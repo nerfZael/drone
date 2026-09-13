@@ -3,6 +3,8 @@ import android.content.*
 import android.media.MediaMetadata
 import android.os.Handler
 class MediaSession(context: Context, name: String) {
+  var playbackAttributes: android.media.AudioAttributes? = null
+  fun setPlaybackToLocal(attributes: android.media.AudioAttributes) { playbackAttributes = attributes }
   var isActive = false
   var callback: Callback? = null
   var state: PlaybackState? = null

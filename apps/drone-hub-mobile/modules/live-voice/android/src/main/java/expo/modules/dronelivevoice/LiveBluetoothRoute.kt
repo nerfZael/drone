@@ -18,7 +18,7 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import expo.modules.kotlin.Promise
 
-/** A headset voice-recognition connection, without HFP's virtual-call/end-call media-key suppression. */
+/** Standard HFP call audio, so headset firmware enables its call-volume buttons. */
 @Suppress("DEPRECATION")
 internal class LiveBluetoothRoute(private val context: Context, val id: String,
   private val output: AudioDeviceInfo, private val onDisconnected: () -> Unit) {
@@ -29,6 +29,7 @@ internal class LiveBluetoothRoute(private val context: Context, val id: String,
   private var device: BluetoothDevice? = null
   private var starting: Promise? = null
   private val closingPromises = mutableListOf<Promise>()
+  private val closingCallbacks = mutableListOf<() -> Unit>()
   private var closing = false
   private var closed = false
   private var registered = false
@@ -41,14 +42,9 @@ internal class LiveBluetoothRoute(private val context: Context, val id: String,
   private val configure = object : Runnable {
     override fun run() {
       if (closing || closed || !connected || starting == null) return
-      // Wait for AudioService to observe the external SCO connection before selecting it.
-      // Selecting SCO earlier would ask it to create the virtual call we are avoiding.
+      // Wait for AudioService to observe the requested call-audio connection.
       try {
         if (!manager.isBluetoothScoOn) { handler.postDelayed(this, 25); return }
-        previousMode = manager.mode
-        manager.mode = AudioManager.MODE_IN_COMMUNICATION
-        if (Build.VERSION.SDK_INT >= 31) check(manager.setCommunicationDevice(output)) { "Could not route Live to the headset" }
-        else manager.isBluetoothScoOn = true
         handler.removeCallbacks(timeout)
         val promise = starting; starting = null
         promise?.resolve(true)
@@ -90,15 +86,14 @@ internal class LiveBluetoothRoute(private val context: Context, val id: String,
         val selected = devices.firstOrNull { Build.VERSION.SDK_INT >= 28 && it.address == output.address }
           ?: devices.singleOrNull() ?: error("Could not identify the active Live headset")
         device = selected
-        if (Build.VERSION.SDK_INT >= 31 && !service.isVoiceRecognitionSupported(selected)) {
-          val promise = starting; starting = null
-          finishClose()
-          promise?.resolve(false) // Unsupported headsets keep the standard communication route.
-          return
-        }
         check(!service.isAudioConnected(selected)) { "The headset is already being used by another voice session" }
-        check(service.startVoiceRecognition(selected)) { "Could not start headset voice audio. Try Live again." }
+        // Voice-recognition SCO leaves some Shokz firmware in its idle-button
+        // mode (volume announces battery). Request standard call audio instead.
+        previousMode = manager.mode
+        manager.mode = AudioManager.MODE_IN_COMMUNICATION
         requested = true; audioDisconnected = false
+        if (Build.VERSION.SDK_INT >= 31) check(manager.setCommunicationDevice(output)) { "Could not route Live to the headset" }
+        else { manager.startBluetoothSco(); manager.isBluetoothScoOn = true }
       } catch (error: Exception) { fail(error.message ?: "Could not start headset voice audio") }
     }
     override fun onServiceDisconnected(profile: Int) {
@@ -123,35 +118,32 @@ internal class LiveBluetoothRoute(private val context: Context, val id: String,
     if (starting != null) close()
   }
 
-  fun close(promise: Promise? = null) {
-    if (closed) { promise?.resolve(); return }
+  fun close(promise: Promise? = null, onClosed: (() -> Unit)? = null) {
+    if (closed) { promise?.resolve(); onClosed?.invoke(); return }
     if (promise != null) closingPromises.add(promise)
+    if (onClosed != null) closingCallbacks.add(onClosed)
     if (closing) return
     closing = true
     val pending = starting; starting = null
     pending?.reject("LIVE_HEADSET_CANCELLED", "Live headset startup was cancelled", null)
     handler.removeCallbacks(timeout); handler.removeCallbacks(configure)
-    // Drop our AudioService request before ending external SCO, otherwise it can reconnect it.
+    // Drop our call-audio request before restoring the previous mode.
     previousMode?.let { mode ->
       try {
         if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
-        else manager.isBluetoothScoOn = false
+        else { manager.stopBluetoothSco(); manager.isBluetoothScoOn = false }
         manager.mode = mode
       } catch (_: Exception) {}
     }
     previousMode = null
-    val service = headset
-    val selected = device
-    if (requested && service != null && selected != null) {
+    if (requested) {
       requested = false
-      try {
-        service.stopVoiceRecognition(selected)
-        if (!audioDisconnected) {
-          // Serialize a quick restart after actual disconnection, without losing the Play request.
-          handler.postDelayed(closeTimeout, 2000)
-          return
-        }
-      } catch (_: Exception) {}
+      if (!audioDisconnected) {
+        // Wait for disconnection before opening another route. Some Android
+        // Bluetooth stacks additionally suppress headset Play briefly after calls.
+        handler.postDelayed(closeTimeout, 2000)
+        return
+      }
     }
     finishClose()
   }
@@ -170,6 +162,8 @@ internal class LiveBluetoothRoute(private val context: Context, val id: String,
     if (registered) { context.unregisterReceiver(receiver); registered = false }
     headset?.let { adapter?.closeProfileProxy(BluetoothProfile.HEADSET, it) }; headset = null
     closingPromises.forEach { it.resolve() }; closingPromises.clear()
+    val callbacks = closingCallbacks.toList(); closingCallbacks.clear()
+    callbacks.forEach { it() }
   }
 
   companion object {

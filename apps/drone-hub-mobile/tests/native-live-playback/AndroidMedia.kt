@@ -1,10 +1,11 @@
 package android.media
 
-class AudioAttributes {
+class AudioAttributes(val usage: Int) {
   class Builder {
-    fun setUsage(value: Int) = this
+    private var usage = 0
+    fun setUsage(value: Int) = apply { usage = value }
     fun setContentType(value: Int) = this
-    fun build() = AudioAttributes()
+    fun build() = AudioAttributes(usage)
   }
   companion object { const val USAGE_MEDIA = 2; const val USAGE_VOICE_COMMUNICATION = 1; const val CONTENT_TYPE_SPEECH = 1 }
 }
@@ -47,13 +48,16 @@ interface AudioRouting {
 }
 class AudioDeviceInfo(val type: Int, val address: String = "headset") {
   companion object {
-    const val TYPE_BLUETOOTH_SCO = 7; const val TYPE_BLE_HEADSET = 26
+    const val TYPE_BLUETOOTH_A2DP = 8; const val TYPE_BLUETOOTH_SCO = 7; const val TYPE_BLE_HEADSET = 26
     const val TYPE_WIRED_HEADSET = 3; const val TYPE_WIRED_HEADPHONES = 4
     const val TYPE_USB_DEVICE = 11; const val TYPE_USB_HEADSET = 22; const val TYPE_HEARING_AID = 23
     const val TYPE_BUILTIN_SPEAKER = 2; const val TYPE_BUILTIN_EARPIECE = 1
   }
 }
 class AudioTrack : AudioRouting {
+  var attributes: AudioAttributes? = null
+  var preferredDevice: AudioDeviceInfo? = null
+  fun setPreferredDevice(device: AudioDeviceInfo): Boolean { preferredDevice = device; return true }
   override var routedDevice: AudioDeviceInfo? = null
   var routeListener: AudioRouting.OnRoutingChangedListener? = null
   fun addOnRoutingChangedListener(listener: AudioRouting.OnRoutingChangedListener, handler: android.os.Handler) { routeListener = listener }
@@ -84,16 +88,17 @@ class AudioTrack : AudioRouting {
   @Synchronized fun snapshot() = spans.toList()
   var volume = 1f
   fun setVolume(value: Float): Int { volume = value; return 0 }
-  fun play() {}
+  fun play() { paused = false }
   fun pause() { paused = true }
-  fun flush() {}
+  @Synchronized fun flush() { spans.clear() }
   fun release() { released = true }
   class Builder {
-    fun setAudioAttributes(value: AudioAttributes) = this
+    private var attributes: AudioAttributes? = null
+    fun setAudioAttributes(value: AudioAttributes) = apply { attributes = value }
     fun setAudioFormat(value: AudioFormat) = this
     fun setBufferSizeInBytes(value: Int) = this
     fun setTransferMode(value: Int) = this
-    fun build() = AudioTrack().also { latest = it }
+    fun build() = AudioTrack().also { it.attributes = attributes; latest = it }
   }
   companion object {
     const val STATE_INITIALIZED = 1; const val MODE_STREAM = 1
@@ -109,11 +114,13 @@ class AudioManager {
   val routeCalls = mutableListOf<String>()
   fun getDevices(flags: Int) = outputs
   fun setCommunicationDevice(device: AudioDeviceInfo): Boolean {
-    check(isBluetoothScoOn) { "Cannot request a virtual call before external SCO is connected" }
+    check(mode == MODE_IN_COMMUNICATION) { "Select call audio only after claiming communication mode" }
     routeCalls.add("select")
     communicationDevice = device
     return true
   }
+  fun startBluetoothSco() { routeCalls.add("startSco") }
+  fun stopBluetoothSco() { routeCalls.add("stopSco") }
   fun clearCommunicationDevice() { routeCalls.add("clear"); communicationDevice = null }
   var mode = MODE_IN_COMMUNICATION
   var modeListener: OnModeChangedListener? = null

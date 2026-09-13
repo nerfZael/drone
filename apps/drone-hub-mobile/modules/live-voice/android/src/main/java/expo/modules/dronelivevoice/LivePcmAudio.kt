@@ -53,6 +53,13 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   }
   private var headsetRouted = false
   private val routeListener = AudioRouting.OnRoutingChangedListener { routing ->
+    if (stoppedOutput && headsetRouted) {
+      val device = routing.routedDevice
+      if (isHeadset(device)) {
+        stoppedCueRouteReady = true
+        if (stoppedCuePlaying) player?.setVolume(1f)
+      } else if (device != null) finishStoppedCue()
+    }
     if (running) {
       when (routing.routedDevice?.type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
@@ -94,6 +101,19 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private val queuedBytes = AtomicInteger(0)
   private var recordingCueQueued = false
   private var recordingCueBytes: ByteArray? = null
+  private var stoppedOutput = false
+  @Volatile private var stoppedCuePlaying = false
+  @Volatile private var stoppedCueRouteReady = false
+  private val stoppedCueCallbacks = mutableListOf<() -> Unit>()
+  private val stoppedCueTimeout = Runnable { finishStoppedCue() }
+  private var stoppedCueFrames = 0
+  private val checkStoppedCue = object : Runnable {
+    override fun run() {
+      val output = player ?: return
+      if (output.playbackHeadPosition >= stoppedCueFrames) finishStoppedCue()
+      else handler.postDelayed(this, 10)
+    }
+  }
 
   fun start(recordingCue: Boolean = false) {
     try {
@@ -247,12 +267,16 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       error("Live voice playback fell behind. Start again.")
     }
   }
-  fun stop() {
+  // Stop capture and discard assistant speech immediately, retaining only the
+  // already-routed output for the local acknowledgement. No second tone player.
+  fun stop(keepOutputForCue: Boolean = false) {
+    val retainOutput = keepOutputForCue && running && playbackReady &&
+      (!headsetRouted || isHeadset(player?.routedDevice))
     running = false
     muted = true
     // AudioRecord.stop can block. Silence queued output before waiting for the microphone.
     try { player?.setVolume(0f); player?.pause(); player?.flush() } catch (_: Exception) {}
-    player?.removeOnRoutingChangedListener(routeListener)
+    if (!retainOutput) finishStoppedCue()
     handler.removeCallbacks(routeTimeout)
     handler.removeCallbacks(checkReady)
     completeReady(false)
@@ -260,9 +284,78 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     captureThread?.join(1000)
     playbackThread?.join(1000)
     recorder?.release(); recorder = null
-    player?.release(); player = null
     echo?.release(); echo = null
     noise?.release(); noise = null
     playback.clear(); queuedBytes.set(0)
+    if (retainOutput) {
+      stoppedOutput = true
+      // Bound retention even if JS never requests the acknowledgement.
+      handler.postDelayed(stoppedCueTimeout, 1500)
+    }
+  }
+
+  fun playStoppedCue(complete: () -> Unit) {
+    val output = player
+    if (!stoppedOutput || output == null) { complete(); return }
+    stoppedCueCallbacks.add(complete)
+    if (stoppedCuePlaying) return
+    stoppedCuePlaying = true
+    val bytes = stoppedCuePcm()
+    try {
+      // A paused track reports no routed device. Restart silently and verify
+      // its route again before writing the cue; never infer it from audio mode.
+      stoppedCueRouteReady = !headsetRouted
+      output.setVolume(if (stoppedCueRouteReady) 1f else 0f)
+      output.play()
+      routeListener.onRoutingChanged(output)
+      if (!stoppedCuePlaying) return
+      playbackThread = Thread({
+        Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+        try {
+          var writtenFrames = 0
+          val silence = ByteArray(4800)
+          while (stoppedCuePlaying && !stoppedCueRouteReady) {
+            val count = output.write(silence, 0, silence.size)
+            check(count > 0) { "Could not prime the stopped cue route" }
+            writtenFrames += count / 2
+            Thread.sleep(5)
+          }
+          var offset = 0
+          if (stoppedCuePlaying) Log.i("DroneLiveVoice", "Stopped cue begins on retained Live output")
+          while (stoppedCuePlaying && offset < bytes.size) {
+            val count = output.write(bytes, offset, bytes.size - offset)
+            check(count > 0) { "Could not play the stopped cue" }
+            offset += count
+            writtenFrames += count / 2
+          }
+          handler.post {
+            if (stoppedCuePlaying) {
+              stoppedCueFrames = writtenFrames
+              checkStoppedCue.run()
+            }
+          }
+        } catch (_: Exception) { handler.post { finishStoppedCue() } }
+      }, "LiveStoppedCue").apply { start() }
+    } catch (_: Exception) { finishStoppedCue() }
+  }
+
+  private fun finishStoppedCue() {
+    stoppedCuePlaying = false; stoppedOutput = false
+    handler.removeCallbacks(stoppedCueTimeout); handler.removeCallbacks(checkStoppedCue)
+    val output = player; player = null
+    try { output?.setVolume(0f); output?.pause(); output?.flush() } catch (_: Exception) {}
+    output?.removeOnRoutingChangedListener(routeListener)
+    // Pausing unblocks a streaming write before releasing its track.
+    if (playbackThread !== Thread.currentThread()) playbackThread?.join(1000)
+    output?.release()
+    val callbacks = stoppedCueCallbacks.toList(); stoppedCueCallbacks.clear()
+    callbacks.forEach { it() }
+  }
+
+  private fun isHeadset(device: AudioDeviceInfo?) = when (device?.type) {
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> true
+    else -> false
   }
 }

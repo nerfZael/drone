@@ -36,7 +36,8 @@ fun main() {
   val started = Promise()
   route.start(started)
   s.adapter.deliver()
-  check(s.headset.calls == listOf("start") && s.manager.routeCalls.isEmpty() && !started.resolved)
+  check(s.headset.calls.isEmpty() && s.manager.routeCalls == listOf("select") && !started.resolved)
+  check(s.manager.mode == AudioManager.MODE_IN_COMMUNICATION)
   s.broadcast(BluetoothHeadset.STATE_AUDIO_DISCONNECTED) // Initial idle state is not a hangup.
   check(s.pauses == 0)
   s.connect()
@@ -49,16 +50,21 @@ fun main() {
   route.close(released)
   check(released.resolved && s.context.receiver == null && s.adapter.closed == 1)
   check(s.manager.mode == AudioManager.MODE_NORMAL && s.manager.routeCalls.last() == "clear")
-  // A subsequent start is accepted immediately; no virtual-call cooldown or extra button needed.
+  // The app accepts a subsequent start after teardown; Bluetooth firmware may delay physical Play.
   val restarted = s.route("next")
   val startAgain = Promise()
   restarted.start(startAgain); s.adapter.deliver(); s.connect()
-  check(startAgain.value == true && s.headset.calls == listOf("start", "stop", "start"))
+  check(startAgain.value == true && s.headset.calls.isEmpty())
   val stopping = Promise()
-  restarted.close(stopping)
+  var afterClose = false
+  restarted.close(stopping, onClosed = {
+    check(s.manager.mode == AudioManager.MODE_NORMAL && !s.manager.isBluetoothScoOn)
+    afterClose = true
+  })
+  check(!afterClose)
   check(!stopping.resolved) // A UI pause must await the still-connected headset before restarting.
   s.disconnect()
-  check(stopping.resolved && Handler.pending.isEmpty())
+  check(stopping.resolved && afterClose && Handler.pending.isEmpty())
 
   val pending = HeadsetScenario()
   val pendingRoute = pending.route()
@@ -72,8 +78,10 @@ fun main() {
   val unsupported = HeadsetScenario()
   unsupported.headset.supported = false
   val unsupportedStart = Promise()
-  unsupported.route().start(unsupportedStart); unsupported.adapter.deliver()
-  check(unsupportedStart.value == false && unsupported.headset.calls.isEmpty() && unsupported.context.receiver == null)
+  val unsupportedRoute = unsupported.route()
+  unsupportedRoute.start(unsupportedStart); unsupported.adapter.deliver(); unsupported.connect()
+  check(unsupportedStart.value == true && unsupported.headset.calls.isEmpty()) // Call audio does not need voice-recognition support.
+  unsupported.disconnect(); unsupportedRoute.close()
 
   val busy = HeadsetScenario()
   busy.headset.audioConnected = true
@@ -86,7 +94,7 @@ fun main() {
   timed.route().start(timedStart); timed.adapter.deliver()
   Handler.runDelayed()
   Handler.runDelayed() // Bound cleanup if a failed connection never sends DISCONNECTED.
-  check(timedStart.rejection != null && timed.context.receiver == null && timed.headset.calls == listOf("start", "stop"))
+  check(timedStart.rejection != null && timed.context.receiver == null && timed.headset.calls.isEmpty() && timed.manager.mode == AudioManager.MODE_NORMAL)
   check(Handler.pending.isEmpty())
 
   val connecting = HeadsetScenario()
@@ -97,8 +105,8 @@ fun main() {
   val connectionClosed = Promise()
   connectingRoute.close(connectionClosed)
   connecting.connect() // A late SCO connection cannot enable the route or microphone after cancellation.
-  check(connectingStart.rejection != null && connecting.manager.routeCalls.isEmpty() && !connectionClosed.resolved)
+  check(connectingStart.rejection != null && connecting.manager.routeCalls == listOf("select", "clear") && !connectionClosed.resolved)
   connecting.disconnect()
   check(connectionClosed.resolved && connecting.context.receiver == null && Handler.pending.isEmpty())
-  println("Headset voice route: external-SCO ordering, direct hangup, immediate restart, awaited teardown, late binding, unsupported/busy headset and timeout passed")
+  println("Headset call route: standard communication request, no voice-recognition mode, direct hangup, awaited teardown, late binding, unsupported/busy headset and timeout passed")
 }

@@ -118,7 +118,145 @@ private fun controlClockRunsWhilePausedAndStopsOnClose() {
   println("Handler control clock runs without display frames, including standby, and cancels on close")
 }
 
+
+private fun stoppedCueKeepsHeadsetOutput() {
+  for (ending in listOf("rendered", "track-lost", "sco-lost", "timeout", "resume", "close")) {
+    val context = Context()
+    val controls = LiveMediaControls(context, "stop-cue", {})
+    check(controls.session.playbackAttributes?.usage == android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION) {
+      "Headset volume must control the voice stream used by PCM"
+    }
+    val captured = java.util.concurrent.atomic.AtomicInteger()
+    val audio = LivePcmAudio({ captured.incrementAndGet() }, { error(it) })
+    audio.start()
+    val track = AudioTrack.latest
+    track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+    LiveVoiceSession.stopAudio = { controls.stopAudio(audio); LiveVoiceSession.stopAudio = null }
+    try {
+      controls.command("pause")
+      check(track.paused && track.volume == 0f && !track.released)
+      val captureCount = captured.get()
+      controls.update("paused") // JS acknowledgement must retain the cue's player.
+      if (ending == "rendered") track.routedDevice = null // Android does this while paused.
+      val cue = Promise()
+      controls.playStoppedCue(cue)
+      if (ending == "rendered") {
+        Thread.sleep(20)
+        check(!cue.resolved && track.volume == 0f)
+        check(track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+        track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+      }
+      val deadline = System.nanoTime() + 2_000_000_000L
+      while (track.snapshot().filter { span -> span.bytes.any { it != 0.toByte() } }.sumOf { it.bytes.size } < 14400) {
+        check(System.nanoTime() < deadline) { "Stop cue did not reach the existing track" }
+        Thread.sleep(1)
+      }
+      check(AudioTrack.latest === track && ToneGenerator.played == 0)
+      check(!cue.resolved && !track.released && track.volume == 1f)
+      val duplicate = Promise()
+      controls.playStoppedCue(duplicate)
+      check(!duplicate.resolved) { "Duplicate requests must also await the cue before releasing its route" }
+      check(captured.get() == captureCount) { "Stop cue must never keep the microphone running" }
+      when (ending) {
+        "track-lost" -> track.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        "sco-lost" -> controls.pauseForHeadsetDisconnect()
+        "timeout" -> Handler.advanceTimeBy(1500)
+        "resume" -> controls.command("play")
+        "close" -> controls.close()
+        else -> { track.nowFrames = track.snapshot().last().end; Handler.advanceTimeBy(20) }
+      }
+      check(duplicate.resolved)
+      check(cue.resolved && track.released && track.volume == 0f)
+      check(track.routeListener == null)
+    } finally { controls.close(); audio.stop(); LiveVoiceSession.stopAudio = null }
+  }
+  // Cancel before startup has reached the headset: no phone fallback cue.
+  val controls = LiveMediaControls(Context(), "cancel-cue", {})
+  val audio = LivePcmAudio({}, { error(it) }, awaitHeadset = true)
+  audio.start()
+  val track = AudioTrack.latest
+  controls.stopAudio(audio)
+  val cue = Promise()
+  controls.playStoppedCue(cue)
+  check(cue.resolved && track.released && ToneGenerator.played == 0)
+  controls.close()
+  println("Stop cue reuses routed PCM after capture stops, waits for rendering, and cancels silently on route loss/startup cancellation")
+}
+
+private fun hangupCueUsesHeadsetMediaAfterRouteRelease() {
+  for (ending in listOf("rendered", "resume", "close", "lost", "timeout", "absent", "different", "late")) {
+    val context = Context()
+    val controls = LiveMediaControls(context, "hangup-cue", {})
+    controls.rememberBluetoothHeadset(AudioDeviceInfo(AudioDeviceInfo.TYPE_BLUETOOTH_SCO))
+    context.audioManager.outputs = when (ending) {
+      "absent", "late" -> emptyArray()
+      "different" -> arrayOf(AudioDeviceInfo(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, "other-headset"))
+      else -> arrayOf(AudioDeviceInfo(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP))
+    }
+    val captures = java.util.concurrent.atomic.AtomicInteger()
+    val audio = LivePcmAudio({ captures.incrementAndGet() }, { error(it) })
+    audio.start()
+    val voice = AudioTrack.latest
+    voice.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+    LiveVoiceSession.stopAudio = { controls.stopAudio(audio); LiveVoiceSession.stopAudio = null }
+    try {
+      controls.pauseForHeadsetDisconnect() // Physical headset hangup, not a media Pause key.
+      val stopped = Promise()
+      controls.playStoppedCue(stopped)
+      check(stopped.resolved && voice.released && voice.volume == 0f)
+      check(AudioTrack.latest === voice) { "Do not open media audio before call-route teardown" }
+      val count = captures.get()
+      context.audioManager.mode = AudioManager.MODE_NORMAL
+      val released = Promise()
+      controls.playReleasedStoppedCue(released)
+      if (ending == "absent" || ending == "different") {
+        Handler.advanceTimeBy(3000)
+        check(released.resolved && AudioTrack.latest === voice)
+        continue
+      }
+      if (ending == "late") {
+        Handler.advanceTimeBy(250)
+        check(!released.resolved && AudioTrack.latest === voice)
+        context.audioManager.outputs = arrayOf(AudioDeviceInfo(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP))
+        Handler.advanceTimeBy(25)
+      }
+      val media = AudioTrack.latest
+      check(media !== voice && media.attributes?.usage == android.media.AudioAttributes.USAGE_MEDIA)
+      check(media.preferredDevice?.address == "headset")
+      media.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) // A2DP is still recovering from the call.
+      Thread.sleep(20)
+      check(media.volume == 0f && !released.resolved)
+      check(media.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+      media.route(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+      Handler.advanceTimeBy(750)
+      val deadline = System.nanoTime() + 2_000_000_000L
+      while (media.snapshot().none { span -> span.bytes.any { it != 0.toByte() } }) {
+        check(System.nanoTime() < deadline); Thread.sleep(1)
+      }
+      check(captures.get() == count) { "Post-hangup cue must not reopen capture" }
+      check(!released.resolved && media.volume == 1f)
+      when (ending) {
+        "resume" -> controls.command("play")
+        "close" -> controls.close()
+        "lost" -> media.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        "timeout" -> Handler.advanceTimeBy(3000)
+        else -> {
+          media.nowFrames = media.snapshot().last().end
+          // Let the writer hand completion back to the main queue, then advance
+          // the render check. This must finish well before the 3-second timeout.
+          repeat(10) { if (!released.resolved) { Thread.sleep(2); Handler.advanceTimeBy(10) } }
+        }
+      }
+      check(released.resolved && media.released && media.volume == 0f) { "Ending $ending: promise=${released.resolved}, released=${media.released}, volume=${media.volume}" }
+    } finally { controls.close(); audio.stop(); LiveVoiceSession.stopAudio = null }
+  }
+  check(Handler.pending.isEmpty())
+  println("Physical call hangup plays the stop cue only on the same headset's media route after teardown; no microphone, speaker fallback, or stale resume cue")
+}
+
 fun main() {
+  hangupCueUsesHeadsetMediaAfterRouteRelease()
+  stoppedCueKeepsHeadsetOutput()
   controlClockRunsWhilePausedAndStopsOnClose()
   standbyDoesNotTakeAudioFocus()
   stalePauseHeadsetButton()

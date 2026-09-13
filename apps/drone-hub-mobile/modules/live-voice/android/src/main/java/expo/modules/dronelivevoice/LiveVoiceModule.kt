@@ -73,6 +73,7 @@ class LiveVoiceModule : Module() {
       check(bluetoothRoute == null) { "Previous headset audio is still releasing" }
       val context = appContext.reactContext ?: error("React context is unavailable")
       val output = LiveBluetoothRoute.candidate(context)
+      LiveVoiceSession.mediaControls?.rememberBluetoothHeadset(output)
       if (output == null || !LiveBluetoothRoute.permitted(context)) promise.resolve(false)
       else {
         val route = LiveBluetoothRoute(context, id, output) { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }
@@ -89,7 +90,11 @@ class LiveVoiceModule : Module() {
       if (route == null) promise.resolve()
       else {
         bluetoothRoute = null; LiveVoiceSession.closeRoute = null
-        route.close(promise)
+        val controls = LiveVoiceSession.mediaControls
+        route.close(onClosed = {
+          if (controls != null && LiveVoiceSession.mediaControls === controls) controls.playReleasedStoppedCue(promise)
+          else promise.resolve()
+        })
       }
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("armControls") { id: String ->
@@ -145,7 +150,11 @@ class LiveVoiceModule : Module() {
         { LiveVoiceSession.mediaControls?.hasVoiceModeSettled() == true })
       pcm = audio
       pcmId = id
-      LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null }
+      LiveVoiceSession.stopAudio = {
+        val controls = LiveVoiceSession.mediaControls
+        if (controls != null) controls.stopAudio(audio) else audio.stop()
+        pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
+      }
       try { audio.start(recordingCue = LiveVoiceSession.mediaControls?.isPlaying() == true) } catch (error: Exception) {
         pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
         throw error
@@ -153,7 +162,7 @@ class LiveVoiceModule : Module() {
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("stopPcm") { id: String ->
       if (pcmId == id) {
-        pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
+        LiveVoiceSession.stopAudio?.invoke()
       }
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("mutePcm") { id: String, muted: Boolean ->

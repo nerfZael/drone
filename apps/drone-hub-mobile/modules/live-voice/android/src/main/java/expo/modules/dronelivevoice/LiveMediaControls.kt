@@ -10,7 +10,6 @@ import android.media.AudioManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.MediaMetadata
-import android.media.ToneGenerator
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -34,7 +33,10 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   private var playing = true
   private var closed = false
   private var skipStoppedCue = false
-  private var cue: ToneGenerator? = null
+  private var stoppedAudio: LivePcmAudio? = null
+  private var bluetoothAddress: String? = null
+  private var pendingHeadsetCue = false
+  private var headsetCue: LiveHeadsetCue? = null
   private var receiverRegistered = false
   private var scoConnected = false
   private var communicationHeadsetConnected = false
@@ -49,7 +51,10 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
           scoConnected = connected
           if (disconnected) pauseForHeadsetDisconnect()
         }
-        AudioManager.ACTION_AUDIO_BECOMING_NOISY -> pauseForHeadsetDisconnect()
+        AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
+          headsetCue?.close(); headsetCue = null
+          pauseForHeadsetDisconnect()
+        }
       }
     }
   }
@@ -59,7 +64,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   private var focused = false
   private var focusRequest: AudioFocusRequest? = null
   private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-    if (change < 0) command("pause")
+    if (change < 0) { headsetCue?.close(); headsetCue = null; command("pause") }
   }
   val session = MediaSession(context, "DroneCompanionLive")
 
@@ -124,7 +129,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       playing = false
       scoConnected = false; communicationHeadsetConnected = false
       publishPlaybackState()
-      cue?.release(); cue = null
+      stoppedAudio?.stop(); stoppedAudio = null
       LiveVoiceSession.stopAudio?.invoke()
     }
     try { update(if (action == "play") "connecting" else "paused") }
@@ -135,9 +140,16 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   fun update(state: String) {
     if (closed || state == "recording" && !playing) return
     playing = state != "paused"
+    session.setPlaybackToLocal(AudioAttributes.Builder()
+      .setUsage(if (playing) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
     if (!playing) {
       scoConnected = false; communicationHeadsetConnected = false
-      cue?.release(); cue = null
+    }
+    if (playing) {
+      pendingHeadsetCue = false
+      headsetCue?.close(); headsetCue = null
+      stoppedAudio?.stop(); stoppedAudio = null
     }
     if (playing && !focused) {
       val result = if (Build.VERSION.SDK_INT >= 26) {
@@ -171,6 +183,9 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
     voiceModeSince?.let { SystemClock.elapsedRealtime() - it >= 750 } == true
 
   fun pauseForHeadsetDisconnect() {
+    // A stop acknowledgement can still be rendering after we publish paused.
+    // HFP/SCO disconnect signals must silence it before the track falls back.
+    stoppedAudio?.stop(); stoppedAudio = null
     // During a queued resume the previous route can still be disconnecting.
     // It must not cancel the new intent before its microphone has started.
     if (closed || !playing || LiveVoiceSession.stopAudio == null) return
@@ -180,30 +195,38 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
     command("pause")
   }
 
+  fun stopAudio(audio: LivePcmAudio) {
+    stoppedAudio?.stop()
+    audio.stop(keepOutputForCue = !closed && !skipStoppedCue)
+    stoppedAudio = audio
+  }
+
   fun playStoppedCue(promise: Promise) {
-    if (closed) { promise.resolve(); return }
-    if (skipStoppedCue) {
+    if (closed || skipStoppedCue) {
+      pendingHeadsetCue = !closed && skipStoppedCue
       skipStoppedCue = false
+      stoppedAudio?.stop(); stoppedAudio = null
       promise.resolve()
-      return // Do not emit the stop cue through the phone after losing the headset.
+      return
     }
-    try {
-      cue?.release()
-      // During a Live session expo-audio puts the device in communication mode and, with a
-      // Bluetooth headset, routes through SCO. The voice-call stream follows that route, so the
-      // cue reaches the headset instead of racing the route switch on the music stream.
-      val stream = if (audioManager?.mode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
-      val tone = ToneGenerator(stream, 80)
-      cue = tone
-      val duration = 300
-      check(tone.startTone(ToneGenerator.TONE_PROP_NACK, duration)) {
-        "Could not play the Live microphone cue"
-      }
-      handler.postDelayed({
-        if (cue === tone) { tone.release(); cue = null }
-        promise.resolve()
-      }, (duration + 50).toLong())
-    } catch (error: Exception) { promise.reject("LIVE_CUE", error.message, error) }
+    val audio = stoppedAudio
+    if (audio == null) promise.resolve()
+    else audio.playStoppedCue {
+      if (stoppedAudio === audio) stoppedAudio = null
+      promise.resolve()
+    }
+  }
+
+  fun rememberBluetoothHeadset(device: AudioDeviceInfo?) { bluetoothAddress = device?.address }
+
+  fun playReleasedStoppedCue(promise: Promise) {
+    val requested = pendingHeadsetCue
+    pendingHeadsetCue = false
+    val address = bluetoothAddress
+    if (closed || playing || !requested || address.isNullOrEmpty()) { promise.resolve(); return }
+    val cue = LiveHeadsetCue(audioManager, address) { headsetCue = null; promise.resolve() }
+    headsetCue = cue
+    cue.start()
   }
 
   fun close() {
@@ -215,7 +238,9 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
     if (Build.VERSION.SDK_INT >= 31) modeListener?.let { audioManager.removeOnModeChangedListener(it) }
     modeListener = null
     communicationListener = null
-    cue?.release(); cue = null
+    pendingHeadsetCue = false
+    headsetCue?.close(); headsetCue = null
+    stoppedAudio?.stop(); stoppedAudio = null
     releaseFocus()
     session.isActive = false; session.release()
   }
