@@ -33,6 +33,7 @@ export * from './workspace-access.js';
 export * from './token-usage.js';
 
 export { CompanionLiveConversation, LIVE_COMPANION_PROMPT_PREFIX, splitLiveCommentary } from './CompanionLiveConversation';
+export { companionLiveReconnectDelay } from './companion-live-reconnect.js';
 export { waitForCompanionReply } from './waitForCompanionReply';
 export { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from './live-audio-buffer';
 

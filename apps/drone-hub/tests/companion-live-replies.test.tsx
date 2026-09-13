@@ -87,3 +87,68 @@ test('desktop speaks a pending backend completion after restarting Live, then sp
     dom.happyDOM.abort();
   }
 });
+
+test('desktop automatically reconnects with backoff but an explicit stop cancels it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const set = (key: string, value: unknown) => {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  };
+  set('window', dom); set('document', dom.document); set('IS_REACT_ACT_ENVIRONMENT', true);
+  set('fetch', async () => Response.json({ enabled: true, systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 8000 }));
+  const connections: Array<{ callbacks: any; closed: number }> = [];
+  const start = spyOn(CompanionLiveConnection.prototype, 'start').mockImplementation(async function (this: CompanionLiveConnection) {
+    connections.push({ callbacks: (this as any).options, closed: 0 });
+  });
+  const close = spyOn(CompanionLiveConnection.prototype, 'close').mockImplementation(function (this: CompanionLiveConnection) {
+    const found = connections.find((entry) => entry.callbacks === (this as any).options);
+    if (found) found.closed += 1;
+  });
+  const scheduled: Array<{ callback: () => void; delay: number; cancelled: boolean }> = [];
+  const schedule = (callback: () => void, delay: number) => {
+    const entry = { callback, delay, cancelled: false };
+    scheduled.push(entry);
+    return () => { entry.cancelled = true; };
+  };
+  let live!: ReturnType<typeof useCompanionLive>;
+  function Harness() { live = useCompanionLive(undefined, schedule); return null; }
+  const element = dom.document.createElement('div');
+  dom.document.body.append(element);
+  const root = createRoot(element as unknown as HTMLElement);
+  try {
+    await act(async () => { root.render(<Harness />); });
+    await act(async () => { await live.start(async () => 'reply', 'Workspace'); });
+    await act(async () => { connections[0].callbacks.onReady('backend'); });
+    expect(live.status).toBe('listening');
+
+    await act(async () => { connections[0].callbacks.onError('Hub restarted'); });
+    expect(live.status).toBe('connecting');
+    expect(scheduled.map((entry) => entry.delay)).toEqual([1_000]);
+    await act(async () => { scheduled[0].callback(); await Promise.resolve(); });
+    expect(connections).toHaveLength(2);
+
+    await act(async () => { connections[1].callbacks.onError('Still offline'); });
+    expect(scheduled.map((entry) => entry.delay)).toEqual([1_000, 2_000]);
+    await act(async () => { scheduled[1].callback(); await Promise.resolve(); });
+    expect(connections).toHaveLength(3);
+    await act(async () => {
+      connections[2].callbacks.onReady('backend');
+      connections[2].callbacks.onError('Disconnected again');
+    });
+    expect(scheduled.map((entry) => entry.delay)).toEqual([1_000, 2_000, 1_000]);
+    await act(async () => { live.stop(); });
+    expect(live.status).toBe('idle');
+    expect(scheduled[2].cancelled).toBe(true);
+    await act(async () => { scheduled[2].callback(); await Promise.resolve(); });
+    expect(connections).toHaveLength(3);
+  } finally {
+    await act(async () => { root.unmount(); });
+    start.mockRestore(); close.mockRestore();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
+  }
+});

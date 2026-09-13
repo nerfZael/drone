@@ -75,6 +75,55 @@ test('start cue announces capture while Live connects and does not sound again o
   }
 });
 
+test('mobile reconnects silently with backoff and explicit stop cancels the retry', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  const scheduled: Array<{ callback: () => void; delay: number; cancelled: boolean }> = [];
+  const cueStart = cues.length;
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    controlSchedule = (callback, delay) => {
+      const entry = { callback, delay, cancelled: false };
+      scheduled.push(entry);
+      return () => { entry.cancelled = true; };
+    };
+    connectImmediately = true;
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    const first = connections.at(-1)!;
+    expect(live.status).toBe('listening');
+    expect(cues.slice(cueStart)).toEqual(['recording']);
+
+    connectImmediately = false;
+    await act(async () => { first.options.onError('Hub restarted'); await Promise.resolve(); });
+    expect(live.status).toBe('connecting');
+    expect(scheduled.map((entry) => entry.delay)).toEqual([1_000]);
+    expect(cues.slice(cueStart)).toEqual(['recording']);
+
+    await act(async () => { scheduled[0].callback(); await Promise.resolve(); await Promise.resolve(); });
+    const second = connections.at(-1)!;
+    expect(second).not.toBe(first);
+    expect(cues.slice(cueStart)).toEqual(['recording']);
+    await act(async () => { second.options.onError('Still offline'); await Promise.resolve(); });
+    expect(scheduled.map((entry) => entry.delay)).toEqual([1_000, 2_000]);
+    expect(cues.slice(cueStart)).toEqual(['recording']);
+
+    // The visible "End Live voice" action uses pause while the hook is reconnecting.
+    await act(async () => { live.pause(); await Promise.resolve(); });
+    expect(live.status).toBe('paused');
+    expect(scheduled[1].cancelled).toBe(true);
+    const count = connections.length;
+    await act(async () => { scheduled[1].callback(); await Promise.resolve(); });
+    expect(connections).toHaveLength(count);
+    await act(async () => { live.reset(); });
+  } finally {
+    connectImmediately = true; controlSchedule = undefined;
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
 test('Android Live survives screen lock and the notification Stop ends the session', async () => {
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   platform.OS = 'android';
