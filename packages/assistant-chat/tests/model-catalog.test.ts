@@ -112,6 +112,30 @@ describe('model catalog', () => {
     ]);
   });
 
+  test('preserves a provider-published reasoning default', () => {
+    expect(groupProviderModelOptions([
+      { provider: 'openrouter', id: 'reasoning', thinkingLevel: 'xhigh', defaultReasoningLevel: 'xhigh' },
+      { provider: 'openrouter', id: 'reasoning', thinkingLevel: 'high', defaultReasoningLevel: 'xhigh' },
+      { provider: 'openrouter', id: 'reasoning', thinkingLevel: 'low', defaultReasoningLevel: 'xhigh' },
+    ])).toEqual([{
+      provider: 'openrouter',
+      id: 'reasoning',
+      label: 'reasoning',
+      reasoningLevels: ['xhigh', 'high', 'low'],
+      defaultReasoningLevel: 'xhigh',
+    }]);
+  });
+
+  test('repairs an unsupported provider-published reasoning default', () => {
+    expect(groupProviderModelOptions([
+      { provider: 'openrouter', id: 'reasoning', thinkingLevel: 'high', defaultReasoningLevel: 'unknown' },
+      { provider: 'openrouter', id: 'reasoning', thinkingLevel: 'low', defaultReasoningLevel: 'unknown' },
+    ])[0]).toMatchObject({
+      reasoningLevels: ['high', 'low'],
+      defaultReasoningLevel: 'high',
+    });
+  });
+
   test('builds choices and keeps every reasoning selection valid for its model', () => {
     const models = normalizeProviderModelCatalog({
       models: [
