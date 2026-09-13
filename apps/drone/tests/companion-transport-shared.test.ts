@@ -130,3 +130,16 @@ test('background compaction does not produce a blocking Companion activity', () 
     tokensBefore: 180_000, tokensAfter: 20_000 })).toBeNull();
   expect(boundedCompanionActivityEvent({ type: 'compaction_started' })).toEqual({ type: 'compaction_started' });
 });
+
+
+test('forwards only context counts from session completion', () => {
+  expect(boundedCompanionActivityEvent({
+    type: 'session_finished', error: 'private provider content', changedFiles: ['/private'],
+    contextUsage: { tokens: 25000, contextWindow: 100000, percent: 25, confidence: 'heuristic', secret: 'private' },
+  })).toEqual({ type: 'context_usage', contextUsage: {
+    tokens: 25000, contextWindow: 100000, percent: 25, confidence: 'heuristic',
+  } });
+  for (const contextUsage of [undefined, { tokens: -1, contextWindow: 100 }, { tokens: 1, contextWindow: 0 }, { tokens: Infinity, contextWindow: 100 }]) {
+    expect(boundedCompanionActivityEvent({ type: 'session_finished', contextUsage })).toBeNull();
+  }
+});

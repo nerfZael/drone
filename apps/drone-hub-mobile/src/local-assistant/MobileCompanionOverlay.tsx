@@ -1,6 +1,8 @@
 import { MobileCompanionModelPicker } from './MobileCompanionModelPicker';
 import React from 'react';
+import Svg, { Circle } from 'react-native-svg';
 import {
+  companionContextUsageLabel,
   companionToolActivityLabel,
   companionCompactionLabel,
   groupCompanionToolActivity,
@@ -42,7 +44,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
 import { NativeMarkdown } from './NativeMarkdown';
-import { formatMobileVoiceDuration } from './mobile-voice-transcription-model';
 import { MobileCompanionMenu, type MobileCompanionMenuItem, type MobileCompanionMenuTone } from './MobileCompanionMenu';
 import { MobileCompanionProposal } from './MobileCompanionProposal';
 import { MobileCompanionWorkspaceModal } from './MobileCompanionWorkspaceModal';
@@ -52,29 +53,29 @@ import { useMobileCompanionCurrentWorkspace } from './use-mobile-companion-curre
 type Companion = ReturnType<typeof useMobileCompanion>;
 type CompanionStatus = Companion['status'];
 
-function statusLabel(status: CompanionStatus, duration: number, elapsed: number) {
-  if (status === 'starting') return 'Starting microphone…';
-  if (status === 'recording') return `Listening · ${formatMobileVoiceDuration(duration)}`;
-  if (status === 'transcribing') return 'Transcribing…';
-  if (status === 'working') return `Working · ${Math.round(elapsed / 1_000)}s`;
-  if (status === 'completed') return 'Done';
+function statusLabel(status: CompanionStatus) {
+  if (status === 'starting') return 'Starting';
+  if (status === 'recording') return 'Listening';
+  if (status === 'transcribing') return 'Transcribing';
+  if (status === 'working') return 'Working';
+  if (status === 'completed') return 'Completed';
   if (status === 'cancelled') return 'Stopped';
   if (status === 'error') return 'Needs attention';
   return 'Idle';
 }
 
 /** Live voice owns the headline while it is connected; otherwise the turn status does. */
-function headlineLabel(companion: Companion, elapsed: number): string {
+function headlineLabel(companion: Companion): string {
   const live = companion.live;
-  if (companion.checkingVoiceMode) return 'Loading voice setting…';
-  if (companion.status === 'working') return statusLabel('working', 0, elapsed);
+  if (companion.checkingVoiceMode) return 'Starting';
+  if (companion.status === 'working') return 'Working';
   if (live.status === 'connecting') {
-    return live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Listening · Connecting Live…' : 'Opening microphone…';
+    return 'Connecting';
   }
-  if (live.status === 'listening') return live.muted ? 'Live · Mic muted' : 'Live · Listening';
-  if (live.status === 'paused') return 'Live paused';
-  if (companion.recordingPaused) return 'Listening paused';
-  return statusLabel(companion.status, companion.durationMillis, elapsed);
+  if (live.status === 'listening') return live.muted ? 'Muted' : 'Listening';
+  if (live.status === 'paused') return 'Paused';
+  if (companion.recordingPaused) return 'Paused';
+  return statusLabel(companion.status);
 }
 
 function statusDotStyle(status: CompanionStatus, liveActive: boolean, recordingPaused: boolean) {
@@ -147,6 +148,7 @@ export function MobileCompanionOverlay() {
   const [workspaceDeviceId, setWorkspaceDeviceId] = React.useState<string | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
+  const [contextTooltipOpen, setContextTooltipOpen] = React.useState(false);
   const [activityExpanded, setActivityExpanded] = React.useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
   const [captionsOpen, setCaptionsOpen] = React.useState(false);
@@ -452,7 +454,7 @@ export function MobileCompanionOverlay() {
                 accessibilityLabel={active ? 'Working — show tool activity' : 'Show Companion activity'}
                 accessibilityState={{ expanded: activityExpanded }}
                 hitSlop={8}
-                onPress={() => { resize(false); setActivityExpanded((value) => !value); }}
+                onPress={() => { resize(false); setContextTooltipOpen(false); setActivityExpanded((value) => !value); }}
                 style={({ pressed }) => [styles.dotButton, pressed && styles.pressed]}
               >
                 {active ? (
@@ -475,7 +477,7 @@ export function MobileCompanionOverlay() {
                   </Pressable>
                 ) : (
                   <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.title, status === 'error' && styles.titleError]}>
-                    {headlineLabel(companion, elapsed)}
+                    {headlineLabel(companion)}
                   </Text>
                 )}
               </View>
@@ -534,10 +536,27 @@ export function MobileCompanionOverlay() {
             >
               {activityExpanded ? (
                 <View style={styles.activity} accessibilityLabel="Companion activity">
-                  <Text style={styles.activitySummaryText}>
-                    {active ? 'Working' : 'Worked'} for {Math.round(elapsed / 1_000)}s ·{' '}
-                    {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
-                  </Text>
+                  <View style={styles.activitySummary}>
+                    <Text style={[styles.activitySummaryText, { flex: 1 }]}>
+                      {active ? 'Working' : 'Worked'} for {Math.round(elapsed / 1_000)}s ·{' '}
+                      {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
+                    </Text>
+                    {companion.contextUsage ? (
+                      <Pressable style={styles.contextUsage} accessibilityRole="button" accessibilityState={{ expanded: contextTooltipOpen }} accessibilityLabel={companionContextUsageLabel(companion.contextUsage)} onPress={() => setContextTooltipOpen((value) => !value)} hitSlop={8}>
+                        <Svg width={26} height={26} viewBox="0 0 26 26">
+                          <Circle cx={13} cy={13} r={10} fill="none" stroke={colors.muted} strokeWidth={3} opacity={0.5} />
+                          <Circle cx={13} cy={13} r={10} fill="none" stroke={companion.contextUsage.percent >= 90 ? colors.danger : colors.accent} strokeWidth={3}
+                            strokeDasharray={2 * Math.PI * 10} strokeDashoffset={2 * Math.PI * 10 * (1 - Math.min(100, companion.contextUsage.percent) / 100)}
+                            rotation={-90} origin="13, 13" />
+                        </Svg>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {contextTooltipOpen && companion.contextUsage ? (
+                    <Pressable style={styles.contextTooltip} onPress={() => setContextTooltipOpen(false)} accessibilityLabel="Dismiss context usage">
+                      <Text style={styles.contextUsageText}>{companionContextUsageLabel(companion.contextUsage)}</Text>
+                    </Pressable>
+                  ) : null}
                   {companion.compaction ? (
                     <View style={styles.toolHeader} accessibilityLiveRegion="polite">
                       {companion.compaction.status === 'running' ? (
@@ -742,6 +761,10 @@ const styles = StyleSheet.create({
   body: { flexGrow: 0, flexShrink: 1 },
   bodyContent: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10, gap: 10 },
   activity: { gap: 2 },
+  activitySummary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, paddingBottom: 4 },
+  contextUsage: { alignItems: 'center', justifyContent: 'center', width: 28, height: 28, marginLeft: 'auto' },
+  contextTooltip: { alignSelf: 'flex-end', maxWidth: '100%', padding: 8, borderRadius: 6, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  contextUsageText: { color: colors.muted, fontSize: 9, textAlign: 'right', fontVariant: ['tabular-nums'] },
   activitySummaryText: { color: colors.muted, fontSize: 11, paddingBottom: 4 },
   captions: { gap: 4, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.borderSubtle, backgroundColor: colors.whiteWashSoft },
   captionsLabel: { color: colors.mutedDim, fontSize: 9, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },

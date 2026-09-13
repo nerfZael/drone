@@ -79,6 +79,7 @@ export type CompanionToolActivity = {
 };
 
 export type CompanionToolActivityEvent = CompanionCompactionEvent & {
+  contextUsage?: unknown;
   type: string;
   callId?: unknown;
   tool?: unknown;

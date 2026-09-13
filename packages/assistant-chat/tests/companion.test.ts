@@ -446,6 +446,7 @@ describe('Companion contracts', () => {
       endedAt: null,
       activity: [],
       compaction: null,
+      contextUsage: null,
       subscriptions: [],
     });
     expect(connection.cancelled).toEqual(['run-2']);
@@ -780,4 +781,39 @@ test('subscription snapshots update independently of turns and clear on disconne
   connection.message({ type: 'subscriptions', subscriptions: [row] });
   expect(controller.getSnapshot().subscriptions).toEqual([]);
   await controller.close();
+});
+
+
+test('Companion context usage survives follow-ups, updates after compaction, and resets on close', async () => {
+  const connection = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'session' });
+  const submit = (messageId: string) => controller.submitPrompt({
+    prompt: messageId, messageId, createTransport: () => connection.transport, executeTool: () => ({}),
+  });
+  await submit('first');
+  expect(controller.getSnapshot().contextUsage).toBeNull();
+  connection.message({ type: 'activity', messageId: 'first', event: {
+    type: 'context_usage', contextUsage: { tokens: 25000, contextWindow: 100000, percent: 99 },
+  } });
+  expect(controller.getSnapshot().contextUsage?.percent).toBe(25);
+  expect(controller.getSnapshot().activity).toEqual([]);
+  connection.message({ type: 'status', messageId: 'first', status: 'completed' });
+  await submit('second');
+  expect(controller.getSnapshot().contextUsage?.tokens).toBe(25000);
+  connection.message({ type: 'activity', messageId: 'first', event: {
+    type: 'context_usage', contextUsage: { tokens: 99999, contextWindow: 100000 },
+  } });
+  expect(controller.getSnapshot().contextUsage?.tokens).toBe(25000);
+  connection.message({ type: 'activity', messageId: 'second', event: {
+    type: 'compaction_completed', tokensAfter: 10000,
+  } });
+  expect(controller.getSnapshot().contextUsage).toEqual({
+    tokens: 10000, contextWindow: 100000, percent: 10, confidence: 'heuristic',
+  });
+  connection.message({ type: 'activity', messageId: 'second', event: {
+    type: 'context_usage', contextUsage: { tokens: NaN, contextWindow: 0 },
+  } });
+  expect(controller.getSnapshot().contextUsage?.tokens).toBe(10000);
+  await controller.close();
+  expect(controller.getSnapshot().contextUsage).toBeNull();
 });

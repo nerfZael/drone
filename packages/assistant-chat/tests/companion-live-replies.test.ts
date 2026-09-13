@@ -47,6 +47,8 @@ test('a delegated completion speaks once and retains its current Live delegation
   try {
     delegate(live.conversation);
     await tick();
+    expect(h.controller.getSnapshot().status).toBe('working');
+    expect(live.sent).toEqual([]); // Starting a backend session must not narrate a failure.
     h.finish();
     await Promise.resolve(); await Promise.resolve();
     expect(live.sent).toEqual([{ type: 'session.commentary.append', delegation_id: 'delegation', content: 'Done' }]);

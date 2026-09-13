@@ -1,6 +1,6 @@
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
-import type { CompanionCompactionActivity } from '@drone/assistant-chat';
+import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
@@ -93,6 +93,7 @@ type MobileCompanionContextValue = {
   activity: CompanionToolActivity[];
   subscriptions: import('@drone/assistant-chat').PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
+  contextUsage: CompanionContextUsage | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalDefaultRepoPath: string | null;

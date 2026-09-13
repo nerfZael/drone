@@ -1,3 +1,4 @@
+import { parseCompanionContextUsage, type CompanionContextUsage } from './companion-context-usage.js';
 import { normalizePresentedChatResourceSubscriptions, type PresentedChatResourceSubscription } from './resource-subscription-presentation.js';
 import { reduceCompanionCompaction, type CompanionCompactionActivity } from './companion-compaction.js';
 import type { CompanionProposalApplyResult } from './companion-proposal.js';
@@ -21,6 +22,7 @@ export type CompanionClientState = {
   activity: CompanionToolActivity[];
   subscriptions: PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
+  contextUsage: CompanionContextUsage | null;
 };
 
 export type CompanionClientConnectionTelemetry = Pick<
@@ -104,6 +106,7 @@ const INITIAL_STATE: CompanionClientState = {
   endedAt: null,
   activity: [],
   compaction: null,
+  contextUsage: null,
 };
 
 export class CompanionClientController {
@@ -168,6 +171,7 @@ export class CompanionClientController {
     const prompt = input.prompt.trim();
     if (!prompt) return;
 
+    const startingSession = this.activeSession === null;
     const steering = this.state.status === 'working' && this.activeSession !== null;
     const session = this.activeSession ?? this.createSession(input);
     const messageId = input.messageId || this.options.createId();
@@ -184,6 +188,8 @@ export class CompanionClientController {
       endedAt: null,
       activity: steering ? this.state.activity : [],
       compaction: steering ? this.state.compaction : null,
+      // Notify reply waiters only once startup has entered the working state.
+      contextUsage: startingSession ? null : this.state.contextUsage,
     });
 
     try {
@@ -365,6 +371,12 @@ export class CompanionClientController {
       if (message.messageId && message.messageId !== session.latestMessageId &&
         (message.messageId !== session.activityMessageId || !session.messageExecutors.has(message.messageId))) return;
       this.update({
+        contextUsage: message.event.type === 'context_usage'
+          ? parseCompanionContextUsage(message.event.contextUsage) ?? this.state.contextUsage
+          : message.event.type === 'compaction_completed' && this.state.contextUsage &&
+            typeof message.event.tokensAfter === 'number'
+            ? parseCompanionContextUsage({ ...this.state.contextUsage, tokens: message.event.tokensAfter, confidence: 'heuristic' }) ?? this.state.contextUsage
+            : this.state.contextUsage,
         activity: reduceCompanionToolActivity(this.state.activity, message.event),
         compaction: this.state.status === 'working'
           ? reduceCompanionCompaction(this.state.compaction, message.event) : this.state.compaction,

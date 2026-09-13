@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { CompanionBrowserToolName } from '@drone/assistant-chat';
+import { parseCompanionContextUsage, type CompanionBrowserToolName } from '@drone/assistant-chat';
 
 
 const ACTIVITY_RESULT_MAX_CHARS = 20_000;
@@ -104,6 +104,10 @@ export class CompanionBrowserToolBroker {
 export function boundedCompanionActivityEvent(event: any): any | null {
   if (event?.background === true) return null;
   const type = String(event?.type ?? '');
+  if (type === 'session_finished') {
+    const contextUsage = parseCompanionContextUsage(event.contextUsage);
+    return contextUsage ? { type: 'context_usage', contextUsage } : null;
+  }
   // Only status and estimated sizes cross the activity channel. In particular,
   // fallback errors may contain provider content and must not be forwarded.
   if (type === 'compaction_started' || type === 'compaction_skipped') return { type };

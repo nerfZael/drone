@@ -1,4 +1,5 @@
 import React from 'react';
+import { Tooltip } from 'radix-ui';
 import type { BlipCompactionHistoryDetails, BlipContextUsage } from '@blip/protocol';
 
 function formatTokens(tokens: number): string {
@@ -91,41 +92,50 @@ export function AssistantContextUsageIndicator({ usage }: { usage: BlipContextUs
         ? 'text-[var(--yellow)]'
         : 'text-[var(--accent)]';
   const confidence = usage.confidence === 'heuristic' ? ', estimated' : '';
-  const label = `Context: ${formatTokens(usage.tokens)} of ${formatTokens(usage.contextWindow)} tokens (${Math.round(percent)}%${confidence})`;
+  const label = `Context: ${usage.tokens.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens (${Math.round(percent)}%${confidence})`;
 
   return (
-    <span
-      data-assistant-context-usage="true"
-      className={`relative inline-flex h-8 w-8 flex-shrink-0 items-center justify-center ${tone}`}
-      title={label}
-      aria-label={label}
-      role="img"
-    >
-      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
-        <circle
-          cx="15"
-          cy="15"
-          r={radius}
-          fill="none"
-          stroke="var(--chat-composer-context-track, var(--border-subtle))"
-          strokeWidth="3"
-        />
-        <circle
-          cx="15"
-          cy="15"
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          transform="rotate(-90 15 15)"
-        />
-      </svg>
-      <span className="absolute text-[.5rem] font-semibold tabular-nums text-[var(--chat-composer-fg)]">
-        {Math.round(percent)}
-      </span>
-    </span>
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span
+            tabIndex={0}
+            data-assistant-context-usage="true"
+            className={`relative inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${tone}`}
+            aria-label={label}
+            role="img"
+          >
+            <svg width="24" height="24" viewBox="0 0 30 30" aria-hidden="true">
+              <circle
+                cx="15"
+                cy="15"
+                r={radius}
+                fill="none"
+                stroke="var(--muted)"
+                opacity="0.5"
+                strokeWidth="3"
+              />
+              <circle
+                cx="15"
+                cy="15"
+                r={radius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="butt"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                transform="rotate(-90 15 15)"
+              />
+            </svg>
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content side="top" sideOffset={6} className="z-[200] max-w-64 rounded-md border border-[var(--border)] bg-[var(--panel-raised)] px-2.5 py-1.5 text-xs text-[var(--fg)] shadow-[var(--shadow-menu)]">
+            {label}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }

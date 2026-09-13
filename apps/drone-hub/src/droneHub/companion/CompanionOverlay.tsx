@@ -1,3 +1,4 @@
+import { AssistantContextUsageIndicator } from '../assistant/AssistantContextStatus';
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
@@ -218,8 +219,11 @@ export function CompanionOverlay() {
           <Popover.Portal>
             <Popover.Content side="top" align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
               className="z-[110] w-[min(24rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--shadow-dialog)]">
-              <div className="px-3.5 py-2 text-xs text-[var(--muted)]">
-                {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)} · {companion.activity.length} tool calls
+              <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 text-xs text-[var(--muted)]">
+                <span className="flex-1">{active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)} · {companion.activity.length} tool calls</span>
+                {companion.contextUsage ? (
+                  <AssistantContextUsageIndicator usage={companion.contextUsage} />
+                ) : null}
               </div>
         <div
           id="companion-tool-calls"

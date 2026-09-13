@@ -1,5 +1,5 @@
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
-import type { CompanionCompactionActivity } from '@drone/assistant-chat';
+import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import { createCompanionActionReporter, type CompanionActionNotification } from './companion-action-notifications';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
@@ -62,6 +62,7 @@ type CompanionContextValue = {
   activity: CompanionToolActivity[];
   subscriptions: import('@drone/assistant-chat').PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
+  contextUsage: CompanionContextUsage | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalExecutionProgress: CompanionProposalExecutionProgress | null;

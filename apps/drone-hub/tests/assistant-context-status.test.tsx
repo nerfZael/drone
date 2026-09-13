@@ -44,8 +44,8 @@ describe('assistant context status', () => {
 
     expect(html).toContain('data-assistant-context-usage="true"');
     expect(html).toContain('role="img"');
-    expect(html).toContain('Context: 24K of 128K tokens (19%, estimated)');
-    expect(html).toContain('>19<');
+    expect(html).toContain('Context: 24,000 of 128,000 tokens (19%, estimated)');
+    expect(html).not.toContain('>19<');
     expect(html).toContain('stroke-dashoffset');
   });
 
