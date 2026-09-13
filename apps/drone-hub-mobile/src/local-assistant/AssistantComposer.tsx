@@ -213,8 +213,6 @@ export function AssistantComposer({
   onSend,
   onStop,
   onOpenDictation,
-  onDictationPrestart,
-  onDictationPrestartCancel,
   onOpenModel,
   modelLabel,
   reasoningLabel,
@@ -243,10 +241,6 @@ export function AssistantComposer({
   onSend: MobileComposerSend;
   onStop?(): void;
   onOpenDictation?(): void;
-  /** Called as soon as the mic is pressed so recording can begin before the card opens. */
-  onDictationPrestart?(): void;
-  /** Called when a started press is abandoned before opening dictation. */
-  onDictationPrestartCancel?(): void;
   onOpenModel(): void;
   modelLabel: string;
   reasoningLabel?: string;
@@ -320,9 +314,6 @@ export function AssistantComposer({
     onNotice: setVoiceError,
     onError: setVoiceError,
   });
-  // While the mic-press morph plays the recorder may already be running
-  // (started early so no speech is lost); the card only appears once the morph
-  // completes.
   const [voiceMorphActive, setVoiceMorphActive] = React.useState(false);
   const localRecorderOpen =
     !onOpenDictation && (voiceActive || transcriptionQueue.hasClips) && !voiceMorphActive;
@@ -508,34 +499,13 @@ export function AssistantComposer({
   // While the morph is in progress the input must not take focus or raise the
   // keyboard, otherwise Android briefly shows it before dictation opens.
   const voiceMorphSettleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceMorphArmedRef = React.useRef(false);
-  const prestartDictation = React.useCallback(() => {
-    if (voiceRecordActionDisabled) return;
-    if (onOpenDictation) onDictationPrestart?.();
-    else if (!voiceActiveRef.current) void beginVoiceRecording();
-  }, [beginVoiceRecording, onDictationPrestart, onOpenDictation, voiceRecordActionDisabled]);
-  const cancelPrestartedDictation = React.useCallback(() => {
-    if (onOpenDictation) onDictationPrestartCancel?.();
-    else if (voiceActiveRef.current) discardVoice();
-  }, [discardVoice, onDictationPrestartCancel, onOpenDictation]);
-  const beginVoiceMorph = React.useCallback(() => {
-    if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
-    voiceMorphSettleTimerRef.current = null;
-    voiceMorphArmedRef.current = false;
-    setVoiceMorphActive(true);
-    prestartDictation();
-  }, [prestartDictation]);
-  const armVoiceMorph = React.useCallback(() => {
-    voiceMorphArmedRef.current = true;
-  }, []);
   const settleVoiceMorph = React.useCallback(() => {
-    if (!voiceMorphArmedRef.current) cancelPrestartedDictation();
     if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
     voiceMorphSettleTimerRef.current = setTimeout(() => {
       voiceMorphSettleTimerRef.current = null;
       setVoiceMorphActive(false);
     }, 260);
-  }, [cancelPrestartedDictation]);
+  }, []);
   React.useEffect(
     () => () => {
       if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
@@ -550,8 +520,12 @@ export function AssistantComposer({
       activateVoiceRecording();
       return;
     }
-    beginVoiceMorph();
-    armVoiceMorph();
+    // Opening the card starts recording. Acquiring the mic before this animation
+    // finishes disables VoiceMorphComposer, which cancels the completion callback
+    // and leaves a hidden recording holding the microphone.
+    if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
+    voiceMorphSettleTimerRef.current = null;
+    setVoiceMorphActive(true);
     cancelAnimation(voiceMorphProgress);
     voiceMorphProgress.value = withTiming(
       1,
@@ -563,7 +537,7 @@ export function AssistantComposer({
       },
     );
     settleVoiceMorph();
-  }, [activateVoiceRecording, armVoiceMorph, beginVoiceMorph, onOpenDictation, settleVoiceMorph, voiceMorphProgress, voiceRecordActionDisabled]);
+  }, [activateVoiceRecording, onOpenDictation, settleVoiceMorph, voiceMorphProgress, voiceRecordActionDisabled]);
 
   const beginContinuousVoice = React.useCallback(
     async (mode: MobileContinuousVoiceMode) => {

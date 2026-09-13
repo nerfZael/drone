@@ -228,35 +228,6 @@ export function useMobileDictation(options: {
     stopAndTranscribe,
   ]);
 
-  /**
-   * Speech usually begins before the swipe-up finishes, so the recorder starts
-   * the moment the gesture is recognised, before the card is shown. If the
-   * gesture is abandoned, cancelPrestart throws the clip away.
-   */
-  const prestartRecording = React.useCallback(() => {
-    return runRecordingCommand(async () => {
-      if (finalizingRef.current || openRef.current) return;
-      if (voice.getRecordingSession().kind !== 'idle') return;
-      voice.setError('');
-      ownsRecorderErrorRef.current = true;
-      const started = await voice.startRecording('dictation');
-      if (!started) {
-        voice.setError('');
-        ownsRecorderErrorRef.current = false;
-      }
-    });
-  }, [runRecordingCommand, voice]);
-
-  const cancelPrestart = React.useCallback(() => {
-    return runRecordingCommand(async () => {
-      if (openRef.current) return;
-      if (voice.getRecordingSession().kind !== 'dictation') return;
-      await voice.discardRecording('dictation');
-      ownsRecorderErrorRef.current = false;
-      voice.setError('');
-    });
-  }, [runRecordingCommand, voice]);
-
   const openAndStart = React.useCallback(
     async (initialText = '') => {
       setOpen(true);
@@ -429,8 +400,6 @@ export function useMobileDictation(options: {
     microphoneUnavailable,
     setText,
     openAndStart,
-    prestartRecording,
-    cancelPrestart,
     toggleRecording,
     togglePause,
     cancelRecording,
