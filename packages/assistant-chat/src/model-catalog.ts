@@ -37,6 +37,7 @@ export type ProviderModelCatalogOption = {
   id?: unknown;
   name?: unknown;
   thinkingLevel?: unknown;
+  defaultReasoningLevel?: unknown;
 };
 
 export type ProviderModelCatalogDefault = {
@@ -182,11 +183,13 @@ export function groupProviderModelOptions(
     if (!provider || !id || (selectedProvider && provider !== selectedProvider)) continue;
     const key = providerModelCatalogIdentity(provider, id);
     const reasoningLevel = normalizeModelReasoningLevel(model?.thinkingLevel) || 'off';
+    const declaredDefault = normalizeModelReasoningLevel(model?.defaultReasoningLevel);
     const existing = grouped.get(key);
     if (existing) {
       if (!existing.reasoningLevels.includes(reasoningLevel)) {
         existing.reasoningLevels.push(reasoningLevel);
       }
+      if (declaredDefault) existing.defaultReasoningLevel = declaredDefault;
       continue;
     }
     grouped.set(key, {
@@ -194,8 +197,14 @@ export function groupProviderModelOptions(
       id,
       label: text(model?.name) || id,
       reasoningLevels: [reasoningLevel],
-      defaultReasoningLevel: reasoningLevel,
+      defaultReasoningLevel: declaredDefault || reasoningLevel,
     });
+  }
+
+  for (const model of grouped.values()) {
+    if (!model.reasoningLevels.includes(model.defaultReasoningLevel)) {
+      model.defaultReasoningLevel = model.reasoningLevels[0] ?? '';
+    }
   }
 
   const configured = grouped.get(

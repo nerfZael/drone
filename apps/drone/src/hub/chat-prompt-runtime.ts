@@ -52,6 +52,7 @@ import {
 import { pendingChatForkSourceSessionId } from './chat-fork';
 import { claudeCheckpointValidationScript } from './claude-checkpoint-fork';
 import { openCodeCheckpointForkScript } from './opencode-checkpoint-fork';
+import { resolveCodexOpenRouterReasoning } from './codex-openrouter-catalog';
 
 export function claudeSandboxEnvironmentLines(runtime: unknown): string[] {
   // Claude Code refuses bypassPermissions under root unless the caller explicitly
@@ -983,6 +984,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
 
       if (agent.kind === 'builtin' && agent.id === 'codex') {
+        const codexReasoning = await resolveCodexOpenRouterReasoning(chatModel, chatReasoning);
         const sandboxArg =
           agentPermissionMode === 'read'
             ? 'read-only'
@@ -1032,7 +1034,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           approvalsReviewer: approvalPolicy === 'auto' ? 'auto_review' : 'user',
           sandbox: sandboxArg,
           ...(chatModel ? { model: chatModel } : {}),
-          ...(chatReasoning ? { effort: chatReasoning } : {}),
+          ...(codexReasoning ? { effort: codexReasoning } : {}),
           signal: opts.signal,
           timing: opts.timing,
         });

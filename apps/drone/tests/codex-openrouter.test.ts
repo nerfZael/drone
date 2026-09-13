@@ -5,7 +5,12 @@ import path from 'node:path';
 import { codexModelRoute, codexProviderLaunchScript } from '../src/codex-model-routing';
 import { CodexProviderCredentials } from '../src/CodexProviderCredentials';
 import { CodexPromptRunManager } from '../src/codex-prompt-run-manager';
-import { parseCodexOpenRouterModels, getCodexOpenRouterCatalog } from '../src/hub/codex-openrouter-catalog';
+import {
+  parseCodexOpenRouterModels,
+  getCodexOpenRouterCatalog,
+  resolveCodexOpenRouterReasoning,
+  saveCodexOpenRouterCatalog,
+} from '../src/hub/codex-openrouter-catalog';
 import { withTempDroneDataDir } from './test-helpers';
 
 test('the full OpenRouter catalog includes models without tools, context metadata, or reasoning', () => {
@@ -21,6 +26,45 @@ test('the full OpenRouter catalog includes models without tools, context metadat
   expect(codexModelRoute('gpt-example')).toEqual({ provider: 'default', model: 'gpt-example' });
   expect(codexProviderLaunchScript('exec codex app-server', models[0].id)).toContain('wire_api="responses"');
   expect(codexProviderLaunchScript('exec codex app-server', 'gpt-example')).toBe('exec codex app-server');
+});
+
+test('the Codex catalog uses OpenRouter reasoning capabilities', () => {
+  const [model] = parseCodexOpenRouterModels({ data: [{
+    id: 'z-ai/glm-5.3-flash',
+    supported_parameters: ['tools', 'reasoning'],
+    reasoning: {
+      mandatory: true,
+      default_enabled: true,
+      supported_efforts: ['max', 'high', 'low'],
+      default_effort: 'max',
+    },
+  }] });
+  expect(model).toMatchObject({
+    reasoningLevels: ['max', 'high', 'low'],
+    defaultReasoningLevel: 'max',
+  });
+});
+
+test('existing unsupported OpenRouter reasoning selections use the published default', async () => {
+  await withTempDroneDataDir('codex-openrouter-reasoning-', async () => {
+    await saveCodexOpenRouterCatalog({ data: [{
+      id: 'z-ai/glm-5.3-flash',
+      supported_parameters: ['reasoning'],
+      reasoning: {
+        mandatory: true,
+        supported_efforts: ['max', 'high', 'low'],
+        default_effort: 'max',
+      },
+    }] });
+    expect(await resolveCodexOpenRouterReasoning(
+      'openrouter:z-ai/glm-5.3-flash',
+      'medium',
+    )).toBe('max');
+    expect(await resolveCodexOpenRouterReasoning(
+      'openrouter:z-ai/glm-5.3-flash',
+      'high',
+    )).toBe('high');
+  });
 });
 
 test('catalog refresh failures retain the full cached catalog', async () => {
