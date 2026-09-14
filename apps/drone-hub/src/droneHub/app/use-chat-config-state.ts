@@ -199,6 +199,9 @@ export function useChatConfigState({
       return;
     }
     if (cachedChatInfo) {
+      // The cache expires independently of this selection. Retain its metadata
+      // as active state: runtime readers skip configuration once it is cached.
+      setChatInfo(cachedChatInfo);
       markChatLoadConfigResolved(
         { droneId: selectedDrone, chatName: selectedChat },
         {
