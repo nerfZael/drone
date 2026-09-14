@@ -1,3 +1,4 @@
+import { repairDuplicateChatIdentities } from './chat-identity-migration';
 import crypto from 'node:crypto';
 import { searchNativeChatMessages } from './native-chat-messages';
 import {
@@ -653,6 +654,11 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       installActiveTurnProjections(connection, { rebuildExisting });
     },
   },
+  {
+    version: 13,
+    name: 'repair duplicate chat identities and enforce uniqueness',
+    migrate: repairDuplicateChatIdentities,
+  },
 ];
 
 function createActiveChatMessageSearch(connection: HubDatabaseConnection): void {
@@ -952,7 +958,7 @@ function metadataWithStableId(chatEntry: any, current?: any): any {
   const value = metadata(chatEntry);
   const suppliedId = typeof value.id === 'string' ? value.id.trim() : '';
   const currentId = typeof current?.id === 'string' ? current.id.trim() : '';
-  return { ...value, id: suppliedId || currentId || crypto.randomUUID() };
+  return { ...value, id: currentId || suppliedId || crypto.randomUUID() };
 }
 
 function archivedChatValue(raw: unknown): {
@@ -2546,10 +2552,11 @@ export class ChatTranscriptRepository {
     const value = { ...rawValue, ...metadataWithStableId(rawValue) };
     const now = new Date().toISOString();
     const info = connection.prepare(`
-      INSERT OR IGNORE INTO canonical_chats (
+      INSERT INTO canonical_chats (
         drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
         transcript_version, turns_source_hash
       ) VALUES (?, ?, ?, ?, ?, ?, 0, '')
+      ON CONFLICT(drone_id, chat_name) DO NOTHING
     `).run(
       droneId,
       chatName,
@@ -2629,7 +2636,9 @@ export class ChatTranscriptRepository {
     connection.prepare(`INSERT INTO canonical_chats (
       drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
       transcript_version, turns_source_hash
-    ) VALUES (?, ?, ?, ?, '{}', '', 0, '')`).run(droneId, chatName, now, now);
+    ) VALUES (?, ?, ?, ?, ?, '', 0, '')`).run(
+      droneId, chatName, now, now, stableJson({ id: crypto.randomUUID() }),
+    );
     appendChatEvent(connection, 'chat.created', droneId, chatName, { source: 'turn-reconciliation' });
     return true;
   }
