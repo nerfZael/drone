@@ -1,5 +1,6 @@
 export type CompanionCompactionActivity = {
   status: 'running' | 'completed' | 'skipped' | 'cancelled' | 'failed' | 'interrupted';
+  reason?: string;
   tokensBefore?: number;
   tokensAfter?: number;
   fallbackUsed?: boolean;
@@ -18,7 +19,7 @@ export function reduceCompanionCompaction(
   event: CompanionCompactionEvent,
 ): CompanionCompactionActivity | null {
   if (event.type === 'compaction_started') return { status: 'running' };
-  if (event.type === 'compaction_skipped') return { status: 'skipped' };
+  if (event.type === 'compaction_skipped') return { status: 'skipped', ...(typeof event.reason === 'string' && event.reason.trim() ? { reason: event.reason.trim() } : {}) };
   if (event.type === 'compaction_failed') {
     return { status: event.reason === 'cancelled' ? 'cancelled' : 'failed' };
   }
@@ -36,7 +37,7 @@ export function reduceCompanionCompaction(
 /** Shared wording for the web and mobile Companion overlays. */
 export function companionCompactionLabel(activity: CompanionCompactionActivity): string {
   if (activity.status === 'running') return 'Compacting context…';
-  if (activity.status === 'skipped') return 'Context compaction skipped';
+  if (activity.status === 'skipped') return `Context compaction skipped${activity.reason ? `: ${activity.reason}` : ''}`;
   if (activity.status === 'cancelled') return 'Context compaction stopped';
   if (activity.status === 'failed') return 'Context compaction failed';
   if (activity.status === 'interrupted') return 'Context compaction ended without a result';

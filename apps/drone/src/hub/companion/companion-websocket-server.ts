@@ -22,6 +22,7 @@ function messageText(data: RawData): string {
 
 export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSocketServer {
   const server = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_PAYLOAD_BYTES });
+  const owners = new Map<string, WebSocket>();
   server.on('connection', (socket: WebSocket, _request: http.IncomingMessage) => {
     let session: CompanionRunSession | null = null;
     let cleanedUp = false;
@@ -114,21 +115,36 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         return;
       }
       if (!session) {
+        const persistent = message.resumeSession === true;
+        const runtimeRunId = persistent ? `websocket:${runId}` : `websocket:${crypto.randomUUID()}`;
+        if (persistent && owners.has(runtimeRunId)) {
+          send({ type: 'error', runId, messageId, error: 'This Companion conversation is still open or disconnecting in another window. Close it there and retry; its history is saved.' });
+          return;
+        }
+        if (persistent) owners.set(runtimeRunId, socket);
         let createdSession!: CompanionRunSession;
-        createdSession = new CompanionRunSession({
-          clientRunId: runId,
-          runtimeRunId: `websocket:${crypto.randomUUID()}`,
-          transport: 'websocket',
-          runtime,
-          emit: (event) => send({ runId, ...event }),
-          isAvailable: () =>
-            session === createdSession && !cleanedUp && socket.readyState === WebSocket.OPEN,
-          unavailableMessage: 'Companion browser disconnected',
-          onClose: () => {
-            if (session === createdSession) session = null;
-          },
-        });
-        session = createdSession;
+        try {
+          createdSession = new CompanionRunSession({
+            clientRunId: runId,
+            runtimeRunId,
+            preserveSession: persistent,
+            transport: 'websocket',
+            runtime,
+            emit: (event) => send({ runId, ...event }),
+            isAvailable: () =>
+              session === createdSession && !cleanedUp && socket.readyState === WebSocket.OPEN,
+            unavailableMessage: 'Companion browser disconnected',
+            onClose: () => {
+              if (session === createdSession) session = null;
+              if (persistent && owners.get(runtimeRunId) === socket) owners.delete(runtimeRunId);
+            },
+          });
+          session = createdSession;
+        } catch (error) {
+          if (persistent) owners.delete(runtimeRunId);
+          send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
       }
       const activeSession = session;
       void activeSession.submit({ prompt, messageId, telemetry }).catch((error) => {

@@ -11,11 +11,9 @@ import type {
 } from '@blip/core';
 import type { BlipHistoryPage } from '@blip/protocol';
 
-import { toBlipModelProvider } from '../hub-settings';
-import { loadOpenRouterCatalog, cachedOpenRouterModel } from '../openrouter-model-catalog';
-import { loadCodexCatalog, discoveredCodexModel } from '../codex-model-catalog';
+import { resolveNativeModel } from './resolve-native-model';
 import { HubSessionRepository } from './hub-session-repository';
-import { loadBlipNodeRuntime, loadBlipRuntime } from './blip-runtime-loader';
+import { loadBlipAiRuntime, loadBlipRuntime } from './blip-runtime-loader';
 
 export type BlipAssistantThreadConfiguration = {
   provider: string;
@@ -475,9 +473,46 @@ export class BlipAssistantHost {
       this.invalidateThread(threadId);
   }
 
-  async close(): Promise<void> {
+  /** Release execution resources without deleting the durable transcript or binding. */
+  async detachThread(threadId: string): Promise<void> {
+    const handle = this.handles.get(threadId) ?? await this.handlePromises.get(threadId);
+    if (handle?.running) { handle.abort(); await handle.waitForIdle(); }
+    handle?.close();
+    this.handles.delete(threadId);
+    this.promptControllers.delete(threadId);
+    this.invalidatedThreads.delete(threadId);
+    this.loadedTools.delete(threadId);
+    await this.disposeConfiguration(threadId);
+  }
+
+  /** A rejected switch leaves the working handle and all transcript entries intact. */
+  async ensureModelFits(threadId: string, target: { provider: string; model: string }): Promise<void> {
+    const model = await resolveNativeModel(target.provider, target.model);
+    const handle = await this.handle(threadId);
+    if (handle.running) throw new Error('Wait for the Companion reply to finish before changing models.');
+    const config = this.loadedConfigurations.get(threadId)!;
+    const [runtime, ai] = await Promise.all([loadBlipRuntime(), loadBlipAiRuntime()]);
+    const budget = runtime.compactionBudget(model, runtime.resolveCompactionSettings());
+    const estimate = async () => {
+      const messages = await this.repository.readModelMessages(handle.state);
+      const transformed = config.transformContext ? await config.transformContext(messages) : messages;
+      return ai.estimateContextTokens(model, {
+        systemPrompt: config.systemPrompt,
+        messages: transformed as import('@mariozechner/pi-ai').Message[],
+        tools: this.loadedTools.get(threadId) ?? config.tools,
+      }).inputTokens;
+    };
+    if (await estimate() <= budget.hardLimit) return;
+    await handle.compact({ ...runtime.DEFAULT_COMPACTION_SETTINGS,
+      background: false, contextWindowTokens: budget.contextWindow });
+    if (await estimate() > budget.hardLimit) {
+      throw new Error(`This conversation cannot fit ${target.model}, even after compaction. The current model and conversation have been kept.`);
+    }
+  }
+
+  async close(preserveSessions = false): Promise<void> {
     const threadIds = new Set([...this.handles.keys(), ...this.handlePromises.keys()]);
-    await Promise.allSettled([...threadIds].map((threadId) => this.deleteThread(threadId)));
+    await Promise.allSettled([...threadIds].map((threadId) => preserveSessions ? this.detachThread(threadId) : this.deleteThread(threadId)));
     this.repository.close();
   }
 
@@ -601,22 +636,11 @@ export class BlipAssistantHost {
   }
 
   private async createHandle(threadId: string): Promise<BlipSessionHandle> {
-    const [runtime, nodeRuntime] = await Promise.all([loadBlipRuntime(), loadBlipNodeRuntime()]);
+    const runtime = await loadBlipRuntime();
     const config = await this.configuration(threadId);
     let handle: BlipSessionHandle | undefined;
     try {
-      const provider = toBlipModelProvider(config.provider);
-      await loadOpenRouterCatalog();
-      await loadCodexCatalog();
-      let model: import('@mariozechner/pi-ai').Model<any> | undefined = cachedOpenRouterModel(provider, config.model);
-      if (!model) {
-        try { model = nodeRuntime.resolveBlipModel(provider, config.model); }
-        catch (error) {
-          const discovered = discoveredCodexModel(provider, config.model);
-          if (!discovered) throw error;
-          model = discovered;
-        }
-      }
+      const model = await resolveNativeModel(config.provider, config.model);
       const usageStore = getUsageStore();
       if (model.cost && Object.values(model.cost).some((rate) => rate > 0) &&
           !usageStore.prices().some((price) => price.provider === model!.provider && price.model === model!.id)) {

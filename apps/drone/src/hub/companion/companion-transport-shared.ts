@@ -110,7 +110,18 @@ export function boundedCompanionActivityEvent(event: any): any | null {
   }
   // Only status and estimated sizes cross the activity channel. In particular,
   // fallback errors may contain provider content and must not be forwarded.
-  if (type === 'compaction_started' || type === 'compaction_skipped') return { type };
+  if (type === 'compaction_started') return { type };
+  if (type === 'compaction_skipped') {
+    const reasons = new Set([
+      'nothing to compact at a safe boundary',
+      'no complete tool boundary fits the model budget',
+      'latest user request and fixed context cannot fit the post-compaction target with a summary',
+      'summary exceeded its token budget',
+      'candidate still exceeded the post-compaction target',
+      'candidate did not reduce context enough',
+    ]);
+    return { type, ...(reasons.has(event.reason) ? { reason: event.reason } : {}) };
+  }
   if (type === 'compaction_failed') {
     return { type, reason: event.reason === 'cancelled' ? 'cancelled' : 'error' };
   }

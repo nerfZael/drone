@@ -5,7 +5,7 @@ import { createPortableId } from './platform.js';
 import { prepareCompaction, type CompactionPlan } from './prepareCompaction.js';
 import { compactionBudget, resolveCompactionSettings, type CompactionSettings } from './compaction-settings.js';
 export { prepareCompaction, type CompactionPlan } from './prepareCompaction.js';
-export { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from './compaction-settings.js';
+export { compactionBudget, resolveCompactionSettings, DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from './compaction-settings.js';
 import { deterministicSummary } from './helpers/compaction-summary-input.js';
 import { modelSummary } from './helpers/compaction-summary.js';
 import { compactionFileMetadata } from './helpers/compaction-file-metadata.js';

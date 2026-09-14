@@ -224,6 +224,8 @@ export type CompanionRunEvent =
 export type CompanionClientMessage =
   | {
       type: 'start_run';
+      /** Reuse the durable desktop conversation identified by runId. */
+      resumeSession?: boolean;
       runId: string;
       messageId?: string;
       prompt: string;

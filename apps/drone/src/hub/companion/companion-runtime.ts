@@ -1,3 +1,5 @@
+import { droneRootPath } from '../../host/paths';
+import { resolveNativeModel } from '../assistant/resolve-native-model';
 import { workspaceWindowLayoutProperties } from './workspace-window-layout-schema';
 import { chatWindowLayoutProperties } from './chat-window-layout-schema';
 import crypto from 'node:crypto';
@@ -13,6 +15,7 @@ import type { AssistantDroneSummary } from '../assistant/assistant-contracts';
 import type { HubServices } from '../application/hub-services';
 import { loadDroneSummaryRegistry } from '../drone-summary-registry';
 import {
+  toBlipModelProvider,
   resolveBlipProviderApiKey,
   resolveEffectiveProviderApiKeySettings,
 } from '../hub-settings';
@@ -22,6 +25,7 @@ import {
   COMPANION_SUBSCRIPTION_TOOL_NAMES,
   companionSettingsEqual,
   readCompanionSettings,
+  writeCompanionSettings,
   type CompanionBrowserToolName,
   type CompanionSettings,
   type CompanionToolName,
@@ -128,7 +132,8 @@ export class CompanionRuntime {
   private readonly telemetryByThreadId = new Map<string, CompanionRunTelemetry>();
   private readonly subscriptionSessions = new Map<string, () => Promise<void>>();
   private closing = false;
-  private readonly repository = new HubSessionRepository({ inMemory: true, trackUsage: true });
+  private changingSettings = false;
+  private readonly repository = new HubSessionRepository(droneRootPath('companion-blip.sqlite'));
   private readonly host: BlipAssistantHost;
 
   constructor(private readonly deps: RuntimeDependencies) {
@@ -138,6 +143,20 @@ export class CompanionRuntime {
       this.repository,
       (threadId, event) => this.telemetryByThreadId.get(threadId)?.observe(event),
     );
+  }
+
+  async updateSettings(value: unknown): Promise<void> {
+    if (this.changingSettings || this.activeRunIds.size) throw new Error('Wait for the Companion reply to finish before changing settings.');
+    this.changingSettings = true;
+    try {
+      await writeCompanionSettings(value, async (settings) => {
+        for (const [threadId, context] of this.contexts) {
+          if (context.settings.provider !== settings.provider || context.settings.model !== settings.model) {
+            await this.host.ensureModelFits(threadId, settings);
+          }
+        }
+      });
+    } finally { this.changingSettings = false; }
   }
 
   /** Deliver through ASAP when enabled; false leaves the request buffered by the transport. */
@@ -181,6 +200,7 @@ export class CompanionRuntime {
     const runId = String(input.runId).trim() || crypto.randomUUID();
     const threadId = `companion:${runId}`;
     if (this.closing) throw new Error('Companion is shutting down');
+    if (this.changingSettings) throw new Error('Companion is checking the model change. Please retry when it finishes.');
     if (this.activeRunIds.has(runId)) throw new Error('Companion run already exists');
     this.activeRunIds.add(runId);
     const coldStart = !this.host.hasThreadHandle(threadId);
@@ -207,9 +227,25 @@ export class CompanionRuntime {
         ? await telemetry.measure('settingsMs', () => readCompanionSettings())
         : await readCompanionSettings();
       const workspaceRevision = await this.deps.workspaces?.revision() ?? '';
+      let restoredSettings: CompanionSettings | undefined;
+      if (!existingContext) {
+        const savedId = await this.repository.sessionIdForThread(threadId);
+        const saved = savedId ? await this.repository.load(savedId) : undefined;
+        if (saved && (saved.modelId !== settings.model || saved.modelProvider !== toBlipModelProvider(settings.provider))) {
+          const provider = saved.modelProvider === 'openai-codex' ? 'codex'
+            : saved.modelProvider === 'google' ? 'gemini' : saved.modelProvider;
+          if (['openai', 'codex', 'gemini', 'openrouter'].includes(provider)) {
+            try {
+              await resolveNativeModel(provider, saved.modelId);
+              restoredSettings = { ...settings, provider: provider as CompanionSettings['provider'], model: saved.modelId };
+            } catch { /* A now-unavailable old model must not prevent recovery with a known model. */ }
+          }
+        }
+      }
       const settingsChanged = Boolean(
         existingContext && (!companionSettingsEqual(existingContext.settings, settings) || existingContext.workspaceRevision !== workspaceRevision),
       );
+      await resolveNativeModel(settings.provider, settings.model);
       telemetry?.setModel(settings);
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       const credential = telemetry
@@ -223,6 +259,9 @@ export class CompanionRuntime {
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       if (existingContext) {
         if (settingsChanged) {
+          if (existingContext.settings.provider !== settings.provider || existingContext.settings.model !== settings.model) {
+            await this.host.ensureModelFits(threadId, settings);
+          }
           this.host.invalidateThread(threadId);
           existingContext.settings = settings;
           existingContext.workspaceRevision = workspaceRevision;
@@ -234,7 +273,7 @@ export class CompanionRuntime {
           acceptsSteering: false,
           windowLayoutTools: input.transport === 'websocket',
           runId,
-          settings,
+          settings: restoredSettings ?? settings,
           workspaceRevision,
           callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
@@ -253,6 +292,12 @@ export class CompanionRuntime {
         } else {
           await this.host.prepareThread(threadId);
         }
+      }
+      if (restoredSettings) {
+        await this.host.ensureModelFits(threadId, settings);
+        this.host.invalidateThread(threadId);
+        this.contexts.get(threadId)!.settings = settings;
+        await this.host.prepareThread(threadId);
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       telemetry?.markAgentRunStarted();
@@ -327,6 +372,14 @@ export class CompanionRuntime {
   }
 
   async deleteSession(runId: string): Promise<void> {
+    await this.releaseSession(runId, false);
+  }
+
+  async detachSession(runId: string): Promise<void> {
+    await this.releaseSession(runId, true);
+  }
+
+  private async releaseSession(runId: string, preserve: boolean): Promise<void> {
     const normalizedRunId = String(runId).trim();
     if (!normalizedRunId) return;
     const completion = this.activeRunCompletions.get(normalizedRunId);
@@ -338,7 +391,8 @@ export class CompanionRuntime {
       await releaseSubscriptions?.();
     } finally {
       const threadId = `companion:${normalizedRunId}`;
-      await this.host.deleteThread(threadId).catch(() => undefined);
+      if (preserve) await this.host.detachThread(threadId);
+      else await this.host.deleteThread(threadId);
       this.contexts.delete(threadId);
       this.activeRunIds.delete(normalizedRunId);
       this.activeRunCompletions.delete(normalizedRunId);
@@ -353,8 +407,8 @@ export class CompanionRuntime {
       ...this.subscriptionSessions.keys(),
       ...[...this.contexts.keys()].map((threadId) => threadId.replace(/^companion:/, '')),
     ]);
-    await Promise.allSettled([...sessionIds].map((runId) => this.deleteSession(runId)));
-    await this.host.close();
+    await Promise.allSettled([...sessionIds].map((runId) => this.detachSession(runId)));
+    await this.host.close(true);
     this.contexts.clear();
     this.activeRunIds.clear();
     this.activeRunCompletions.clear();

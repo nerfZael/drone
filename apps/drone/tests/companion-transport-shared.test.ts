@@ -143,3 +143,9 @@ test('forwards only context counts from session completion', () => {
     expect(boundedCompanionActivityEvent({ type: 'session_finished', contextUsage })).toBeNull();
   }
 });
+
+test('forwards known compaction skip reasons without arbitrary provider content', () => {
+  const reason = 'latest user request and fixed context cannot fit the post-compaction target with a summary';
+  expect(boundedCompanionActivityEvent({ type: 'compaction_skipped', reason, summary: 'private' }))
+    .toEqual({ type: 'compaction_skipped', reason });
+});

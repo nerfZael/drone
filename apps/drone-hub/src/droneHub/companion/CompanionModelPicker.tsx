@@ -81,7 +81,10 @@ export function CompanionModelPicker() {
         <select aria-label="Companion model" value={modelId} disabled={busy || modelIds.length === 0} className={SELECT_CLASS}
           onChange={(event) => selectModel(event.target.value)}>
           {modelId ? null : <option value="">{loading ? 'Loading…' : saving ? 'Saving…' : modelIds.length === 0 ? 'None available' : 'Choose a model'}</option>}
-          {modelIds.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
+          {modelIds.map((id) => {
+            const reason = providerModels.find((model) => model.id === id)?.unavailableReason;
+            return <option key={id} value={id} disabled={Boolean(reason)}>{modelLabel(id)}{reason ? ` — ${reason}` : ''}</option>;
+          })}
         </select>
       </MenuSelectRow>
       {reasoningLevels.length > 0 ? (
@@ -92,6 +95,7 @@ export function CompanionModelPicker() {
           </select>
         </MenuSelectRow>
       ) : null}
+      {saving ? <p role="status" className="dh-type-menu-meta px-2.5 py-1">Checking conversation fit. Compaction may take a moment.</p> : null}
       {!sameProvider ? <p className="dh-type-menu-meta px-2.5 py-1">Choose a model to save the provider change.</p> : null}
       {current && !current.credentials[provider] ? (
         <p className="px-2.5 py-1 text-xs text-[var(--red)]">{PROVIDER_LABELS[provider]} credentials are missing. Add them in General settings before running Companion.</p>

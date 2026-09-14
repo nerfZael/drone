@@ -27,18 +27,10 @@ export async function loadCodexCatalog() {
     ...others, ...discovered, ...bundled.filter((option) => !ids.has(option.id)));
 }
 
-// model/list exposes selection capabilities, but not token limits or pricing.
-// New IDs use conservative limits until the bundled runtime knows their metadata.
+// Selection discovery does not include verified token limits. Never manufacture
+// a model budget: callers must use the bundled runtime metadata or reject it.
 export function discoveredCodexModel(provider: string, id: string): Model<'openai-codex-responses'> | undefined {
   if (provider !== 'codex' && provider !== 'openai-codex') return undefined;
-  const model = models.find((item) => item.id === id);
-  if (!model) return undefined;
-  return {
-    id, name: model.label, provider: 'openai-codex', api: 'openai-codex-responses',
-    baseUrl: 'https://chatgpt.com/backend-api', input: ['text', 'image'],
-    reasoning: model.reasoningLevels.some((level) => level !== 'off'),
-    contextWindow: 32768, maxTokens: 4096,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    ...(model.reasoningLevels.includes('xhigh') ? { thinkingLevelMap: { xhigh: 'xhigh' } } : {}),
-  };
+  if (!models.some((item) => item.id === id)) return undefined;
+  throw new Error(`Token limits are unavailable for ${id}. Choose a model with known limits; the current conversation has been kept.`);
 }

@@ -34,3 +34,7 @@ export function loadBlipTools(): Promise<typeof BlipTools> {
   toolsPromise ??= importEsm('@blip/tools') as Promise<typeof BlipTools>;
   return toolsPromise;
 }
+
+export function loadBlipAiRuntime(): Promise<Pick<typeof import('@mariozechner/pi-ai'), 'estimateContextTokens'>> {
+  return importEsm('@mariozechner/pi-ai/agent-core') as Promise<Pick<typeof import('@mariozechner/pi-ai'), 'estimateContextTokens'>>;
+}

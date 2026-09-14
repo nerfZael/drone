@@ -821,3 +821,32 @@ test('Companion context usage survives follow-ups, updates after compaction, and
   await controller.close();
   expect(controller.getSnapshot().contextUsage).toBeNull();
 });
+
+test('saved desktop conversation resumes after disconnect, window teardown and controller recreation', async () => {
+  let saved: { runId: string; reply: string; transcript: string } | null = null;
+  const store = { read: () => saved, write: (value: typeof saved) => { saved = value; } };
+  let count = 0;
+  const make = () => new CompanionClientController({ createId: () => `recovery-${++count}`, sessionStore: store });
+  const first = make();
+  const a = clientTransport();
+  await first.submitPrompt({ prompt: 'Important draft', createTransport: () => a.transport, executeTool: () => ({}) });
+  const runId = first.getSessionId()!;
+  a.message({ type: 'reply', reply: 'Saved draft text' });
+  a.message({ type: 'status', status: 'completed' });
+  await first.suspend();
+  const restored = make();
+  expect(restored.getSnapshot().reply).toBe('Saved draft text');
+  const b = clientTransport();
+  await restored.submitPrompt({ prompt: 'Continue', createTransport: () => b.transport, executeTool: () => ({}) });
+  expect(restored.getSessionId()).toBe(runId);
+  b.disconnect('Hub restarted');
+  const c = clientTransport();
+  await restored.submitPrompt({ prompt: 'Resume after restart', createTransport: () => c.transport, executeTool: () => ({}) });
+  expect(restored.getSessionId()).toBe(runId);
+  await restored.cancel();
+  const d = clientTransport();
+  await restored.submitPrompt({ prompt: 'Continue after stop', createTransport: () => d.transport, executeTool: () => ({}) });
+  expect(restored.getSessionId()).toBe(runId);
+  await restored.close();
+  expect(saved).toBeNull();
+});

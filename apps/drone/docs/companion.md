@@ -28,7 +28,7 @@ Companion exposes the Hub MCP event tools: `subscribe_to_resource_events`, `subs
 
 Subscriptions belong to the **open Companion conversation**, independently of the selected drone chat. They act immediately without proposals. Desktop and mobile receive an **Event notification** turn, with normal tool activity, replies, and errors. Queue delivery waits for the active request; ASAP can steer an active request even when Companion's user follow-up setting is Queue. Events do not replace newer queued user requests in the visible reply. Event browser tools reuse the latest user message's captured workspace context; event resource IDs remain the authoritative target for event work.
 
-Closing, cancelling, or disconnecting the Companion conversation ends its subscriptions. Changing the phone's device permissions also closes its Companion session and subscriptions. Hub restarts discard Companion sessions and cancel their orphaned subscriptions. These subscriptions therefore cannot provide reminders while Companion is closed. Each desktop connection gets an independent internal identity, including when clients reuse a run ID. Stored subscription/delivery records follow the Hub's normal retention policy. An unexpected desktop disconnect is shown even after a reply has completed, so it cannot silently leave Companion appearing to watch events.
+Closing, cancelling, or disconnecting the Companion conversation ends its subscriptions. Changing the phone's device permissions also closes its Companion session and subscriptions. Hub restarts cancel orphaned subscriptions. Desktop conversation history is retained. These subscriptions therefore cannot provide reminders while Companion is closed. Desktop clients opt into a durable conversation identity; only one connection may own it at a time. Legacy clients still receive independent connection identities. Stored subscription/delivery records follow the Hub's normal retention policy. An unexpected desktop disconnect is shown even after a reply has completed, so it cannot silently leave Companion appearing to watch events.
 
 Manual validation: ask Companion to report when a busy chat finishes, finish that chat, and verify an event reply appears without another user prompt. Try a named custom event and a one-minute cron schedule; inspect, update, and cancel them through Companion. Exercise Queue and ASAP during a running request, then close/reopen Companion and confirm old subscriptions do not resume. Repeat on mobile, including disconnect/reconnect.
 
@@ -125,11 +125,11 @@ Register the open editor buffer in the same small browser text-target layer. The
 
 The overlay should reuse the agent-chat Working presentation. Show elapsed time and tool count in a clickable row; expanding it shows running and completed tool calls and their bounded results. Keep model reasoning hidden. Render the final response through `ChatMessageBody` so normal Markdown behavior stays consistent with agent chat.
 
-Closing the overlay erases the conversation. If recording, transcription, or Blip is active, close must abort it first; then clear the audio blob, transcript, activity, reply, pending follow-ups, and browser state and delete the temporary Companion thread. Completed conversations are not recoverable in the first version. Closing does not undo tool effects that already completed, such as a composer patch; those remain visible and undoable. A run-generation check must prevent a late browser tool result from mutating state after close.
+Closing the overlay clears the visible conversation and its reconnect pointer. If recording, transcription, or Blip is active, close must abort it first; then clear the audio blob, transcript, activity, reply, pending follow-ups, and browser state and release the Companion execution handle. The durable desktop transcript remains archived. Closing does not undo tool effects that already completed, such as a composer patch; those remain visible and undoable. A run-generation check must prevent a late browser tool result from mutating state after close.
 
 ### 2. Reuse the existing Blip host
 
-Add a small Companion runtime beside `assistant-runtime.ts`. It should own a second `BlipAssistantHost` with a configuration callback built specifically for Companion. Change the host constructor to accept an optional repository, then give Companion an isolated `HubSessionRepository` opened with an explicit in-memory option. Do not point the existing path-based constructor at the string `:memory:` because it currently resolves all inputs as filesystem paths.
+Add a small Companion runtime beside `assistant-runtime.ts`. It should own a second `BlipAssistantHost` with a configuration callback built specifically for Companion. Change the host constructor to accept an optional repository, then give Companion an isolated `HubSessionRepository` at `companion-blip.sqlite`.
 
 For each run:
 
@@ -138,9 +138,9 @@ For each run:
 3. Execute server-owned tools locally and browser-owned tools through the bound socket.
 4. Return every tool result to Blip so it can continue or correct its plan.
 5. Send the final answer to the overlay.
-6. In a `finally` block, delete the temporary thread and remove its socket/run binding.
+6. On disconnect, release the execution handle and socket ownership while preserving the durable desktop thread binding.
 
-This reuses the complete SQLite repository behavior without writing Companion sessions to disk or creating another repository implementation. A completed turn keeps its thread available for follow-ups; overlay close calls `deleteThread`. Settings → Companion → Follow-up delivery selects ASAP (default) or Queue, using the normal Save button and canonical Hub settings. Both record-and-transcribe and Live mode use this setting. ASAP delivers follow-ups to the running agent through its steering channel; Queue runs them in order after the current request finishes. Changes apply to new backend runs, while an active run keeps its saved delivery mode. Tool activity and elapsed time remain attached to that active run; its final answer is correlated with the latest message. In ASAP mode, follow-ups wait only for runtime startup or teardown when no agent can accept steering. Steering takes effect at the next agent processing point and does not undo completed tool actions. A hard Hub crash drops the in-memory database with the process, so no startup sweep or global deletion of unbound assistant sessions is needed. Close the in-memory repository during graceful Hub shutdown.
+This reuses the complete SQLite repository behavior for durable desktop transcripts. A completed turn keeps its thread available for follow-ups; desktop close detaches the handle. Settings → Companion → Follow-up delivery selects ASAP (default) or Queue, using the normal Save button and canonical Hub settings. Both record-and-transcribe and Live mode use this setting. ASAP delivers follow-ups to the running agent through its steering channel; Queue runs them in order after the current request finishes. Changes apply to new backend runs, while an active run keeps its saved delivery mode. Tool activity and elapsed time remain attached to that active run; its final answer is correlated with the latest message. In ASAP mode, follow-ups wait only for runtime startup or teardown when no agent can accept steering. Steering takes effect at the next agent processing point and does not undo completed tool actions. The durable repository survives a Hub crash. Graceful shutdown detaches handles before closing the repository.
 
 Add a dedicated Companion WebSocket route using the existing `ws` and Hub authentication patterns. Its protocol only needs `start_run`, `cancel_run`, `tool_call`, `tool_result`, `activity`, `status`, `reply`, and `error` messages. Stream bounded Blip tool activity to the overlay. Bind runs and tool calls to that socket, apply timeouts, and reject late or mismatched results. Closing the socket aborts its active run and rejects pending browser tool calls. Use a separate no-server `WebSocketServer`, route it from the existing upgrade handler, and extend Hub transport shutdown to close both the terminal and Companion servers.
 
@@ -229,7 +229,7 @@ Use one draft and Save action so provider, model, prompt, and tools change toget
 
 Companion assigns a distinct `messageId` to every turn, separate from the overlay's reusable run ID. Desktop transcription requests, WebSocket messages, mobile mesh requests, Blip sessions/turns, and browser tool calls carry that correlation through the execution path.
 
-The Hub records one sanitized timing summary per message in the shared Hub SQLite database. It retains the newest 2,000 summaries and never stores the prompt, transcript, model reasoning, tool arguments, tool results, file paths, or reply text. Temporary Blip conversations remain memory-only and are still deleted when the overlay closes.
+The Hub records one sanitized timing summary per message in the shared Hub SQLite database. It retains the newest 2,000 summaries and never stores the prompt, transcript, model reasoning, tool arguments, tool results, file paths, or reply text. Full desktop conversation history is stored separately in `companion-blip.sqlite`.
 
 Each summary includes:
 
@@ -267,7 +267,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - The proposal card exposes exact prompts, messages, delivery mode, and repository scope before approval; every execution attempt is single-shot, and a correction proposal contains only unfinished work, with completed operations never replayed.
 - A changed composer is never overwritten, and one browser cannot receive another browser's tool calls.
 - Follow-up turns reuse the open Companion thread, and turns submitted while it is working run in order.
-- Closing the overlay cancels any active stage, deletes the temporary session, and leaves no recoverable Companion conversation.
+- Closing the overlay cancels any active stage and clears the reconnect pointer; the durable desktop transcript remains archived.
 - Closing never rolls back completed tool effects, but no browser mutation may land after the run was closed.
 - Silence and empty transcripts never create a run, session, message, or tool call.
 - Companion session data is memory-only, and a forced mid-run Hub crash leaves no Companion session, binding, or transcript on disk.
@@ -305,7 +305,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - **Decided:** Closing the overlay cancels and permanently erases the conversation. Recoverable history is deferred.
 - **Decided:** Both patch tools commit immediately without confirmation and must remain reversible with one Ctrl/Cmd+Z. Insert-only patches handle empty targets, so no separate write tool is needed.
 - **Decided:** Chat search is keyword-only and excludes archived chats in the first version.
-- **Decided:** Companion sessions use an isolated in-memory SQLite repository. Normal close deletes them, while a Hub crash removes them with process memory.
+- **Decided:** Desktop Companion uses an isolated durable SQLite repository and a browser reconnect identity. Disconnect and Hub shutdown preserve its transcript.
 - **Decided:** Companion maintains multiple independently revision-checked, fully validated proposal documents that can be patched over multiple turns without blocking the conversation.
 - **Decided:** Proposal approval executes ordered group, drone, chat, clone, and message operations; later operations can reference a drone created or cloned earlier in the same proposal.
 - **Decided:** Companion can open an existing chat with `open_drone_chat` and can highlight drones immediately, but creation, deletion, renaming, and messaging require proposal approval.
@@ -376,3 +376,32 @@ Desktop uses `GET`/`PUT /api/settings/companion/auto-approve`; mobile uses the `
 Proposal settings schema v11 migrates `read_companion_proposal` and `apply_companion_proposal_patch` to `read_proposal` and `apply_proposal_patch`, enabling `execute_proposal` for existing proposal-editing profiles. Current explicit tool selections are preserved.
 
 Proposal settings schema v12 adds `list_proposals`, `create_proposal`, and `discard_proposal` to existing proposal-editing profiles while preserving current explicit choices. Proposal IDs accompany execution results, including manual-Apply continuations. Executions are serialized across the session: an overlapping execute request fails with `PROPOSAL_EXECUTION_IN_PROGRESS`, while other drafts can still be created, edited, or discarded. A running proposal cannot be edited or discarded. Desktop and mobile preserve execution history until the conversation closes, including discarded failures. Pending drafts and archived records are session-only.
+
+## Model changes and desktop recovery
+
+Companion resolves token limits from the bundled native model catalog or the cached
+OpenRouter catalog. Codex selection discovery alone does not supply token limits.
+Those models are marked “Token limits unavailable” and cannot replace the working
+selection. Add verified metadata to the runtime catalog to enable a new model;
+do not substitute a guessed context window.
+
+Model changes wait for active replies to finish. The Hub checks each connected
+conversation against the target input budget, including tools and output headroom.
+If necessary, it compacts with the current model before saving the selection.
+A failed or insufficient compaction leaves the selection and original transcript
+intact. Known compaction skip reasons are displayed in desktop/mobile activity.
+
+Desktop transcripts, tool results and compaction checkpoints are stored in
+`companion-blip.sqlite` under the active Drone data directory. Disconnect, Stop,
+window teardown and Hub shutdown release execution resources without deleting
+that history. The desktop stores its reconnect ID and latest visible reply in
+origin-scoped local storage; sending another message resumes the saved conversation.
+Subscriptions, pending browser tool calls and captured targets are not restored.
+Closing the Companion overlay explicitly clears the desktop reconnect pointer
+and starts a new conversation next time; the archived backend transcript remains.
+Clearing browser storage also clears that reconnect pointer.
+
+These changes protect sessions created by the updated runtime. An already-running
+older Hub still holds its Companion history only in memory; save important work
+before the first deployment/restart. Building the changes does not migrate that
+live history.

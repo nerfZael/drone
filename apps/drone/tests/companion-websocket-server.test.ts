@@ -362,3 +362,51 @@ test('desktop subscriptions resume idle sessions and isolate clients that reuse 
     await closeTestServer(clients[0], server, httpServer);
   }
 });
+
+test('durable desktop sessions resume the same identity and reject simultaneous owners without deleting history', async () => {
+  const runs: string[] = [];
+  const detached: string[] = [];
+  const deleted: string[] = [];
+  const runtime = {
+    async run(input: any) { runs.push(input.runId); return 'Saved reply'; },
+    steer() { return false; },
+    async detachSession(id: string) { detached.push(id); },
+    async deleteSession(id: string) { deleted.push(id); },
+  };
+  const server = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => {
+    server.handleUpgrade(request, socket, head, (client) => server.emit('connection', client, request));
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address() as { port: number };
+  const connect = async () => {
+    const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    await new Promise<void>((resolve, reject) => { client.once('open', resolve); client.once('error', reject); });
+    return client;
+  };
+  const first = await connect();
+  const second = await connect();
+  const firstEvents: any[] = [];
+  const secondEvents: any[] = [];
+  first.on('message', (raw) => firstEvents.push(JSON.parse(raw.toString())));
+  second.on('message', (raw) => secondEvents.push(JSON.parse(raw.toString())));
+  const start = { type: 'start_run', runId: 'durable-conversation', resumeSession: true, prompt: 'Continue' };
+  try {
+    first.send(JSON.stringify(start));
+    await waitFor(() => firstEvents.some((event) => event.status === 'completed'));
+    second.send(JSON.stringify(start));
+    await waitFor(() => secondEvents.some((event) => event.type === 'error'));
+    expect(secondEvents.find((event) => event.type === 'error').error).toContain('another window');
+    expect(runs).toEqual(['websocket:durable-conversation']);
+    first.close();
+    await waitFor(() => detached.length === 1 && first.readyState === WebSocket.CLOSED);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    second.send(JSON.stringify(start));
+    await waitFor(() => secondEvents.some((event) => event.status === 'completed'));
+    expect(runs).toEqual(['websocket:durable-conversation', 'websocket:durable-conversation']);
+    expect(deleted).toEqual([]);
+  } finally { first.terminate(); await closeTestServer(second, server, httpServer); }
+  expect(detached).toHaveLength(2);
+  expect(deleted).toEqual([]);
+});

@@ -16,3 +16,9 @@ test('compaction presentation distinguishes estimates, fallback, and terminal ou
     type: 'compaction_completed', tokensBefore: NaN, tokensAfter: -1,
   })!)).toBe('Context compacted');
 });
+
+test('skipped compaction explains the safe boundary or budget failure', () => {
+  const reason = 'latest user request and fixed context cannot fit the post-compaction target with a summary';
+  const state = reduceCompanionCompaction(null, { type: 'compaction_skipped', reason })!;
+  expect(companionCompactionLabel(state)).toBe(`Context compaction skipped: ${reason}`);
+});

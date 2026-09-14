@@ -13,6 +13,8 @@ export type CompanionSettingsDraft = {
 };
 
 export type CompanionModelOption = {
+  contextWindow?: number | null;
+  unavailableReason?: string;
   provider: CompanionProvider;
   id: string;
   name: string;

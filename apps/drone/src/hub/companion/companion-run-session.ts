@@ -42,11 +42,12 @@ type CompanionRunSessionEvent =
   | Extract<CompanionRunEvent, { type: 'subscriptions' }>;
 
 type CompanionRunSessionOptions = {
+  preserveSession?: boolean;
   clientRunId: string;
   runtimeRunId: string;
   transport: CompanionTelemetryTransport;
   runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'> & Partial<
-    Pick<CompanionRuntime, 'connectSubscriptions' | 'resumeWithProposalResult'>
+    Pick<CompanionRuntime, 'connectSubscriptions' | 'resumeWithProposalResult' | 'detachSession'>
   >;
   emit(event: CompanionRunSessionEvent): void | Promise<void>;
   isAvailable(): boolean;
@@ -177,8 +178,13 @@ export class CompanionRunSession {
     this.proposalResultMessageIds.clear();
     this.activeMessageId = '';
     this.browserTools.rejectAll(message);
-    this.options.onClose();
-    await this.options.runtime.deleteSession(this.options.runtimeRunId);
+    try {
+      if (this.options.preserveSession) {
+        if (!this.options.runtime.detachSession) throw new Error('Companion session persistence is unavailable');
+        await this.options.runtime.detachSession(this.options.runtimeRunId);
+      }
+      else await this.options.runtime.deleteSession(this.options.runtimeRunId);
+    } finally { this.options.onClose(); }
   }
 
   private async drain(queued: BufferedCompanionWork): Promise<void> {

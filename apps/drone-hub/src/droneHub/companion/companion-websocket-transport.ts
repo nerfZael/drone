@@ -79,7 +79,7 @@ export function createCompanionWebSocketTransport(url: string): CompanionClientT
       };
     },
     sendPrompt(input) {
-      send({ type: 'start_run', ...input });
+      send({ type: 'start_run', ...input, resumeSession: true });
     },
     sendToolResult(input) {
       send({ type: 'tool_result', ...input });

@@ -109,18 +109,36 @@ const INITIAL_STATE: CompanionClientState = {
   contextUsage: null,
 };
 
+/** The backend transcript is authoritative; this stores the reconnect identity and visible reply. */
+export type CompanionSessionStore = {
+  read(): { runId: string; reply: string; transcript: string } | null;
+  write(value: { runId: string; reply: string; transcript: string } | null): void;
+};
+
 export class CompanionClientController {
   private state = INITIAL_STATE;
   private readonly listeners = new Set<() => void>();
   private generation = 0;
   private activeSession: ActiveSession | null = null;
+  private resumeRunId: string | null = null;
 
   constructor(
     private readonly options: {
       createId(): string;
       now?(): number;
+      sessionStore?: CompanionSessionStore;
     },
-  ) {}
+  ) {
+    try {
+      const saved = options.sessionStore?.read();
+      if (saved?.runId) {
+        this.resumeRunId = saved.runId;
+        this.state = { ...INITIAL_STATE, reply: saved.reply, transcript: saved.transcript,
+          status: saved.reply ? 'completed' : 'error',
+          error: saved.reply ? '' : 'Saved conversation restored. Send a message to continue.' };
+      }
+    } catch { /* Storage may be unavailable; the backend still retains history. */ }
+  }
 
   readonly getSnapshot = (): CompanionClientState => this.state;
 
@@ -158,7 +176,7 @@ export class CompanionClientController {
   }
 
   resetIfNoSession(): void {
-    if (!this.activeSession) this.replace(INITIAL_STATE);
+    if (!this.activeSession && !this.resumeRunId) this.replace(INITIAL_STATE);
   }
 
   async submitPrompt(input: {
@@ -262,6 +280,8 @@ export class CompanionClientController {
   }
 
   async close(): Promise<void> {
+    this.resumeRunId = null;
+    try { this.options.sessionStore?.write(null); } catch {}
     this.generation += 1;
     const session = this.activeSession;
     this.activeSession = null;
@@ -277,6 +297,15 @@ export class CompanionClientController {
       await closeTransport(session.transport);
     }
     this.replace(INITIAL_STATE);
+  }
+
+  /** Window teardown stops execution while retaining the identity needed to resume. */
+  async suspend(): Promise<void> {
+    this.generation += 1;
+    const session = this.activeSession;
+    this.activeSession = null;
+    session?.messageExecutors.clear();
+    if (session) await closeTransport(session.transport);
   }
 
   async cancel(): Promise<void> {
@@ -302,7 +331,7 @@ export class CompanionClientController {
   }): ActiveSession {
     const transport = input.createTransport();
     const session: ActiveSession = {
-      runId: this.options.createId(),
+      runId: this.resumeRunId ?? this.options.createId(),
       generation: ++this.generation,
       transport,
       messageExecutors: new Map(),
@@ -312,6 +341,7 @@ export class CompanionClientController {
       activityMessageId: null,
     };
     this.activeSession = session;
+    if (this.options.sessionStore) this.resumeRunId = session.runId;
     session.ready = Promise.resolve().then(() =>
       transport.open({
         runId: session.runId,
@@ -438,7 +468,9 @@ export class CompanionClientController {
     if (this.state.status === 'completed') {
       this.update({
         status: 'error',
-        error: 'Companion disconnected. Event subscriptions have ended; start a new conversation to subscribe again.',
+        error: this.options.sessionStore
+          ? 'Companion disconnected. Send a message to resume the saved conversation. Event subscriptions have ended.'
+          : 'Companion disconnected. Event subscriptions have ended; start a new conversation to subscribe again.',
         endedAt: this.now(),
       });
       return;
@@ -484,7 +516,12 @@ export class CompanionClientController {
   }
 
   private replace(next: CompanionClientState): void {
+    const previous = this.state;
     this.state = next;
+    if (this.resumeRunId && (next.transcript !== previous.transcript ||
+        ['completed', 'error', 'cancelled'].includes(next.status))) {
+      try { this.options.sessionStore?.write({ runId: this.resumeRunId, reply: next.reply, transcript: next.transcript }); } catch {}
+    }
     for (const listener of this.listeners) listener();
   }
 

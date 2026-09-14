@@ -1,3 +1,6 @@
+import { loadOpenRouterCatalog } from '../openrouter-model-catalog';
+import { loadCodexCatalog } from '../codex-model-catalog';
+import { resolveNativeModel } from '../assistant/resolve-native-model';
 import type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 import { getHubSettingsRepository } from '../../host/hub-settings-repository';
@@ -586,7 +589,7 @@ export async function readCompanionSettings(): Promise<CompanionSettings> {
   return normalizeCompanionSettings(record?.value);
 }
 
-export async function writeCompanionSettings(value: unknown): Promise<CompanionSettings> {
+export async function writeCompanionSettings(value: unknown, beforeSave?: (settings: CompanionSettings) => Promise<void>): Promise<CompanionSettings> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Companion settings must be an object');
   }
@@ -617,11 +620,14 @@ export async function writeCompanionSettings(value: unknown): Promise<CompanionS
     throw new Error('model and thinkingLevel are not supported for this provider');
   }
   const settings = normalizeCompanionSettings(raw);
+  await resolveNativeModel(settings.provider, settings.model);
+  await beforeSave?.(settings);
   await (await getHubSettingsRepository()).put(SETTING_KEY, settings);
   return settings;
 }
 
 export async function companionSettingsResponse() {
+  await Promise.all([loadOpenRouterCatalog(), loadCodexCatalog()]);
   const settings = await readCompanionSettings();
   const credentialEntries = await Promise.all(
     (['openai', 'codex', 'gemini', 'openrouter'] as const).map(async (provider) => [
@@ -629,13 +635,24 @@ export async function companionSettingsResponse() {
       Boolean((await resolveEffectiveProviderApiKeySettings(provider)).apiKey),
     ] as const),
   );
+  const limits = new Map<string, { contextWindow: number | null; unavailableReason?: string }>();
+  for (const option of HUB_AGENT_MODEL_OPTIONS) {
+    const key = `${option.provider}/${option.id}`;
+    if (limits.has(key)) continue;
+    try {
+      const model = await resolveNativeModel(option.provider, option.id, true);
+      limits.set(key, { contextWindow: model.contextWindow });
+    } catch {
+      limits.set(key, { contextWindow: null, unavailableReason: 'Token limits unavailable' });
+    }
+  }
   return {
     ok: true as const,
     settings,
     defaultSystemPrompt: DEFAULT_COMPANION_SYSTEM_PROMPT,
     maxSystemPromptChars: COMPANION_SYSTEM_PROMPT_MAX_CHARS,
     tools: COMPANION_TOOL_SUMMARIES,
-    models: HUB_AGENT_MODEL_OPTIONS,
+    models: HUB_AGENT_MODEL_OPTIONS.map((option) => ({ ...option, ...limits.get(`${option.provider}/${option.id}`) })),
     credentials: Object.fromEntries(credentialEntries),
   };
 }

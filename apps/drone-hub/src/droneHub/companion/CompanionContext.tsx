@@ -1,3 +1,4 @@
+import { desktopCompanionSessionStore } from './companion-session-store';
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
@@ -103,7 +104,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorderCompanion();
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
-    controllerRef.current = new CompanionClientController({ createId: newId });
+    controllerRef.current = new CompanionClientController({ createId: newId, sessionStore: desktopCompanionSessionStore });
   }
   const controller = controllerRef.current;
   const state = React.useSyncExternalStore(
@@ -468,7 +469,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     () => () => {
       textSubmissionGenerationRef.current += 1;
       recordingWorkspaceRef.current = null;
-      void controller.close();
+      void controller.suspend();
       void voice.discardRecording();
     },
     [controller, voice.discardRecording],
