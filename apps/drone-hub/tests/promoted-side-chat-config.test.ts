@@ -83,8 +83,12 @@ test.each([{ kind: 'native' }, { kind: 'builtin', id: 'codex' }] as const)(
     const loaded = render(drone, side.name);
     expect(loaded.chatInfo).toEqual(config);
     expect(selection.chatConfigResolutionState({ currentChatIsDraft: false, hasChats: true, metadataAvailable: Boolean(loaded.chatInfo), loading: loaded.loadingChatInfo })).toBe('ready');
-    expect(render(drone, 'default').chatInfo).toEqual(main);
-    expect(render(drone, side.name).chatInfo).toEqual(config);
+    const revisitedMain = render(drone, 'default');
+    expect(revisitedMain.chatInfo).toEqual(main);
+    expect(revisitedMain.loadingChatInfo).toBe(false);
+    const revisitedSide = render(drone, side.name);
+    expect(revisitedSide.chatInfo).toEqual(config);
+    expect(revisitedSide.loadingChatInfo).toBe(false);
     expect(drone.chats).toEqual(['default']);
   },
 );

@@ -212,7 +212,9 @@ export function useChatConfigState({
         },
       );
     }
-    setLoadingChatInfo(true);
+    // Runtime readers reuse cached configuration without fetching it again,
+    // so no resolution callback will arrive to clear a loading flag here.
+    setLoadingChatInfo(!cachedChatInfo);
     setChatInfoError(null);
   }, [
     selectedDrone,
