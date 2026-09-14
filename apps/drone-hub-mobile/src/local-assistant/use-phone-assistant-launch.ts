@@ -68,7 +68,8 @@ export function usePhoneAssistantLaunch({ requestId, rendered, available, start 
       if (!done) fail('Companion could not connect. Check your selected Hub and try again.');
     }, 30_000);
     const listener = AppState.addEventListener('change', (state) => {
-      if (state !== 'active' && (visible || hasBeenActive) && !done) fail('Startup cancelled. Tap Retry to start Companion.');
+      // Native layout readiness can precede the first foreground event on a cold launch.
+      if (state !== 'active' && hasBeenActive && !done) fail('Startup cancelled. Tap Retry to start Companion.');
       else if (state === 'active') { hasBeenActive = true; void tick(); }
     });
     return () => {

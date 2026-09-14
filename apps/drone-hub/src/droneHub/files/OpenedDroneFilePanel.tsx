@@ -312,6 +312,7 @@ export function OpenedDroneFilePanel({
   const openedTextModeByPathRef = React.useRef(new Map<string, TextFileViewMode>());
   const [markdownOutlineExpansionCommand, setMarkdownOutlineExpansionCommand] =
     React.useState<MarkdownOutlineExpansionCommand | null>(null);
+  const [previewSearchRequest, setPreviewSearchRequest] = React.useState(0);
   const [previewContentsCopied, setPreviewContentsCopied] = React.useState(false);
   const previewCopyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
@@ -859,6 +860,13 @@ export function OpenedDroneFilePanel({
     }}>
     <div
       ref={panelRef}
+      onKeyDownCapture={(event) => {
+        if (openedFileShowsMarkdownPreview && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          event.stopPropagation();
+          setPreviewSearchRequest((previous) => previous + 1);
+        }
+      }}
       className="dh-opened-file-panel h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]"
     >
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
@@ -1106,6 +1114,8 @@ export function OpenedDroneFilePanel({
               </div>
             ) : openedFileShowsMarkdownPreview ? (
               <MarkdownOutlinePreview
+                key={activeFileViewModeKey}
+                searchRequest={previewSearchRequest}
                 text={fileContent ?? ''}
                 onOpenLink={openMarkdownPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}

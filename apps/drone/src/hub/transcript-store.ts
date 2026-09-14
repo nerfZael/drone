@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { searchNativeChatMessages } from './native-chat-messages';
 import {
   normalizeProviderMessageCheckpoint,
   type ProviderMessageCheckpoint,
@@ -3412,7 +3413,7 @@ export function searchActiveChatMessages(opts: {
           AND (? = '' OR drone_id = ?)
           ${allowedDroneClause}
           AND (? = '' OR chat_name = ?)
-        ORDER BY rank, timestamp DESC
+        ORDER BY rank, timestamp DESC, turn_id, role
         LIMIT ? OFFSET ?
       `).all(
         ftsQuery,
@@ -3421,8 +3422,8 @@ export function searchActiveChatMessages(opts: {
         ...(allowedDroneIds ?? []),
         String(opts.chatName ?? '').trim(),
         String(opts.chatName ?? '').trim(),
-        limit,
-        offset,
+        limit + offset,
+        0,
       ) as Array<{
         drone_id: string;
         chat_name: string;
@@ -3435,7 +3436,7 @@ export function searchActiveChatMessages(opts: {
     );
     return {
       available: true,
-      results: results.map((row) => ({
+      results: [...results.map((row) => ({
         droneId: row.drone_id,
         chatName: row.chat_name,
         turnId: row.turn_id,
@@ -3443,7 +3444,15 @@ export function searchActiveChatMessages(opts: {
         timestamp: row.timestamp,
         snippet: row.snippet,
         rank: Number(row.rank),
-      })),
+      })), ...searchNativeChatMessages({
+        query, limit: limit + offset,
+        droneIds: allowedDroneIds ?? undefined,
+        droneId: String(opts.droneId ?? '').trim(),
+        chatName: String(opts.chatName ?? '').trim(),
+      })]
+        .sort((left, right) => left.rank - right.rank || right.timestamp.localeCompare(left.timestamp)
+          || left.turnId.localeCompare(right.turnId) || left.role.localeCompare(right.role))
+        .slice(offset, offset + limit),
       limit,
       offset,
     };

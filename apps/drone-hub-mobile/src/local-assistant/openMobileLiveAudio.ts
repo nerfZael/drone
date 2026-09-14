@@ -3,7 +3,7 @@ import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Crypto from 'expo-crypto';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync, requestNotificationPermissionsAsync, setAudioModeAsync } from 'expo-audio';
-import { AppState, Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import { ensureMobileRecordingPermission, ensureMobileBackgroundRecordingPermission } from './mobile-recording-permission';
 import { startMobileLiveBackground } from './mobile-live-background';
 
@@ -15,7 +15,10 @@ export async function prepareMobileLiveAudio(options: { headsetShortcut?: boolea
   if (!permission.granted) throw new Error('Allow microphone access in your phone settings to use Live voice.');
   await ensureMobileBackgroundRecordingPermission({
     platform: Platform.OS, platformVersion: Number(Platform.Version),
-    requestPermission: requestNotificationPermissionsAsync,
+    // Even an already-granted request opens a permission activity on Samsung,
+    // pausing the assistant and cancelling its pending lock-screen startup.
+    requestPermission: async () => await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
+      ? { granted: true } : requestNotificationPermissionsAsync(),
   });
   if (Platform.OS === 'android') {
     const native = requireOptionalNativeModule<NativePcm>('DroneLiveVoice');

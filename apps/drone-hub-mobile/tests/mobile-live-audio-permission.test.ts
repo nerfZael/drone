@@ -13,6 +13,8 @@ mock.module('expo-crypto', () => ({ randomUUID: () => 'permission-test' }));
 let granted = true;
 let requestGranted = true;
 let requests = 0;
+let notificationRequests = 0;
+let notificationsGranted = true;
 const listeners = new Set<(state: string) => void>();
 const appState = {
   currentState: 'active',
@@ -21,11 +23,11 @@ const appState = {
     return { remove: () => listeners.delete(listener) };
   },
 };
-mock.module('react-native', () => ({ AppState: appState, Platform: { OS: 'android', Version: 36 } }));
+mock.module('react-native', () => ({ AppState: appState, PermissionsAndroid: { PERMISSIONS: { POST_NOTIFICATIONS: 'notifications' }, check: async () => notificationsGranted }, Platform: { OS: 'android', Version: 36 } }));
 mock.module('../src/local-assistant/mobile-live-background', () => ({ startMobileLiveBackground: async () => async () => {} }));
 mock.module('expo-audio', () => ({
   getRecordingPermissionsAsync: async () => ({ granted }),
-  requestNotificationPermissionsAsync: async () => ({ granted: true }),
+  requestNotificationPermissionsAsync: async () => { notificationRequests++; return { granted: true }; },
   requestRecordingPermissionsAsync: async () => {
     requests++;
     appState.currentState = 'background';
@@ -38,6 +40,7 @@ const { prepareMobileLiveAudio } = await import('../src/local-assistant/openMobi
 test('Live skips native permission requests when already granted', async () => {
   await prepareMobileLiveAudio();
   expect(requests).toBe(0);
+  expect(notificationRequests).toBe(0);
 });
 
 test('Live waits for foreground after a native permission dialog', async () => {
@@ -85,4 +88,13 @@ test('shortcut obtains Bluetooth permission before a headset connects and report
   shortcutGranted = false;
   try { await expect(prepareMobileLiveAudio({ headsetShortcut: true })).rejects.toThrow('Allow Nearby devices access'); }
   finally { shortcutGranted = true; }
+});
+
+test('Live still requests notification access when it has not been granted', async () => {
+  granted = true; appState.currentState = 'active'; notificationsGranted = false;
+  const previous = notificationRequests;
+  try {
+    await prepareMobileLiveAudio();
+    expect(notificationRequests).toBe(previous + 1);
+  } finally { notificationsGranted = true; }
 });

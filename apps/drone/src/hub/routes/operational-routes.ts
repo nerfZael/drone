@@ -341,8 +341,7 @@ function serializeChatLoadTelemetryForLog(
 
 export interface OperationalRouteDependencies {
   resolveDroneOrPendingForReadRef: ServiceFunction;
-  loadCanonicalActiveModel: ServiceFunction;
-  summarizeAssistantChatIdle: ServiceFunction;
+  readChatIdleStatus: ServiceFunction;
   resolveGroqApiKeySettings: ServiceFunction;
   resolveSpeechSettings: ServiceFunction;
   emitAssistantUiAction: ServiceFunction;
@@ -360,8 +359,7 @@ export function registerOperationalRoutes(
 ): void {
   const {
     resolveDroneOrPendingForReadRef,
-    loadCanonicalActiveModel,
-    summarizeAssistantChatIdle,
+    readChatIdleStatus,
     resolveGroqApiKeySettings,
     resolveSpeechSettings,
     emitAssistantUiAction,
@@ -502,10 +500,7 @@ export function registerOperationalRoutes(
     }
 
     try {
-      const registry = await loadCanonicalActiveModel();
-      const statuses = targets.map((target) =>
-        summarizeAssistantChatIdle(registry, target, { requireChat: true }),
-      );
+      const statuses = await Promise.all(targets.map((target) => readChatIdleStatus(target)));
       const matched =
         mode === 'any'
           ? statuses.some((status: any) => status.idle)

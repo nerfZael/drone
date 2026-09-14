@@ -6,6 +6,7 @@ import { parseMarkdownOutline, type MarkdownOutlineSection } from './markdown-ou
 
 type MarkdownOutlinePreviewProps = {
   text: string;
+  searchRequest?: number;
   onOpenLink?: (href: string) => boolean;
   expansionCommand?: MarkdownOutlineExpansionCommand | null;
   targetLine?: number | null;
@@ -189,9 +190,46 @@ export function MarkdownOutlinePreview({
   text,
   onOpenLink,
   expansionCommand,
-  targetLine,
-  targetNavigationSeq = 0,
+  targetLine: externalTargetLine,
+  targetNavigationSeq: externalNavigationSeq = 0,
+  searchRequest = 0,
 }: MarkdownOutlinePreviewProps) {
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [matchIndex, setMatchIndex] = React.useState(0);
+  const [searchNavigationSeq, setSearchNavigationSeq] = React.useState(0);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const matches = React.useMemo(() => {
+    if (!query) return [];
+    const needle = query.toLowerCase();
+    return text.split('\n').flatMap((line, index) =>
+      line.toLowerCase().includes(needle) ? [index + 1] : [],
+    );
+  }, [text, query]);
+  const activeMatch = Math.min(matchIndex, Math.max(0, matches.length - 1));
+  const targetLine = searchOpen && query ? matches[activeMatch] : externalTargetLine;
+  const targetNavigationSeq = searchOpen ? searchNavigationSeq : externalNavigationSeq;
+  const openSearch = () => {
+    setSearchOpen(true);
+    setSearchNavigationSeq((previous) => previous + 1);
+    window.setTimeout(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }, 0);
+  };
+  React.useEffect(() => {
+    if (searchRequest > 0) openSearch();
+  }, [searchRequest]);
+  const navigateMatch = (direction: number) => {
+    if (!matches.length) return;
+    setMatchIndex((activeMatch + direction + matches.length) % matches.length);
+    setSearchNavigationSeq((previous) => previous + 1);
+  };
+  const closeSearch = () => {
+    setSearchOpen(false);
+    containerRef.current?.focus();
+  };
   const idPrefix = React.useId();
   const previewRef = React.useRef<HTMLDivElement | null>(null);
   const highlightedElementRef = React.useRef<HTMLElement | null>(null);
@@ -283,8 +321,7 @@ export function MarkdownOutlinePreview({
     });
   }, []);
 
-  if (outline.sections.length === 0) {
-    return (
+  const preview = outline.sections.length === 0 ? (
       <div
         ref={previewRef}
         className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-6 py-6"
@@ -297,10 +334,7 @@ export function MarkdownOutlinePreview({
           preferOpenLinkBeforeModifiedClick
         />
       </div>
-    );
-  }
-
-  return (
+    ) : (
     <div ref={previewRef} className="dh-markdown-outline">
       <div className="dh-markdown dh-markdown--agent dh-markdown--document dh-markdown-outline__document">
         {outline.preamble ? (
@@ -328,6 +362,59 @@ export function MarkdownOutlinePreview({
           ))}
         </div>
       </div>
+    </div>
+  );
+  return (
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      className="h-full min-h-0 flex flex-col outline-none"
+      onMouseDown={(event) => {
+        if (!(event.target as Element).closest('button, a, input, textarea, select')) {
+          containerRef.current?.focus({ preventScroll: true });
+        }
+      }}
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          event.stopPropagation();
+          openSearch();
+        } else if (searchOpen && event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          closeSearch();
+        }
+      }}
+    >
+      {searchOpen ? (
+        <div role="search" aria-label="Find in file" className="flex shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel)] px-3 py-2 text-12">
+          <input
+            ref={searchInputRef}
+            aria-label="Find in file"
+            placeholder="Find in file"
+            value={query}
+            className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2 py-1 text-[var(--fg)]"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setMatchIndex(0);
+              setSearchNavigationSeq((previous) => previous + 1);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                navigateMatch(event.shiftKey ? -1 : 1);
+              }
+            }}
+          />
+          <span role="status" className="text-[var(--muted)]">
+            {query ? matches.length ? `${activeMatch + 1} of ${matches.length} matching lines` : 'No results' : ''}
+          </span>
+          <button type="button" aria-label="Previous match" disabled={!matches.length} onClick={() => navigateMatch(-1)}>↑</button>
+          <button type="button" aria-label="Next match" disabled={!matches.length} onClick={() => navigateMatch(1)}>↓</button>
+          <button type="button" aria-label="Close search" onClick={closeSearch}>×</button>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1">{preview}</div>
     </div>
   );
 }

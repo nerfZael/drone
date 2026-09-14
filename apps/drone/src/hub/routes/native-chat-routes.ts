@@ -1,5 +1,6 @@
 import type { BlipHistoryPage } from '@blip/protocol';
 import type { HubRouter } from '../hub-router';
+import { readNativeChatMessages } from '../native-chat-messages';
 
 export type NativeChatRouteDependencies = {
   nativeChatLifecycle: any;
@@ -61,6 +62,23 @@ export function registerNativeChatRoutes(
         const status =
           Number(error?.statusCode ?? 0) || (/unknown (drone|chat)/i.test(message) ? 404 : 400);
         respond(status, { ok: false, error: message });
+      }
+    },
+  );
+
+  apiRouter.get(
+    '/api/drones/:droneRef/chats/:chatName/native/messages',
+    async ({ params, url, json: respond }) => {
+      try {
+        const { chatId } = await resolveNativeChat(
+          decodeURIComponent(params.droneRef), decodeURIComponent(params.chatName) || 'default',
+        );
+        respond(200, { ok: true, historyKind: 'messages', ...readNativeChatMessages(
+          chatId, Number(url.searchParams.get('limit') ?? 20), Number(url.searchParams.get('maxChars') ?? 4000),
+        ) });
+      } catch (error: any) {
+        const message = String(error?.message ?? error);
+        respond(Number(error?.statusCode) || (/unknown (drone|chat)/i.test(message) ? 404 : 400), { ok: false, error: message });
       }
     },
   );

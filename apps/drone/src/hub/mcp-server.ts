@@ -3459,7 +3459,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Subscribe to resource events',
       description:
-        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Chat idle subscriptions do not require target-drone read access; without it, delivery includes status only, not message content. Chat failure and change-request subscriptions require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
+        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Chat subscriptions also return idle, the current idle status; the subscription remains active for future events. If already idle, read_chat can retrieve its reply now. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Chat idle subscriptions do not require target-drone read access; without it, delivery includes status only, not message content. Chat failure and change-request subscriptions require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
       inputSchema: {
         provider: z.enum(['drone-hub', 'github']),
         resourceType: z.enum(['chat', 'repository', 'pull_request', 'change_request']),
@@ -3484,6 +3484,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         ok: true,
         created: response?.created === true,
         subscription: mcpSubscription(response?.subscription),
+        ...(typeof response?.idle === 'boolean' ? { idle: response.idle } : {}),
       });
     },
   );
@@ -3612,7 +3613,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
+      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. Native chats return bounded visible messages with historyKind=messages, without detailed activity. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -3631,6 +3632,22 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?transcript=tail&tail=${limit}&pending=all&activity=${includeActivity ? 'full' : 'summary'}`,
           { method: 'GET' },
         );
+        if (response?.agent?.kind === 'native') {
+          const history = await requestJson(
+            `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/native/messages?limit=${limit * 2}&maxChars=${maxCharsPerField}`,
+            { method: 'GET' },
+          );
+          return toolResult({
+            ok: true, drone: args.drone, chat, historyKind: 'messages',
+            messages: history.messages, hasOlder: history.hasOlder,
+            // Native completion leaves shared prompts marked sent. Those are
+            // delivery records, not evidence that the native agent is running.
+            ...pendingChatSummary({ ...response, pending: (Array.isArray(response.pending) ? response.pending : []).filter(
+              (prompt: any) => prompt.state !== 'sent',
+            ) }, limit, maxCharsPerField),
+            limit, maxCharsPerField, includeActivity: false,
+          });
+        }
         const turns = Array.isArray(response?.transcripts)
           ? response.transcripts
               .slice(-limit)

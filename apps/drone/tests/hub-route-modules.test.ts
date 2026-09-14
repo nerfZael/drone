@@ -270,8 +270,7 @@ describe('extracted Hub route modules', () => {
     });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => ({ id: 'drone-alpha' }),
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: (_registry: unknown, target: unknown) => ({
+      readChatIdleStatus: async (target: any) => ({
         ...target,
         idle: true,
       }),
@@ -332,8 +331,7 @@ describe('extracted Hub route modules', () => {
     });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: null }),
       resolveSpeechSettings: async () => ({ enabled: false, muted: true, volume: 1, voice: 'troy' }),
       emitAssistantUiAction: () => {},
@@ -421,8 +419,7 @@ describe('extracted Hub route modules', () => {
     });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: null }),
       resolveSpeechSettings: async () => ({
         enabled: false,
@@ -562,8 +559,7 @@ describe('extracted Hub route modules', () => {
     });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
       resolveSpeechSettings: async () => ({
         enabled: true,
@@ -614,8 +610,7 @@ describe('extracted Hub route modules', () => {
     const { router, request, responses } = routeHarness({ text: 'Muted speech.' });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => {
         groqSettingsLookups += 1;
         return { apiKey: null };
@@ -651,8 +646,7 @@ describe('extracted Hub route modules', () => {
     const { router, request } = routeHarness({ text: 'Mute me before playback.' });
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
       resolveSpeechSettings: async () => ({ enabled: true, muted, volume: 1, voice: 'troy' }),
       emitAssistantUiAction: (action: unknown) => emittedActions.push(action),
@@ -699,8 +693,7 @@ describe('extracted Hub route modules', () => {
     );
     registerOperationalRoutes(router, {
       resolveDroneOrPendingForReadRef: async () => null,
-      loadCanonicalActiveModel: async () => ({ drones: {} }),
-      summarizeAssistantChatIdle: () => null,
+      readChatIdleStatus: async () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
       resolveSpeechSettings: async () => {
         settingsLookupCount += 1;

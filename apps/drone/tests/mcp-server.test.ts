@@ -1016,6 +1016,7 @@ describe('Drone Hub assistant MCP transport', () => {
           return Response.json({
             ok: true,
             created: true,
+            idle: createRequests === 1,
             subscription: {
               id: 'subscription-1',
               provider: 'drone-hub',
@@ -1064,6 +1065,7 @@ describe('Drone Hub assistant MCP transport', () => {
           },
         });
         expect(allowed.isError).not.toBe(true);
+        expect(allowed.structuredContent?.idle).toBe(true);
 
         deniedClient = await createInProcessDroneHubMcpClient({
           correlationId: 'subscription-read-denied',
@@ -1079,6 +1081,7 @@ describe('Drone Hub assistant MCP transport', () => {
           },
         });
         expect(denied.isError).not.toBe(true);
+        expect(denied.structuredContent?.idle).toBe(false);
         const deniedFailure = await deniedClient.callTool({
           name: 'subscribe_to_resource_events',
           arguments: {

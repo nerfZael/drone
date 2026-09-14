@@ -1,4 +1,5 @@
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
+import { readChatIdleStatus } from './chat-idle-status';
 import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
@@ -574,7 +575,6 @@ import {
   summarizeDroneActivity,
 } from './drone-summary-helpers';
 import { mergeNativeBusyChatNames } from './native-drone-summary';
-import { summarizeAssistantChatIdle } from './assistant';
 import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 
 const HUB_API_LOADED_AT = new Date().toISOString();
@@ -5549,6 +5549,11 @@ async function startDroneHubApiServerWithLifecycle(
       : await createMcpServer(payload);
   };
 
+  const readIdleStatus = async (target: { droneId: string; chatName: string }) => {
+    const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ??
+      await loadCanonicalActiveModel();
+    return readChatIdleStatus(registry, target, nativeChatIsBusy);
+  };
   const resourceSubscriptionDatabase = getHubDatabase();
   const resourceSubscriptionRepository = resourceSubscriptionDatabase
     ? new ResourceSubscriptionRepository(resourceSubscriptionDatabase)
@@ -5556,16 +5561,7 @@ async function startDroneHubApiServerWithLifecycle(
   const resourceSubscriptionService = resourceSubscriptionRepository
     ? new ResourceSubscriptionService({
         repository: resourceSubscriptionRepository,
-        readChatStatus: async (location) => {
-          const registry =
-            readCanonicalChatActivityModel(location.droneId, location.chatName) ??
-            (await loadCanonicalActiveModel());
-          return summarizeAssistantChatIdle(
-            registry,
-            { droneId: location.droneId, chatName: location.chatName },
-            { requireChat: true },
-          );
-        },
+        readChatStatus: readIdleStatus,
         wakePromptQueue: (droneId, chatName) => {
           enqueuePendingPromptPump(droneId, chatName);
           notifyCanonicalPromptQueueChatWrite(droneId, chatName);
@@ -5856,8 +5852,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   registerOperationalRoutes(apiRouter, {
     resolveDroneOrPendingForReadRef,
-    loadCanonicalActiveModel,
-    summarizeAssistantChatIdle,
+    readChatIdleStatus: readIdleStatus,
     resolveGroqApiKeySettings,
     resolveSpeechSettings: resolveEffectiveSpeechSettings,
     emitAssistantUiAction: (uiAction, threadId) =>

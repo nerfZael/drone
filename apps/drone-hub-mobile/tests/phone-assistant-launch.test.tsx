@@ -133,3 +133,31 @@ test('remounting the assistant surface does not replay a consumed press', async 
   await act(async () => { await launch.retry(); });
   expect(starts).toHaveLength(2);
 });
+
+test('cold locked launch tolerates background events after layout until first foreground', async () => {
+  appState.currentState = 'background';
+  await act(async () => { root = create(<Harness available={false} />); });
+  await act(async () => { listeners.forEach((listener) => listener('background')); });
+  expect(launch.error).toBe(''); expect(launch.pending).toBe(true);
+  await act(async () => { root.update(<Harness />); });
+  await tick(); expect(starts).toHaveLength(0);
+  await act(async () => {
+    appState.currentState = 'active'; listeners.forEach((listener) => listener('active'));
+  });
+  expect(starts).toHaveLength(1);
+});
+
+test('a cold launch cancels if it leaves foreground while still hydrating', async () => {
+  appState.currentState = 'background';
+  await act(async () => { root = create(<Harness available={false} />); });
+  await act(async () => {
+    appState.currentState = 'active'; listeners.forEach((listener) => listener('active'));
+    appState.currentState = 'background'; listeners.forEach((listener) => listener('background'));
+  });
+  expect(launch.error).toContain('Startup cancelled');
+  await act(async () => {
+    root.update(<Harness />);
+    appState.currentState = 'active'; listeners.forEach((listener) => listener('active'));
+  });
+  await tick(); expect(starts).toHaveLength(0);
+});

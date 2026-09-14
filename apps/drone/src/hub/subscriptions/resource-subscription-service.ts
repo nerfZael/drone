@@ -352,7 +352,7 @@ export class ResourceSubscriptionService {
     resourceId: string;
     events: ResourceSubscriptionEventType[];
     intent?: string;
-  }): Promise<{ created: boolean; subscription: ResourceSubscription }> {
+  }): Promise<{ created: boolean; subscription: ResourceSubscription; idle?: boolean }> {
     const subscriber = normalizeSubscriber(input.subscriber);
     const resource = normalizeResource(input.provider, input.resourceType, input.resourceId);
     const events = normalizeEvents(resource.provider, resource.resourceType, input.events);
@@ -394,16 +394,18 @@ export class ResourceSubscriptionService {
       );
     let cursor =
       existing?.status === 'active' || existing?.status === 'paused' ? existing.cursor : undefined;
+    let idle: boolean | undefined;
     if (resource.provider === 'drone-hub' && resource.resourceType === 'chat') {
       const location = this.deps.repository.resolveChatResource(resource.resourceId);
       if (!location) throw new Error(`unknown DroneHub chat resource: ${resource.resourceId}`);
       if (location.chatId === subscriber.chatId) {
         throw new Error('a conversation cannot subscribe to its own chat events');
       }
-      if (!cursor) {
-        const status = await this.deps.readChatStatus(location);
-        cursor = chatCursor(location, status);
-      }
+      const status = await this.deps.readChatStatus(location);
+      idle = status.idle;
+      // Return the same observation used to establish a new watcher. Existing
+      // watchers keep their cursor so resubscribing cannot swallow a transition.
+      if (!cursor) cursor = chatCursor(location, status);
     }
     const result = await this.deps.repository.upsert({
       subscriber,
@@ -433,7 +435,10 @@ export class ResourceSubscriptionService {
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
     this.notifySessionSubscriptions(subscriber.chatId);
-    return { ...result, subscription: this.withResourceLabel(result.subscription) };
+    return {
+      ...result, subscription: this.withResourceLabel(result.subscription),
+      ...(idle === undefined ? {} : { idle }),
+    };
   }
 
   listCustomEvents(input: { query?: string; after?: string; limit?: number }) {
