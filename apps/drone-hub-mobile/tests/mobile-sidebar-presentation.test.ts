@@ -745,8 +745,8 @@ describe('mobile sidebar presentation', () => {
     expect(dronesSource).toContain('visible={active && workspaceVisible}');
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
-    expect(providerSource).toContain("tool === 'read_companion_proposal'");
-    expect(providerSource).toContain("tool === 'apply_companion_proposal_patch'");
+    expect(providerSource).toContain("tool === 'read_proposal'");
+    expect(providerSource).toContain("tool === 'apply_proposal_patch'");
     expect(providerSource).not.toContain('prepareDroneDraft');
     expect(workspaceTargetSource).toContain('executeCompanionProposal(proposal');
     expect(workspaceTargetSource).not.toContain('prepareDroneDraft');

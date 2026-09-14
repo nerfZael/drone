@@ -73,7 +73,7 @@ test('runtime returns correction errors and delivers only the assistant-correcte
     snapshots: new Map(),
     proposalModels: resolver,
     callBrowser: async (name: string, args: any) => {
-      if (name === 'read_companion_proposal') return {
+      if (name === 'read_proposal') return {
         targetId: 'companion-proposal', path: 'companion-proposal.json',
         revision: 'r1', mode: 'edit', content: original,
       };
@@ -83,8 +83,8 @@ test('runtime returns correction errors and delivers only the assistant-correcte
   };
   const runtime = Object.create(CompanionRuntime.prototype);
   const tools = await runtime.customTools(context, []);
-  const read = tools.find((tool: any) => tool.name === 'read_companion_proposal');
-  const patch = tools.find((tool: any) => tool.name === 'apply_companion_proposal_patch');
+  const read = tools.find((tool: any) => tool.name === 'read_proposal');
+  const patch = tools.find((tool: any) => tool.name === 'apply_proposal_patch');
   await read.execute('read', {});
   const args = {
     targetId: 'companion-proposal', baseRevision: 'r1',
@@ -105,4 +105,59 @@ test('runtime returns correction errors and delivers only the assistant-correcte
   for (const operation of JSON.parse(delivered[0].content).operations) {
     expect(operation).toMatchObject({ agent: 'builtin:codex', model: 'gpt-6-astra', reasoning: 'low' });
   }
+});
+
+test('runtime exposes explicit proposal execution independently of patch snapshots', async () => {
+  const { CompanionRuntime } = await import('../src/hub/companion/companion-runtime');
+  const { DEFAULT_COMPANION_SETTINGS } = await import('../src/hub/companion/companion-config');
+  const calls: unknown[] = [];
+  const pending = { applied: false, status: 'pending_review', revision: '2', operationCount: 1 };
+  const runtime = Object.create(CompanionRuntime.prototype);
+  const tools = await runtime.customTools({
+    settings: DEFAULT_COMPANION_SETTINGS,
+    snapshots: new Map(),
+    proposalModels: new CompanionProposalModels(),
+    callBrowser: async (name: string, args: unknown) => { calls.push({ name, args }); return pending; },
+  }, []);
+  const execute = tools.find((tool: any) => tool.name === 'execute_proposal');
+  expect(execute.parameters.required).toEqual(['targetId', 'baseRevision']);
+  const args = { targetId: 'companion-proposal', baseRevision: '2' };
+  const response = await execute.execute('execute', args);
+  expect(calls).toEqual([{ name: 'execute_proposal', args }]);
+  expect(response.details).toEqual(pending);
+});
+
+test('runtime retains separate snapshots for multiple proposals and rejects cross-document patches', async () => {
+  const { CompanionRuntime } = await import('../src/hub/companion/companion-runtime');
+  const { DEFAULT_COMPANION_SETTINGS } = await import('../src/hub/companion/companion-config');
+  const { CompanionProposalStore } = await import('@drone/assistant-chat');
+  let id = 0;
+  const store = new CompanionProposalStore(() => `proposal-${++id}`);
+  const runtime = Object.create(CompanionRuntime.prototype);
+  const tools = await runtime.customTools({
+    settings: DEFAULT_COMPANION_SETTINGS, snapshots: new Map(), proposalModels: new CompanionProposalModels(),
+    callBrowser: async (name: string, args: any) => {
+      if (name === 'create_proposal') return store.create({ defaultRepoPath: '/repo' }, 'session', args.title);
+      if (name === 'read_proposal') return store.read(args.targetId);
+      if (name === 'apply_proposal_patch') return store.patch(args.targetId, args.baseRevision, args.content, () => ({ defaultRepoPath: '/wrong' }), 'session');
+      if (name === 'discard_proposal') return store.discard(args.targetId, args.baseRevision);
+      throw new Error(name);
+    },
+  }, []);
+  const tool = (name: string) => tools.find((item: any) => item.name === name);
+  const a = (await tool('create_proposal').execute('create-a', { title: 'A' })).details;
+  const b = (await tool('create_proposal').execute('create-b', { title: 'B' })).details;
+  const patch = (path: string) => `*** Begin Patch\n*** Update File: ${path}\n@@\n-  "operations": []\n+  "operations": [{"id":"group","type":"create_group","name":"Review"}]\n*** End Patch`;
+  await expect(tool('apply_proposal_patch').execute('cross-target', {
+    targetId: a.targetId, baseRevision: a.revision, patch: patch(b.path),
+  })).rejects.toThrow('patch path does not match');
+  for (const item of [a, b]) {
+    const result = await tool('apply_proposal_patch').execute(`patch-${item.targetId}`, {
+      targetId: item.targetId, baseRevision: item.revision, patch: patch(item.path),
+    });
+    expect(result.details).toMatchObject({ targetId: item.targetId, revision: '1', operationCount: 1 });
+  }
+  expect(store.pending).toHaveLength(2);
+  await tool('discard_proposal').execute('discard-a', { targetId: a.targetId, baseRevision: '1' });
+  expect(store.pending.map(item => item.id)).toEqual([b.targetId]);
 });

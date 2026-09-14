@@ -49,7 +49,7 @@ describe('Companion action notifications', () => {
   test('ignores file and window actions and results outside the executed proposal', () => {
     const notifications: CompanionActionNotification[] = [];
     const report = createCompanionActionReporter(proposal, {}, (items) => notifications.push(...items));
-    report(['open_file', 'open_drone_chat', 'set_window_layout', 'apply_companion_proposal_patch'].map((type) => ({
+    report(['open_file', 'open_drone_chat', 'set_window_layout', 'apply_proposal_patch'].map((type) => ({
       id: 'create', type, status: 'completed',
     })) as CompanionProposalExecutionItem[]);
     report([{ id: 'unrelated', type: 'create_drone', status: 'completed' }]);

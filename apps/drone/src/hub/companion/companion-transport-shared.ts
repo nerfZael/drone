@@ -47,7 +47,7 @@ export class CompanionBrowserToolBroker {
       // A proposal patch may execute real operations before returning. Do not
       // report a timeout while those operations are still running: the caller
       // could retry and duplicate side effects. Stop/disconnect still reject it.
-      const timer = tool === 'apply_companion_proposal_patch' ? undefined : setTimeout(
+      const timer = tool === 'execute_proposal' ? undefined : setTimeout(
         () => this.reject(callId, new Error(`browser tool timed out: ${tool}`)),
         this.options.timeoutMs ?? DEFAULT_BROWSER_TOOL_TIMEOUT_MS,
       );

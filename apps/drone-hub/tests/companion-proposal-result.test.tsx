@@ -13,7 +13,7 @@ import {
   useCompanionWorkspace,
 } from '../src/droneHub/companion/CompanionWorkspaceContext';
 
-for (const outcome of ['success', 'partial-failure', 'throw'] as const) {
+for (const outcome of ['success', 'partial-failure', 'throw', 'throw-after-progress'] as const) {
 test(`auto-approved proposals return the actual ${outcome} inside the original tool call`, async () => {
   const autoApproveSpy = spyOn(autoApproveModule, 'useCompanionAutoApprove').mockReturnValue({
     enabled: true,
@@ -60,10 +60,14 @@ test(`auto-approved proposals return the actual ${outcome} inside the original t
       getAppContext: () => ({ activeRepoPath: '/repo' }),
       resolveDroneName: () => null,
       resolveDroneCreationDefaults: () => null,
-      executeProposal: async (proposal) => {
+      executeProposal: async (proposal, _context, reportProgress) => {
         executions += 1;
         await finishExecution.promise;
         if (outcome === 'throw') throw new Error('Apply failed');
+        if (outcome === 'throw-after-progress') {
+          reportProgress?.({ activeOperationId: 'second', operations: [{ id: 'create', type: 'create_chat', status: 'completed', result: { chatName: 'new-chat' } }] });
+          throw new Error('Second operation failed');
+        }
         return {
           ok: outcome === 'success',
           operations: proposal.operations.map((operation, index) => ({
@@ -90,6 +94,15 @@ test(`auto-approved proposals return the actual ${outcome} inside the original t
       </ActiveComposerProvider>,
     );
     expect(await companion.submitText('Create a chat')).toEqual({ ok: true });
+    const execute = async (callId: string, revision: string) => {
+      receive({ type: 'tool_call', messageId: prompts[0]!.messageId, generation: 1,
+        callId, tool: 'execute_proposal', args: { targetId: 'companion-proposal', baseRevision: revision },
+      });
+      for (let attempt = 0; attempt < 30; attempt++) await Promise.resolve();
+    };
+    await execute('empty', '0');
+    expect(toolResults.at(-1)).toMatchObject({ ok: false, error: 'EMPTY_PROPOSAL' });
+    toolResults.length = 0;
     const proposal = {
       version: 1,
       title: 'Create chat',
@@ -103,16 +116,32 @@ test(`auto-approved proposals return the actual ${outcome} inside the original t
       messageId: prompts[0]!.messageId,
       generation: 1,
       callId: 'proposal-tool',
-      tool: 'apply_companion_proposal_patch',
+      tool: 'apply_proposal_patch',
       args: {
         targetId: 'companion-proposal',
         baseRevision: '0',
         content: JSON.stringify(proposal),
       },
     });
+    for (let attempt = 0; attempt < 30 && toolResults.length === 0; attempt++) await Promise.resolve();
+    expect(executions).toBe(0);
+    expect(toolResults[0]).toMatchObject({ ok: true, result: { revision: '1' } });
+    toolResults.length = 0;
+    await execute('stale', '0');
+    expect(toolResults.at(-1)).toMatchObject({ ok: false, error: 'STALE_PROPOSAL_REVISION' });
+    expect(executions).toBe(0);
+    toolResults.length = 0;
+    receive({ type: 'tool_call', messageId: prompts[0]!.messageId, generation: 1,
+      callId: 'execute-tool', tool: 'execute_proposal',
+      args: { targetId: 'companion-proposal', baseRevision: '1' },
+    });
     await Promise.resolve();
     expect(executions).toBe(1);
     expect(toolResults).toEqual([]);
+    await execute('duplicate', '1');
+    expect(toolResults.at(-1)).toMatchObject({ ok: false, error: 'PROPOSAL_EXECUTION_IN_PROGRESS' });
+    expect(executions).toBe(1);
+    toolResults.length = 0;
     finishExecution.resolve();
     for (let attempt = 0; attempt < 30 && toolResults.length === 0; attempt += 1) {
       await Promise.resolve();
@@ -134,12 +163,18 @@ test(`auto-approved proposals return the actual ${outcome} inside the original t
             ? [{ id: 'create', type: 'create_chat', status: 'failed', error: 'Apply failed' },
                { id: 'second', type: 'create_chat', status: 'skipped' }]
             : [{ id: 'create', type: 'create_chat', status: 'completed', result: { chatName: 'new-chat' } },
-               outcome === 'partial-failure'
+               (outcome === 'partial-failure' || outcome === 'throw-after-progress')
                  ? { id: 'second', type: 'create_chat', status: 'failed', error: 'Second operation failed' }
                  : { id: 'second', type: 'create_chat', status: 'completed', result: { chatName: 'new-chat' } }],
         },
       },
     });
+    toolResults.length = 0;
+    await execute('replay', '1');
+    expect(toolResults.at(-1)).toMatchObject({ ok: false,
+      error: outcome === 'success' ? 'STALE_PROPOSAL_REVISION' : 'PROPOSAL_ALREADY_EXECUTED',
+    });
+    expect(executions).toBe(1);
   } finally {
     finishExecution.resolve();
     await companion.close();

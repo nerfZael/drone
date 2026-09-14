@@ -15,8 +15,12 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'apply_composer_patch',
   'read_open_file',
   'apply_editor_patch',
-  'read_companion_proposal',
-  'apply_companion_proposal_patch',
+  'list_proposals',
+  'create_proposal',
+  'discard_proposal',
+  'read_proposal',
+  'apply_proposal_patch',
+  'execute_proposal',
   'open_drone_chat',
   'highlight_drones',
   'open_workspace_files',
@@ -177,9 +181,9 @@ export function companionToolActivityLabel(item: CompanionToolActivity): string 
     else label = chatName ? `Open chat “${chatName}”` : 'Open drone chat';
   } else if (item.tool === 'get_app_context') {
     label = 'Read app context';
-  } else if (item.tool === 'read_companion_proposal') {
+  } else if (item.tool === 'read_proposal') {
     label = 'Read proposal';
-  } else if (item.tool === 'apply_companion_proposal_patch') {
+  } else if (item.tool === 'apply_proposal_patch') {
     label = 'Update proposal';
   } else {
     label = item.tool.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -272,8 +276,10 @@ export function validateCompanionProposalResultInput(input: {
     if (raw.revision !== undefined && (typeof raw.revision !== 'string' || !/^\d{1,16}$/.test(raw.revision))) {
       throw new Error('result revision is invalid');
     }
+    if (raw.targetId !== undefined && (typeof raw.targetId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(raw.targetId))) throw new Error('result targetId is invalid');
     const result = { applied: true as const, autoApproved: raw.autoApproved, proposal, execution,
       ...(typeof raw.revision === 'string' ? { revision: raw.revision } : {}),
+      ...(typeof raw.targetId === 'string' ? { targetId: raw.targetId } : {}),
     };
     if (JSON.stringify(result).length > 250_000) throw new Error('result is too large');
     return { ok: true, runId, messageId, result };

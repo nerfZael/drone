@@ -70,8 +70,9 @@ function clientTransport() {
 describe('Companion contracts', () => {
   test('allows proposal editing and chat navigation without the legacy draft action', () => {
     expect(COMPANION_BROWSER_TOOL_NAMES).toContain('open_drone_chat');
-    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('read_companion_proposal');
-    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('apply_companion_proposal_patch');
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('read_proposal');
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('apply_proposal_patch');
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('execute_proposal');
     expect([...COMPANION_BROWSER_TOOL_NAMES]).not.toContain('prepare_drone_draft');
   });
 
@@ -162,6 +163,9 @@ describe('Companion contracts', () => {
       },
     };
     expect(validateCompanionProposalResultInput(input)).toMatchObject({ ok: true });
+    expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, targetId: 'proposal-123' } }))
+      .toMatchObject({ ok: true, result: { targetId: 'proposal-123' } });
+    expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, targetId: '../bad' } }).ok).toBe(false);
     expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, revision: '2' } }))
       .toMatchObject({ ok: true, result: { revision: '2' } });
     expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, revision: 'invalid' } }))

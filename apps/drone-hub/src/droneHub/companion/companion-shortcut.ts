@@ -50,28 +50,3 @@ export function companionProposalShortcutGesture(
     ? 'toggle-auto-approve'
     : 'schedule-apply';
 }
-
-export function shouldAutoExecuteCompanionProposal({
-  enabled,
-  status,
-  operationCount,
-  hasExecutionContext,
-  executing,
-  executed,
-}: {
-  enabled: boolean;
-  status: string;
-  operationCount: number;
-  hasExecutionContext: boolean;
-  executing: boolean;
-  executed: boolean;
-}): boolean {
-  return (
-    enabled &&
-    status === 'completed' &&
-    operationCount > 0 &&
-    hasExecutionContext &&
-    !executing &&
-    !executed
-  );
-}

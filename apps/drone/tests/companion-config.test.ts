@@ -60,16 +60,16 @@ describe('Companion settings', () => {
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'open_drone_chat'),
     ).toMatchObject({ execution: 'browser', category: 'actions' });
     expect(
-      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_companion_proposal_patch'),
-    ).toMatchObject({ requires: 'read_companion_proposal', execution: 'browser' });
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_proposal_patch'),
+    ).toMatchObject({ requires: 'read_proposal', execution: 'browser' });
     expect(
-      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'read_companion_proposal')?.description,
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'read_proposal')?.description,
     ).toContain('delete_drone and send_message');
     expect(
-      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_companion_proposal_patch')?.description,
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_proposal_patch')?.description,
     ).toContain('deleting drones and sending or queueing chat messages');
     expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain(
-      'one editable proposal',
+      'Multiple proposals may coexist',
     );
     expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain('Use list_agent_models');
   });
@@ -164,13 +164,12 @@ describe('Companion settings', () => {
   });
 
   test('migrates the schema-v3 default prompt to model discovery instructions', () => {
-    const previousSchemaV3Prompt = DEFAULT_COMPANION_SETTINGS.systemPrompt
-      .split('\n')
-      .filter((line) =>
-        !line.startsWith('Use list_agent_models') &&
-        !line.startsWith('Use list_chats to inspect'),
-      )
-      .join('\n');
+    const previousSchemaV3Prompt = [
+      ...DEFAULT_COMPANION_SETTINGS.systemPrompt.split('\n').slice(0, 5),
+      'Use read_companion_proposal and apply_companion_proposal_patch for requested Drone Hub changes such as creating, cloning, renaming, or deleting groups, drones, and chats, configuring creation overrides, and sending or queueing chat messages.',
+      'There is one editable proposal for the Companion session. Proposal patches update its review card but do not execute it. You may discuss it with the user and revise it over multiple turns before they apply or discard it.',
+      'Read the proposal before every patch. Preserve operations the user still wants, use $create-operation-id references for later operations on a newly created drone, and keep operation order executable.',
+    ].join('\n');
     const settings = normalizeCompanionSettings({
       ...DEFAULT_COMPANION_SETTINGS,
       schemaVersion: 3,
@@ -188,8 +187,9 @@ describe('Companion settings', () => {
         name !== 'open_drone_chat' &&
         name !== 'list_groups' &&
         name !== 'list_agent_models' &&
-        name !== 'read_companion_proposal' &&
-        name !== 'apply_companion_proposal_patch',
+        name !== 'read_proposal' &&
+        name !== 'apply_proposal_patch' &&
+        name !== 'execute_proposal' && name !== 'create_proposal' && name !== 'list_proposals' && name !== 'discard_proposal',
       );
     const migrated = normalizeCompanionSettings({
       ...DEFAULT_COMPANION_SETTINGS,
@@ -209,12 +209,12 @@ describe('Companion settings', () => {
     expect(migrated.enabledTools).toContain('open_drone_chat');
     expect(migrated.enabledTools).toContain('list_groups');
     expect(migrated.enabledTools).toContain('list_agent_models');
-    expect(migrated.enabledTools).toContain('read_companion_proposal');
-    expect(migrated.enabledTools).toContain('apply_companion_proposal_patch');
+    expect(migrated.enabledTools).toContain('read_proposal');
+    expect(migrated.enabledTools).toContain('apply_proposal_patch');
     expect(migratedWithoutDraftPermission.enabledTools).toContain('open_drone_chat');
-    expect(migratedWithoutDraftPermission.enabledTools).not.toContain('read_companion_proposal');
+    expect(migratedWithoutDraftPermission.enabledTools).not.toContain('read_proposal');
     expect(explicitlyDisabled.enabledTools).not.toContain('open_drone_chat');
-    expect(explicitlyDisabled.enabledTools).not.toContain('read_companion_proposal');
+    expect(explicitlyDisabled.enabledTools).not.toContain('read_proposal');
   });
 
   test('adds model discovery only to schema-v3 default profiles', () => {
@@ -262,4 +262,13 @@ test('follow-up delivery defaults to ASAP for existing settings and persists exp
     await writeCompanionSettings({ ...saved, promptDeliveryMode: 'asap' });
     expect((await readCompanionSettings()).promptDeliveryMode).toBe('asap');
   });
+});
+
+test('migrates proposal tool names and execution capability while preserving explicit choices', () => {
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 10,
+    enabledTools: ['read_companion_proposal', 'apply_companion_proposal_patch'],
+  }).enabledTools).toEqual(['list_proposals', 'create_proposal', 'discard_proposal', 'read_proposal', 'apply_proposal_patch', 'execute_proposal']);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS,
+    enabledTools: ['read_proposal', 'apply_proposal_patch'],
+  }).enabledTools).toEqual(['read_proposal', 'apply_proposal_patch']);
 });

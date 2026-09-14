@@ -770,7 +770,7 @@ describe('Blip assistant host', () => {
       try {
         await host.promptThread('thread-tool-result', 'Prepare a proposal');
         await host.promptThreadWithToolResult('thread-tool-result', {
-          toolName: 'apply_companion_proposal_patch',
+          toolName: 'execute_proposal',
           args: { action: 'apply_reviewed_proposal' },
           text: '{"applied":true,"execution":{"ok":true}}',
           details: { applied: true, execution: { ok: true } },
@@ -778,7 +778,7 @@ describe('Blip assistant host', () => {
 
         expect(receivedResult).toMatchObject({
           role: 'toolResult',
-          toolName: 'apply_companion_proposal_patch',
+          toolName: 'execute_proposal',
           isError: false,
           details: { applied: true, execution: { ok: true } },
         });
@@ -822,7 +822,7 @@ describe('Blip assistant host', () => {
           await host.promptThread('stop-result', 'Draft');
           pause = true;
           const continuation = host.promptThreadWithToolResult('stop-result', {
-            toolName: 'apply_companion_proposal_patch', args: {}, text: 'Executed',
+            toolName: 'execute_proposal', args: {}, text: 'Executed',
           });
           const settled = Promise.allSettled([continuation]);
           await started.promise;

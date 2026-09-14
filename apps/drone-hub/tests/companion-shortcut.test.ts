@@ -4,7 +4,6 @@ import {
   COMPANION_SHORTCUT_DOUBLE_TAP_MS,
   companionProposalShortcutGesture,
   isCompanionShortcutDoubleTap,
-  shouldAutoExecuteCompanionProposal,
   shouldConsumeCompanionProposalShortcut,
   shouldCancelCompanionRecordingWithEscape,
 } from '../src/droneHub/companion/companion-shortcut';
@@ -60,28 +59,6 @@ describe('Companion shortcut double tap', () => {
     expect(companionProposalShortcutGesture(0, 1_000)).toBe('schedule-apply');
     expect(companionProposalShortcutGesture(1_000, 1_200)).toBe('toggle-auto-approve');
     expect(companionProposalShortcutGesture(1_000, 1_500)).toBe('schedule-apply');
-  });
-});
-
-describe('Companion proposal auto-approve', () => {
-  test('waits for a successfully completed turn and an executable proposal', () => {
-    const ready = {
-      enabled: true,
-      status: 'completed',
-      operationCount: 1,
-      hasExecutionContext: true,
-      executing: false,
-      executed: false,
-    };
-    expect(shouldAutoExecuteCompanionProposal(ready)).toBe(true);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, enabled: false })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, status: 'working' })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, status: 'cancelled' })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, status: 'error' })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, operationCount: 0 })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, hasExecutionContext: false })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, executing: true })).toBe(false);
-    expect(shouldAutoExecuteCompanionProposal({ ...ready, executed: true })).toBe(false);
   });
 });
 

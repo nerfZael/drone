@@ -151,10 +151,6 @@ export function CompanionOverlay() {
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
-  const showProposal = Boolean(
-    companion.proposal &&
-    (!companion.autoApprove || companion.status === 'error' || companion.status === 'cancelled'),
-  );
   const latestProposalExecution = companion.proposalHistory[
     companion.proposalHistory.length - 1
   ]?.execution;
@@ -171,13 +167,28 @@ export function CompanionOverlay() {
           entries={companion.proposalHistory}
           onClose={() => setHistoryOpen(false)}
         />
-      ) : showProposal && companion.proposal ? (
+      ) : companion.proposal ? (
+        <div className="flex min-h-0 flex-col gap-2">
+          {companion.proposals?.length > 1 ? (
+            <div className="flex max-w-[28rem] flex-wrap gap-1" aria-label="Pending proposals">
+              {companion.proposals.map(item => (
+                <button key={item.targetId} type="button"
+                  aria-pressed={item.targetId === companion.selectedProposalId}
+                  className="rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1 text-xs text-[var(--fg)] aria-pressed:border-[var(--accent)]"
+                  onClick={() => companion.selectProposal(item.targetId)}>
+                  {item.title}{item.status === 'failed' ? ' · Failed' : item.status === 'executing' ? ' · Applying' : ''}
+                </button>
+              ))}
+            </div>
+          ) : null}
         <CompanionProposalCard
+          key={companion.selectedProposalId}
           proposal={companion.proposal}
           defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
           execution={companion.proposalExecution}
           executionProgress={companion.proposalExecutionProgress}
-          executing={companion.proposalExecuting}
+          executing={companion.selectedProposalExecuting}
+          executionBlocked={companion.proposalExecuting}
           companionStatus={companion.status}
           droneNames={companion.proposalDroneNames}
           resolveDroneName={(droneId) => workspace?.resolveDroneName(droneId) ?? null}
@@ -188,9 +199,10 @@ export function CompanionOverlay() {
               return null;
             }
           }}
-          onExecute={() => void companion.executeProposal()}
-          onDiscard={companion.discardProposal}
+          onExecute={() => void companion.executeProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
+          onDiscard={() => companion.discardProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
         />
+        </div>
       ) : null}
       <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}

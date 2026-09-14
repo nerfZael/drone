@@ -13,13 +13,14 @@ describe('Companion overlay presentation', () => {
     expect(source).not.toContain("open={item.status === 'running'}");
   });
 
-  test('hides auto-approved proposal cards and exposes session execution history', () => {
+  test('keeps pending proposal cards visible with auto-approval and exposes session execution history', () => {
     const source = readFileSync(
       new URL('../src/droneHub/companion/CompanionOverlay.tsx', import.meta.url),
       'utf8',
     );
 
-    expect(source).toContain("companion.status === 'error' || companion.status === 'cancelled'");
+    expect(source).toContain(') : companion.proposal ? (');
+    expect(source).not.toContain('const showProposal');
     expect(source).toContain('latest execution failed');
     expect(source).toContain('pressed={companion.autoApprove}');
     expect(source).toContain('expanded={historyOpen}');

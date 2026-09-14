@@ -147,6 +147,7 @@ export function MobileCompanionOverlay() {
   const { height } = useWindowDimensions();
   const [workspaceDeviceId, setWorkspaceDeviceId] = React.useState<string | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [proposalHistoryOpen, setProposalHistoryOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [contextTooltipOpen, setContextTooltipOpen] = React.useState(false);
   const [activityExpanded, setActivityExpanded] = React.useState(false);
@@ -163,6 +164,7 @@ export function MobileCompanionOverlay() {
     if (!visible) {
       reportOverlayInset(0);
       setCollapsed(false);
+      setProposalHistoryOpen(false);
     }
   }, [reportOverlayInset, visible]);
   React.useEffect(() => () => reportOverlayInset(0), [reportOverlayInset]);
@@ -269,7 +271,7 @@ export function MobileCompanionOverlay() {
   const errors = [companion.error, live.error, liveSettings.error, autoApprove.error].filter(Boolean);
   // Manual collapse persists through streamed replies; composer focus also keeps only the header.
   const showBody = !collapsed && !composerFocused &&
-    (activityExpanded || captionsOpen || errors.length > 0 || Boolean(companion.reply) || Boolean(companion.proposal));
+    (activityExpanded || captionsOpen || errors.length > 0 || Boolean(companion.reply) || Boolean(companion.proposal) || Boolean(companion.proposalHistory?.length));
   const openWorkspaces = () => {
     Keyboard.dismiss();
     setWorkspaceDeviceId(companion.workspaceDeviceId);
@@ -672,17 +674,46 @@ export function MobileCompanionOverlay() {
                 </View>
               ) : null}
 
+              {companion.proposals?.length > 1 ? (
+                <View accessibilityLabel="Pending proposals">
+                  {companion.proposals.map(item => (
+                    <Pressable key={item.targetId} accessibilityRole="button"
+                      accessibilityState={{ selected: item.targetId === companion.selectedProposalId }}
+                      onPress={() => companion.selectProposal(item.targetId)} style={{ paddingVertical: 8 }}>
+                      <Text style={{ color: colors.text }}>
+                        {item.targetId === companion.selectedProposalId ? '• ' : ''}{item.title} · {item.status}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
               {companion.proposal ? (
                 <MobileCompanionProposal
+                  key={companion.selectedProposalId}
                   proposal={companion.proposal}
                   defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
                   execution={companion.proposalExecution}
-                  executing={companion.proposalExecuting}
+                  executing={companion.selectedProposalExecuting}
                   resolveDroneName={companion.resolveDroneName}
                   applyDisabled={applyDisabled}
-                  onExecute={() => void companion.executeProposal()}
-                  onDiscard={companion.discardProposal}
+                  onExecute={() => void companion.executeProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
+                  onDiscard={() => companion.discardProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
                 />
+              ) : null}
+              {companion.proposalHistory?.length ? (
+                <View>
+                  <Pressable accessibilityRole="button" onPress={() => setProposalHistoryOpen(value => !value)} style={{ paddingVertical: 8 }}>
+                    <Text style={{ color: colors.text }}>Execution history</Text>
+                  </Pressable>
+                  {proposalHistoryOpen ? companion.proposalHistory.map((item, index) => (
+                    <View key={`${item.targetId}-${index}`} style={{ paddingVertical: 8 }}>
+                      <Text style={{ color: colors.text }}>{item.proposal.title} · {item.execution.ok ? 'Applied' : 'Failed'}</Text>
+                      {item.execution.operations.map(operation => (
+                        <Text key={operation.id} style={{ color: colors.text }}>{operation.id}: {operation.status}{operation.error ? ` · ${operation.error}` : ''}</Text>
+                      ))}
+                    </View>
+                  )) : null}
+                </View>
               ) : null}
             </ScrollView>
           ) : null}

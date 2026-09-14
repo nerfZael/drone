@@ -161,6 +161,7 @@ export type CompanionProposalApplyResult = {
   autoApproved: boolean;
   /** Revision actually executed; absent for older clients. */
   revision?: string;
+  targetId?: string;
   proposal: CompanionProposal;
   execution: CompanionProposalExecution;
 };
@@ -170,8 +171,9 @@ export function companionProposalApplyResult(
   execution: CompanionProposalExecution,
   autoApproved: boolean,
   revision: string,
+  targetId?: string,
 ): CompanionProposalApplyResult {
-  return { applied: true, autoApproved, revision, proposal, execution };
+  return { applied: true, autoApproved, revision, proposal, execution, ...(targetId ? { targetId } : {}) };
 }
 
 export type CompanionProposalExecutionProgress = {
@@ -254,7 +256,7 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue" }',
   'A later operation may target a drone created or cloned earlier in the document with droneId "$<operation id>".',
   'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default" where it is optional.',
-  'Any Apply attempt is terminal for this proposal. The user must discard it before creating a fresh proposal; completed operations are never replayed.',
+  'Any Apply attempt is terminal for this proposal. Create a separate correction proposal containing only unfinished work after a failure. Completed operations must never be replayed. Use discard_proposal to dismiss obsolete drafts or failures; other proposals remain usable.',
 ].join('\n');
 
 export function serializeCompanionProposal(proposal: CompanionProposal): string {
@@ -445,6 +447,24 @@ export function companionProposalOperationDetails(
     case 'rename_chat':
       return [];
   }
+}
+
+/** Preserve confirmed outcomes if execution exits before returning its final result. */
+export function companionProposalInterruptedExecution(
+  proposal: CompanionProposal,
+  error: unknown,
+  progress: CompanionProposalExecutionProgress | null,
+): CompanionProposalExecution {
+  const reported = new Map((progress?.operations ?? []).map(item => [item.id, item]));
+  let failed = [...reported.values()].some(item => item.status === 'failed');
+  const operations = proposal.operations.map((operation): CompanionProposalExecutionItem => {
+    const known = reported.get(operation.id);
+    if (known?.type === operation.type) return known;
+    if (failed) return { id: operation.id, type: operation.type, status: 'skipped' };
+    failed = true;
+    return { id: operation.id, type: operation.type, status: 'failed', error: error instanceof Error ? error.message : String(error) };
+  });
+  return { ok: operations.every(item => item.status === 'completed'), operations };
 }
 
 /** Execute a validated proposal in order, resolving $create-op drone references. */

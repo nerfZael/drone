@@ -75,7 +75,7 @@ describe('Companion browser tool broker', () => {
       dispatch: (value) => { call = value; },
     });
     let settled = false;
-    const pending = broker.request('apply_companion_proposal_patch', {}, 1);
+    const pending = broker.request('execute_proposal', {}, 1);
     void pending.then(() => { settled = true; });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(settled).toBe(false);
@@ -89,10 +89,10 @@ describe('Companion browser tool broker', () => {
       available: () => true, unavailableMessage: 'disconnected', dispatch: () => {},
     });
     const controller = new AbortController();
-    const stopped = broker.request('apply_companion_proposal_patch', {}, 1, controller.signal);
+    const stopped = broker.request('execute_proposal', {}, 1, controller.signal);
     controller.abort();
     await expect(stopped).rejects.toThrow('cancelled');
-    const disconnected = broker.request('apply_companion_proposal_patch', {}, 2);
+    const disconnected = broker.request('execute_proposal', {}, 2);
     broker.rejectAll('disconnected');
     await expect(disconnected).rejects.toThrow('disconnected');
   });

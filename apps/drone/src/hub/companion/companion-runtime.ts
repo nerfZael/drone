@@ -3,7 +3,7 @@ import { chatWindowLayoutProperties } from './chat-window-layout-schema';
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
-import type { CompanionClientTelemetry, CompanionProposalApplyResult } from '@drone/assistant-chat';
+import { COMPANION_PROPOSAL_TARGET_ID, type CompanionClientTelemetry, type CompanionProposalApplyResult } from '@drone/assistant-chat';
 
 import { BlipAssistantHost } from '../assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from '../assistant/blip-runtime-loader';
@@ -115,7 +115,7 @@ function rememberBrowserSnapshot(
   snapshot: BrowserTextSnapshot,
 ): void {
   for (const [key, existing] of snapshots) {
-    if (existing.kind === snapshot.kind) snapshots.delete(key);
+    if (existing.kind === snapshot.kind && (snapshot.kind !== 'proposal' || existing.targetId === snapshot.targetId)) snapshots.delete(key);
   }
   snapshots.set(snapshotKey(snapshot.kind, snapshot.targetId, snapshot.revision), snapshot);
 }
@@ -258,8 +258,8 @@ export class CompanionRuntime {
       telemetry?.markAgentRunStarted();
       const prompt = () => input.proposalResult
         ? this.host.promptThreadWithToolResult(threadId, {
-            toolName: 'apply_companion_proposal_patch',
-            args: { action: 'apply_reviewed_proposal', autoApproved: input.proposalResult.autoApproved },
+            toolName: 'execute_proposal',
+            args: { targetId: input.proposalResult.targetId ?? COMPANION_PROPOSAL_TARGET_ID, baseRevision: input.proposalResult.revision },
             text: JSON.stringify(input.proposalResult, null, 2),
             details: input.proposalResult,
             isError: !input.proposalResult.execution.ok,
@@ -541,12 +541,12 @@ export class CompanionRuntime {
       ['read_active_composer', 'composer'],
       ['read_recorder', 'recorder'],
       ['read_open_file', 'editor'],
-      ['read_companion_proposal', 'proposal'],
+      ['read_proposal', 'proposal'],
     ] as const) {
       add(name, {
-        parameters: objectParameters({}),
-        execute: async (_callId, _args, signal) => {
-          const value = await context.callBrowser(name, {}, signal);
+        parameters: objectParameters(kind === 'proposal' ? { targetId: { type: 'string', description: 'Proposal ID from create_proposal or list_proposals. Omit to read the selected proposal.' } } : {}),
+        execute: async (_callId, args, signal) => {
+          const value = await context.callBrowser(name, kind === 'proposal' ? args as Record<string, unknown> : {}, signal);
           const snapshot = normalizeBrowserSnapshot(kind, value);
           rememberBrowserSnapshot(context.snapshots, snapshot);
           return result(value);
@@ -558,7 +558,7 @@ export class CompanionRuntime {
       ['apply_composer_patch', 'composer'],
       ['apply_recorder_patch', 'recorder'],
       ['apply_editor_patch', 'editor'],
-      ['apply_companion_proposal_patch', 'proposal'],
+      ['apply_proposal_patch', 'proposal'],
     ] as const) {
       add(name, {
         parameters: objectParameters({
@@ -602,6 +602,35 @@ export class CompanionRuntime {
         },
       });
     }
+
+    add('list_proposals', {
+      parameters: objectParameters({}),
+      execute: async (_callId, _args, signal) => result(await context.callBrowser('list_proposals', {}, signal)),
+    });
+    add('create_proposal', {
+      parameters: objectParameters({ title: { type: 'string', maxLength: 120, description: 'Short title for a new independent proposal.' } }),
+      execute: async (_callId, args, signal) => {
+        const value = await context.callBrowser('create_proposal', args as Record<string, unknown>, signal);
+        rememberBrowserSnapshot(context.snapshots, normalizeBrowserSnapshot('proposal', value));
+        return result(value);
+      },
+    });
+    add('discard_proposal', {
+      parameters: objectParameters({
+        targetId: { type: 'string', description: 'Proposal ID to discard.' },
+        baseRevision: { type: 'string', description: 'Latest revision from reading or patching that proposal.' },
+      }, ['targetId', 'baseRevision']),
+      execute: async (_callId, args, signal) => result(await context.callBrowser('discard_proposal', args as Record<string, unknown>, signal)),
+    });
+
+    add('execute_proposal', {
+      parameters: objectParameters({
+        targetId: { type: 'string', description: 'Exact targetId returned by read_proposal.' },
+        baseRevision: { type: 'string', description: 'Exact revision returned by the latest proposal read or patch.' },
+      }, ['targetId', 'baseRevision']),
+      execute: async (_callId, args, signal) =>
+        result(await context.callBrowser('execute_proposal', args as Record<string, unknown>, signal)),
+    });
 
     add('open_drone_chat', {
       parameters: objectParameters({

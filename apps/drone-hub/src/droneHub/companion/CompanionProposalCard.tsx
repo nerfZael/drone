@@ -647,7 +647,7 @@ function ProposalActions({
           : execution?.ok
             ? 'Applied'
             : execution
-              ? 'Discard to retry'
+              ? 'Failed'
               : 'Apply proposal'}
       </UiButton>
     </>
@@ -668,6 +668,7 @@ export function CompanionProposalCard({
   execution,
   executionProgress = null,
   executing,
+  executionBlocked = false,
   companionStatus,
   droneNames = {},
   resolveDroneName,
@@ -681,6 +682,7 @@ export function CompanionProposalCard({
   execution: CompanionProposalExecution | null;
   executionProgress?: CompanionProposalExecutionProgress | null;
   executing: boolean;
+  executionBlocked?: boolean;
   companionStatus: CompanionStatus;
   droneNames?: Readonly<Record<string, string>>;
   resolveDroneName?(droneId: string): string | null;
@@ -699,7 +701,7 @@ export function CompanionProposalCard({
   );
   const completedCount = execution?.operations.filter((item) => item.status === 'completed').length ?? 0;
   const applyDisabled =
-    executing || companionBusy || proposal.operations.length === 0 || execution !== null;
+    executing || executionBlocked || companionBusy || proposal.operations.length === 0 || execution !== null;
   const status = historyDetails && execution?.ok
     ? { tone: 'success' as const, label: 'Applied' }
     : failureStatus(execution, completedCount);

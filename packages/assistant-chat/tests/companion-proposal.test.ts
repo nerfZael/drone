@@ -364,3 +364,23 @@ describe('Companion organization and side-chat proposals', () => {
     expect(calls).toEqual(['create', 'rename', 'move', 'assign', 'delete', 'fork']);
   });
 });
+
+test('interrupted executions preserve confirmed successes and their created drone IDs', async () => {
+  const { companionProposalInterruptedExecution } = await import('../src/companion-proposal');
+  const proposal = validateCompanionProposal({ version: 1, title: 'Setup', operations: [
+    { id: 'create', type: 'create_drone', prompt: 'Work' },
+    { id: 'message', type: 'send_message', droneId: '$create', message: 'Review' },
+    { id: 'later', type: 'send_message', droneId: '$create', message: 'Test' },
+  ] });
+  const completed = { id: 'create', type: 'create_drone' as const, status: 'completed' as const, result: { droneId: 'created-123' } };
+  expect(companionProposalInterruptedExecution(proposal, new Error('Connection ended'), {
+    activeOperationId: 'message', operations: [completed],
+  })).toEqual({ ok: false, operations: [completed,
+    { id: 'message', type: 'send_message', status: 'failed', error: 'Connection ended' },
+    { id: 'later', type: 'send_message', status: 'skipped' },
+  ] });
+  const successful = proposal.operations.map(operation => ({ id: operation.id, type: operation.type, status: 'completed' as const }));
+  expect(companionProposalInterruptedExecution(proposal, new Error('Late error'), {
+    activeOperationId: null, operations: successful,
+  })).toEqual({ ok: true, operations: successful });
+});

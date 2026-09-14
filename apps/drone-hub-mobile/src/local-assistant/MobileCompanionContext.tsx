@@ -5,17 +5,14 @@ import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
 import {
-  COMPANION_PROPOSAL_FORMAT,
-  COMPANION_PROPOSAL_PATH,
+  CompanionProposalStore,
+  type ProposalSummary,
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
   companionProposalApplyResult,
   waitForCompanionReply,
   LIVE_COMPANION_PROMPT_PREFIX,
-  EMPTY_COMPANION_PROPOSAL,
   executeCompanionBrowserTool,
-  parseCompanionProposalText,
-  serializeCompanionProposal,
   type CompanionBrowserToolName,
   type CompanionBrowserWorkspace,
   type CompanionClientTelemetry,
@@ -94,10 +91,15 @@ type MobileCompanionContextValue = {
   subscriptions: import('@drone/assistant-chat').PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
   contextUsage: CompanionContextUsage | null;
+  proposalHistory: Array<{ targetId: string; proposal: CompanionProposal; execution: CompanionProposalExecution }>;
+  proposals: ProposalSummary[];
+  selectedProposalId: string | null;
+  selectProposal(id: string): void;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalDefaultRepoPath: string | null;
   proposalExecuting: boolean;
+  selectedProposalExecuting: boolean;
   available: boolean;
   workspaceDeviceId: string;
   unavailableReason: string;
@@ -115,8 +117,8 @@ type MobileCompanionContextValue = {
   submitText(prompt: string): Promise<{ ok: true } | { ok: false; error: string }>;
   close(): Promise<void>;
   cancel(): Promise<void>;
-  executeProposal(): Promise<void>;
-  discardProposal(): void;
+  executeProposal(targetId?: string, baseRevision?: string): Promise<void>;
+  discardProposal(targetId?: string, baseRevision?: string): void;
   registerWorkspaceTarget(target: MobileCompanionWorkspaceTarget): () => void;
   registerEditorTarget(target: MobileCompanionEditorTarget): () => void;
 };
@@ -151,18 +153,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const focusedEditorIdRef = React.useRef<string | null>(null);
   const activeTargetDeviceIdRef = React.useRef('');
   const [targetRevision, setTargetRevision] = React.useState(0);
-  const [proposal, setProposal] = React.useState<CompanionProposal | null>(null);
-  const [proposalExecution, setProposalExecution] =
-    React.useState<CompanionProposalExecution | null>(null);
-  const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
-  const [proposalExecuting, setProposalExecuting] = React.useState(false);
-  const proposalRef = React.useRef<CompanionProposal | null>(null);
-  const proposalRevisionRef = React.useRef(0);
-  const proposalSessionRef = React.useRef<string | null>(null);
-  const proposalExecutingRef = React.useRef(false);
-  const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
-  const proposalExecutionContextRef = React.useRef<MobileCompanionProposalExecutionContext | null>(null);
-  const proposalExecutionGenerationRef = React.useRef(0);
+  const [proposalActionError, setProposalActionError] = React.useState('');
+  const [proposalStore] = React.useState(() => new CompanionProposalStore<MobileCompanionProposalExecutionContext>(Crypto.randomUUID));
+  const proposalStoreVersion = React.useSyncExternalStore(proposalStore.subscribe, proposalStore.getSnapshot, proposalStore.getSnapshot);
+  const selectedProposal = proposalStore.selected;
+  const proposal = selectedProposal?.visible ? selectedProposal.proposal : null;
+  const proposalExecution = selectedProposal?.execution ?? null;
+  const proposalDefaultRepoPath = selectedProposal?.context?.defaultRepoPath ?? null;
+  const proposalExecuting = Boolean(proposalStore.executingId);
+  const proposalExecutingRef = React.useMemo(() => ({ get current() { return Boolean(proposalStore.executingId); } }), [proposalStore]);
 
   const registerWorkspaceTarget = React.useCallback((target: MobileCompanionWorkspaceTarget) => {
     workspaceTargetRef.current = target;
@@ -242,151 +241,52 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     return eligible[eligible.length - 1]!;
   }, []);
 
-  const readProposal = React.useCallback(() => ({
-    targetId: COMPANION_PROPOSAL_TARGET_ID,
-    path: COMPANION_PROPOSAL_PATH,
-    content: serializeCompanionProposal(proposalRef.current ?? EMPTY_COMPANION_PROPOSAL),
-    revision: String(proposalRevisionRef.current),
-    mode: 'edit' as const,
-    format: COMPANION_PROPOSAL_FORMAT,
-  }), []);
-
-  const applyProposal = React.useCallback((
-    targetId: string,
-    baseRevision: string,
-    content: string,
-  ) => {
-    if (proposalExecutingRef.current) throw new Error('PROPOSAL_EXECUTION_IN_PROGRESS');
-    if (proposalExecutionRef.current) throw new Error('PROPOSAL_ALREADY_EXECUTED');
-    if (targetId !== COMPANION_PROPOSAL_TARGET_ID) throw new Error('STALE_PROPOSAL_TARGET');
-    if (baseRevision !== String(proposalRevisionRef.current)) {
-      throw new Error('STALE_PROPOSAL_REVISION');
+  const proposalContext = (): MobileCompanionProposalExecutionContext => {
+    const target = workspaceTargetRef.current;
+    if (!target) throw new Error('NO_ACTIVE_MOBILE_CONTEXT');
+    const appContext = target.getAppContext();
+    return { defaultRepoPath: typeof appContext?.activeRepoPath === 'string' ? appContext.activeRepoPath : '', targetDeviceId: target.targetDeviceId };
+  };
+  const readProposal = React.useCallback((targetId?: string) => proposalStore.read(targetId), [proposalStore]);
+  const applyProposal = React.useCallback((targetId: string, baseRevision: string, content: string) =>
+    proposalStore.patch(targetId, baseRevision, content, () => proposalContext(), controller.getSessionId()), [controller, proposalStore]);
+  const discardProposal = React.useCallback((targetId?: string, baseRevision?: string) => {
+    const id = targetId ?? proposalStore.selectedId;
+    try {
+      if (id) proposalStore.discard(id, baseRevision ?? proposalStore.read(id).revision);
+      setProposalActionError('');
+    } catch (error) {
+      setProposalActionError(error instanceof Error ? error.message : String(error));
     }
-    const next = parseCompanionProposalText(content);
-    if (!proposalRef.current) {
-      const appContext = workspaceTargetRef.current?.getAppContext();
-      const defaultRepoPath = typeof appContext?.activeRepoPath === 'string'
-        ? appContext.activeRepoPath
-        : '';
-      const targetDeviceId = workspaceTargetRef.current?.targetDeviceId;
-      if (!targetDeviceId) throw new Error('NO_ACTIVE_MOBILE_CONTEXT');
-      proposalExecutionContextRef.current = { defaultRepoPath, targetDeviceId };
-      setProposalDefaultRepoPath(defaultRepoPath);
-    }
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = next;
-    proposalSessionRef.current = controller.getSessionId();
-    setProposal(next);
-    return {
-      ok: true as const,
-      revision: String(proposalRevisionRef.current),
-      operationCount: next.operations.length,
-    };
-  }, [controller]);
-
-  const discardProposal = React.useCallback(() => {
-    if (proposalExecutingRef.current) return;
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = null;
-    proposalExecutionRef.current = null;
-    proposalExecutionContextRef.current = null;
-    setProposal(null);
-    setProposalExecution(null);
-    setProposalDefaultRepoPath(null);
-  }, []);
-
+  }, [proposalStore]);
   const executeProposal = React.useCallback(async (options?: {
     autoApproved?: boolean;
     returnResultToTool?: boolean;
+    targetId?: string;
+    baseRevision?: string;
   }): Promise<CompanionProposalExecution | undefined> => {
-    const current = proposalRef.current;
-    const appliedRevision = String(proposalRevisionRef.current);
-    const proposalSessionId = proposalSessionRef.current;
-    const target = workspaceTargetRef.current;
-    const executionContext = proposalExecutionContextRef.current;
-    if (!target || !current || !executionContext || current.operations.length === 0 ||
-      proposalExecutingRef.current || proposalExecutionRef.current) return;
-    if (!target.reachable || target.targetDeviceId !== executionContext.targetDeviceId) {
-      const execution: CompanionProposalExecution = {
-        ok: false,
-        operations: current.operations.map((operation, index) => index === 0
-          ? {
-              id: operation.id,
-              type: operation.type,
-              status: 'failed',
-              error: target.targetDeviceId !== executionContext.targetDeviceId ? 'PROPOSAL_TARGET_CHANGED' : 'TARGET_DEVICE_OFFLINE',
-            }
-          : { id: operation.id, type: operation.type, status: 'skipped' }),
-      };
-      proposalExecutionRef.current = execution;
-      setProposalExecution(execution);
-      if (!options?.returnResultToTool) {
-        await controller.submitProposalResult(
-          companionProposalApplyResult(current, execution, options?.autoApproved === true, appliedRevision),
-          proposalSessionId,
-        );
-      }
-      return execution;
-    }
-    const executionGeneration = proposalExecutionGenerationRef.current + 1;
-    proposalExecutionGenerationRef.current = executionGeneration;
-    proposalExecutingRef.current = true;
-    setProposalExecuting(true);
-    setProposalExecution(null);
-    let completedExecution: CompanionProposalExecution;
+    const targetId = options?.targetId ?? proposalStore.selectedId;
+    if (!targetId) return;
+    const revision = options?.baseRevision ?? proposalStore.read(targetId).revision;
+    const entry = proposalStore.begin(targetId, revision);
+    const autoApproved = options?.autoApproved === true;
+    let execution: CompanionProposalExecution;
     try {
-      completedExecution = await target.executeProposal(current, executionContext);
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        proposalExecutionRef.current = completedExecution;
-        setProposalExecution(completedExecution);
+      const target = workspaceTargetRef.current;
+      if (!target || !target.reachable || target.targetDeviceId !== entry.context!.targetDeviceId) {
+        throw new Error(target?.targetDeviceId !== entry.context!.targetDeviceId ? 'PROPOSAL_TARGET_CHANGED' : 'TARGET_DEVICE_OFFLINE');
       }
-    } catch (executionError) {
-      completedExecution = {
-        ok: false,
-        operations: current.operations.map((operation, index) => index === 0
-          ? {
-              id: operation.id,
-              type: operation.type,
-              status: 'failed',
-              error: executionError instanceof Error
-                ? executionError.message
-                : String(executionError),
-            }
-          : { id: operation.id, type: operation.type, status: 'skipped' }),
-      };
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        proposalExecutionRef.current = completedExecution;
-        setProposalExecution(completedExecution);
-      }
-    } finally {
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        proposalExecutingRef.current = false;
-        setProposalExecuting(false);
-      }
+      execution = await target.executeProposal(entry.proposal, entry.context!);
+    } catch (error) {
+      execution = { ok: false, operations: entry.proposal.operations.map((operation, index) => index === 0
+        ? { id: operation.id, type: operation.type, status: 'failed', error: error instanceof Error ? error.message : String(error) }
+        : { id: operation.id, type: operation.type, status: 'skipped' }) };
     }
-    if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
-    // Successful applications are no longer an editable draft. Allow the next
-    // tool call to create a new proposal, just as on desktop.
-    if (completedExecution!.ok) {
-      proposalRevisionRef.current += 1;
-      proposalRef.current = null;
-      proposalExecutionRef.current = null;
-      proposalExecutionContextRef.current = null;
-      setProposal(null);
-      setProposalExecution(null);
-      setProposalDefaultRepoPath(null);
-    }
-    const applyResult = companionProposalApplyResult(
-      current,
-      completedExecution!,
-      options?.autoApproved === true,
-      appliedRevision,
-    );
-    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult, proposalSessionId);
-    return completedExecution!;
-  }, [controller]);
+    if (!proposalStore.finish(entry, execution, autoApproved)) return undefined;
+    const result = companionProposalApplyResult(entry.proposal, execution, autoApproved, revision, entry.id);
+    if (!options?.returnResultToTool) await controller.submitProposalResult(result, entry.sessionId);
+    return execution;
+  }, [controller, proposalStore]);
 
   const executeMobileTool = React.useCallback(
     async (
@@ -395,19 +295,22 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       args: Record<string, unknown>,
     ) => {
       if (workspaceTargetRef.current?.targetDeviceId !== expectedTargetDeviceId) throw new Error('STALE_MOBILE_CONTEXT');
-      if (tool === 'read_companion_proposal') return readProposal();
-      if (tool === 'apply_companion_proposal_patch') {
-        const proposalUpdate = applyProposal(
-          String(args.targetId ?? ''),
-          String(args.baseRevision ?? ''),
-          String(args.content ?? ''),
-        );
-        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) return proposalUpdate;
-        const current = proposalRef.current;
-        if (!current?.operations.length) return proposalUpdate;
-        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
+      if (tool === 'list_proposals') return { proposals: proposalStore.list() };
+      if (tool === 'create_proposal') return proposalStore.create(proposalContext(), controller.getSessionId(), typeof args.title === 'string' ? args.title : undefined);
+      if (tool === 'read_proposal') return readProposal(typeof args.targetId === 'string' ? args.targetId : undefined);
+      if (tool === 'discard_proposal') return proposalStore.discard(String(args.targetId ?? ''), String(args.baseRevision ?? ''));
+      if (tool === 'apply_proposal_patch') return applyProposal(String(args.targetId ?? ''), String(args.baseRevision ?? ''), String(args.content ?? ''));
+      if (tool === 'execute_proposal') {
+        const targetId = String(args.targetId ?? '');
+        const revision = String(args.baseRevision ?? '');
+        const entry = proposalStore.ready(targetId, revision);
+        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) {
+          proposalStore.select(targetId);
+          return { applied: false, status: 'pending_review', targetId, revision, operationCount: entry.proposal.operations.length };
+        }
+        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true, targetId, baseRevision: revision });
         if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
-        return companionProposalApplyResult(current, execution, true, proposalUpdate.revision);
+        return companionProposalApplyResult(entry.proposal, execution, true, revision, targetId);
       }
       const resolveTarget = () => {
         const activeTarget = workspaceTargetRef.current;
@@ -447,16 +350,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     activeTargetDeviceIdRef.current = '';
     await controller.close();
     await voice.discardRecording('companion');
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = null;
-    proposalExecutionRef.current = null;
-    proposalExecutionContextRef.current = null;
-    setProposal(null);
-    setProposalExecution(null);
-    setProposalDefaultRepoPath(null);
-    proposalExecutingRef.current = false;
-    setProposalExecuting(false);
+    proposalStore.clear();
+    setProposalActionError('');
+
   }, [controller, live.reset, voice.discardRecording]);
 
   React.useEffect(() => {
@@ -761,8 +657,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
 
   React.useEffect(
     () => () => {
-      proposalExecutionGenerationRef.current += 1;
-      proposalExecutingRef.current = false;
+      proposalStore.clear();
       void controller.close();
       void voice.discardRecording('companion');
     },
@@ -775,16 +670,10 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 
-  React.useEffect(() => {
-    if (!autoApproveSettings.enabled || autoApproveSettings.loading || effectiveStatus !== 'completed' ||
-      !proposal?.operations.length || proposalExecuting || proposalExecution ||
-      proposalExecutionContextRef.current?.targetDeviceId !== target?.targetDeviceId) return;
-    void executeProposal({ autoApproved: true });
-  }, [autoApproveSettings.enabled, autoApproveSettings.loading, effectiveStatus, proposal, proposalExecuting, proposalExecution, target?.targetDeviceId, executeProposal]);
-
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
+      error: proposalActionError || state.error,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       live,
       checkingVoiceMode,
@@ -801,10 +690,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       setComposerFocused,
       status: effectiveStatus,
       durationMillis: effectiveDurationMillis,
+      proposalHistory: proposalStore.history.map(item => ({ targetId: item.entry.id, proposal: item.entry.proposal, execution: item.execution })),
+      proposals: proposalStore.list().filter(item => ['draft', 'executing', 'failed'].includes(item.status)),
+      selectedProposalId: proposalStore.selectedId,
+      selectProposal: (id: string) => proposalStore.select(id),
       proposal,
       proposalExecution,
       proposalDefaultRepoPath,
       proposalExecuting,
+      selectedProposalExecuting: Boolean(proposalStore.executingId && proposalStore.selectedId === proposalStore.executingId),
       available,
       workspaceDeviceId: activeTargetDeviceIdRef.current || target?.targetDeviceId || '',
       unavailableReason,
@@ -818,12 +712,20 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       submitText,
       close,
       cancel,
-      executeProposal: async () => { await executeProposal(); },
+      executeProposal: async (targetId?: string, baseRevision?: string) => {
+        try {
+          await executeProposal({ targetId, baseRevision });
+          setProposalActionError('');
+        } catch (error) {
+          setProposalActionError(error instanceof Error ? error.message : String(error));
+        }
+      },
       discardProposal,
       registerWorkspaceTarget,
       registerEditorTarget,
     }),
     [
+      proposalStore, proposalStoreVersion, proposalActionError,
       live, checkingVoiceMode, headsetShortcut, autoApproveSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
       overlayOpen, overlayInset, reportOverlayInset, composerFocused,
       voice.session,

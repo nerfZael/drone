@@ -38,3 +38,5 @@ export { waitForCompanionReply } from './waitForCompanionReply';
 export { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from './live-audio-buffer';
 
 export { connectCompanionLiveReplies } from './companion-live-replies.js';
+
+export * from './companion-proposal-store.js';

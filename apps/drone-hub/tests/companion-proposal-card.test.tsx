@@ -115,7 +115,8 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Apply failed');
     expect(html).toContain('Name already exists');
     expect(html).toContain('Not run');
-    expect(html).toContain('Discard to retry');
+    expect(html).toContain('>Failed</span>');
+    expect(html).not.toContain('Discard to retry');
     expect(html).toContain('disabled');
   });
 
@@ -455,4 +456,19 @@ test('review identifies side forks, group destinations, moved chats and preserve
   expect(html).toContain('Reviewers');
   expect(html).toContain('keeping its chats');
   expect(html).toContain('Nested group folders are removed');
+});
+
+test('another running proposal disables Apply without labeling this draft as applying or blocking discard', () => {
+  const html = renderToStaticMarkup(<CompanionProposalCard
+    proposal={{ version: 1, title: 'Waiting draft', operations: [{ id: 'group', type: 'create_group', name: 'Later' }] }}
+    defaultRepoPath="/repo" execution={null} executing={false} executionBlocked={true}
+    companionStatus="completed" onExecute={() => {}} onDiscard={() => {}}
+  />);
+  const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [];
+  const apply = buttons.find(button => button.includes('Apply proposal')) ?? '';
+  expect(apply).toMatch(/<button[^>]* disabled=""/);
+  const discard = buttons.find(button => button.includes('>Discard<')) ?? '';
+  expect(discard).toContain('Discard');
+  expect(discard).not.toMatch(/<button[^>]* disabled=""/);
+  expect(html).not.toContain('Applying');
 });

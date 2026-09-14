@@ -286,7 +286,7 @@ test('mobile refuses Live delegation while a proposal is being applied', async (
       } });
     };
     await act(async () => {
-      emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_companion_proposal_patch', args: {
+      emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_proposal_patch', args: {
         targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: '0',
         content: JSON.stringify({ version: 1, title: 'Create review group', operations: [{ id: 'group', type: 'create_group', name: 'Review' }] }),
       } });
@@ -341,12 +341,14 @@ for (const status of ['completed', 'error', 'cancelled'] as const) {
         } });
       };
       await act(async () => {
-        emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_companion_proposal_patch', args: {
+        emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_proposal_patch', args: {
           targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: '0',
           content: JSON.stringify({ version: 1, title: 'Create review group', operations: [{ id: 'group', type: 'create_group', name: 'Review' }] }),
         } });
         await tick();
       });
+      expect(executions).toBe(0);
+      await executeProposalTool(request, 'execute', '1');
       expect(executions).toBe(1);
       await act(async () => { emit({ type: 'status', status }); await tick(); });
       expect(executions).toBe(1);
@@ -399,9 +401,12 @@ test('mobile uses current approval settings and permits successive inline propos
     expect(executions).toBe(0);
     await act(async () => { await h.context().autoApproveSettings.save(true); });
     await proposalTool(request, 'apply-first', '1', 'First revised');
+    expect(executions).toBe(0);
+    await executeProposalTool(request, 'execute-first', '2');
     expect(executions).toBe(1);
     expect(h.context().proposal).toBeNull();
     await proposalTool(request, 'apply-second', '3', 'Second');
+    await executeProposalTool(request, 'execute-second', '4');
     expect(executions).toBe(2);
     expect(calls.filter((call) => call.operation === 'proposal.result')).toEqual([]);
     expect(calls.filter((call) => call.operation === 'tool.result').at(-1)!.payload.result)
@@ -417,7 +422,7 @@ function emitRun(request: any, payload: any) {
 
 async function proposalTool(request: any, callId: string, revision: string, name: string) {
   await act(async () => {
-    emitRun(request, { type: 'tool_call', generation: 1, callId, tool: 'apply_companion_proposal_patch', args: {
+    emitRun(request, { type: 'tool_call', generation: 1, callId, tool: 'apply_proposal_patch', args: {
       targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: revision,
       content: JSON.stringify({ version: 1, title: 'Create group', operations: [{ id: 'group', type: 'create_group', name }] }),
     } });
@@ -694,4 +699,122 @@ test('cancelling while the Hub preference response is pending cannot start audio
     expect(live.status).toBe('idle');
     expect(recorded).toBe(0);
   } finally { mesh.request = originalRequest; await h.cleanup(); }
+});
+
+async function executeProposalTool(request: any, callId: string, revision: string, targetId = COMPANION_PROPOSAL_TARGET_ID) {
+  await act(async () => {
+    emitRun(request, { type: 'tool_call', generation: 1, callId, tool: 'execute_proposal', args: {
+      targetId, baseRevision: revision,
+    } });
+    await tick();
+  });
+}
+
+test('mobile keeps drafts inert across completed turns and approval toggles, and checks execution revisions', async () => {
+  let executions = 0;
+  const h = await harness(false, async () => { executions++; return { ok: true, operations: [] }; });
+  try {
+    await act(async () => { await h.context().submitText('Draft a group'); });
+    const request = calls.find((call) => call.operation === 'run.start')!.payload;
+    await proposalTool(request, 'draft', '0', 'First');
+    await executeProposalTool(request, 'review', '1');
+    expect(calls.filter((call) => call.operation === 'tool.result').at(-1)!.payload.result)
+      .toMatchObject({ applied: false, status: 'pending_review', revision: '1' });
+    expect(executions).toBe(0);
+    await act(async () => { emitRun(request, { type: 'status', status: 'completed' }); await tick(); });
+    await act(async () => { await h.context().autoApproveSettings.save(true); await tick(); });
+    expect(executions).toBe(0);
+    await act(async () => { await h.context().submitText('Finish the group'); });
+    const next = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    await proposalTool(next, 'revise', '1', 'Final');
+    await executeProposalTool(next, 'stale', '1');
+    expect(calls.filter((call) => call.operation === 'tool.result').at(-1)!.payload)
+      .toMatchObject({ ok: false, error: 'STALE_PROPOSAL_REVISION' });
+    await executeProposalTool(next, 'wrong-target', '2', 'wrong');
+    expect(executions).toBe(0);
+    await executeProposalTool(next, 'execute', '2');
+    expect(executions).toBe(1);
+  } finally { await h.cleanup(); }
+});
+
+test('mobile manages independent proposals and discards a failure without blocking another draft', async () => {
+  const executed: any[] = [];
+  const h = await harness(false, async proposal => {
+    executed.push(proposal);
+    return { ok: executed.length > 1, operations: proposal.operations.map(op => ({
+      id: op.id, type: op.type, status: executed.length > 1 ? 'completed' : 'failed',
+      ...(executed.length === 1 ? { error: 'Group already exists' } : {}),
+    })) };
+  }, true);
+  try {
+    await act(async () => { await h.context().submitText('Create two groups'); });
+    const request = calls.find(call => call.operation === 'run.start')!.payload;
+    let nextCall = 0;
+    const tool = async (name: string, args: any) => {
+      const callId = `multi-${++nextCall}`;
+      await act(async () => {
+        emitRun(request, { type: 'tool_call', generation: 1, callId, tool: name, args });
+        await tick();
+      });
+      return calls.filter(call => call.operation === 'tool.result').at(-1)!.payload;
+    };
+    const a = (await tool('create_proposal', { title: 'First' })).result;
+    const b = (await tool('create_proposal', { title: 'Second' })).result;
+    expect(a.targetId).not.toBe(b.targetId);
+    for (const [item, name] of [[a, 'First'], [b, 'Second']] as const) {
+      expect((await tool('apply_proposal_patch', { targetId: item.targetId, baseRevision: '0',
+        content: JSON.stringify({ version: 1, title: name, operations: [{ id: 'group', type: 'create_group', name }] }),
+      })).ok).toBe(true);
+    }
+    expect(h.context().proposals).toHaveLength(2);
+    expect(executed).toHaveLength(0);
+    const failed = await tool('execute_proposal', { targetId: a.targetId, baseRevision: '1' });
+    expect(failed.result).toMatchObject({ targetId: a.targetId, applied: true, execution: { ok: false } });
+    expect((await tool('discard_proposal', { targetId: a.targetId, baseRevision: '1' })).result.discarded).toBe(true);
+    expect(h.context().proposals.map(item => item.targetId)).toEqual([b.targetId]);
+    const applied = await tool('execute_proposal', { targetId: b.targetId, baseRevision: '1' });
+    expect(applied.result).toMatchObject({ targetId: b.targetId, applied: true, execution: { ok: true } });
+    expect(executed.map(proposal => proposal.title)).toEqual(['First', 'Second']);
+    expect(h.context().proposalHistory.map(item => item.execution.ok)).toEqual([false, true]);
+    expect(h.context().proposals).toEqual([]);
+  } finally { await h.cleanup(); }
+});
+
+test('manual review selects one proposal and agent discard needs no approval', async () => {
+  const executed: any[] = [];
+  const h = await harness(false, async proposal => {
+    executed.push(proposal);
+    return { ok: true, operations: proposal.operations.map(op => ({ id: op.id, type: op.type, status: 'completed' })) };
+  });
+  try {
+    await act(async () => { await h.context().submitText('Prepare two choices'); });
+    const request = calls.find(call => call.operation === 'run.start')!.payload;
+    let nextCall = 0;
+    const tool = async (name: string, args: any) => {
+      await act(async () => {
+        emitRun(request, { type: 'tool_call', generation: 1, callId: `choice-${++nextCall}`, tool: name, args });
+        await tick();
+      });
+      return calls.filter(call => call.operation === 'tool.result').at(-1)!.payload.result;
+    };
+    const drafts = [];
+    for (const title of ['Old request', 'New request']) {
+      const draft = await tool('create_proposal', { title });
+      await tool('apply_proposal_patch', { targetId: draft.targetId, baseRevision: '0',
+        content: JSON.stringify({ version: 1, title, operations: [{ id: 'group', type: 'create_group', name: title }] }),
+      });
+      drafts.push(draft);
+    }
+    expect(await tool('execute_proposal', { targetId: drafts[1].targetId, baseRevision: '1' }))
+      .toMatchObject({ applied: false, status: 'pending_review', targetId: drafts[1].targetId });
+    expect(await tool('discard_proposal', { targetId: drafts[0].targetId, baseRevision: '1' }))
+      .toMatchObject({ discarded: true });
+    expect(executed).toEqual([]);
+    expect(h.context().proposals).toHaveLength(1);
+    await act(async () => { emitRun(request, { type: 'status', status: 'completed' }); });
+    await act(async () => { await h.context().executeProposal(drafts[1].targetId, '1'); });
+    expect(executed.map(proposal => proposal.title)).toEqual(['New request']);
+    expect(calls.find(call => call.operation === 'proposal.result')!.payload.result)
+      .toMatchObject({ targetId: drafts[1].targetId, revision: '1', autoApproved: false });
+  } finally { await h.cleanup(); }
 });

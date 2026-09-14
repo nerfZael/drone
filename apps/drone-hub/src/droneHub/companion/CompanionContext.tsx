@@ -4,15 +4,13 @@ import React from 'react';
 import { createCompanionActionReporter, type CompanionActionNotification } from './companion-action-notifications';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import {
-  COMPANION_PROPOSAL_FORMAT,
-  COMPANION_PROPOSAL_PATH,
+  CompanionProposalStore,
+  type ProposalSummary,
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
   companionProposalApplyResult,
-  EMPTY_COMPANION_PROPOSAL,
+  companionProposalInterruptedExecution,
   executeCompanionBrowserTool,
-  parseCompanionProposalText,
-  serializeCompanionProposal,
   type CompanionBrowserToolName,
   type CompanionClientTelemetry,
   type CompanionProposal,
@@ -26,7 +24,6 @@ import {
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
 import {
-  shouldAutoExecuteCompanionProposal,
   shouldCancelCompanionRecordingWithEscape,
 } from './companion-shortcut';
 import { createCompanionWebSocketTransport } from './companion-websocket-transport';
@@ -37,6 +34,7 @@ import { useCompanionWorkspace, type CapturedCompanionWorkspace } from './Compan
 
 export type CompanionProposalHistoryEntry = {
   id: string;
+  targetId?: string;
   proposal: CompanionProposal;
   execution: CompanionProposalExecution;
   defaultRepoPath: string;
@@ -63,12 +61,16 @@ type CompanionContextValue = {
   subscriptions: import('@drone/assistant-chat').PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
   contextUsage: CompanionContextUsage | null;
+  proposals: ProposalSummary[];
+  selectedProposalId: string | null;
+  selectProposal(id: string): void;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalExecutionProgress: CompanionProposalExecutionProgress | null;
   proposalDroneNames: Readonly<Record<string, string>>;
   proposalDefaultRepoPath: string | null;
   proposalExecuting: boolean;
+  selectedProposalExecuting: boolean;
   autoApprove: boolean;
   proposalHistory: CompanionProposalHistoryEntry[];
   actionNotifications: CompanionActionNotification[];
@@ -82,8 +84,8 @@ type CompanionContextValue = {
   toggleRecordingPause(): void;
   discardRecording(): Promise<void>;
   close(): Promise<void>;
-  executeProposal(): Promise<void>;
-  discardProposal(): void;
+  executeProposal(targetId?: string, baseRevision?: string): Promise<void>;
+  discardProposal(targetId?: string, baseRevision?: string): void;
   toggleAutoApprove(): void;
 };
 
@@ -109,15 +111,17 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     controller.getSnapshot,
     controller.getSnapshot,
   );
-  const [proposal, setProposal] = React.useState<CompanionProposal | null>(null);
-  const [proposalExecution, setProposalExecution] =
-    React.useState<CompanionProposalExecution | null>(null);
-  const [proposalExecutionProgress, setProposalExecutionProgress] =
-    React.useState<CompanionProposalExecutionProgress | null>(null);
-  const [proposalDroneNames, setProposalDroneNames] =
-    React.useState<Readonly<Record<string, string>>>({});
-  const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
-  const [proposalExecuting, setProposalExecuting] = React.useState(false);
+  const [proposalActionError, setProposalActionError] = React.useState('');
+  const [proposalStore] = React.useState(() => new CompanionProposalStore<CompanionProposalExecutionContext>(newId));
+  const proposalStoreVersion = React.useSyncExternalStore(proposalStore.subscribe, proposalStore.getSnapshot, proposalStore.getSnapshot);
+  const selectedProposal = proposalStore.selected;
+  const proposal = selectedProposal?.visible ? selectedProposal.proposal : null;
+  const proposalExecution = selectedProposal?.execution ?? null;
+  const proposalDefaultRepoPath = selectedProposal?.context?.defaultRepoPath ?? null;
+  const proposalExecuting = Boolean(proposalStore.executingId);
+  const proposalExecutingRef = React.useMemo(() => ({ get current() { return Boolean(proposalStore.executingId); } }), [proposalStore]);
+  const [proposalExecutionProgress, setProposalExecutionProgress] = React.useState<CompanionProposalExecutionProgress | null>(null);
+  const [proposalDroneNames, setProposalDroneNames] = React.useState<Readonly<Record<string, string>>>({});
   const autoApproveSettings = useCompanionAutoApprove();
   const autoApprove = autoApproveSettings.enabled;
   const autoApproveSettingsRef = React.useRef(autoApproveSettings);
@@ -127,13 +131,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setActionNotifications((items) => items.filter((item) => item.id !== id));
   }, []);
   const [proposalHistory, setProposalHistory] = React.useState<CompanionProposalHistoryEntry[]>([]);
-  const proposalExecutingRef = React.useRef(false);
-  const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
-  const proposalExecutionContextRef = React.useRef<CompanionProposalExecutionContext | null>(null);
-  const proposalRef = React.useRef<CompanionProposal | null>(null);
-  const proposalRevisionRef = React.useRef(0);
-  const proposalSessionRef = React.useRef<string | null>(null);
-  const proposalExecutionGenerationRef = React.useRef(0);
   const voiceSubmissionGenerationRef = React.useRef(0);
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
   const textSubmissionGenerationRef = React.useRef(0);
@@ -159,20 +156,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     recordingWorkspaceRef.current = null;
     await controller.close();
     await voice.discardRecording();
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = null;
-    proposalExecutionRef.current = null;
-    proposalExecutionContextRef.current = null;
-    setProposal(null);
-    setProposalExecution(null);
-    setProposalExecutionProgress(null);
-    setProposalDroneNames({});
-    setProposalDefaultRepoPath(null);
+    proposalStore.clear();
+    setProposalActionError('');
     setProposalHistory([]);
     setActionNotifications([]);
-    proposalExecutingRef.current = false;
-    setProposalExecuting(false);
+    setProposalExecutionProgress(null);
+    setProposalDroneNames({});
   }, [controller, voice.discardRecording, live.reset]);
 
   const stop = React.useCallback(() => {
@@ -194,64 +183,22 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [controller, voice.discardRecording]);
   discardVoiceRecordingRef.current = discardRecording;
 
-  const readProposal = React.useCallback(() => ({
-    targetId: COMPANION_PROPOSAL_TARGET_ID,
-    path: COMPANION_PROPOSAL_PATH,
-    content: serializeCompanionProposal(proposalRef.current ?? EMPTY_COMPANION_PROPOSAL),
-    revision: String(proposalRevisionRef.current),
-    mode: 'edit' as const,
-    format: COMPANION_PROPOSAL_FORMAT,
-  }), []);
-
-  const applyProposal = React.useCallback((
-    targetId: string,
-    baseRevision: string,
-    content: string,
-    capturedWorkspace: CapturedCompanionWorkspace | null,
-  ) => {
-    if (proposalExecutingRef.current) throw new Error('PROPOSAL_EXECUTION_IN_PROGRESS');
-    if (proposalExecutionRef.current) throw new Error('PROPOSAL_ALREADY_EXECUTED');
-    if (targetId !== COMPANION_PROPOSAL_TARGET_ID) throw new Error('STALE_PROPOSAL_TARGET');
-    if (baseRevision !== String(proposalRevisionRef.current)) {
-      throw new Error('STALE_PROPOSAL_REVISION');
+  const proposalContext = (capturedWorkspace: CapturedCompanionWorkspace | null): CompanionProposalExecutionContext => {
+    const appContext = capturedWorkspace?.getAppContext();
+    return { defaultRepoPath: typeof appContext?.activeRepoPath === 'string' ? appContext.activeRepoPath : '' };
+  };
+  const readProposal = React.useCallback((targetId?: string) => proposalStore.read(targetId), [proposalStore]);
+  const applyProposal = React.useCallback((targetId: string, baseRevision: string, content: string, capturedWorkspace: CapturedCompanionWorkspace | null) =>
+    proposalStore.patch(targetId, baseRevision, content, () => proposalContext(capturedWorkspace), controller.getSessionId()), [controller, proposalStore]);
+  const discardProposal = React.useCallback((targetId?: string, baseRevision?: string) => {
+    const id = targetId ?? proposalStore.selectedId;
+    try {
+      if (id) proposalStore.discard(id, baseRevision ?? proposalStore.read(id).revision);
+      setProposalActionError('');
+    } catch (error) {
+      setProposalActionError(error instanceof Error ? error.message : String(error));
     }
-    const next = parseCompanionProposalText(content);
-    if (!proposalRef.current) {
-      const appContext = capturedWorkspace?.getAppContext();
-      const defaultRepoPath = typeof appContext?.activeRepoPath === 'string'
-        ? appContext.activeRepoPath
-        : '';
-      proposalExecutionContextRef.current = { defaultRepoPath };
-      setProposalDefaultRepoPath(defaultRepoPath);
-    }
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = next;
-    proposalSessionRef.current = controller.getSessionId();
-    setProposal(next);
-    setProposalExecutionProgress(null);
-    setProposalDroneNames({});
-    return {
-      ok: true as const,
-      revision: String(proposalRevisionRef.current),
-      operationCount: next.operations.length,
-    };
-  }, [controller]);
-
-  const discardProposal = React.useCallback(() => {
-    if (proposalExecutingRef.current) return;
-    proposalRevisionRef.current += 1;
-    proposalExecutionGenerationRef.current += 1;
-    proposalRef.current = null;
-    proposalExecutionRef.current = null;
-    proposalExecutionContextRef.current = null;
-    setProposal(null);
-    setProposalExecution(null);
-    setProposalExecutionProgress(null);
-    setProposalDroneNames({});
-    setProposalDefaultRepoPath(null);
-  }, []);
-
+  }, [proposalStore]);
   const toggleAutoApprove = React.useCallback(() => {
     setActionNotifications([]);
     void autoApproveSettings.toggle();
@@ -260,88 +207,51 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const executeProposal = React.useCallback(async (options?: {
     autoApproved?: boolean;
     returnResultToTool?: boolean;
+    targetId?: string;
+    baseRevision?: string;
   }): Promise<CompanionProposalExecution | undefined> => {
-    const current = proposalRef.current;
-    const appliedRevision = String(proposalRevisionRef.current);
-    const proposalSessionId = proposalSessionRef.current;
-    const executionContext = proposalExecutionContextRef.current;
-    if (!workspace || !current || !executionContext || current.operations.length === 0 ||
-      proposalExecutingRef.current || proposalExecutionRef.current) return;
-    const executionGeneration = proposalExecutionGenerationRef.current + 1;
-    proposalExecutionGenerationRef.current = executionGeneration;
-    proposalExecutingRef.current = true;
-    const startedAt = Date.now();
+    const targetId = options?.targetId ?? proposalStore.selectedId;
+    if (!targetId) return;
+    const revision = options?.baseRevision ?? proposalStore.read(targetId).revision;
+    const entry = proposalStore.begin(targetId, revision);
     const autoApproved = options?.autoApproved === true;
-    setProposalExecuting(true);
-    setProposalExecution(null);
-    setProposalExecutionProgress({ activeOperationId: null, operations: [] });
-    const droneNames = Object.fromEntries(
-      current.operations.flatMap((operation) => {
-        if (!('droneId' in operation) || operation.droneId.startsWith('$')) return [];
-        return [[operation.droneId, workspace.resolveDroneName(operation.droneId) || operation.droneId]];
-      }),
-    );
+    const startedAt = Date.now();
+    let droneNames: Record<string, string> = {};
     setProposalDroneNames(droneNames);
-    const reportActions = createCompanionActionReporter(current, droneNames, (notifications) => {
-      if (autoApproved) setActionNotifications((items) => [...items, ...notifications].slice(-3));
-    });
-    let completedExecution: CompanionProposalExecution;
+    setProposalExecutionProgress({ activeOperationId: null, operations: [] });
+    let reportActions: ReturnType<typeof createCompanionActionReporter> | null = null;
+    let execution: CompanionProposalExecution;
+    let latestProgress: CompanionProposalExecutionProgress | null = null;
     try {
-      completedExecution = await workspace.executeProposal(current, executionContext, (progress) => {
-        if (proposalExecutionGenerationRef.current === executionGeneration) {
+      droneNames = Object.fromEntries(entry.proposal.operations.flatMap(operation =>
+        'droneId' in operation && !operation.droneId.startsWith('$')
+          ? [[operation.droneId, workspace?.resolveDroneName(operation.droneId) || operation.droneId]] : []));
+      setProposalDroneNames(droneNames);
+      reportActions = createCompanionActionReporter(entry.proposal, droneNames, notifications => {
+        if (autoApproved) setActionNotifications(items => [...items, ...notifications].slice(-3));
+      });
+      if (!workspace) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
+      execution = await workspace.executeProposal(entry.proposal, entry.context!, (progress) => {
+        if (proposalStore.executingId === entry.id) {
+          latestProgress = progress;
           setProposalExecutionProgress(progress);
-          reportActions(progress.operations);
+          reportActions?.(progress.operations);
         }
       });
-    } catch (executionError) {
-      completedExecution = {
-        ok: false,
-        operations: current.operations.map((operation, index) => index === 0
-          ? {
-              id: operation.id,
-              type: operation.type,
-              status: 'failed',
-              error: executionError instanceof Error
-                ? executionError.message
-                : String(executionError),
-            }
-          : { id: operation.id, type: operation.type, status: 'skipped' }),
-      };
-    } finally {
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        reportActions(completedExecution!.operations);
-        proposalExecutionRef.current = completedExecution!;
-        setProposalExecution(completedExecution!);
-        setProposalExecutionProgress(null);
-        setProposalHistory((history) => [...history, {
-          id: newId(),
-          proposal: current,
-          execution: completedExecution!,
-          defaultRepoPath: executionContext.defaultRepoPath,
-          droneNames,
-          startedAt,
-          completedAt: Date.now(),
-          autoApproved,
-        }]);
-        if (completedExecution!.ok) {
-          proposalRevisionRef.current += 1;
-          proposalRef.current = null;
-          proposalExecutionRef.current = null;
-          proposalExecutionContextRef.current = null;
-          setProposal(null);
-          setProposalExecution(null);
-          setProposalDroneNames({});
-          setProposalDefaultRepoPath(null);
-        }
-        proposalExecutingRef.current = false;
-        setProposalExecuting(false);
-      }
+    } catch (error) {
+      execution = companionProposalInterruptedExecution(entry.proposal, error, latestProgress);
     }
-    if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
-    const applyResult = companionProposalApplyResult(current, completedExecution!, autoApproved, appliedRevision);
-    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult, proposalSessionId);
-    return completedExecution!;
-  }, [controller, workspace]);
+    if (!proposalStore.finish(entry, execution, autoApproved)) return undefined;
+    reportActions?.(execution.operations);
+    setProposalExecutionProgress(null);
+    setProposalHistory(history => [...history, {
+      id: newId(), targetId: entry.id, proposal: entry.proposal, execution, defaultRepoPath: entry.context!.defaultRepoPath,
+      droneNames, startedAt, completedAt: Date.now(), autoApproved,
+    }]);
+    const result = companionProposalApplyResult(entry.proposal, execution, autoApproved, revision, entry.id);
+    if (!options?.returnResultToTool) await controller.submitProposalResult(result, entry.sessionId);
+    return execution;
+  }, [controller, proposalStore, workspace]);
 
   React.useLayoutEffect(() => {
     const cancelOnEscape = (event: KeyboardEvent) => {
@@ -367,8 +277,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(
     () => () => {
-      proposalExecutionGenerationRef.current += 1;
-      proposalExecutingRef.current = false;
+      proposalStore.clear();
     },
     [],
   );
@@ -386,20 +295,22 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           String(args.targetId ?? ''), String(args.baseRevision ?? ''), String(args.content ?? ''),
         );
       }
-      if (tool === 'read_companion_proposal') return readProposal();
-      if (tool === 'apply_companion_proposal_patch') {
-        const proposalUpdate = applyProposal(
-          String(args.targetId ?? ''),
-          String(args.baseRevision ?? ''),
-          String(args.content ?? ''),
-          capturedWorkspace,
-        );
-        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) return proposalUpdate;
-        const current = proposalRef.current;
-        if (!current?.operations.length) return proposalUpdate;
-        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
+      if (tool === 'list_proposals') return { proposals: proposalStore.list() };
+      if (tool === 'create_proposal') return proposalStore.create(proposalContext(capturedWorkspace), controller.getSessionId(), typeof args.title === 'string' ? args.title : undefined);
+      if (tool === 'read_proposal') return readProposal(typeof args.targetId === 'string' ? args.targetId : undefined);
+      if (tool === 'discard_proposal') return proposalStore.discard(String(args.targetId ?? ''), String(args.baseRevision ?? ''));
+      if (tool === 'apply_proposal_patch') return applyProposal(String(args.targetId ?? ''), String(args.baseRevision ?? ''), String(args.content ?? ''), capturedWorkspace);
+      if (tool === 'execute_proposal') {
+        const targetId = String(args.targetId ?? '');
+        const revision = String(args.baseRevision ?? '');
+        const entry = proposalStore.ready(targetId, revision);
+        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) {
+          proposalStore.select(targetId);
+          return { applied: false, status: 'pending_review', targetId, revision, operationCount: entry.proposal.operations.length };
+        }
+        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true, targetId, baseRevision: revision });
         if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
-        return companionProposalApplyResult(current, execution, true, proposalUpdate.revision);
+        return companionProposalApplyResult(entry.proposal, execution, true, revision, targetId);
       }
       if (!capturedWorkspace) {
         if (tool === 'read_active_composer' || tool === 'apply_composer_patch') {
@@ -571,42 +482,27 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       : live.status === 'error' && state.status === 'idle' ? 'error'
       : state.status;
 
-  React.useEffect(() => {
-    if (!proposal || !shouldAutoExecuteCompanionProposal({
-      enabled: autoApprove,
-      status: effectiveStatus,
-      operationCount: proposal.operations.length,
-      hasExecutionContext: proposalDefaultRepoPath !== null,
-      executing: proposalExecuting,
-      executed: proposalExecution !== null,
-    })) return;
-    void executeProposal({ autoApproved: true });
-  }, [
-    autoApprove,
-    effectiveStatus,
-    executeProposal,
-    proposal,
-    proposalDefaultRepoPath,
-    proposalExecution,
-    proposalExecuting,
-  ]);
-
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
       sessionId: controller.getSessionId(),
-      error: state.error || autoApproveSettings.error,
+      error: proposalActionError || state.error || autoApproveSettings.error,
       live,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
       recordingPaused: voice.status === 'paused',
       durationMillis: voice.durationMillis,
+      proposals: proposalStore.list().filter(item => ['draft', 'executing', 'failed'].includes(item.status)),
+      selectedProposalId: proposalStore.selectedId,
+      selectProposal: (id: string) => proposalStore.select(id),
       proposal,
       proposalExecution,
-      proposalExecutionProgress,
-      proposalDroneNames,
+      proposalExecutionProgress: proposalStore.selectedId === proposalStore.executingId ? proposalExecutionProgress : null,
+      proposalDroneNames: proposalStore.executingId === proposalStore.selectedId ? proposalDroneNames
+        : proposalExecution ? proposalHistory.slice().reverse().find(item => item.targetId === proposalStore.selectedId)?.droneNames ?? {} : {},
       proposalDefaultRepoPath,
       proposalExecuting,
+      selectedProposalExecuting: Boolean(proposalStore.executingId && proposalStore.selectedId === proposalStore.executingId),
       autoApprove,
       proposalHistory,
       actionNotifications,
@@ -620,11 +516,19 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleRecordingPause,
       discardRecording,
       close,
-      executeProposal: async () => { await executeProposal(); },
+      executeProposal: async (targetId?: string, baseRevision?: string) => {
+        try {
+          await executeProposal({ targetId, baseRevision });
+          setProposalActionError('');
+        } catch (error) {
+          setProposalActionError(error instanceof Error ? error.message : String(error));
+        }
+      },
       discardProposal,
       toggleAutoApprove,
     }),
     [
+      proposalStore, proposalStoreVersion, proposalActionError,
       close,
       live,
       autoApproveSettings.error,

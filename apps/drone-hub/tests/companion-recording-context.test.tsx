@@ -63,7 +63,7 @@ test('recording origin survives pause, navigation, transcription, proposal creat
       return null;
     }
     renderToStaticMarkup(<ActiveComposerProvider><CompanionWorkspaceProvider><CompanionProvider><Harness /></CompanionProvider></CompanionWorkspaceProvider></ActiveComposerProvider>);
-    const tool = async (name: 'get_app_context' | 'apply_companion_proposal_patch', args = {}) => {
+    const tool = async (name: 'get_app_context' | 'apply_proposal_patch', args = {}) => {
       receive({ type: 'tool_call', messageId: prompts.at(-1)!.messageId,
         generation: 1, callId: String(results.length), tool: name, args });
       for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -79,7 +79,7 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     finishTranscript('create a drone in this repo');
     await sending;
     expect(await tool('get_app_context')).toEqual({ activeRepoPath: '/a', selectedDrone: { id: '/a' }, selectedChat: '/a-chat' });
-    await tool('apply_companion_proposal_patch', {
+    await tool('apply_proposal_patch', {
       targetId: 'companion-proposal', baseRevision: '0',
       content: JSON.stringify({ version: 1, title: 'Create drone', operations: [{ id: 'create', type: 'create_drone', prompt: 'hello' }] }),
     });
