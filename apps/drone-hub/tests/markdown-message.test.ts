@@ -345,4 +345,15 @@ describe('MarkdownMessage', () => {
     expect(html).not.toContain('</ol><ul>');
     expect(html).toMatch(/<li>[\s\S]*Source[\s\S]*<ul>/);
   });
+  test('ordered lists widen their gutter once markers reach two digits so the clipped body does not cut them', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const base = /\.dh-markdown ul,\s*\.dh-markdown ol\s*\{([^}]*)\}/.exec(styles)?.[1];
+    const wide = /\.dh-markdown ol:has\(> li:nth-child\(10\)\),\s*\.dh-markdown ol\[start\]\s*\{([^}]*)\}/.exec(styles)?.[1];
+    const wider = /\.dh-markdown ol:has\(> li:nth-child\(100\)\)\s*\{([^}]*)\}/.exec(styles)?.[1];
+    expect(base).toContain('1.35rem');
+    expect(wide).toContain('margin-left: 2rem');
+    expect(wider).toContain('margin-left: 2.6rem');
+    expect(/\.output-collapse\s*\{[^}]*overflow: hidden/.test(styles)).toBe(true);
+  });
+
 });

@@ -1989,6 +1989,11 @@ code, pre {
 .dh-markdown ul ul ul { list-style: square; }
 .dh-markdown ol ol { list-style: lower-alpha; }
 .dh-markdown ol ol ol { list-style: lower-roman; }
+/* Markers hang outside the list box and the message body clips overflow, so lists that
+   reach two or three digits (or start past 1) need a wider gutter than short lists. */
+.dh-markdown ol:has(> li:nth-child(10)),
+.dh-markdown ol[start] { margin-left: 2rem; }
+.dh-markdown ol:has(> li:nth-child(100)) { margin-left: 2.6rem; }
 .dh-markdown li { margin: .36rem 0; padding-left: .12rem; }
 .dh-markdown li.task-list-item { list-style: none; padding-left: 0; }
 .dh-markdown ul.contains-task-list,

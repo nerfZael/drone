@@ -171,11 +171,11 @@ function OperationList({ proposal, defaultRepoPath, execution, executing, resolv
                 />
               ) : null}
             </View>
-            {targetStep !== null || (message && message.chatName && message.chatName !== 'default') || message?.delivery === 'asap' ? (
+            {targetStep !== null || message ? (
               <View style={styles.pillRow}>
                 {targetStep !== null ? <Pill tone="accent">{`↑ Step ${targetStep}`}</Pill> : null}
                 {message && message.chatName && message.chatName !== 'default' ? <Pill>{message.chatName}</Pill> : null}
-                {message?.delivery === 'asap' ? <Pill tone="warning">Send immediately</Pill> : null}
+                {message ? (message.delivery === 'asap' ? <Pill tone="warning">ASAP</Pill> : <Pill>Queued</Pill>) : null}
               </View>
             ) : null}
             {message ? (

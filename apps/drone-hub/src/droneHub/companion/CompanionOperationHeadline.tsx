@@ -67,7 +67,7 @@ export function CompanionOperationHeadline({
     case 'move_chats':
       return <><Action kind="rename">Move chats</Action> in <Name>{drone}</Name> to <Name>{operation.targetGroup || 'Root'}</Name></>;
     case 'send_message':
-      return <><Action kind="message">Send message</Action> to <Name>{drone}</Name></>;
+      return <><Action kind="message">Message</Action> <Name>{drone}</Name></>;
   }
 }
 

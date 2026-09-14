@@ -436,10 +436,16 @@ function ProposalOperationList({
             {isMessage && operation.chatName && operation.chatName !== 'default' ? (
               <Pill title="Chat">{operation.chatName}</Pill>
             ) : null}
-            {isMessage && operation.delivery === 'asap' ? (
-              <Pill tone="warning" title="Delivered right away, interrupting whatever the drone is doing">
-                Send immediately
-              </Pill>
+            {isMessage ? (
+              operation.delivery === 'asap' ? (
+                <Pill tone="warning" title="ASAP delivery: steers the drone's current turn instead of waiting for it to finish">
+                  ASAP
+                </Pill>
+              ) : (
+                <Pill title="Queued delivery: waits for the drone's current response to finish">
+                  Queued
+                </Pill>
+              )
             ) : null}
           </div>
         );

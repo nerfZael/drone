@@ -62,3 +62,42 @@ test('late results cannot resurrect proposals after session cleanup', () => {
   expect(proposals.list()).toEqual([]);
   expect(proposals.history).toEqual([]);
 });
+
+test('empty drafts stay out of review until Companion adds operations, without stealing an active review', () => {
+  const proposals = store();
+  const a = proposals.create({ defaultRepoPath: '/a' }, 'session', 'A');
+  expect(proposals.selectedId).toBeNull();
+  expect(proposals.pending).toEqual([]);
+  expect(proposals.listPending()).toEqual([]);
+  expect(proposals.list().map(item => item.targetId)).toEqual([a.targetId]);
+  expect(proposals.read().targetId).toBe(a.targetId);
+  expect(() => proposals.select(a.targetId)).toThrow('PROPOSAL_NOT_PENDING');
+  proposals.patch(a.targetId, a.revision, doc('A'), () => ({ defaultRepoPath: '' }), 'session');
+  expect(proposals.selectedId).toBe(a.targetId);
+  const b = proposals.create({ defaultRepoPath: '/b' }, 'session', 'B');
+  expect(proposals.selectedId).toBe(a.targetId);
+  expect(proposals.read().targetId).toBe(a.targetId);
+  expect(proposals.listPending().map(item => item.targetId)).toEqual([a.targetId]);
+  proposals.patch(b.targetId, b.revision, doc('B'), () => ({ defaultRepoPath: '' }), 'session');
+  expect(proposals.selectedId).toBe(a.targetId);
+  expect(proposals.listPending().map(item => item.targetId)).toEqual([a.targetId, b.targetId]);
+  proposals.patch(a.targetId, '1', JSON.stringify({ version: 1, title: 'A', operations: [] }), () => ({ defaultRepoPath: '' }), 'session');
+  expect(proposals.selectedId).toBe(b.targetId);
+  expect(proposals.listPending().map(item => item.targetId)).toEqual([b.targetId]);
+});
+
+test('an execution request for review never replaces the proposal already under review', () => {
+  const proposals = store();
+  const a = proposals.create({ defaultRepoPath: '/a' }, 'session', 'A');
+  const b = proposals.create({ defaultRepoPath: '/b' }, 'session', 'B');
+  proposals.patch(b.targetId, b.revision, doc('B'), () => ({ defaultRepoPath: '' }), 'session');
+  proposals.selectIfUnreviewed(a.targetId);
+  expect(proposals.selectedId).toBe(b.targetId);
+  proposals.patch(a.targetId, a.revision, doc('A'), () => ({ defaultRepoPath: '' }), 'session');
+  proposals.selectIfUnreviewed(a.targetId);
+  expect(proposals.selectedId).toBe(b.targetId);
+  proposals.discard(b.targetId, '1');
+  expect(proposals.selectedId).toBe(a.targetId);
+  proposals.discard(a.targetId, '1');
+  expect(() => proposals.selectIfUnreviewed('missing')).toThrow('STALE_PROPOSAL_TARGET');
+});

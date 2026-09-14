@@ -31,18 +31,42 @@ export class CompanionProposalStore<C extends CompanionProposalExecutionContext>
   getSnapshot = () => this.version;
   private publish() { this.version++; for (const listener of this.listeners) listener(); }
   get selected() { return this.selectedId ? this.entries.get(this.selectedId) ?? null : null; }
-  get pending() { return [...this.entries.values()].filter(e => e.visible && ['draft', 'executing', 'failed'].includes(e.status)); }
-  list(): ProposalSummary[] {
-    return [...this.entries.values()].filter(e => e.visible).map(e => ({
+  /** Proposals the user can review: pending and holding at least one operation. Empty drafts stay out of the UI until Companion fills them. */
+  get pending() { return [...this.entries.values()].filter(e => this.reviewable(e)); }
+  private reviewable(entry: ProposalEntry<C>) {
+    return entry.visible && ['draft', 'executing', 'failed'].includes(entry.status) && entry.proposal.operations.length > 0;
+  }
+  private summarize(e: ProposalEntry<C>): ProposalSummary {
+    return {
       targetId: e.id, revision: String(e.revision), title: e.proposal.title,
       status: e.status, operationCount: e.proposal.operations.length, defaultRepoPath: e.context?.defaultRepoPath ?? null,
       ...(e.context && 'targetDeviceId' in e.context && typeof e.context.targetDeviceId === 'string' ? { targetDeviceId: e.context.targetDeviceId } : {}),
-    }));
+    };
   }
+  /** Every document Companion can address, including empty drafts it has just created. */
+  list(): ProposalSummary[] { return [...this.entries.values()].filter(e => e.visible).map(e => this.summarize(e)); }
+  /** Review-card order: the numbered strip and the selection fall back to the first entry here. */
+  listPending(): ProposalSummary[] { return this.pending.map(e => this.summarize(e)); }
   select(id: string) {
     const entry = this.get(id);
-    if (!['draft', 'executing', 'failed'].includes(entry.status)) throw new Error('PROPOSAL_NOT_PENDING');
+    if (!this.reviewable(entry)) throw new Error('PROPOSAL_NOT_PENDING');
     this.selectedId = id; this.publish();
+  }
+  /** Bring a proposal under review only when nothing else is; an open review is never replaced. */
+  selectIfUnreviewed(id: string) {
+    this.get(id);
+    this.reconcileSelection(id);
+    this.publish();
+  }
+  /** Keep the review selection on a reviewable proposal; a freshly filled draft takes over only when nothing else is under review. */
+  private reconcileSelection(changedId: string) {
+    const selected = this.selected;
+    if (selected && this.reviewable(selected)) return;
+    const changed = this.entries.get(changedId);
+    this.selectedId = changed && this.reviewable(changed) ? changedId : this.pending[0]?.id ?? null;
+  }
+  private get newestDraftId(): string | null {
+    return [...this.entries.values()].reverse().find(e => e.visible && e.status === 'draft')?.id ?? null;
   }
   private get(id: string): ProposalEntry<C> {
     // Compatibility for clients holding the former session-owned document.
@@ -58,11 +82,12 @@ export class CompanionProposalStore<C extends CompanionProposalExecutionContext>
     const id = this.createId();
     if (!/^[a-zA-Z0-9_-]{1,160}$/.test(id) || this.entries.has(id)) throw new Error('INVALID_PROPOSAL_ID');
     const proposal = parseCompanionProposalText(JSON.stringify({ ...EMPTY_COMPANION_PROPOSAL, title: title ?? EMPTY_COMPANION_PROPOSAL.title }));
+    // Empty drafts are not selected for review; Companion addresses them by targetId until it adds operations.
     this.entries.set(id, { id, revision: 0, proposal, context, sessionId, status: 'draft', execution: null, visible: true });
-    this.selectedId = id; this.publish();
+    this.publish();
     return this.read(id);
   }
-  read(id = this.selectedId ?? COMPANION_PROPOSAL_TARGET_ID) {
+  read(id = this.selectedId ?? this.newestDraftId ?? COMPANION_PROPOSAL_TARGET_ID) {
     const entry = this.get(id);
     return { targetId: id, path: id === COMPANION_PROPOSAL_TARGET_ID ? COMPANION_PROPOSAL_PATH : `proposals/${id}.json`,
       content: serializeCompanionProposal(entry.proposal), revision: String(entry.revision),
@@ -81,7 +106,7 @@ export class CompanionProposalStore<C extends CompanionProposalExecutionContext>
     const next = { ...entry, proposal, revision: entry.revision + 1, context: entry.context ?? context(),
       sessionId: entry.sessionId ?? sessionId, visible: true };
     this.entries.set(id, next);
-    if (!this.selectedId) this.selectedId = id;
+    this.reconcileSelection(id);
     this.publish();
     return { ok: true as const, targetId: id, revision: String(next.revision), operationCount: proposal.operations.length };
   }

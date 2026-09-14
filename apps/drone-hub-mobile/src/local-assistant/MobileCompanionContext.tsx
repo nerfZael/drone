@@ -305,7 +305,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         const revision = String(args.baseRevision ?? '');
         const entry = proposalStore.ready(targetId, revision);
         if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) {
-          proposalStore.select(targetId);
+          proposalStore.selectIfUnreviewed(targetId);
           return { applied: false, status: 'pending_review', targetId, revision, operationCount: entry.proposal.operations.length };
         }
         const execution = await executeProposal({ autoApproved: true, returnResultToTool: true, targetId, baseRevision: revision });
@@ -691,7 +691,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       status: effectiveStatus,
       durationMillis: effectiveDurationMillis,
       proposalHistory: proposalStore.history.map(item => ({ targetId: item.entry.id, proposal: item.entry.proposal, execution: item.execution })),
-      proposals: proposalStore.list().filter(item => ['draft', 'executing', 'failed'].includes(item.status)),
+      proposals: proposalStore.listPending(),
       selectedProposalId: proposalStore.selectedId,
       selectProposal: (id: string) => proposalStore.select(id),
       proposal,

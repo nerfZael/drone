@@ -64,7 +64,7 @@ describe('Companion action notifications', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('<span class="sr-only">Completed: </span>');
     expect(html).toContain('text-[var(--green)]">Create drone</span>');
-    expect(html).toContain('text-[var(--info)]">Send message</span>');
+    expect(html).toContain('text-[var(--info)]">Message</span> <span');
     expect(html).toContain('text-[var(--red)]">Failed: </span>');
     expect(html).toContain('Chat unavailable');
     expect(html).toContain('Dismiss notification:');

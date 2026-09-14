@@ -2,6 +2,7 @@ import React from 'react';
 import type { ChatWorkspaceCatalog, ChatWorkspaceOption } from '@drone/assistant-chat';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 import { requestJson } from '../http';
+import { contextMenuItemBaseClass } from '../../ui/dropdown';
 
 type CurrentWorkspace = ChatWorkspaceCatalog & { target: ChatWorkspaceOption; droneId: string };
 
@@ -100,7 +101,7 @@ export function CompanionCurrentWorkspaceAccess({ refreshKey }: { refreshKey: bo
           ? 'Workspace unavailable'
           : 'Open a drone for workspace access';
   return (
-    <div className="min-w-0 max-w-full text-xs">
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         disabled={busy || loading || !current || Boolean(selected?.read && isDefault)}
@@ -110,19 +111,22 @@ export function CompanionCurrentWorkspaceAccess({ refreshKey }: { refreshKey: bo
             ? `${current.target.deviceName} · ${current.target.path || current.target.name}. Read allows listing, reading and searching files. Makes this the default Companion workspace. Access stays selected when you switch drones.`
             : label
         }
-        className="max-w-full truncate rounded border border-[var(--border-subtle)] px-2 py-1 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-60"
+        className={`${contextMenuItemBaseClass} text-[var(--fg-secondary)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-60`}
       >
-        {label}
-      </button>
-      {current && (
-        <span className="ml-2 inline-block max-w-full truncate align-middle text-[var(--fg-muted)]">
-          {current.target.deviceName}
+        <span className="flex w-4 shrink-0 items-center justify-center text-[var(--muted)]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {selected?.read && isDefault
+              ? <><path d="M20 6 9 17l-5-5" /></>
+              : <><path d="M12 5v14M5 12h14" /></>}
+          </svg>
         </span>
-      )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {current ? <span className="dh-type-menu-meta max-w-[8rem] shrink-0 truncate">{current.target.deviceName}</span> : null}
+      </button>
       {error && (
-        <p role="status" className="text-[var(--danger)]">
+        <p role="status" className="px-2.5 py-1 text-xs text-[var(--red)]">
           {error}{' '}
-          <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>
+          <button type="button" disabled={busy} className="underline" onClick={() => setRetry((value) => value + 1)}>
             Retry
           </button>
         </p>

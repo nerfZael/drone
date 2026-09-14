@@ -33,7 +33,8 @@ describe('Companion proposal card', () => {
     expect(html).not.toContain('id="proposal-description"');
     expect(html).not.toContain('Create a draft and queue a follow-up.');
     expect(html).toContain('Create draft drone');
-    expect(html).toContain('Send message');
+    expect(html).toContain('>Message</span>');
+    expect(html).not.toContain('Send message');
     expect(html).toContain('↑ Step 1');
     expect(html).toContain('Reviewer');
     expect(html).toContain('>repo</span>');
@@ -76,8 +77,10 @@ describe('Companion proposal card', () => {
       />,
     );
 
-    expect(html).toContain('Send message');
-    expect(html).toContain('Send immediately');
+    expect(html).toContain('>Message</span>');
+    expect(html).not.toContain('Send message');
+    expect(html).toContain('>ASAP<');
+    expect(html).not.toContain('Queued');
     expect(html).toContain('Review Prompt and Shot Architecture');
     expect(html).toContain(message);
     expect(html).not.toContain('drone-uuid');

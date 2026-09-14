@@ -111,7 +111,7 @@ export function mobileProposalHeadline(
     case 'move_chats':
       return { kind: 'rename', action: 'Move chats', parts: [plain(' in '), name(drone), plain(' to '), name(operation.targetGroup || 'Root')] };
     case 'send_message':
-      return { kind: 'message', action: 'Send message', parts: [plain(' to '), name(drone)] };
+      return { kind: 'message', action: 'Message', parts: [name(drone)] };
   }
 }
 

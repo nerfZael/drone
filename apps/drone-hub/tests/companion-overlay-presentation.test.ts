@@ -18,16 +18,39 @@ describe('Companion overlay presentation', () => {
       new URL('../src/droneHub/companion/CompanionOverlay.tsx', import.meta.url),
       'utf8',
     );
+    const menu = readFileSync(
+      new URL('../src/droneHub/companion/CompanionOptionsMenu.tsx', import.meta.url),
+      'utf8',
+    );
 
-    expect(source).toContain(') : companion.proposal ? (');
+    expect(source).toContain(') : companion.proposal && !proposalHidden ? (');
     expect(source).not.toContain('const showProposal');
-    expect(source).toContain('latest execution failed');
+    expect(source).toContain('<CompanionProposalStrip');
+    expect(source).toContain('if (targetId === companion.selectedProposalId) setProposalHidden((hidden) => !hidden);');
+    expect(source).toContain('React.useEffect(() => { setProposalHidden(false); }, [companion?.selectedProposalId]);');
+    expect(source).not.toContain('companion.proposals?.length > 1');
+    expect(menu).toContain('latest execution failed');
     expect(source).toContain('pressed={companion.autoApprove}');
-    expect(source).toContain('expanded={historyOpen}');
+    expect(menu).toContain('expanded={historyOpen}');
     expect(source).toContain('<CompanionProposalHistory');
-    expect(source).toContain('Show execution history');
-    expect(source).not.toContain('Show execution history (');
-    expect(source).not.toContain('Math.min(companion.proposalHistory.length');
+    expect(menu).toContain("execution history");
+    expect(menu).not.toContain('Show execution history (');
+    expect(menu).not.toContain('Math.min(companion.proposalHistory.length');
     expect(source).toContain('double-tap Caps Lock to toggle');
+  });
+
+  test('keeps the Live voice on/off switch inside the options menu rather than the header row', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/companion/CompanionOverlay.tsx', import.meta.url),
+      'utf8',
+    );
+    const menu = readFileSync(
+      new URL('../src/droneHub/companion/CompanionOptionsMenu.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).not.toContain('toggleLiveVoice');
+    expect(menu).toContain('label="Live voice"');
+    expect(menu).toContain('checked={live.enabled}');
+    expect(menu).toContain('onSelect={() => void companion.toggleLiveVoice()}');
   });
 });

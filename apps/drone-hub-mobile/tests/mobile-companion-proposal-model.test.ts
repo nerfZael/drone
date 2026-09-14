@@ -31,7 +31,7 @@ describe('mobile Companion proposal model', () => {
       kind: 'create', action: 'Create drone', parts: [{ text: 'reviewer', name: true }],
     });
     expect(mobileProposalHeadline(proposal.operations[1]!, label)).toEqual({
-      kind: 'message', action: 'Send message', parts: [{ text: ' to' }, { text: 'reviewer', name: true }].map((part, index) => index === 0 ? { text: ' to ' } : part),
+      kind: 'message', action: 'Message', parts: [{ text: 'reviewer', name: true }],
     });
     expect(mobileProposalHeadline(proposal.operations[2]!, label)).toEqual({
       kind: 'rename', action: 'Rename drone', parts: [{ text: 'main', name: true }, { text: ' to ' }, { text: 'archive', name: true }],
