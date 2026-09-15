@@ -186,6 +186,56 @@ test('failed paused controls end the session without reviving it or blocking cle
   await h.live.stop();
 });
 
+
+test('a subscriber can cancel startup while its connecting snapshot is published', async () => {
+  const h = harness();
+  const abort = new AbortController();
+  const unsubscribe = h.live.subscribe(() => {
+    if (h.live.getSnapshot().status === 'connecting') abort.abort();
+  });
+  try {
+    await h.live.start(target, abort.signal);
+    expect(h.connections).toHaveLength(0);
+    expect(h.live.getSnapshot().status).toBe('idle');
+  } finally { unsubscribe(); await h.live.stop(); }
+});
+
+test('failed control updates cannot let a resumed session overtake microphone cleanup', async () => {
+  const released = deferred();
+  const h = harness({ stopped: async () => { throw new Error('Controls unavailable'); } }, () => released.promise);
+  let resumed: Promise<void> | undefined;
+  try {
+    await h.live.start(target);
+    h.live.pause();
+    resumed = h.live.resume();
+    await tick();
+    expect(h.connections).toHaveLength(1);
+    released.resolve();
+    await resumed;
+    expect(h.connections).toHaveLength(2);
+  } finally { released.resolve(); await resumed; await h.live.stop(); }
+});
+
+for (const phase of ['startup', 'reconnect']) test(`pause during ${phase} notification prevents connection`, async () => {
+  const h = harness();
+  if (phase === 'reconnect') {
+    await h.live.start(target);
+    h.connections[0].options.onReady('backend');
+  }
+  const count = h.connections.length;
+  const unsubscribe = h.live.subscribe(() => {
+    if (h.live.getSnapshot().status === 'connecting') h.live.pause();
+  });
+  try {
+    if (phase === 'reconnect') h.connections[0].options.onError('disconnected');
+    else await h.live.start(target);
+    for (const retry of h.scheduled) retry.callback();
+    await tick();
+    expect(h.live.getSnapshot().status).toBe('paused');
+    expect(h.connections).toHaveLength(count);
+  } finally { unsubscribe(); await h.live.stop(); }
+});
+
 const target = { id: 'hub', name: 'Hub', run: async () => 'reply' };
 
 function harness(platform: Partial<CompanionLivePlatform> = {}, release = async () => {}, start = async () => {}, backend?: CompanionClientController) {

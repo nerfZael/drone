@@ -18,6 +18,7 @@ type Options = {
 /** Serializes native control acquisition/release independently of Live connections. */
 export class MobileCompanionLivePlatform implements CompanionLivePlatform {
   private controls: MobileLiveControls | null = null;
+  private controlsOwner: object | null = null;
   private pending = Promise.resolve();
   private keepControls = false;
 
@@ -56,11 +57,18 @@ export class MobileCompanionLivePlatform implements CompanionLivePlatform {
 
   disarm(): void { this.keepControls = false; this.options.onShortcutArmed(false); }
 
-  stopped = (audioReleased: Promise<void>, paused: boolean): Promise<void> => this.enqueue(async () => {
-    await audioReleased;
-    if (paused || this.keepControls) await this.controls?.update('paused');
-    else await this.releaseControls();
-  });
+  stopped = (audioReleased: Promise<void>, paused: boolean): Promise<void> => {
+    const retain = paused || this.keepControls;
+    // Retire callbacks immediately, even when native audio takes time to release.
+    const retired = retain ? null : this.detachControls();
+    // Publish pause before cleanup/cues, so the next headset press means Play.
+    const updating = retain ? this.controls?.update('paused') : undefined;
+    const releasing = this.enqueue(async () => {
+      await audioReleased;
+      await retired?.release();
+    });
+    return Promise.all([updating, releasing]).then(() => undefined);
+  };
 
   schedule = (callback: () => void, delayMs: number): (() => void) => {
     if (this.controls?.schedule) return this.controls.schedule(callback, delayMs);
@@ -113,17 +121,33 @@ export class MobileCompanionLivePlatform implements CompanionLivePlatform {
     if (!wanted() || this.controls) return;
     await prepareMobileLiveAudio(standby ? { headsetShortcut: true } : undefined);
     if (!wanted()) return;
-    const controls = await openMobileLiveControls((action) => {
-      if (this.controls === controls) this.options.onAction(action);
-    }, standby);
-    if (!wanted()) { await controls.release(); return; }
-    this.controls = controls;
+    const owner = {};
+    this.controlsOwner = owner;
+    try {
+      // Native controls can emit End before registration resolves.
+      const controls = await openMobileLiveControls((action) => {
+        if (this.controlsOwner === owner && (this.controls || wanted())) this.options.onAction(action);
+      }, standby);
+      if (!wanted() || this.controlsOwner !== owner) {
+        if (this.controlsOwner === owner) this.controlsOwner = null;
+        await controls.release();
+        return;
+      }
+      this.controls = controls;
+    } finally {
+      if (this.controlsOwner === owner && !this.controls) this.controlsOwner = null;
+    }
   }
 
   private async releaseControls(): Promise<void> {
+    await this.detachControls()?.release();
+  }
+
+  private detachControls(): MobileLiveControls | null {
     const controls = this.controls;
     this.controls = null;
-    await controls?.release();
+    this.controlsOwner = null;
+    return controls;
   }
 
   private enqueue(action: () => Promise<void>): Promise<void> {

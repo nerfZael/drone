@@ -83,11 +83,13 @@ export class CompanionLiveController {
     this.cancelRetry();
     target = { ...target };
     this.target = target;
-    this.setState({ ...EMPTY, hasStarted: true, status: 'connecting', targetDeviceId: target.id, targetName: target.name });
     // A launch request only owns the startup it initiated, never an existing call.
     const cancel = () => { if (this.target === target) void this.stop(); };
     signal?.addEventListener('abort', cancel, { once: true });
-    try { await this.connect(target, false); }
+    try {
+      this.setState({ ...EMPTY, hasStarted: true, status: 'connecting', targetDeviceId: target.id, targetName: target.name });
+      await this.connect(target, false);
+    }
     finally { signal?.removeEventListener('abort', cancel); }
   };
 
@@ -123,7 +125,7 @@ export class CompanionLiveController {
   readonly fail = (error: string): void => { this.setState({ status: 'error', error }); };
 
   private async connect(target: CompanionLiveTarget, reconnecting: boolean): Promise<void> {
-    if (this.target !== target || this.attempt) return;
+    if (this.target !== target || this.attempt || this.state.status !== 'connecting') return;
     if (this.platform.canStart?.() === false) { this.scheduleReconnect(target); return; }
     const previousCleanup = this.cleanup;
     const abort = new AbortController();
@@ -195,17 +197,18 @@ export class CompanionLiveController {
   private finishControls(paused: boolean): void {
     const target = this.target;
     const released = this.cleanup;
-    this.cleanup = Promise.all([released, this.platform.stopped?.(released, paused)]).then(() => undefined).catch(() => {
-      if (paused && this.target === target && this.state.status === 'paused') void this.stop();
+    this.cleanup = Promise.allSettled([released, this.platform.stopped?.(released, paused)]).then((results) => {
+      if (results[1].status === 'rejected' && paused && this.target === target && this.state.status === 'paused') void this.stop();
     });
   }
 
   private scheduleReconnect(target: CompanionLiveTarget): void {
     if (this.target !== target) return;
     this.retry?.cancel();
-    this.setState({ status: 'connecting', capturing: false, error: '', queued: 0, playbackBlocked: false });
     const retry = { cancel: () => {} };
     this.retry = retry;
+    this.setState({ status: 'connecting', capturing: false, error: '', queued: 0, playbackBlocked: false });
+    if (this.retry !== retry) return; // A subscriber may pause/end while observing the new state.
     retry.cancel = (this.platform.schedule ?? scheduleTimeout)(() => {
       if (this.retry !== retry || this.target !== target) return;
       this.retry = null;
