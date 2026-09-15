@@ -36,7 +36,7 @@ mock.module('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => 
 for (const icon of ['audio-lines', 'captions', 'ellipsis', 'folder', 'folder-open', 'mic', 'mic-off', 'pause', 'play', 'square', 'x', 'zap']) {
   mock.module(`lucide-react-native/icons/${icon}`, () => ({ default: () => null }));
 }
-for (const name of ['MobileCompanionModelPicker', 'NativeMarkdown', 'MobileCompanionMenu', 'MobileCompanionProposal', 'MobileCompanionWorkspaceModal']) {
+for (const name of ['MobileCompanionScreenPanel', 'MobileCompanionModelPicker', 'NativeMarkdown', 'MobileCompanionMenu', 'MobileCompanionProposal', 'MobileCompanionWorkspaceModal']) {
   mock.module(`../src/local-assistant/${name}`, () => ({ [name]: () => null }));
 }
 mock.module('../src/drones/ChatSubscriptionIndicator', () => ({ ChatSubscriptionIndicator: () => null }));

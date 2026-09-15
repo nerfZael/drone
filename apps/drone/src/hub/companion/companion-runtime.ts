@@ -686,6 +686,14 @@ export class CompanionRuntime {
         result(await context.callBrowser('execute_proposal', args as Record<string, unknown>, signal)),
     });
 
+    add('show_on_screen', {
+      parameters: objectParameters({
+        action: { type: 'string', enum: ['inspect', 'show', 'clear'] },
+        markdown: { type: 'string', description: 'Markdown text to display for action show. Fit limits are returned by the client.' },
+      }, ['action']),
+      execute: async (_callId, args, signal) => result(await context.callBrowser('show_on_screen', args as Record<string, unknown>, signal)),
+    });
+
     add('open_drone_chat', {
       parameters: objectParameters({
         droneId: {

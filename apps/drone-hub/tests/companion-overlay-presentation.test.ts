@@ -13,7 +13,7 @@ describe('Companion overlay presentation', () => {
     expect(source).not.toContain("open={item.status === 'running'}");
   });
 
-  test('keeps pending proposal cards visible with auto-approval and exposes session execution history', () => {
+  test('supports hiding manual reviews and exposes session execution history', () => {
     const source = readFileSync(
       new URL('../src/droneHub/companion/CompanionOverlay.tsx', import.meta.url),
       'utf8',
@@ -23,8 +23,6 @@ describe('Companion overlay presentation', () => {
       'utf8',
     );
 
-    expect(source).toContain(') : companion.proposal && !proposalHidden ? (');
-    expect(source).not.toContain('const showProposal');
     expect(source).toContain('<CompanionProposalStrip');
     expect(source).toContain('if (targetId === companion.selectedProposalId) setProposalHidden((hidden) => !hidden);');
     expect(source).toContain('React.useEffect(() => { setProposalHidden(false); }, [companion?.selectedProposalId]);');

@@ -1,4 +1,5 @@
 import React, { act } from 'react';
+import { CompanionScreen } from '../../../packages/assistant-chat/src/CompanionScreen';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -25,8 +26,10 @@ for (const name of ['arrow-up-right', 'mic', 'mic-off', 'pause', 'play', 'rotate
 const calls: string[] = [];
 const live = { status: 'listening', capturing: true, muted: false, error: '', captions: 'secret words the user said', targetName: 'Studio Mac',
   pause: () => calls.push('pause'), toggleMute: () => calls.push('mute') };
-const companion = { live, status: 'idle', available: true, error: '', startAssistantVoice: async () => {}, close: async () => { calls.push('close'); } };
+const companion = { screen: new CompanionScreen(), live, status: 'idle', available: true, error: '', startAssistantVoice: async () => {}, close: async () => { calls.push('close'); } };
 const launch = { pending: false, error: '', retry: async () => { calls.push('retry'); }, cancel: () => calls.push('cancel') };
+mock.module('../src/local-assistant/MobileCompanionScreenPanel', () => ({ MobileCompanionScreenPanel: () => <TextDisplay /> }));
+function TextDisplay() { return React.createElement('Text', {}, 'Display surface'); }
 mock.module('../src/local-assistant/MobileCompanionContext', () => ({ useMobileCompanion: () => companion }));
 mock.module('../src/local-assistant/PhoneAssistantContext', () => ({ usePhoneAssistantRequest: () => 'press-1' }));
 mock.module('../src/local-assistant/use-phone-assistant-launch', () => ({ usePhoneAssistantLaunch: () => launch }));
@@ -45,6 +48,7 @@ const render = () => act(async () => { root = create(<PhoneAssistantScreen />); 
 beforeEach(() => {
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   calls.length = 0;
+  companion.screen.clear();
   Object.assign(live, { status: 'listening', capturing: true, muted: false, error: '' });
   Object.assign(companion, { status: 'idle', error: '' });
   Object.assign(launch, { pending: false, error: '' });
@@ -100,4 +104,20 @@ test('startup shows a busy primary control instead of pause', async () => {
   expect(texts()).toContain('Starting Live');
   expect(button('Starting').props.disabled).toBe(true);
   expect(root.root.findAllByType('ActivityIndicator')).toHaveLength(1);
+});
+
+
+test('display content replaces the animation while controls remain available', async () => {
+  companion.screen.resize(300, 400);
+  const result = companion.screen.execute({ markdown: '**Ready**' });
+  companion.screen.measured(companion.screen.getSnapshot().candidate!.id, 300, 40);
+  expect(await result).toMatchObject({ displayed: true });
+  await render();
+  expect(texts()).toContain('Display surface');
+  expect(texts()).not.toContain('Listening');
+  expect(button('Pause')).toBeDefined();
+  expect(button('Mute')).toBeDefined();
+  expect(button('End')).toBeDefined();
+  await act(async () => companion.screen.clear());
+  expect(texts()).toContain('Listening');
 });
