@@ -116,7 +116,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposalStore] = React.useState(() => new CompanionProposalStore<CompanionProposalExecutionContext>(newId));
   const proposalStoreVersion = React.useSyncExternalStore(proposalStore.subscribe, proposalStore.getSnapshot, proposalStore.getSnapshot);
   const selectedProposal = proposalStore.selected;
-  const proposal = selectedProposal?.visible ? selectedProposal.proposal : null;
   const proposalExecution = selectedProposal?.execution ?? null;
   const proposalDefaultRepoPath = selectedProposal?.context?.defaultRepoPath ?? null;
   const proposalExecuting = Boolean(proposalStore.executingId);
@@ -125,6 +124,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposalDroneNames, setProposalDroneNames] = React.useState<Readonly<Record<string, string>>>({});
   const autoApproveSettings = useCompanionAutoApprove();
   const autoApprove = autoApproveSettings.enabled;
+  // Patching selects a draft before execute_proposal runs. Gate review data in
+  // this render so neither the card nor its tabs can flash before auto-approval.
+  // An unresolved setting must not briefly behave like manual approval either.
+  const reviewProposals = !autoApprove && !autoApproveSettings.loading;
+  const proposal = reviewProposals && selectedProposal?.visible ? selectedProposal.proposal : null;
   const autoApproveSettingsRef = React.useRef(autoApproveSettings);
   autoApproveSettingsRef.current = autoApproveSettings;
   const [actionNotifications, setActionNotifications] = React.useState<CompanionActionNotification[]>([]);
@@ -493,7 +497,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       status: effectiveStatus,
       recordingPaused: voice.status === 'paused',
       durationMillis: voice.durationMillis,
-      proposals: proposalStore.listPending(),
+      proposals: reviewProposals ? proposalStore.listPending() : [],
       selectedProposalId: proposalStore.selectedId,
       selectProposal: (id: string) => proposalStore.select(id),
       proposal,
@@ -534,6 +538,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       live,
       autoApproveSettings.error,
       autoApprove,
+      reviewProposals,
       discardProposal,
       discardRecording,
       effectiveStatus,
