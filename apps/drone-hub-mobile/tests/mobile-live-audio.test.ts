@@ -10,7 +10,7 @@ let finishMicrophone: (() => void) | undefined;
 let recordingMode = false;
 let microphoneRunning = false;
 const listeners = new Map<string, (event: any) => void>();
-mock.module('react-native', () => ({ Platform: { OS: 'android' }, AppState: { currentState: 'active' } }));
+mock.module('react-native', () => ({ PermissionsAndroid: {}, Platform: { OS: 'android' }, AppState: { currentState: 'active' } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => `audio-${++sequence}` }));
 mock.module('expo-audio', () => ({
   getRecordingPermissionsAsync: async () => ({ granted: true }), requestRecordingPermissionsAsync: async () => ({ granted: true }),
@@ -52,10 +52,14 @@ const { openMobileLiveAudio } = await import('../src/local-assistant/openMobileL
 
 test('native Live captures during startup and releases audio before background protection', async () => {
   calls.length = 0; const captured: string[] = []; let stopRequested = false;
-  const audio = await openMobileLiveAudio({ onAudio: (data) => captured.push(data), onError() {} }, () => { stopRequested = true; });
+  const playback: unknown[] = [];
+  const audio = await openMobileLiveAudio({ onPlayback: event => playback.push(event), onAudio: (data) => captured.push(data), onError() {} }, () => { stopRequested = true; });
   expect(calls).toEqual(['service.start', 'background:true', 'microphone.open']); expect(captured).toEqual(['AQI=']);
   listeners.get('pcmAudio')?.({ id: 'stale', audio: 'AwQ=' }); expect(captured).toHaveLength(1);
   audio.play('BQY='); expect(calls.at(-1)).toBe('play:BQY=');
+  expect(playback).toEqual([]); // Calling play is not evidence of playback.
+  await Promise.resolve();
+  expect(playback).toEqual([{ stage: 'native_enqueued' }]);
   stopped(); expect(stopRequested).toBe(true);
   await audio.release(); await audio.release();
   expect(calls.slice(-3)).toEqual(['microphone.stop', 'background:false', 'service.stop']); expect(listeners.size).toBe(0);

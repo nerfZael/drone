@@ -1,8 +1,9 @@
 import { COMPANION_CAPABILITY, LIVE_AUDIO_TRANSPORT, type LiveAudioClientStream, type CapabilityEvent } from '@drone/device-protocol';
-import { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
+import { type CompanionLiveTiming, LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
 import type { MobileMicrophoneCoordinator, MobileMicrophoneLease } from './mobile-microphone-coordinator';
 
 type Options = {
+  timing?: CompanionLiveTiming;
   targetDeviceId: string;
   sessionId: string;
   microphoneCoordinator: MobileMicrophoneCoordinator;
@@ -57,7 +58,7 @@ export class MobileCompanionLiveConnection {
     this.pendingAudio = new Promise((resolve) => { settled = resolve; });
     try {
       try {
-        this.audio = await this.options.openAudio({ signal: this.audioAbort.signal, onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error) });
+        this.audio = await this.options.openAudio({ signal: this.audioAbort.signal, onPlayback: (event) => this.options.timing?.playback(event), onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error) });
       } finally { settled(); }
       if (this.closed) return;
       this.audio.mute(this.muted);
@@ -80,7 +81,7 @@ export class MobileCompanionLiveConnection {
         else if (payload.type === 'live_closed') this.fail('Live conversation ended. Start again to reconnect.');
       });
       this.stream = await this.options.openLiveAudio(this.options.targetDeviceId, this.options.sessionId,
-        (audio) => { if (!this.closed) this.audio?.play(audio); }, (error) => this.fail(error));
+        (audio) => { if (!this.closed) { this.options.timing?.audioReceived(); this.audio?.play(audio); } }, (error) => this.fail(error));
       if (this.closed) { this.stream.close(); return; }
       const started = await this.request('live.start', { transport: 'pcm', audioTransport: LIVE_AUDIO_TRANSPORT, audioOffer: this.stream.offer }) as { audioTransport?: string; audioAnswer?: unknown };
       if (started?.audioTransport !== LIVE_AUDIO_TRANSPORT) throw new Error('Update the Hub to use Live audio streaming.');
@@ -94,13 +95,17 @@ export class MobileCompanionLiveConnection {
 
   send(event: Record<string, unknown>): void {
     this.outgoingEvents = this.outgoingEvents.then(async () => {
-      if (!this.closed) await this.request('live.event', { event });
+      if (!this.closed) {
+        await this.request('live.event', { event });
+        this.options.timing?.mark('append_relay_accepted', { eventType: String(event.type), delegationId: typeof event.delegation_id === 'string' ? event.delegation_id : null });
+      }
     }).catch(() => this.fail('Could not send the backend result to Live.'));
   }
   mute(muted: boolean): void { this.muted = muted; this.buffer.mute(muted); this.audio?.mute(muted); }
   close(): Promise<void> {
     if (this.closed) return this.cleanup;
     this.closed = true;
+    this.options.timing?.close();
     this.buffer.close();
     this.stream?.close();
     this.audioAbort.abort();
@@ -131,7 +136,7 @@ export class MobileCompanionLiveConnection {
   }
   private becomeReady(): void {
     if (this.closed || this.ready || !this.backendReady || !this.startAccepted || !this.stream) return;
-    this.ready = true; this.timeout?.(); this.buffer.connect(); this.options.onReady(this.backendModel);
+    this.ready = true; this.options.timing?.once('live_ready'); this.timeout?.(); this.buffer.connect(); this.options.onReady(this.backendModel);
   }
   private request(operation: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,
@@ -139,7 +144,7 @@ export class MobileCompanionLiveConnection {
   }
   private markCapturing(): void {
     if (this.closed || this.capturing) return;
-    this.capturing = true;
+    this.capturing = true; this.options.timing?.once('capture_started');
     this.options.onCapturing?.();
   }
   private capture(audio: string): void {

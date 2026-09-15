@@ -1,6 +1,6 @@
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
-import { companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
+import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
 
@@ -24,7 +24,7 @@ type LiveSettings = {
   defaultSystemPrompt: string;
   maxSystemPromptChars: number;
 };
-type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal) => Promise<string>; workspaceLabel: string };
+type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; workspaceLabel: string };
 type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
@@ -189,7 +189,9 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     const update = (patch: Partial<LiveState>) => {
       if (mounted.current && active.current === session) setState((previous) => ({ ...previous, ...patch }));
     };
+    const timing = new CompanionLiveTiming();
     const connection = new CompanionLiveConnection({
+      timing,
       onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
       onCapturing: () => update({ capturing: true }),
       onReady: (backendModel) => {
@@ -210,10 +212,11 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       onPlaybackBlocked: (playbackBlocked) => update({ playbackBlocked }),
     });
     const conversation = new CompanionLiveConversation({
+      timing,
       externalBackendReplies: Boolean(controller),
-      runBackend: async (prompt) => {
+      runBackend: async (prompt, telemetry) => {
         if (active.current !== session) throw new Error('Voice conversation ended.');
-        return await target.runBackend(prompt, session.abort.signal);
+        return await target.runBackend(prompt, session.abort.signal, telemetry);
       },
       send: (event) => connection.send(event),
       onTranscript: (rows) => update({ captions: rows.map((row) => `${row.role === 'user' ? 'You' : 'Companion'}: ${row.text}`).join('\n') }),

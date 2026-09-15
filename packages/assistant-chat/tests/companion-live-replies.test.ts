@@ -108,3 +108,46 @@ test('superseded results and cancelled work are not narrated', async () => {
     expect(live.sent).toEqual([]);
   } finally { live.stop(); }
 });
+
+test('intermediate messages are quiet, deduplicated, and do not consume the final delegation', async () => {
+  const h = harness(); const live = h.live(); live.ready();
+  try {
+    delegate(live.conversation); await tick();
+    const progress = { type: 'assistant_update' as const, messageId: '2', updateId: 'progress-1', text: 'I found the chat; I am checking its latest reply.' };
+    h.receive(progress); h.receive(progress);
+    expect(live.sent).toEqual([{ type: 'session.thinking.append', delegation_id: 'delegation', content: progress.text }]);
+    h.finish('Finished');
+    expect(live.sent[1]).toEqual({ type: 'session.commentary.append', delegation_id: 'delegation', content: 'Finished' });
+    h.receive({ ...progress, updateId: 'late' });
+    expect(live.sent).toHaveLength(2);
+  } finally { live.stop(); await h.controller.close(); }
+});
+
+test('progress during setup, from superseded requests, or after stop is discarded', async () => {
+  const h = harness(); await h.submit(); const live = h.live();
+  const progress = { type: 'assistant_update' as const, messageId: '2', updateId: 'update', text: 'Checking' };
+  h.receive(progress); live.ready();
+  expect(live.sent).toEqual([]);
+  await h.submit();
+  h.receive({ ...progress, updateId: 'stale' });
+  expect(live.sent).toEqual([]);
+  h.receive({ ...progress, messageId: '3', updateId: 'current' });
+  expect(live.sent[0]?.type).toBe('session.thinking.append');
+  live.stop();
+  h.receive({ ...progress, messageId: '3', updateId: 'stopped' });
+  expect(live.sent).toHaveLength(1);
+  await h.controller.close();
+});
+
+test('pending spoken correction suppresses progress and oversized progress is skipped whole', () => {
+  const sent: Record<string, unknown>[] = [];
+  const conversation = new CompanionLiveConversation({
+    runBackend: async () => '', send: (event) => sent.push(event), schedule: () => () => {},
+    onQueue: () => {}, onTranscript: () => {},
+  });
+  conversation.deliverBackendUpdate('x'.repeat(1601));
+  delegate(conversation);
+  conversation.deliverBackendUpdate('Old request progress');
+  expect(sent).toEqual([]);
+  conversation.stop();
+});

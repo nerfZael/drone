@@ -230,3 +230,23 @@ test('ASAP refuses delivery during agent_end listeners, before afterPrompt start
     }
   });
 });
+
+test('quiet progress retains its model-response owner when a correction arrives mid-response', async () => {
+  const h = harness();
+  try {
+    await h.session.submit({ prompt: 'initial', messageId: 'a' });
+    h.ready = true;
+    h.runs[0].onEvent({ type: 'turn_started' });
+    await h.session.submit({ prompt: 'correction', messageId: 'b' });
+    h.runs[0].onEvent({ type: 'assistant_message', intermediate: true, messageId: 'u1', text: 'Old progress' });
+    h.runs[0].onEvent({ type: 'turn_started' });
+    h.runs[0].onEvent({ type: 'assistant_message', intermediate: true, messageId: 'u2', text: 'Current progress' });
+    h.runs[0].onEvent({ type: 'reasoning_message', messageId: 'r', text: 'Private reasoning' });
+    h.runs[0].onEvent({ type: 'assistant_message', intermediate: false, messageId: 'final', text: 'Done' });
+    expect(h.messages.filter(m => m.type === 'assistant_update')).toEqual([
+      { type: 'assistant_update', messageId: 'a', updateId: 'u1', text: 'Old progress' },
+      { type: 'assistant_update', messageId: 'b', updateId: 'u2', text: 'Current progress' },
+    ]);
+    h.finish[0]('Done'); await tick();
+  } finally { await h.session.close('test complete'); }
+});

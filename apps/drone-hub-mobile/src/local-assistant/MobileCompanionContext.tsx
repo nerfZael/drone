@@ -432,10 +432,10 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       lastWorkspace: mobileLiveWorkspaceSnapshot(activeTarget),
     };
     console.info('[CompanionLive] Context attached', { contextId: liveScope.id, workspace: liveScope.lastWorkspace });
-    await live.start(activeTarget.targetDeviceId, activeTarget.targetName, async (prompt, signal) => {
+    await live.start(activeTarget.targetDeviceId, activeTarget.targetName, async (prompt, signal, telemetry) => {
       if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
       observeMobileLiveWorkspace(liveScope, workspaceTargetRef.current, 'delegation');
-      return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, liveScope), signal);
+      return waitForCompanionReply(controller, () => run(prompt, telemetry, undefined, liveScope), signal);
     });
   }, [available, unavailableReason, targetCapability, live.start, voice, controller, run]);
   headsetCallbacks.current = { start: async () => {

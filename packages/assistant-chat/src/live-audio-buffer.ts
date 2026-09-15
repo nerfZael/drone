@@ -65,7 +65,8 @@ export type LivePcmAudio = {
   resume(): Promise<void>;
   release(): Promise<void>;
 };
-export type LivePcmCallbacks = { signal?: AbortSignal; onAudio(audio: string): void; onError(error: string): void };
+export type LivePcmCallbacks = {
+  onPlayback?(event: import('./companion-live-timing.js').LivePlaybackTiming): void; signal?: AbortSignal; onAudio(audio: string): void; onError(error: string): void };
 
 // Merge complete PCM chunks without concatenating padded base64 strings. Kept
 // platform-neutral: React Native does not provide browser atob/btoa globals.

@@ -350,10 +350,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const capturedWorkspace = captureWorkspace();
       const context = capturedWorkspace?.getAppContext();
       const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
-      await live.start(async (prompt, signal) => {
+      await live.start(async (prompt, signal, telemetry) => {
         if (signal.aborted) throw new Error('Voice conversation ended.');
         if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
-        return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace), signal);
+        return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace, telemetry), signal);
       }, workspaceLabel);
   }, [captureWorkspace, controller, live.start, run]);
 

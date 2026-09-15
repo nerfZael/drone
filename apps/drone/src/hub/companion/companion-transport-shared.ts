@@ -153,3 +153,12 @@ function boundedActivityValue(value: unknown): unknown {
     ? value
     : `${serialized.slice(0, ACTIVITY_RESULT_MAX_CHARS)}\n… value truncated`;
 }
+
+/** Only complete, public assistant text preceding tool work is a progress update. */
+export function companionAssistantUpdate(event: any): { type: 'assistant_update'; updateId: string; text: string } | null {
+  if (event?.background === true || event?.type !== 'assistant_message' || event.intermediate !== true ||
+    typeof event.messageId !== 'string' || !event.messageId ||
+    typeof event.text !== 'string' || !event.text.trim() || event.text.length > 1_600) return null;
+  // Skip oversized messages whole: truncation could remove an important qualification.
+  return { type: 'assistant_update', updateId: event.messageId, text: event.text };
+}

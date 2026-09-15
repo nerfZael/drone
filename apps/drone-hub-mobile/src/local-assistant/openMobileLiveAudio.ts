@@ -122,7 +122,9 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     const report = (error: unknown) => { if (!closed) callbacks.onError(error instanceof Error ? error.message : 'Live audio failed.'); };
     return {
       mute(muted) { if (!closed) void native.mutePcm(id, muted).catch(report); },
-      play(audio) { if (!closed) void native.playPcm(id, audio).catch(report); },
+      play(audio) { if (!closed) void native.playPcm(id, audio).then(() => {
+        if (!closed) callbacks.onPlayback?.({ stage: 'native_enqueued' });
+      }).catch(report); },
       async resume() {},
       release,
     };
