@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
@@ -23,6 +24,8 @@ function transcriptTurnSortKey(raw: TranscriptTurnLike | null | undefined): numb
 
 export function cloneChatEntryForDroneClone(entryRaw: any): any {
   const cloned = entryRaw && typeof entryRaw === 'object' ? JSON.parse(JSON.stringify(entryRaw)) : {};
+  // Hub conversation identity is distinct from provider continuation/session IDs.
+  cloned.id = crypto.randomUUID();
   delete cloned.agentMessageAutoContinueEnabled;
   delete cloned.agentMessageAutoContinueEnabledAt;
   delete cloned.agentSuggestionEnabled;

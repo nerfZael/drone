@@ -10,11 +10,10 @@ import type { DroneSummary } from '../src/droneHub/types';
 
 // Exercise the real configuration hook through promotion and summary updates.
 // Only model discovery, telemetry, and cache storage are substituted.
-function configHarness() {
+function configHarness(cache = new Map<string, any>()) {
   let cursor = 0;
   const slots: any[] = [];
   const effects: Array<() => void> = [];
-  const cache = new Map<string, any>();
   const useMemo = (factory: () => any, deps: any[]) => {
     const index = cursor++;
     if (!slots[index] || deps.some((dep, i) => !Object.is(dep, slots[index].deps[i]))) {
@@ -83,8 +82,12 @@ test.each([{ kind: 'native' }, { kind: 'builtin', id: 'codex' }] as const)(
     const loaded = render(drone, side.name);
     expect(loaded.chatInfo).toEqual(config);
     expect(selection.chatConfigResolutionState({ currentChatIsDraft: false, hasChats: true, metadataAvailable: Boolean(loaded.chatInfo), loading: loaded.loadingChatInfo })).toBe('ready');
-    expect(render(drone, 'default').chatInfo).toEqual(main);
-    expect(render(drone, side.name).chatInfo).toEqual(config);
+    const revisitedMain = render(drone, 'default');
+    expect(revisitedMain.chatInfo).toEqual(main);
+    expect(revisitedMain.loadingChatInfo).toBe(false);
+    const revisitedSide = render(drone, side.name);
+    expect(revisitedSide.chatInfo).toEqual(config);
+    expect(revisitedSide.loadingChatInfo).toBe(false);
     expect(drone.chats).toEqual(['default']);
   },
 );
@@ -99,3 +102,29 @@ test('a newly created side chat becomes eligible when its summary arrives', () =
   // Removing it must still invalidate its cached metadata.
   expect(render(before, side.name).chatInfo).toBeNull();
 });
+
+
+test.each(['same-drone', 'other-drone'])(
+  'a revisited chat keeps its active configuration after cache expiry (%s)', (destination) => {
+    const cache = new Map<string, any>();
+    const render = configHarness(cache);
+    const config = { chat: 'default', agent: { kind: 'builtin', id: 'codex' } } as ChatInfo;
+    render(drone, 'default').resolveChatInfoFromState(config);
+    const otherDrone = destination === 'same-drone' ? drone : { ...drone, id: 'another-drone' };
+    const otherChat = destination === 'same-drone' ? side.name : 'default';
+    render(otherDrone, otherChat).resolveChatInfoFromState({ chat: otherChat, agent: { kind: 'native' } } as ChatInfo);
+    expect(render(drone, 'default').chatInfo).toEqual(config);
+
+    // Expiry does not itself render React; sending a message or receiving an
+    // update does. No new configuration response arrives for a cached chat.
+    cache.clear();
+    const afterUpdate = render({ ...drone }, 'default');
+    expect(afterUpdate.chatInfo).toEqual(config);
+    expect(afterUpdate.loadingChatInfo).toBe(false);
+    expect(afterUpdate.chatInfoError).toBeNull();
+    expect(selection.chatConfigResolutionState({
+      currentChatIsDraft: false, hasChats: true,
+      metadataAvailable: Boolean(afterUpdate.chatInfo), loading: afterUpdate.loadingChatInfo,
+    })).toBe('ready');
+  },
+);

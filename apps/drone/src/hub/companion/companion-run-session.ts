@@ -9,7 +9,7 @@ import type { CompanionBrowserCall, CompanionRuntime } from './companion-runtime
 import type { CompanionTelemetryTransport } from './companion-telemetry';
 import type { SessionSubscriptionDelivery } from '../subscriptions/resource-subscription-service';
 import {
-  boundedCompanionActivityEvent,
+  boundedCompanionActivityEvent, companionAssistantUpdate,
   CompanionBrowserToolBroker,
 } from './companion-transport-shared';
 
@@ -200,10 +200,18 @@ export class CompanionRunSession {
         };
 
         try {
+          let updateMessageId = messageId;
           const onEvent = (event: Parameters<Parameters<CompanionRuntime['run']>[0]['onEvent']>[0]) => {
             if (!this.isCurrentGeneration(runGeneration)) return;
+            // Freeze ownership for each model response: a correction can arrive
+            // while that response is already streaming.
+            if (event.type === 'turn_started') updateMessageId = this.activeMessageId;
             this.flushSteering();
             if (!this.isCurrentGeneration(runGeneration)) return;
+            const update = companionAssistantUpdate(event);
+            if (update) {
+              void Promise.resolve(this.options.emit({ ...update, messageId: updateMessageId })).catch(() => undefined);
+            }
             const visibleEvent = boundedCompanionActivityEvent(event);
             if (!visibleEvent) return;
             void Promise.resolve(

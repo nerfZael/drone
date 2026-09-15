@@ -174,7 +174,7 @@ export type BlipRuntimeEvent =
     })
   | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
   | (BlipRuntimeEventBase & { type: "assistant_delta"; text: string })
-  | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string })
+  | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string; intermediate?: boolean })
   | (BlipRuntimeEventBase & { type: "reasoning_delta"; text: string })
   | (BlipRuntimeEventBase & { type: "reasoning_message"; messageId: string; text: string })
   | (BlipRuntimeEventBase & { type: "transcript_changed"; role: string })

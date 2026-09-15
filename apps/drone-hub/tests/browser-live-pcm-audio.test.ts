@@ -7,6 +7,7 @@ function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pen
   let allowMicrophone!: () => void;
   let stopped = 0; let closed = 0; let scheduled = 0;
   const errors: string[] = [];
+  const playback: unknown[] = [];
   let now = 0; let nodesStopped = 0;
   const starts: number[] = [];
   const track = { enabled: true, onended: null, stop() { stopped++; } };
@@ -27,7 +28,7 @@ function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pen
     getUserMedia: () => options.pendingPermission ? new Promise((resolve) => { allowMicrophone = () => resolve(microphone); }) : Promise.resolve(microphone),
   } } });
   const abort = new AbortController();
-  return { abort, errors, starts, at: (time: number) => { now = time; }, nodesStopped: () => nodesStopped, open: () => openBrowserLivePcmAudio({ signal: abort.signal, onAudio() {}, onError: (error) => errors.push(error) }, () => {}),
+  return { abort, errors, starts, playback, at: (time: number) => { now = time; }, nodesStopped: () => nodesStopped, open: () => openBrowserLivePcmAudio({ signal: abort.signal, onAudio() {}, onPlayback: event => playback.push(event), onError: (error) => errors.push(error) }, () => {}),
     finishClose: () => finishClose(), allowMicrophone: () => allowMicrophone(),
     stopped: () => stopped, closed: () => closed, scheduled: () => scheduled,
     restore() {
@@ -127,5 +128,16 @@ test('browser backlog bound includes the reserve', async () => {
     expect(h.starts).toHaveLength(1);
     expect(h.errors).toEqual(['Live voice playback fell behind. Start again.']);
     await audio.release();
+  } finally { h.restore(); }
+});
+
+test('playback timing reports the audio-clock reserve without claiming audio has completed', async () => {
+  const h = harness();
+  try {
+    const audio = await h.open();
+    audio.play(btoa('\0'.repeat(4800)));
+    expect(h.playback).toEqual([{ stage: 'scheduled', queueMs: 250, durationMs: 100 }]);
+    await audio.release();
+    expect(h.playback).toHaveLength(1);
   } finally { h.restore(); }
 });

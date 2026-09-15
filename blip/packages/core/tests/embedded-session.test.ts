@@ -208,7 +208,7 @@ describe('Embedded Blip session', () => {
     });
     faux.setResponses([
       fauxAssistantMessage(
-        fauxToolCall('read_file', { path: 'secret.txt' }, { id: 'call_blocked' }),
+        [{ type: 'text', text: 'I will read the file.' }, fauxToolCall('read_file', { path: 'secret.txt' }, { id: 'call_blocked' })],
         { stopReason: 'toolUse' },
       ),
       fauxAssistantMessage('The read was blocked.'),
@@ -241,6 +241,10 @@ describe('Embedded Blip session', () => {
 
     await session.prompt('Read the secret');
 
+    expect(events.filter(event => event.type === 'assistant_message')).toEqual([
+      expect.objectContaining({ text: 'I will read the file.', intermediate: true }),
+      expect.objectContaining({ text: 'The read was blocked.', intermediate: false }),
+    ]);
     expect(preflightCalls).toEqual([
       { tool: 'read_file', callId: 'call_blocked', args: { path: 'secret.txt' } },
     ]);

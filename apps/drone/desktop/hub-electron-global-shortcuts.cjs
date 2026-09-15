@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
+const { reserveBackquote } = require('./hub-x11-backquote.cjs');
 
 function shortcutAccelerator(binding, platform = process.platform) {
   const key = String(binding?.key || '').toLowerCase();
@@ -81,8 +82,48 @@ function createShortcutRegistrar(globalShortcut, dispatch, platform = process.pl
   };
 }
 
+function createDesktopShortcutRegistrar(globalShortcut, dispatch, onFailure, reservePhysical = reserveBackquote) {
+  const native = createShortcutRegistrar(globalShortcut, dispatch);
+  let physical = null;
+  return {
+    async configure(config) {
+      await physical?.close();
+      physical = null;
+      // Electron resolves symbols through all X11 layout layers. Its
+      // backquote grab can land on AltGr+7 while the observer watches TLDE.
+      // Reserve TLDE itself and never also reserve the unrelated symbol.
+      const physicalBindings = config.observedBackquote
+        ? Object.fromEntries(Object.entries(config.bindings).filter(([, binding]) => ['`', '~'].includes(binding.key)))
+        : {};
+      const nativeBindings = Object.fromEntries(Object.entries(config.bindings).filter(([action]) => !(action in physicalBindings)));
+      const status = native.configure({ ...config, bindings: nativeBindings });
+      if (Object.keys(physicalBindings).length) {
+        physical = reservePhysical({ bindings: physicalBindings, suspended: config.suspended }, (error) => {
+          onFailure(error);
+        });
+        try {
+          Object.assign(status.actions, await physical.status);
+        } catch (error) {
+          await physical.close();
+          physical = null;
+          for (const action of Object.keys(physicalBindings)) {
+            status.actions[action] = { active: false, error: `Physical shortcut reservation failed: ${error.message || error}` };
+          }
+        }
+        status.running = Object.values(status.actions).some((action) => action.active);
+      }
+      return status;
+    },
+    async close() {
+      native.close();
+      await physical?.close();
+      physical = null;
+    },
+  };
+}
+
 // This connection gives the Hub an ownership lifetime: only shortcuts reserved
-// by Electron can dispatch while connected. X11 observation preserves physical
+// by the desktop can dispatch while connected. X11 observation preserves physical
 // keypad handling and filters repeated native callbacks while a key is held.
 function connectDesktopGlobalShortcuts({ globalShortcut, apiUrl, apiToken, onError = () => {} }) {
   const lifetime = new AbortController();
@@ -99,13 +140,16 @@ function connectDesktopGlobalShortcuts({ globalShortcut, apiUrl, apiToken, onErr
     if (response.status === 409) return;
     if (!response.ok) throw new Error(`Desktop shortcuts ${kind} failed (${response.status})`);
   }
-  const registrar = createShortcutRegistrar(globalShortcut, (event) => {
+  const registrar = createDesktopShortcutRegistrar(globalShortcut, (event) => {
     const signal = connection?.signal;
     // A callback can arrive immediately after registration, before the Hub has
     // received the registration result. Preserve that ordering on the wire.
     void statusPosted.then(() => {
       if (signal && !signal.aborted) return post('dispatch', event, signal);
     }).catch((error) => { if (!signal?.aborted) onError(error); });
+  }, (error) => {
+    onError(error);
+    connection?.abort();
   });
   const done = (async () => {
     while (!lifetime.signal.aborted) {
@@ -128,15 +172,15 @@ function connectDesktopGlobalShortcuts({ globalShortcut, apiUrl, apiToken, onErr
             buffer = buffer.slice(end + 2);
             if (!message.startsWith('event: configure\n')) continue;
             const config = JSON.parse(message.split('\n').find((line) => line.startsWith('data: ')).slice(6));
-            const status = registrar.configure(config);
-            statusPosted = post('status', { revision: config.revision, status }, controller.signal);
+            statusPosted = registrar.configure(config).then((status) =>
+              post('status', { revision: config.revision, status }, controller.signal));
             await statusPosted;
           }
         }
       } catch (error) {
         if (!lifetime.signal.aborted) onError(error);
       } finally {
-        registrar.close();
+        await registrar.close();
         controller.abort();
         lifetime.signal.removeEventListener('abort', abort);
       }
@@ -144,13 +188,11 @@ function connectDesktopGlobalShortcuts({ globalShortcut, apiUrl, apiToken, onErr
     }
   })();
   return {
-    setSuspended: (value) => registrar.setSuspended(value),
     close() {
-      registrar.close();
       lifetime.abort();
       return done;
     },
   };
 }
 
-module.exports = { shortcutAccelerator, createShortcutRegistrar, connectDesktopGlobalShortcuts };
+module.exports = { shortcutAccelerator, createShortcutRegistrar, createDesktopShortcutRegistrar, connectDesktopGlobalShortcuts };

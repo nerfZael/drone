@@ -1,3 +1,4 @@
+import { resolveRepairedChatIdentity } from './chat-identity-migration';
 import crypto from 'node:crypto';
 
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
@@ -394,10 +395,13 @@ async function authenticateChatMcpToken(
     return null;
   }
   const registry: any = await loadRegistry();
+  const chatId = getHubDatabase()?.read((connection) =>
+    resolveRepairedChatIdentity(connection, payload.droneId, payload.chatName, payload.chatId),
+  ) ?? payload.chatId;
   const chats = registry?.drones?.[payload.droneId]?.chats;
   const currentChat = Object.entries(
     chats && typeof chats === 'object' && !Array.isArray(chats) ? chats : {},
-  ).find(([, chat]: [string, any]) => normalizeOptionalString(chat?.id) === payload.chatId);
+  ).find(([, chat]: [string, any]) => normalizeOptionalString(chat?.id) === chatId);
   if (!currentChat) return null;
   const [chatName, chat] = currentChat as [string, any];
   const accessScope = normalizeMcpChatAccessScope(
@@ -411,11 +415,11 @@ async function authenticateChatMcpToken(
   });
   return {
     kind: 'chat',
-    tokenId: `chat:${payload.chatId}`,
+    tokenId: `chat:${chatId}`,
     name: `${payload.droneId}/${chatName} chat`,
     droneId: payload.droneId,
     chatName,
-    chatId: payload.chatId,
+    chatId,
     accessScope,
     selectedDroneRefs,
   };

@@ -1,9 +1,10 @@
-import { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
+import { type CompanionLiveTiming, LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { browserMicrophoneCoordinator, type BrowserMicrophoneLease } from '../chat/browser-microphone-coordinator';
 import { openBrowserLivePcmAudio } from './browser-live-pcm-audio';
 
 type Options = {
+  timing?: CompanionLiveTiming;
   onEvent(event: Record<string, unknown>): void;
   onReady(model: string): void;
   onCapturing?(): void;
@@ -48,7 +49,7 @@ export class CompanionLiveConnection {
     try {
       try {
         this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked)))({
-          signal: this.audioAbort.signal, onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error),
+          signal: this.audioAbort.signal, onPlayback: (event) => this.options.timing?.playback(event), onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error),
         });
       } finally { settled(); }
       if (this.closed) return;
@@ -69,14 +70,14 @@ export class CompanionLiveConnection {
         if (event.type === 'live_closed') { if (this.closed) socket.close(); else this.fail('Live conversation ended. Start again.'); return; }
         if (this.closed) return;
         if (event.type === 'live_ready' && event.transport === 'pcm' && !this.ready) {
-          this.ready = true;
+          this.ready = true; this.options.timing?.once('live_ready');
           clearTimeout(this.timeout);
           this.buffer.connect();
           this.options.onReady(String(event.backendModel ?? ''));
         } else if (event.type === 'live_event') {
           const payload = event.event as Record<string, unknown> | undefined;
           if (payload?.type === 'error') this.fail('Live voice reported an error. Start again.');
-          else if (payload?.type === 'session.output_audio.delta' && typeof payload.delta === 'string') this.audio?.play(payload.delta);
+          else if (payload?.type === 'session.output_audio.delta' && typeof payload.delta === 'string') { this.options.timing?.audioReceived(); this.audio?.play(payload.delta); }
           else if (payload && typeof payload === 'object') this.options.onEvent(payload);
         } else if (event.type === 'live_error') this.fail(String(event.error ?? 'Live voice failed.'));
       };
@@ -86,7 +87,9 @@ export class CompanionLiveConnection {
   }
 
   send(event: Record<string, unknown>): void {
-    if (!this.closed && this.socket?.readyState === WebSocket.OPEN) this.sendMessage({ type: 'live_event', event });
+    if (!this.closed && this.socket?.readyState === WebSocket.OPEN && this.sendMessage({ type: 'live_event', event })) {
+      this.options.timing?.mark('append_socket_sent', { eventType: String(event.type), delegationId: typeof event.delegation_id === 'string' ? event.delegation_id : null });
+    }
   }
   mute(muted: boolean): void { this.muted = muted; this.buffer.mute(muted); this.audio?.mute(muted); }
   async play(): Promise<void> {
@@ -96,6 +99,7 @@ export class CompanionLiveConnection {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.options.timing?.close();
     this.buffer.close();
     this.audioAbort.abort();
     clearTimeout(this.timeout);
@@ -118,7 +122,7 @@ export class CompanionLiveConnection {
   }
   private capture(audio: string): void {
     if (this.closed) return;
-    if (!this.capturing) { this.capturing = true; this.options.onCapturing?.(); }
+    if (!this.capturing) { this.capturing = true; this.options.timing?.once('capture_started'); this.options.onCapturing?.(); }
     this.buffer.append(audio);
   }
   private fail(error: string): void { if (!this.closed) { this.close(); this.options.onError(error); } }

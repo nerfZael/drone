@@ -850,3 +850,14 @@ test('saved desktop conversation resumes after disconnect, window teardown and c
   await restored.close();
   expect(saved).toBeNull();
 });
+
+test('Live correlation metadata survives validation only with bounded IDs and a numeric duration', () => {
+  const input = { runId: 'run', prompt: 'hello', telemetry: {
+    version: 1, liveSessionId: 'live-session', liveDelegationId: 'delegation_1', liveDispatchMs: 450.123,
+  } };
+  expect(validateCompanionRunInput(input)).toMatchObject({ telemetry: { ...input.telemetry, liveDispatchMs: 450.1 } });
+  for (const patch of [{ liveSessionId: 'private text\n' }, { liveDelegationId: 'x'.repeat(129) },
+    { liveDispatchMs: Infinity }, { liveDispatchMs: -1 }, { liveDispatchMs: null }]) {
+    expect(validateCompanionRunInput({ ...input, telemetry: { ...input.telemetry, ...patch } })).not.toHaveProperty('telemetry');
+  }
+});

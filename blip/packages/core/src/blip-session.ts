@@ -641,6 +641,7 @@ class BlipSession implements BlipSessionHandle {
             type: 'assistant_message',
             messageId: createPortableId(),
             text,
+            intermediate: event.message.stopReason === 'toolUse',
           });
         }
         const failure = assistantFailure(event.message);

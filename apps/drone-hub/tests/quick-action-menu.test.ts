@@ -13,7 +13,7 @@ describe('quick action sequences', () => {
       expect(menu.getSnapshot()).toBeNull();
       actions.push(action);
     });
-    for (const sequence of ['qe', 'qt', 'qa', 'qq', 'qw', 'qr', 'qs', 'ae', 'ar', 'wf', 'wt', 'wc', 'wx', 'wr']) {
+    for (const sequence of ['qe', 'qr', 'qa', 'qq', 'qw', 'qt', 'qs', 'ae', 'ar', 'wf', 'wt', 'wc', 'wx', 'wr']) {
       menu.open();
       for (const letter of sequence) expect(menu.handleKey(key(letter))).toBe(true);
       expect(menu.getSnapshot()).toBeNull();
@@ -62,7 +62,7 @@ describe('quick action sequences', () => {
     expect(menu.getSnapshot()).not.toBeNull();
     for (const native of ['Tab', 'Enter', ' ']) expect(menu.handleKey(key(native))).toBe(false);
     menu.handleKey(key('q'));
-    menu.handleKey(key('t'));
+    menu.handleKey(key('r'));
     expect(actions).toEqual(['createSideChat']);
   });
 

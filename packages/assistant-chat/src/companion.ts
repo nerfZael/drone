@@ -211,6 +211,9 @@ export type CompanionClientTelemetry = {
   audioDurationMs?: number;
   connectionMs?: number;
   connectionReused?: boolean;
+  liveSessionId?: string;
+  liveDelegationId?: string;
+  liveDispatchMs?: number;
 };
 
 export type CompanionRunEvent =
@@ -218,6 +221,7 @@ export type CompanionRunEvent =
   | { type: 'subscription'; afterMessageId?: string }
   | { type: 'subscriptions'; subscriptions: unknown[] }
   | { type: 'activity'; event: CompanionToolActivityEvent }
+  | { type: 'assistant_update'; updateId: string; text: string }
   | { type: 'reply'; reply: string }
   | { type: 'status'; status: 'working' | 'completed' | 'cancelled' }
   | { type: 'error'; error: string };
@@ -398,8 +402,13 @@ function normalizeCompanionClientTelemetry(value: unknown): CompanionClientTelem
   const transcriptionMs = duration(raw.transcriptionMs, 60 * 60 * 1_000);
   const audioDurationMs = duration(raw.audioDurationMs, 60 * 60 * 1_000);
   const connectionMs = duration(raw.connectionMs, 60_000);
+  const identifier = (value: unknown) => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : undefined;
+  const liveSessionId = identifier(raw.liveSessionId);
+  const liveDelegationId = identifier(raw.liveDelegationId);
+  const liveDispatchMs = typeof raw.liveDispatchMs === 'number' ? duration(raw.liveDispatchMs, 60_000) : undefined;
   const normalized: CompanionClientTelemetry = {
     version: 1,
+    ...(liveSessionId && liveDelegationId && liveDispatchMs !== undefined ? { liveSessionId, liveDelegationId, liveDispatchMs } : {}),
     ...(transcriptionMs !== undefined ? { transcriptionMs } : {}),
     ...(audioDurationMs !== undefined ? { audioDurationMs } : {}),
     ...(connectionMs !== undefined ? { connectionMs } : {}),

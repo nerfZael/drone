@@ -291,6 +291,22 @@ function createDroneProvisioningServiceHandler(
           });
           return;
         }
+        const preRegAny: any = await loadCanonicalLifecycleModel();
+        timer.mark('loadLifecycle');
+        const cloneFromRaw = typeof body?.cloneFrom === 'string' ? body.cloneFrom.trim() : '';
+        const cloneFrom = cloneFromRaw ? cloneFromRaw : null;
+        const cloneChats = body?.cloneChats !== false;
+        const cloneFromFound = cloneFrom ? findDroneIdByRef(preRegAny, cloneFrom) : null;
+        const cloneFromId =
+          cloneFromFound && cloneFromFound.kind === 'real' ? cloneFromFound.id : null;
+        if (cloneFrom && !cloneFromId) {
+          json(res, 404, { ok: false, error: `unknown cloneFrom drone: ${cloneFrom}` });
+          return;
+        }
+        const cloneFromEntry = cloneFromId
+          ? findDroneEntryByIdentity(preRegAny, cloneFromId)?.entry
+          : null;
+        if (!repoPath) repoPath = String(cloneFromEntry?.repoPath ?? '').trim();
         const hasAgentsMdOverride = Object.prototype.hasOwnProperty.call(body ?? {}, 'agentsMd');
         let agentsMdOverride: string | undefined;
         if (hasAgentsMdOverride) {
@@ -310,8 +326,6 @@ function createDroneProvisioningServiceHandler(
         }
         timer.mark('parseBasics');
 
-        const preRegAny: any = await loadCanonicalLifecycleModel();
-        timer.mark('loadLifecycle');
         let name = '';
         try {
           name = normalizeDroneDisplayName(nameRaw);
@@ -457,16 +471,6 @@ function createDroneProvisioningServiceHandler(
             : typeof body?.seed?.cwd === 'string'
               ? body.seed.cwd
               : null;
-        const cloneFromRaw = typeof body?.cloneFrom === 'string' ? body.cloneFrom.trim() : '';
-        const cloneFrom = cloneFromRaw ? cloneFromRaw : null;
-        const cloneChats = body?.cloneChats !== false;
-        const cloneFromFound = cloneFrom ? findDroneIdByRef(preRegAny, cloneFrom) : null;
-        const cloneFromId =
-          cloneFromFound && cloneFromFound.kind === 'real' ? cloneFromFound.id : null;
-        if (cloneFrom && !cloneFromId) {
-          json(res, 404, { ok: false, error: `unknown cloneFrom drone: ${cloneFrom}` });
-          return;
-        }
         const fleetParentRaw =
           typeof body?.fleetParentId === 'string'
             ? body.fleetParentId.trim()
@@ -499,9 +503,6 @@ function createDroneProvisioningServiceHandler(
           });
           return;
         }
-        const cloneFromEntry = cloneFromId
-          ? findDroneEntryByIdentity(preRegAny, cloneFromId)?.entry
-          : null;
         const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
         if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
           json(res, 409, {
@@ -923,7 +924,24 @@ function createDroneProvisioningServiceHandler(
                 continue;
               }
               const group = referencedGroup?.name ?? (groupRefRaw || null);
-              const repoPath = preflight.repoPath;
+              const cloneFromRaw = typeof raw?.cloneFrom === 'string' ? raw.cloneFrom.trim() : '';
+              const cloneFrom = cloneFromRaw ? cloneFromRaw : null;
+              const cloneChats = raw?.cloneChats !== false;
+              const cloneFromFound = cloneFrom ? findDroneIdByRef(regAny, cloneFrom) : null;
+              const cloneFromId =
+                cloneFromFound && cloneFromFound.kind === 'real' ? cloneFromFound.id : null;
+              if (cloneFrom && !cloneFromId) {
+                rejected.push({
+                  name,
+                  error: `unknown cloneFrom drone: ${cloneFrom}`,
+                  status: 404,
+                });
+                continue;
+              }
+              const cloneFromEntry = cloneFromId
+                ? findDroneEntryByIdentity(regAny, cloneFromId)?.entry
+                : null;
+              const repoPath = preflight.repoPath || String(cloneFromEntry?.repoPath ?? '').trim();
               if (referencedGroup && referencedGroup.repoPath !== repoPath) {
                 rejected.push({ name, error: 'group belongs to a different repository', status: 409 });
                 continue;
@@ -1107,20 +1125,6 @@ function createDroneProvisioningServiceHandler(
                     ? raw.seed.cwd
                     : null;
 
-              const cloneFromRaw = typeof raw?.cloneFrom === 'string' ? raw.cloneFrom.trim() : '';
-              const cloneFrom = cloneFromRaw ? cloneFromRaw : null;
-              const cloneChats = raw?.cloneChats !== false;
-              const cloneFromFound = cloneFrom ? findDroneIdByRef(regAny, cloneFrom) : null;
-              const cloneFromId =
-                cloneFromFound && cloneFromFound.kind === 'real' ? cloneFromFound.id : null;
-              if (cloneFrom && !cloneFromId) {
-                rejected.push({
-                  name,
-                  error: `unknown cloneFrom drone: ${cloneFrom}`,
-                  status: 404,
-                });
-                continue;
-              }
               const fleetParentRaw =
                 typeof raw?.fleetParentId === 'string'
                   ? raw.fleetParentId.trim()
@@ -1158,9 +1162,6 @@ function createDroneProvisioningServiceHandler(
                 });
                 continue;
               }
-              const cloneFromEntry = cloneFromId
-                ? findDroneEntryByIdentity(regAny, cloneFromId)?.entry
-                : null;
               const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
               if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
                 rejected.push({
@@ -1228,6 +1229,7 @@ function createDroneProvisioningServiceHandler(
                 name,
                 ...(createAsDraft ? { draft: true } : {}),
                 group: group ?? undefined,
+                groupId: referencedGroup?.id,
                 repoPath,
                 runtime,
                 ...(hasAgentsMdOverride ? { agentsMdOverride } : {}),

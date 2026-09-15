@@ -63,6 +63,7 @@ import {
   IconNetwork,
   IconRefresh,
   IconSidebarExpand,
+  IconSpinner,
   IconTerminal,
   IconTune,
   IconVsCode,
@@ -2525,6 +2526,14 @@ export function SelectedDroneWorkspace({
                       ) : null
                     }
                   />
+                ) : !currentDroneIsDraft && isDroneStartingOrSeeding(currentDrone.hubPhase) ? (
+                  <div role="status" aria-live="polite" className="flex min-h-0 flex-1 flex-col">
+                    <EmptyState
+                      icon={<IconSpinner className="h-8 w-8 text-[var(--accent)]" />}
+                      title={currentDrone.hubMessage || 'Preparing drone…'}
+                      description="The conversation will appear when the drone is ready."
+                    />
+                  </div>
                 ) : blockChatContentForConfig ? (
                   <ChatSurfaceLoadingView
                     resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}

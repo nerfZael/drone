@@ -14,7 +14,6 @@ import { detachedChatKey, DETACHED_CHAT_BEFORE_ATTACH_EVENT, DETACHED_CHAT_FOCUS
 import { placeDetachedChat } from './detached-chat-placement';
 import { measureSideChatBounds } from './side-chat-workspace-state';
 import { useFloatingWindowKeeper } from './use-floating-window-keeper';
-import { useFloatingChatFocusGrow } from './use-floating-chat-focus-grow';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
 import { requestChatFileOpen } from './chat-file-navigation';
@@ -209,7 +208,6 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
       if (panel) prepareSideChatPanel(panel);
     },
   });
-  useFloatingChatFocusGrow({ apiRef, rootRef, ready, keeper: floatingWindows });
   const save = React.useCallback(() => {
     for (const id of floatingWindows.ids()) {
       const bounds = floatingWindows.intent(id);

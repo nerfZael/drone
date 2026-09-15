@@ -375,7 +375,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       async () =>
         await updatePendingDrone(name, {
           phase: 'creating',
-          message: runtime === 'host' ? 'Starting host runtime…' : 'Creating container…',
+          message: cloneFrom
+            ? 'Cloning drone…'
+            : runtime === 'host' ? 'Starting host runtime…' : 'Creating container…',
         }),
     );
 
@@ -516,6 +518,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
                   : null;
               const environment = pendingLatest?.environment ?? null;
               const d = { ...current };
+              if (cloneFrom) {
+                d.hub = { phase: 'seeding', message: 'Copying conversation history…' };
+              }
               deps.applyPendingDisplayNameToProvisionedDrone(d, pendingLatest, displayName);
               if (fleetMeta) {
                 const current = fleetActorConfig(d);

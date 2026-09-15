@@ -3437,6 +3437,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rememberSeenModels([currentModel, ...chatModels.map((model) => model.id)]);
   }, [chatModels, currentModel, rememberSeenModels]);
   React.useEffect(() => {
+    // Creation selects the new drone before the draft workspace closes. Keep
+    // the draft's repository (and its model preferences) until that handoff.
+    if (draftChat) return;
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) {
@@ -3453,6 +3456,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [
     currentDroneRepoAttached,
     currentDroneRepoPath,
+    draftChat,
     normalizeCreateRepoPath,
     selectedChat,
     selectedDrone,

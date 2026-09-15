@@ -14,12 +14,12 @@ async function runtimeBuildId(root) {
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
       const absolute = path.join(dir, entry.name);
       if (entry.isDirectory()) await visit(absolute);
-      else if (/\.(?:c?js)$/.test(entry.name)) files.push(absolute);
+      else if (/\.(?:c?js|py)$/.test(entry.name)) files.push(absolute);
     }
   };
   await visit(dist);
   files.sort();
-  if (files.length === 0) throw new Error(`No runtime JavaScript found in ${dist}`);
+  if (files.length === 0) throw new Error(`No runtime sources found in ${dist}`);
   const hash = crypto.createHash('sha256');
   for (const file of files) {
     hash.update(path.relative(dist, file));
@@ -136,6 +136,8 @@ async function copyDroneHubElectronMain(root) {
   for (const filename of [
     'hub-electron-main.cjs',
     'hub-electron-global-shortcuts.cjs',
+    'hub-x11-backquote.cjs',
+    'hub-x11-backquote.py',
     'hub-electron-diagnostics.cjs',
     'hub-electron-launch.cjs',
     'hub-electron-static-server.cjs',

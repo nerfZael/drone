@@ -20,7 +20,7 @@ Failures retain failed status, whether represented by a prompt-delivery failure 
 
 ## One search index
 
-Chat schema migration 13 rebuilds the existing FTS5 index with a source discriminator. CLI triggers maintain their rows as before. Before each search, authorized active native chats refresh their rows from a consistent snapshot of durable Blip history. Search then executes one FTS query, one relevance ordering, and one pagination operation.
+Chat schema migration 14 rebuilds the existing FTS5 index with a source discriminator. CLI triggers maintain their rows as before. Before each search, authorized active native chats refresh their rows from a consistent snapshot of durable Blip history. Search then executes one FTS query, one relevance ordering, and one pagination operation.
 
 A per-chat session/sequence/count cursor supports incremental appends. Rebinding, deletion, or rollback causes replacement of that chat's native index rows. The entry count is checked alongside the sequence so deletion in the middle of history cannot leave an old answer searchable. The refresh and cursor update share one Hub transaction; concurrent searches cannot duplicate rows. No runtime dual writes or background indexing worker are required.
 

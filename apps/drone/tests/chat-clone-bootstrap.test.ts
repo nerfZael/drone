@@ -85,6 +85,17 @@ describe('chat clone transcript bootstrap', () => {
     expect(prompt).not.toContain('(no output)');
   });
 
+  test('assigns a fresh Hub identity to every clone without changing the source', () => {
+    const source = { id: 'source-chat-id', chatId: 'provider-session-id', turns: [] };
+    const first = cloneChatEntryForDroneClone(source);
+    const second = cloneChatEntryForDroneClone(source);
+    expect(first.id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(second.id).not.toBe(first.id);
+    expect(first.id).not.toBe(source.id);
+    expect(source.id).toBe('source-chat-id');
+    expect(first.chatId).toBe(source.chatId);
+  });
+
   test('preserves continuation ids while dropping source pending prompt state', () => {
     const cloned = cloneChatEntryForDroneClone({
       createdAt: '2026-03-17T10:00:00.000Z',

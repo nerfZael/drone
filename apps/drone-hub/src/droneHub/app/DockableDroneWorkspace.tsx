@@ -14,7 +14,6 @@ import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { useFloatingWindowKeeper } from './use-floating-window-keeper';
-import { useFloatingChatFocusGrow } from './use-floating-chat-focus-grow';
 import { workspaceGridPanelCount } from './workspace-panel-count';
 import { isUsableFloatingBounds } from './floating-window-bounds';
 import { alignFloatingChats, SIDE_CHAT_PANEL_PREFIX } from './align-floating-chats';
@@ -739,7 +738,6 @@ export function DockableDroneWorkspace({
     },
   });
   // A small focused chat grows to read comfortably and shrinks back on blur.
-  useFloatingChatFocusGrow({ apiRef, rootRef: workspaceElementRef, ready: `${currentDrone.id}:${readyVersion}`, keeper: floatingWindows });
   const [hasOpenedSideChats, setHasOpenedSideChats] = React.useState(sideChats.length > 0);
   if (sideChats.length > 0 && !hasOpenedSideChats) setHasOpenedSideChats(true);
   // Once floating chats need Dockview, keep it for this workspace's lifetime.

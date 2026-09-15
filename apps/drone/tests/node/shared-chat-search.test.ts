@@ -218,7 +218,7 @@ test('upgrading the previous search schema rebuilds CLI rows and backfills nativ
         CREATE TRIGGER active_chat_message_search_turn_insert AFTER INSERT ON canonical_chat_turns BEGIN SELECT 1; END;
         CREATE TRIGGER active_chat_message_search_turn_delete AFTER DELETE ON canonical_chat_turns BEGIN SELECT 1; END;
         CREATE TRIGGER active_chat_message_search_turn_update AFTER UPDATE ON canonical_chat_turns BEGIN SELECT 1; END;
-        DELETE FROM hub_schema_migrations WHERE scope='chats' AND version=13;
+        DELETE FROM hub_schema_migrations WHERE scope='chats' AND version=14;
       `),
       );
       const { ChatTranscriptRepository } = await import('../../src/hub/transcript-store');

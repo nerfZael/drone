@@ -95,8 +95,9 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           node.buffer = buffer;
           node.connect(context.destination);
           playing.add(node);
-          node.onended = () => { playing.delete(node); node.disconnect(); };
+          node.onended = () => { playing.delete(node); node.disconnect(); callbacks.onPlayback?.({ stage: 'completed', durationMs: buffer.duration * 1_000 }); };
           node.start(start);
+          callbacks.onPlayback?.({ stage: 'scheduled', queueMs: (start - now) * 1_000, durationMs: buffer.duration * 1_000 });
           playbackEnd = start + buffer.duration;
           onPlaybackBlocked(context.state !== 'running');
         } catch (error) { callbacks.onError(error instanceof Error ? error.message : 'Live playback failed.'); }

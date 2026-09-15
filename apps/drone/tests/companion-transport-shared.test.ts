@@ -149,3 +149,15 @@ test('forwards known compaction skip reasons without arbitrary provider content'
   expect(boundedCompanionActivityEvent({ type: 'compaction_skipped', reason, summary: 'private' }))
     .toEqual({ type: 'compaction_skipped', reason });
 });
+
+test('progress forwards only bounded complete intermediate assistant text', async () => {
+  const { companionAssistantUpdate } = await import('../src/hub/companion/companion-transport-shared');
+  const update = { type: 'assistant_message', messageId: 'm1', text: 'I found the chat.', intermediate: true };
+  expect(companionAssistantUpdate(update)).toEqual({ type: 'assistant_update', updateId: 'm1', text: update.text });
+  for (const event of [
+    { ...update, type: 'reasoning_message' }, { ...update, type: 'assistant_delta' },
+    { ...update, intermediate: false }, { ...update, intermediate: undefined },
+    { ...update, background: true }, { ...update, text: 'x'.repeat(1601) },
+    { ...update, text: '' }, { ...update, messageId: undefined },
+  ]) expect(companionAssistantUpdate(event)).toBeNull();
+});

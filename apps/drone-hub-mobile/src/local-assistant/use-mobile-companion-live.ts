@@ -1,3 +1,4 @@
+import { CompanionLiveTiming, type CompanionClientTelemetry } from '@drone/assistant-chat';
 import React from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
@@ -11,7 +12,7 @@ import type { MobileMicrophoneCoordinator } from './mobile-microphone-coordinato
 type State = { hasStarted: boolean; capturing: boolean; status: 'idle' | 'connecting' | 'listening' | 'paused' | 'error'; error: string; captions: string;
   backendModel: string; targetDeviceId: string; targetName: string; muted: boolean; queued: number };
 type Session = { connection: MobileCompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean; playStopCue: boolean };
-type Target = { id: string; name: string; run: (prompt: string, signal: AbortSignal) => Promise<string>; muted: boolean };
+type Target = { id: string; name: string; run: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; muted: boolean };
 
 export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCoordinator, controller?: CompanionClientController,
   shortcutCallbacks?: { start(): Promise<void>; ended(): void }) {
@@ -157,6 +158,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     // or native microphone setup is still pending. Flush only after Live is ready.
     const replies = controller ? connectCompanionLiveReplies(controller, {
       deliverBackendReply: (reply) => session.conversation.deliverBackendReply(reply),
+      deliverBackendUpdate: (text) => session.conversation.deliverBackendUpdate(text),
     }) : undefined;
     preparingReplies.current = replies ?? null;
     try {
@@ -175,7 +177,9 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
       const update = (patch: Partial<State>) => {
         if (active.current === session) setState((value) => ({ ...value, ...patch }));
       };
+      const timing = new CompanionLiveTiming();
       const connection = new MobileCompanionLiveConnection({
+        timing,
         targetDeviceId, sessionId: Crypto.randomUUID(), microphoneCoordinator,
         schedule: currentControls.schedule,
         request: mesh.request, subscribe: mesh.subscribe, openLiveAudio: mesh.openLiveAudio,
@@ -213,11 +217,12 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         },
       });
       const conversation = new CompanionLiveConversation({
+        timing,
         externalBackendReplies: Boolean(controller),
         schedule: currentControls.schedule,
-        runBackend: async (prompt) => {
+        runBackend: async (prompt, telemetry) => {
           console.info('[CompanionLive] Dispatching backend task', AppState.currentState);
-          try { return await runBackend(prompt, session.abort.signal); }
+          try { return await runBackend(prompt, session.abort.signal, telemetry); }
           catch (error) {
             if (!session.abort.signal.aborted) console.warn('[CompanionLive] Backend delegation failed', {
               targetDeviceId, appState: AppState.currentState, error: error instanceof Error ? error.message : String(error),

@@ -118,6 +118,14 @@ export type CompanionSessionStore = {
 export class CompanionClientController {
   private state = INITIAL_STATE;
   private readonly listeners = new Set<() => void>();
+  private readonly assistantUpdateListeners = new Set<(update: { updateId: string; text: string }) => void>();
+  private readonly seenAssistantUpdates = new Set<string>();
+
+  subscribeAssistantUpdates(listener: (update: { updateId: string; text: string }) => void): () => void {
+    this.assistantUpdateListeners.add(listener);
+    return () => { this.assistantUpdateListeners.delete(listener); };
+  }
+
   private generation = 0;
   private activeSession: ActiveSession | null = null;
   private resumeRunId: string | null = null;
@@ -354,6 +362,17 @@ export class CompanionClientController {
 
   private handleMessage(session: ActiveSession, message: CompanionServerMessage): void {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
+    if (message.type === 'assistant_update') {
+      if (this.state.status !== 'working' || !message.messageId || message.messageId !== session.latestMessageId ||
+        typeof message.updateId !== 'string' || !message.updateId || typeof message.text !== 'string' ||
+        !message.text.trim() || message.text.length > 1_600) return;
+      const key = `${session.runId}:${message.messageId}:${message.updateId}`;
+      if (this.seenAssistantUpdates.has(key)) return;
+      this.seenAssistantUpdates.add(key);
+      if (this.seenAssistantUpdates.size > 2_000) this.seenAssistantUpdates.delete(this.seenAssistantUpdates.values().next().value!);
+      for (const listener of this.assistantUpdateListeners) listener(message);
+      return;
+    }
     if (message.type === 'subscriptions') {
       this.update({ subscriptions: normalizePresentedChatResourceSubscriptions(message.subscriptions) });
       return;

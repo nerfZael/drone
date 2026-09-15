@@ -41,4 +41,5 @@ export { connectCompanionLiveReplies } from './companion-live-replies.js';
 
 export * from './companion-proposal-store.js';
 
+export * from './companion-live-timing.js';
 export * from './CompanionScreen.js';

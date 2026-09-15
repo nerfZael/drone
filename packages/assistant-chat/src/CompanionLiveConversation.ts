@@ -1,11 +1,14 @@
-type Transcript = { role: 'user' | 'assistant'; text: string };
+import type { CompanionClientTelemetry } from './companion.js';
+import type { CompanionLiveTiming } from './companion-live-timing.js';
+import { LiveTranscript, type LiveTranscriptRow } from './live-transcript.js';
 type Delegation = { id: string; receivedAt: number };
 type Options = {
-  runBackend(prompt: string): Promise<string>;
+  runBackend(prompt: string, telemetry?: CompanionClientTelemetry): Promise<string>;
+  timing?: CompanionLiveTiming;
   /** Completed replies arrive from the Companion controller, including subscription runs. */
   externalBackendReplies?: boolean;
   send(event: Record<string, unknown>): void;
-  onTranscript(rows: readonly Transcript[]): void;
+  onTranscript(rows: readonly LiveTranscriptRow[]): void;
   onQueue(size: number): void;
   /** Mobile can supply a clock that runs without display frames. */
   schedule?(callback: () => void, delayMs: number): () => void;
@@ -15,7 +18,7 @@ export const LIVE_COMPANION_PROMPT_PREFIX = 'The user is speaking with Companion
 
 /** Turns streaming conversation into requests for the existing Companion runtime. */
 export class CompanionLiveConversation {
-  private rows: Transcript[] = [];
+  private readonly transcript = new LiveTranscript();
   private seen = new Set<string>();
   private pending: Delegation[] = [];
   private userVersion = 0;
@@ -31,21 +34,19 @@ export class CompanionLiveConversation {
     if (event.type === 'session.input_transcript.delta' || event.type === 'session.output_transcript.delta') {
       if (typeof event.delta !== 'string' || !event.delta) return;
       const role = event.type === 'session.input_transcript.delta' ? 'user' : 'assistant';
-      const last = this.rows[this.rows.length - 1];
-      if (last?.role === role) last.text += event.delta;
-      else this.rows.push({ role, text: event.delta });
+      this.transcript.append(role, event.delta, event.start_ms, event.end_ms);
       if (role === 'user') this.userVersion += 1;
-      this.trimHistory();
-      this.options.onTranscript(this.rows.map((row) => ({ ...row })));
+      this.options.onTranscript(this.transcript.rows());
       // Wait briefly for fragments following the delegation notification.
       if (role === 'user' && this.pending.length) this.schedule();
     } else if (event.type === 'session.delegation.created') {
       const delegation = event.delegation as { id?: unknown; target?: unknown } | undefined;
       if (delegation?.target !== 'client' || typeof delegation.id !== 'string' || this.seen.has(delegation.id)) return;
       if (this.seen.size >= 2_000 || this.pending.length >= 32) {
-        this.speak(delegation.id, 'Too many pending requests. Please end this voice conversation and start a new one.');
+        this.appendContext(delegation.id, 'Too many pending requests. Please end this voice conversation and start a new one.');
         return;
       }
+      this.options.timing?.mark('delegation_received', { delegationId: delegation.id });
       this.seen.add(delegation.id);
       this.pending.push({ id: delegation.id, receivedAt: Date.now() });
       this.options.onQueue(this.pending.length);
@@ -66,7 +67,18 @@ export class CompanionLiveConversation {
     this.resultDelegationId = null;
     // A pending correction will produce a newer backend result.
     if (this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
-    this.speak(id, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+    this.options.timing?.result(id);
+    this.appendContext(id, reply || 'The backend finished without a reply. Check Companion for details.');
+  }
+
+  deliverBackendUpdate(text: string): void {
+    if (this.stopped || (this.pending.length && this.userVersion > this.dispatchedUserVersion)) return;
+    const chunks = splitLiveCommentary(text);
+    if (chunks.length > 4) return;
+    this.options.timing?.mark('backend_update', { delegationId: this.resultDelegationId });
+    for (const content of chunks) {
+      this.options.send({ type: 'session.thinking.append', delegation_id: this.resultDelegationId, content });
+    }
   }
 
   private schedule(): void {
@@ -90,7 +102,7 @@ export class CompanionLiveConversation {
       if (Date.now() - request.receivedAt < 5_000) { this.schedule(); return; }
       this.pending = [];
       this.options.onQueue(0);
-      if (!this.dispatchedUserVersion) this.speak(request.id, 'I could not establish a new request from the transcript. Please clarify what you want me to do.');
+      if (!this.dispatchedUserVersion) this.appendContext(request.id, 'I could not establish a new request from the transcript. Please clarify what you want me to do.');
       return;
     }
     this.pending = [];
@@ -98,11 +110,15 @@ export class CompanionLiveConversation {
     this.dispatchedUserVersion = this.userVersion;
     const dispatchedVersion = this.userVersion;
     this.resultDelegationId = request.id;
-    const conversation = this.rows.map((row) => `${row.role === 'user' ? 'User' : 'Voice assistant'}: ${row.text}`).join('\n');
-    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
+    const conversation = this.transcript.rows().map((row) => {
+      const span = row.startMs !== undefined && row.endMs !== undefined
+        ? ` [${(row.startMs / 1_000).toFixed(2)}–${(row.endMs / 1_000).toFixed(2)}s]` : '';
+      return `${row.role === 'user' ? 'User' : 'Voice assistant'}${span}: ${row.text}`;
+    }).join('\n');
+    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors; timestamp ranges can overlap when speakers interrupt or acknowledge one another):\n${conversation}`;
     try {
-      const reply = await this.options.runBackend(prompt);
-      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+      const reply = await this.options.runBackend(prompt, this.options.timing?.dispatch(request.id, Date.now() - request.receivedAt));
+      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a reply. Check Companion for details.');
     } catch (error) {
       this.returnResult(request.id, dispatchedVersion, `The backend could not finish this request. ${error instanceof Error ? error.message : 'Check Companion for details.'}`);
     } finally {
@@ -115,30 +131,26 @@ export class CompanionLiveConversation {
     // A different delegation ID alone does not mean the user changed their request.
     // Only new speech paired with pending delegation supersedes an in-flight result.
     if (this.pending.length && this.userVersion > dispatchedVersion) return;
-    this.speak(id, reply);
+    this.options.timing?.result(id);
+    this.appendContext(id, reply);
   }
 
-  private speak(id: string | null, text: string): void {
+  private appendContext(id: string | null, text: string): void {
+    // All backend results are quiet context; Live decides whether to mention them.
     // At most 400 UTF-8 bytes per append: safely below the API's 500-token limit,
     // including non-English text. Keep the exact full result in Companion's UI.
     const chunks = splitLiveCommentary(text);
     if (chunks.length > 4) {
       // Do not truncate an answer and accidentally omit a qualification or failure.
-      this.options.send({ type: 'session.commentary.append', delegation_id: id,
-        content: 'The backend returned a detailed answer. Please read the full answer in Companion on screen.' });
+      this.options.send({ type: 'session.thinking.append', delegation_id: id,
+        content: 'The backend returned a detailed answer. The full answer is available in Companion on screen.' });
       return;
     }
     for (const content of chunks) {
-      this.options.send({ type: 'session.commentary.append', delegation_id: id, content });
+      this.options.send({ type: 'session.thinking.append', delegation_id: id, content });
     }
   }
 
-  private trimHistory(): void {
-    // Reserve room for role labels and adapter instructions within Companion's 20k prompt limit.
-    let length = this.rows.reduce((sum, row) => sum + row.text.length + 20, 0);
-    while (length > 18_000 && this.rows.length > 1) length -= this.rows.shift()!.text.length + 20;
-    if (this.rows[0]?.text.length > 17_980) this.rows[0].text = this.rows[0].text.slice(-17_980);
-  }
 }
 
 export function splitLiveCommentary(text: string): string[] {
