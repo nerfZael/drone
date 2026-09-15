@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { searchNativeChatMessages } from './native-chat-messages';
+import { syncNativeChatSearch } from './chat-read/syncNativeChatSearch';
 import {
   normalizeProviderMessageCheckpoint,
   type ProviderMessageCheckpoint,
@@ -653,9 +653,44 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       installActiveTurnProjections(connection, { rebuildExisting });
     },
   },
+  {
+    version: 13,
+    name: 'shared native and CLI message search',
+    migrate(connection) {
+      connection.exec(`
+        DROP TRIGGER active_chat_message_search_turn_insert;
+        DROP TRIGGER active_chat_message_search_turn_delete;
+        DROP TRIGGER active_chat_message_search_turn_update;
+        DROP TABLE active_chat_message_search;
+      `);
+      createActiveChatMessageSearch(connection, true);
+      connection.exec(`
+        CREATE TABLE native_chat_search_cursors (
+          drone_id TEXT NOT NULL, chat_name TEXT NOT NULL, thread_id TEXT NOT NULL,
+          session_id TEXT NOT NULL, sequence INTEGER NOT NULL, entry_count INTEGER NOT NULL,
+          PRIMARY KEY (drone_id, chat_name),
+          FOREIGN KEY (drone_id, chat_name) REFERENCES canonical_chats(drone_id, chat_name) ON UPDATE CASCADE ON DELETE CASCADE
+        );
+        CREATE TRIGGER native_chat_search_delete AFTER DELETE ON canonical_chats BEGIN
+          DELETE FROM active_chat_message_search WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND source = 'native';
+        END;
+        CREATE TRIGGER native_chat_search_rename AFTER UPDATE OF drone_id, chat_name ON canonical_chats BEGIN
+          UPDATE active_chat_message_search SET drone_id = NEW.drone_id, chat_name = NEW.chat_name
+          WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND source = 'native';
+        END;
+        CREATE TRIGGER native_chat_search_identity_update AFTER UPDATE OF metadata_json ON canonical_chats
+        WHEN COALESCE(json_extract(OLD.metadata_json, '$.id'), '') != COALESCE(json_extract(NEW.metadata_json, '$.id'), '')
+          OR COALESCE(json_extract(OLD.metadata_json, '$.agent.kind'), '') != COALESCE(json_extract(NEW.metadata_json, '$.agent.kind'), '')
+        BEGIN
+          DELETE FROM active_chat_message_search WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND source = 'native';
+          DELETE FROM native_chat_search_cursors WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name;
+        END;
+      `);
+    },
+  },
 ];
 
-function createActiveChatMessageSearch(connection: HubDatabaseConnection): void {
+function createActiveChatMessageSearch(connection: HubDatabaseConnection, includeNative = false): void {
   connection.exec(`
     CREATE VIRTUAL TABLE active_chat_message_search USING fts5(
       drone_id UNINDEXED,
@@ -664,6 +699,7 @@ function createActiveChatMessageSearch(connection: HubDatabaseConnection): void 
       role UNINDEXED,
       timestamp UNINDEXED,
       content,
+      ${includeNative ? 'source UNINDEXED,' : ''}
       tokenize = 'unicode61'
     );
 
@@ -686,13 +722,13 @@ function createActiveChatMessageSearch(connection: HubDatabaseConnection): void 
     CREATE TRIGGER active_chat_message_search_turn_delete
     AFTER DELETE ON canonical_chat_turns BEGIN
       DELETE FROM active_chat_message_search
-      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id ${includeNative ? 'AND source IS NULL' : ''};
     END;
 
     CREATE TRIGGER active_chat_message_search_turn_update
     AFTER UPDATE ON canonical_chat_turns BEGIN
       DELETE FROM active_chat_message_search
-      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id ${includeNative ? 'AND source IS NULL' : ''};
       INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
       SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
              COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
@@ -3373,14 +3409,14 @@ export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResu
   return { available: true, chats: [...memoryChats.keys()].filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length)).sort() };
 }
 
-export function searchActiveChatMessages(opts: {
+export async function searchActiveChatMessages(opts: {
   query: string;
   droneId?: string;
   droneIds?: readonly string[];
   chatName?: string;
   limit?: number;
   offset?: number;
-}): { available: boolean; results: ActiveChatSearchResult[]; limit: number; offset: number } {
+}): Promise<{ available: boolean; results: ActiveChatSearchResult[]; limit: number; offset: number }> {
   const query = String(opts.query ?? '').trim();
   const limit = Number.isFinite(opts.limit)
     ? Math.max(1, Math.min(50, Math.floor(Number(opts.limit))))
@@ -3403,6 +3439,11 @@ export function searchActiveChatMessages(opts: {
     const allowedDroneClause = allowedDroneIds
       ? `AND drone_id IN (${allowedDroneIds.map(() => '?').join(', ')})`
       : '';
+    await syncNativeChatSearch(database, {
+      droneIds: allowedDroneIds ?? undefined,
+      droneId: String(opts.droneId ?? '').trim(),
+      chatName: String(opts.chatName ?? '').trim(),
+    });
     const results = database.read((connection) =>
       connection.prepare(`
         SELECT drone_id, chat_name, turn_id, role, timestamp,
@@ -3413,6 +3454,10 @@ export function searchActiveChatMessages(opts: {
           AND (? = '' OR drone_id = ?)
           ${allowedDroneClause}
           AND (? = '' OR chat_name = ?)
+          AND EXISTS (SELECT 1 FROM canonical_chats c
+            WHERE c.drone_id = active_chat_message_search.drone_id AND c.chat_name = active_chat_message_search.chat_name
+              AND ((json_extract(c.metadata_json, '$.agent.kind') = 'native' AND source = 'native')
+                OR (COALESCE(json_extract(c.metadata_json, '$.agent.kind'), '') != 'native' AND source IS NULL)))
         ORDER BY rank, timestamp DESC, turn_id, role
         LIMIT ? OFFSET ?
       `).all(
@@ -3422,8 +3467,8 @@ export function searchActiveChatMessages(opts: {
         ...(allowedDroneIds ?? []),
         String(opts.chatName ?? '').trim(),
         String(opts.chatName ?? '').trim(),
-        limit + offset,
-        0,
+        limit,
+        offset,
       ) as Array<{
         drone_id: string;
         chat_name: string;
@@ -3436,7 +3481,7 @@ export function searchActiveChatMessages(opts: {
     );
     return {
       available: true,
-      results: [...results.map((row) => ({
+      results: results.map((row) => ({
         droneId: row.drone_id,
         chatName: row.chat_name,
         turnId: row.turn_id,
@@ -3444,15 +3489,7 @@ export function searchActiveChatMessages(opts: {
         timestamp: row.timestamp,
         snippet: row.snippet,
         rank: Number(row.rank),
-      })), ...searchNativeChatMessages({
-        query, limit: limit + offset,
-        droneIds: allowedDroneIds ?? undefined,
-        droneId: String(opts.droneId ?? '').trim(),
-        chatName: String(opts.chatName ?? '').trim(),
-      })]
-        .sort((left, right) => left.rank - right.rank || right.timestamp.localeCompare(left.timestamp)
-          || left.turnId.localeCompare(right.turnId) || left.role.localeCompare(right.role))
-        .slice(offset, offset + limit),
+      })),
       limit,
       offset,
     };

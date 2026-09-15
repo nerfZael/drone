@@ -1,3 +1,5 @@
+import { ChatReadService } from '../src/hub/chat-read/ChatReadService';
+import { registerChatReadRoutes } from '../src/hub/routes/chat-read-routes';
 import { expect, test } from 'bun:test';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
@@ -213,19 +215,17 @@ test('Companion read_chat retrieves native history through a read-only route', a
         throw new Error('Must not load unbounded activity');
       },
     });
+    registerChatReadRoutes(router, new ChatReadService(async () => ({
+      ok: true, id: 'native-drone', chat: 'default', chatId: threadId,
+      agent: { kind: 'native' }, transcripts: [], pending: [
+        { id: 'completed', state: 'sent', prompt: 'Already answered' },
+        { id: 'next', state: 'queued', prompt: 'Next question' },
+      ],
+    })));
     globalThis.fetch = (async (input: any, init: any) => {
       const url = new URL(String(input));
       expect(init?.method ?? 'GET').toBe('GET');
       paths.push(url.pathname);
-      if (url.pathname.endsWith('/state'))
-        return Response.json({
-          agent: { kind: 'native' },
-          transcripts: [],
-          pending: [
-            { id: 'completed', state: 'sent', prompt: 'Already answered' },
-            { id: 'next', state: 'queued', prompt: 'Next question' },
-          ],
-        });
       expect(await router.handle({ method: 'GET', headers: {} } as any, {} as any, url)).toBe(true);
       return response!;
     }) as typeof fetch;
@@ -244,8 +244,7 @@ test('Companion read_chat retrieves native history through a read-only route', a
       expect(data.messages[1].text).toBe('The cobalt proposal reply was saved.');
       expect(data.pending.map((prompt: any) => prompt.id)).toEqual(['next']);
       expect(paths).toEqual([
-        '/api/drones/native-drone/chats/default/state',
-        '/api/drones/native-drone/chats/default/native/messages',
+        '/api/drones/native-drone/chats/default/messages',
       ]);
       expect(
         await router.handle(

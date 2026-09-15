@@ -1293,7 +1293,7 @@ function chatCursor(
         validIso(status.latest?.at, '') ||
         `cycle-${crypto.randomUUID()}`,
     lastFailureId:
-      status.latest?.role === 'user' && status.latest?.status === 'failed'
+      status.latest?.status === 'failed'
         ? String(status.latest?.id ?? '').trim()
         : '',
   };
@@ -1329,7 +1329,7 @@ export function detectChatSubscriptionChanges(
   const events: ResourceEvent[] = [];
   const latestId = String(status.latest?.id ?? '').trim();
   const latestFailed =
-    status.latest?.role === 'user' && status.latest?.status === 'failed' && latestId;
+    status.latest?.status === 'failed' && latestId;
   if (
     latestFailed &&
     cursor.lastFailureId !== latestId &&

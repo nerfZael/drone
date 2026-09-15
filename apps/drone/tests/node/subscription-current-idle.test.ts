@@ -84,3 +84,50 @@ for (const initiallyIdle of [true, false]) {
     }
   });
 }
+
+test('failed assistant completion emits chat.failed once and does not emit successful idle', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    database.read((db) =>
+      db.exec(`CREATE TABLE canonical_chats (drone_id TEXT, chat_name TEXT, metadata_json TEXT);
+      INSERT INTO canonical_chats VALUES ('drone', 'default', '{"id":"watched"}');`),
+    );
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => ({
+        idle: false,
+        reason: 'active_user_messages',
+        latest: { id: 'prompt', role: 'user' },
+      }),
+      readSettings: async () => DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      wakePromptQueue: () => {},
+      log: () => {},
+    });
+    const { subscription } = await service.subscribe({
+      subscriber: { chatId: 'companion:test', droneId: 'companion', chatName: 'test' },
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched',
+      events: ['chat.idle', 'chat.failed'],
+    });
+    const location = repository.resolveChatResource('watched')!;
+    const failed = {
+      idle: true,
+      reason: 'latest_user_failed',
+      latest: { id: 'answer', role: 'agent', status: 'failed' },
+    };
+    const changed = detectChatSubscriptionChanges(subscription, location, failed);
+    assert.deepEqual(
+      changed.events.map((event) => event.eventType),
+      ['chat.failed'],
+    );
+    assert.equal(
+      detectChatSubscriptionChanges({ ...subscription, cursor: changed.cursor }, location, failed)
+        .events.length,
+      0,
+    );
+  } finally {
+    close();
+  }
+});
