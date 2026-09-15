@@ -272,3 +272,10 @@ test('migrates proposal tool names and execution capability while preserving exp
     enabledTools: ['read_proposal', 'apply_proposal_patch'],
   }).enabledTools).toEqual(['read_proposal', 'apply_proposal_patch']);
 });
+
+test('enables screen display for legacy navigation profiles and respects current disabled choices', () => {
+  expect(COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'show_on_screen')).toMatchObject({ execution: 'browser', requires: null });
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 12, enabledTools: ['open_drone_chat'] }).enabledTools).toContain('show_on_screen');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['open_drone_chat'] }).enabledTools).not.toContain('show_on_screen');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 12, enabledTools: [] }).enabledTools).toEqual([]);
+});

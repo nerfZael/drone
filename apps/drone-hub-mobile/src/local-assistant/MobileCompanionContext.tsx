@@ -1,3 +1,4 @@
+import { CompanionScreen } from '@drone/assistant-chat';
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
@@ -62,6 +63,7 @@ export type MobileCompanionWorkspaceTarget = {
 };
 
 type MobileCompanionContextValue = {
+  screen: CompanionScreen;
   status: CompanionStatus;
   live: ReturnType<typeof useMobileCompanionLive>;
   checkingVoiceMode: boolean;
@@ -126,6 +128,8 @@ type MobileCompanionContextValue = {
 const MobileCompanionContext = React.createContext<MobileCompanionContextValue | null>(null);
 
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
+  const [screen] = React.useState(() => new CompanionScreen());
+  React.useEffect(() => () => screen.detach(), [screen]);
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
   const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
@@ -295,6 +299,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       args: Record<string, unknown>,
     ) => {
       if (workspaceTargetRef.current?.targetDeviceId !== expectedTargetDeviceId) throw new Error('STALE_MOBILE_CONTEXT');
+      if (tool === 'show_on_screen') return await screen.execute(args);
       if (tool === 'list_proposals') return { proposals: proposalStore.list() };
       if (tool === 'create_proposal') return proposalStore.create(proposalContext(), controller.getSessionId(), typeof args.title === 'string' ? args.title : undefined);
       if (tool === 'read_proposal') return readProposal(typeof args.targetId === 'string' ? args.targetId : undefined);
@@ -345,6 +350,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [controller, live.stop, voice.discardRecording]);
 
   const close = React.useCallback(async () => {
+    screen.clear();
     live.reset();
     if (proposalExecutingRef.current) return;
     activeTargetDeviceIdRef.current = '';
@@ -673,6 +679,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
+      screen,
       error: proposalActionError || state.error,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       live,

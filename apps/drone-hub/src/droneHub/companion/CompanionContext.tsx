@@ -1,3 +1,4 @@
+import { CompanionScreen } from '@drone/assistant-chat';
 import { desktopCompanionSessionStore } from './companion-session-store';
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
@@ -48,6 +49,7 @@ export type CompanionProposalHistoryEntry = {
 type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
 type CompanionContextValue = {
+  screen: CompanionScreen;
   sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
   status: CompanionStatus;
@@ -100,6 +102,8 @@ function newId(): string {
 }
 
 export function CompanionProvider({ children }: { children: React.ReactNode }) {
+  const [screen] = React.useState(() => new CompanionScreen());
+  React.useEffect(() => () => screen.detach(), [screen]);
   const workspace = useCompanionWorkspace();
   const recorder = useRecorderCompanion();
   const controllerRef = React.useRef<CompanionClientController | null>(null);
@@ -150,6 +154,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   voiceStatusRef.current = voice.status;
 
   const close = React.useCallback(async () => {
+    screen.clear();
     if (proposalExecutingRef.current) return;
     live.reset();
     voiceSubmissionGenerationRef.current += 1;
@@ -296,6 +301,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           String(args.targetId ?? ''), String(args.baseRevision ?? ''), String(args.content ?? ''),
         );
       }
+      if (tool === 'show_on_screen') return await screen.execute(args);
       if (tool === 'list_proposals') return { proposals: proposalStore.list() };
       if (tool === 'create_proposal') return proposalStore.create(proposalContext(capturedWorkspace), controller.getSessionId(), typeof args.title === 'string' ? args.title : undefined);
       if (tool === 'read_proposal') return readProposal(typeof args.targetId === 'string' ? args.targetId : undefined);
@@ -486,6 +492,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
+      screen,
       sessionId: controller.getSessionId(),
       error: proposalActionError || state.error || autoApproveSettings.error,
       live,

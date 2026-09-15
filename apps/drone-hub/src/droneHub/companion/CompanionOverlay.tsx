@@ -1,3 +1,4 @@
+import { CompanionScreenPanel } from './CompanionScreenPanel';
 import { AssistantContextUsageIndicator } from '../assistant/AssistantContextStatus';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
@@ -147,6 +148,7 @@ export function CompanionOverlay() {
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
       overflowY: 'auto',
     } : { zIndex: panelOpen ? 100 : 80 }} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
+      {companion.screen ? <CompanionScreenPanel screen={companion.screen} /> : null}
       {historyOpen ? (
         <CompanionProposalHistory
           entries={companion.proposalHistory}
