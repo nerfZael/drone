@@ -139,3 +139,21 @@ test('ending voice rejects the result waiter without cancelling an active Compan
   expect(controller.getSnapshot().reply).toBe('Finished in the UI');
   await controller.close();
 });
+
+test('desktop keeps forwarding microphone audio through delegation and overlapping playback', async () => {
+  const h = harness();
+  try {
+    await h.connection.start(); h.socket().open();
+    h.socket().message({ type: 'live_ready', transport: 'pcm' }); await tick();
+    h.socket().message({ type: 'live_event', event: { type: 'session.delegation.created', delegation: { id: 'd1', target: 'client' } } });
+    h.socket().message({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'Bwg=' } });
+    h.capture('AwQ='); await tick();
+    h.connection.send({ type: 'session.thinking.append', delegation_id: 'd1', content: 'Still working.' });
+    h.socket().message({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'CQo=' } });
+    h.capture('BQY='); await tick();
+    expect(h.muted()).toBe(false);
+    expect(h.socket().sent.filter(m => m.event?.type === 'session.input_audio.append').map(m => m.event.audio)).toEqual(['AQI=', 'AwQ=', 'BQY=']);
+    expect(h.played).toEqual(['Bwg=', 'CQo=']);
+    expect(h.errors).toEqual([]);
+  } finally { await h.cleanup(); }
+});

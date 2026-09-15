@@ -363,8 +363,8 @@ test('mobile reconnect routes backend completion and subscription replies to the
     });
     expect(old.sent).toEqual([]);
     expect(current.sent).toEqual([
-      { type: 'session.commentary.append', delegation_id: null, content: 'Finished' },
-      { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
+      { type: 'session.thinking.append', delegation_id: null, content: 'Finished' },
+      { type: 'session.thinking.append', delegation_id: null, content: 'Notification' },
     ]);
     await act(async () => { live.reset(); });
     expect(live.hasStarted).toBe(false);
@@ -411,7 +411,7 @@ test('headset stop preserves Companion and submitted backend work, and play resu
       receive({ type: 'reply', messageId, reply: 'Finished' });
       receive({ type: 'status', messageId, status: 'completed' });
     });
-    expect(current.sent).toEqual([{ type: 'session.commentary.append', delegation_id: null, content: 'Finished' }]);
+    expect(current.sent).toEqual([{ type: 'session.thinking.append', delegation_id: null, content: 'Finished' }]);
     // The app's stop control uses the same pause path; the headset can restart it.
     await act(async () => { live.pause(); });
     expect(live.status).toBe('paused');
@@ -601,7 +601,7 @@ test('Live uses the controls clock to dispatch a background backend task without
     expect(prompts).toHaveLength(0);
     await act(async () => { now = 500; clock.tick(); });
     expect(prompts).toHaveLength(1);
-    expect(current.sent).toEqual([{ type: 'session.commentary.append', delegation_id: 'background', content: 'Done' }]);
+    expect(current.sent).toEqual([{ type: 'session.thinking.append', delegation_id: 'background', content: 'Done' }]);
   } finally {
     appState.currentState = 'active'; controlSchedule = undefined;
     await act(async () => { root?.unmount(); }); clock.close();

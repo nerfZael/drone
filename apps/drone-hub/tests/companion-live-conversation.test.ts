@@ -19,7 +19,7 @@ test('delegation waits for transcript, deduplicates notifications, and preserves
   expect(prompts).toHaveLength(1);
   expect(prompts[0]).toContain('User: Companion.');
   expect(prompts[0]).toContain('Voice assistant: Which project?');
-  expect(sent).toEqual([{ type: 'session.commentary.append', delegation_id: 'first', content: 'Found it.' }]);
+  expect(sent).toEqual([{ type: 'session.thinking.append', delegation_id: 'first', content: 'Found it.' }]);
   conversation.stop();
 });
 
@@ -104,7 +104,7 @@ test('a long answer is referred to the UI instead of losing its final qualificat
     conversation.receive(delegation('long-result'));
     await delay(550);
     expect(sent).toHaveLength(1);
-    expect(sent[0].content).toContain('read the full answer');
+    expect(sent[0].content).toContain('The full answer is available');
     expect(sent[0].content).not.toContain('Detailed findings');
   } finally { conversation.stop(); }
 });
@@ -159,3 +159,25 @@ function transcript(role: 'user' | 'assistant', delta: string) {
 }
 function delegation(id: string) { return { type: 'session.delegation.created', delegation: { id, target: 'client' } }; }
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+test('a transcribed follow-up stays visible but needs a new Live delegation before backend dispatch', async () => {
+  let dispatch!: () => void;
+  const prompts: string[] = [];
+  let captions = '';
+  const conversation = new CompanionLiveConversation({
+    runBackend: prompt => { prompts.push(prompt); return new Promise(() => {}); },
+    send() {}, onQueue() {}, onTranscript: rows => { captions = rows.map(row => row.text).join(' '); },
+    schedule: callback => { dispatch = callback; return () => {}; },
+  });
+  try {
+    conversation.receive(transcript('user', 'Put one and two on separate lines.'));
+    conversation.receive(delegation('first')); dispatch();
+    conversation.receive(transcript('assistant', 'On it.'));
+    conversation.receive(transcript('user', ' Also add zebra on a third line.'));
+    expect(captions).toContain('Also add zebra on a third line.');
+    expect(prompts).toHaveLength(1);
+    conversation.receive(delegation('follow-up')); dispatch();
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Also add zebra on a third line.');
+  } finally { conversation.stop(); }
+});

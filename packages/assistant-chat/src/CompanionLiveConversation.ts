@@ -43,7 +43,7 @@ export class CompanionLiveConversation {
       const delegation = event.delegation as { id?: unknown; target?: unknown } | undefined;
       if (delegation?.target !== 'client' || typeof delegation.id !== 'string' || this.seen.has(delegation.id)) return;
       if (this.seen.size >= 2_000 || this.pending.length >= 32) {
-        this.speak(delegation.id, 'Too many pending requests. Please end this voice conversation and start a new one.');
+        this.appendContext(delegation.id, 'Too many pending requests. Please end this voice conversation and start a new one.');
         return;
       }
       this.options.timing?.mark('delegation_received', { delegationId: delegation.id });
@@ -68,7 +68,7 @@ export class CompanionLiveConversation {
     // A pending correction will produce a newer backend result.
     if (this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
     this.options.timing?.result(id);
-    this.speak(id, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+    this.appendContext(id, reply || 'The backend finished without a reply. Check Companion for details.');
   }
 
   deliverBackendUpdate(text: string): void {
@@ -102,7 +102,7 @@ export class CompanionLiveConversation {
       if (Date.now() - request.receivedAt < 5_000) { this.schedule(); return; }
       this.pending = [];
       this.options.onQueue(0);
-      if (!this.dispatchedUserVersion) this.speak(request.id, 'I could not establish a new request from the transcript. Please clarify what you want me to do.');
+      if (!this.dispatchedUserVersion) this.appendContext(request.id, 'I could not establish a new request from the transcript. Please clarify what you want me to do.');
       return;
     }
     this.pending = [];
@@ -118,7 +118,7 @@ export class CompanionLiveConversation {
     const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors; timestamp ranges can overlap when speakers interrupt or acknowledge one another):\n${conversation}`;
     try {
       const reply = await this.options.runBackend(prompt, this.options.timing?.dispatch(request.id, Date.now() - request.receivedAt));
-      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a reply. Check Companion for details.');
     } catch (error) {
       this.returnResult(request.id, dispatchedVersion, `The backend could not finish this request. ${error instanceof Error ? error.message : 'Check Companion for details.'}`);
     } finally {
@@ -132,21 +132,22 @@ export class CompanionLiveConversation {
     // Only new speech paired with pending delegation supersedes an in-flight result.
     if (this.pending.length && this.userVersion > dispatchedVersion) return;
     this.options.timing?.result(id);
-    this.speak(id, reply);
+    this.appendContext(id, reply);
   }
 
-  private speak(id: string | null, text: string): void {
+  private appendContext(id: string | null, text: string): void {
+    // All backend results are quiet context; Live decides whether to mention them.
     // At most 400 UTF-8 bytes per append: safely below the API's 500-token limit,
     // including non-English text. Keep the exact full result in Companion's UI.
     const chunks = splitLiveCommentary(text);
     if (chunks.length > 4) {
       // Do not truncate an answer and accidentally omit a qualification or failure.
-      this.options.send({ type: 'session.commentary.append', delegation_id: id,
-        content: 'The backend returned a detailed answer. Please read the full answer in Companion on screen.' });
+      this.options.send({ type: 'session.thinking.append', delegation_id: id,
+        content: 'The backend returned a detailed answer. The full answer is available in Companion on screen.' });
       return;
     }
     for (const content of chunks) {
-      this.options.send({ type: 'session.commentary.append', delegation_id: id, content });
+      this.options.send({ type: 'session.thinking.append', delegation_id: id, content });
     }
   }
 

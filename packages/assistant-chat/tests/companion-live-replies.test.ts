@@ -42,7 +42,7 @@ function delegate(conversation: CompanionLiveConversation, id = 'delegation') {
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 500));
 
-test('a delegated completion speaks once and retains its current Live delegation', async () => {
+test('a delegated completion supplies quiet context once and retains its current Live delegation', async () => {
   const h = harness(); const live = h.live(); live.ready();
   try {
     delegate(live.conversation);
@@ -51,7 +51,7 @@ test('a delegated completion speaks once and retains its current Live delegation
     expect(live.sent).toEqual([]); // Starting a backend session must not narrate a failure.
     h.finish();
     await Promise.resolve(); await Promise.resolve();
-    expect(live.sent).toEqual([{ type: 'session.commentary.append', delegation_id: 'delegation', content: 'Done' }]);
+    expect(live.sent).toEqual([{ type: 'session.thinking.append', delegation_id: 'delegation', content: 'Done' }]);
     h.receive({ type: 'status', status: 'completed' });
     expect(live.sent).toHaveLength(1);
   } finally { live.stop(); await h.controller.close(); }
@@ -65,11 +65,11 @@ test('a backend request outlives Live and finishes in the replacement session wi
     h.finish('Finished after reconnect');
     await Promise.resolve(); await Promise.resolve();
     expect(old.sent).toEqual([]);
-    expect(current.sent).toEqual([{ type: 'session.commentary.append', delegation_id: null, content: 'Finished after reconnect' }]);
+    expect(current.sent).toEqual([{ type: 'session.thinking.append', delegation_id: null, content: 'Finished after reconnect' }]);
   } finally { current.stop(); await h.controller.close(); }
 });
 
-test('subscription completions speak without a voice request, including repeated identical notifications', async () => {
+test('subscription completions supply quiet context without a voice request, including repeated identical notifications', async () => {
   const h = harness(); await h.submit(); h.finish('Subscribed');
   const live = h.live(); live.ready();
   try {
@@ -79,7 +79,7 @@ test('subscription completions speak without a voice request, including repeated
       h.finish('The task finished', id);
     }
     expect(live.sent).toEqual(Array.from({ length: 2 }, () => ({
-      type: 'session.commentary.append', delegation_id: null, content: 'The task finished',
+      type: 'session.thinking.append', delegation_id: null, content: 'The task finished',
     })));
   } finally { live.stop(); await h.controller.close(); }
 });
@@ -117,7 +117,7 @@ test('intermediate messages are quiet, deduplicated, and do not consume the fina
     h.receive(progress); h.receive(progress);
     expect(live.sent).toEqual([{ type: 'session.thinking.append', delegation_id: 'delegation', content: progress.text }]);
     h.finish('Finished');
-    expect(live.sent[1]).toEqual({ type: 'session.commentary.append', delegation_id: 'delegation', content: 'Finished' });
+    expect(live.sent[1]).toEqual({ type: 'session.thinking.append', delegation_id: 'delegation', content: 'Finished' });
     h.receive({ ...progress, updateId: 'late' });
     expect(live.sent).toHaveLength(2);
   } finally { live.stop(); await h.controller.close(); }
