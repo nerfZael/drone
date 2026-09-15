@@ -17,6 +17,7 @@ export type ChatVisibleMessage = {
 };
 
 type ChatReadTurn = {
+  turn?: number;
   id?: string;
   at?: string;
   promptAt?: string;
@@ -55,29 +56,7 @@ export function readVisibleChatHistory(
     if (!snapshot.chatId) throw new Error('native chat has no stable identity');
     return readNativeChatMessages(snapshot.chatId, limit, maxChars);
   }
-  const messages = snapshot.transcripts.flatMap((turn, index) => {
-    const turnId = String(turn.id || `turn-${index + 1}`);
-    const rows: ChatVisibleMessage[] = [];
-    const add = (role: ChatVisibleMessage['role'], text: unknown, at: unknown) => {
-      const content = String(text ?? '');
-      if (!content.trim()) return;
-      rows.push({
-        id: `${role}:${turnId}`,
-        turnId,
-        role,
-        status:
-          role === 'error' || (role === 'assistant' && turn.ok === false) ? 'failed' : 'completed',
-        at: String(at ?? ''),
-        text: content.slice(0, maxChars),
-        textOriginalLength: content.length,
-        textTruncated: content.length > maxChars,
-      });
-    };
-    add('user', turn.prompt, turn.promptAt ?? turn.at);
-    add('assistant', turn.output, turn.completedAt ?? turn.at);
-    add('error', turn.error, turn.completedAt ?? turn.at);
-    return rows;
-  });
+  const messages = cliMessages(snapshot.transcripts, maxChars);
   return {
     messages: messages.slice(-limit),
     hasOlder: messages.length > limit || (snapshot.turnCount ?? 0) > snapshot.transcripts.length,
@@ -106,7 +85,10 @@ export function summarizeChatActivity(
   const queuedUserMessages = pending.filter(
     (prompt) => normalizePendingPromptState(prompt.state, 'queued') === 'queued',
   ).length;
-  const history = readVisibleChatHistory(snapshot).messages;
+  const history =
+    snapshot.agent?.kind === 'native'
+      ? readVisibleChatHistory(snapshot).messages
+      : cliMessages(snapshot.transcripts, 8000, true);
   const candidates: NonNullable<AssistantChatIdleStatus['latest']>[] = history.map((message) => ({
     id: message.turnId && message.role !== 'user' ? `agent:${message.turnId}` : message.id,
     role: message.role === 'user' ? 'user' : 'agent',
@@ -115,19 +97,6 @@ export function summarizeChatActivity(
     text: message.text,
     ...(message.turnId ? { turnId: message.turnId } : {}),
   }));
-  // A silent CLI completion is still a completed turn; its empty output is not a visible message.
-  for (const turn of snapshot.agent?.kind === 'native' ? [] : snapshot.transcripts) {
-    if (!String(turn.output ?? '').trim() && !String(turn.error ?? '').trim()) {
-      candidates.push({
-        id: `agent:${turn.id}`,
-        role: 'agent',
-        status: turn.ok === false ? 'failed' : 'completed',
-        at: String(turn.completedAt ?? turn.at ?? ''),
-        text: '',
-        turnId: turn.id,
-      });
-    }
-  }
   for (const prompt of pending) {
     candidates.push({
       id: `user:${prompt.id}`,
@@ -196,7 +165,7 @@ export function chatReadSnapshotFromRegistry(
       transcripts: Array.isArray(chat?.turns) ? chat.turns : [],
       pending: Array.isArray(chat?.pendingPrompts)
         ? chat.pendingPrompts
-        : seed
+        : !chat && seed
           ? [
               {
                 id: 'startup-seed',
@@ -214,4 +183,39 @@ export function chatReadSnapshotFromRegistry(
 function timestamp(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Include silent completions only for activity, in the same order as visible history.
+function cliMessages(
+  turns: ChatReadTurn[],
+  maxChars: number,
+  includeSilent = false,
+): ChatVisibleMessage[] {
+  return turns.flatMap((turn, index) => {
+    const turnId = String(turn.id || `turn-${turn.turn ?? index + 1}`);
+    const rows: ChatVisibleMessage[] = [];
+    const add = (role: ChatVisibleMessage['role'], text: unknown, at: unknown) => {
+      const content = String(text ?? '');
+      if (
+        !content.trim() &&
+        !(includeSilent && role === 'assistant' && !String(turn.error ?? '').trim())
+      )
+        return;
+      rows.push({
+        id: `${role}:${turnId}`,
+        turnId,
+        role,
+        status:
+          role === 'error' || (role === 'assistant' && turn.ok === false) ? 'failed' : 'completed',
+        at: String(at ?? ''),
+        text: content.slice(0, maxChars),
+        textOriginalLength: content.length,
+        textTruncated: content.length > maxChars,
+      });
+    };
+    add('user', turn.prompt, turn.promptAt ?? turn.at);
+    add('assistant', turn.output, turn.completedAt ?? turn.at);
+    add('error', turn.error, turn.completedAt ?? turn.at);
+    return rows;
+  });
 }

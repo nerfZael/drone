@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { ChatReadService } from '../src/hub/chat-read/ChatReadService';
 import {
   chatReadSnapshotFromRegistry,
+  readVisibleChatHistory,
   summarizeChatActivity,
   type ChatReadSnapshot,
 } from '../src/hub/chat-read/helpers/chat-read-model';
@@ -39,6 +40,7 @@ test('read service bounds requests, reports older history and removes completed 
     maxChars: 3,
   });
   expect(request.tailRaw).toBe('10');
+  expect(request.excludeCompletedPending).toBe(true);
   expect(result).toMatchObject({
     historyKind: 'messages',
     hasOlder: true,
@@ -119,5 +121,40 @@ test('failed CLI output keeps failure status even without a separate error strin
     idle: true,
     reason: 'latest_user_failed',
     latest: { id: 'agent:failure', role: 'agent', status: 'failed', text: 'Could not finish' },
+  });
+});
+
+test('silent completions preserve turn order when completion timestamps are identical', () => {
+  const at = '2026-09-15T10:00:00Z';
+  const silent = { id: 'silent', at, prompt: 'first', output: '', ok: true };
+  const failed = { id: 'failed', at, prompt: 'second', error: 'failure', ok: false };
+  expect(summarizeChatActivity({ ...snapshot, transcripts: [silent, failed] })).toMatchObject({
+    reason: 'latest_user_failed',
+    latest: { id: 'agent:failed', status: 'failed' },
+  });
+  expect(summarizeChatActivity({ ...snapshot, transcripts: [failed, silent] })).toMatchObject({
+    reason: 'latest_agent_message',
+    latest: { id: 'agent:silent', status: 'completed' },
+  });
+});
+
+test('existing chats do not count a retained startup seed as queued work', () => {
+  const read = chatReadSnapshotFromRegistry(
+    { drones: { drone: { seed: { prompt: 'start' }, chats: { default: { turns: [] } } } } },
+    { droneId: 'drone', chatName: 'default' },
+  );
+  expect(summarizeChatActivity(read)).toMatchObject({ idle: true, queuedUserMessages: 0 });
+});
+
+test('legacy turns without IDs keep stable identities across history limits and silent activity', () => {
+  const transcripts = [
+    { turn: 8, prompt: 'earlier', output: 'answer' },
+    { turn: 9, prompt: 'silent', output: '', ok: true },
+  ];
+  const full = readVisibleChatHistory({ ...snapshot, transcripts });
+  const tail = readVisibleChatHistory({ ...snapshot, transcripts: transcripts.slice(-1) });
+  expect(tail.messages[0].id).toBe(full.messages.at(-1)!.id);
+  expect(summarizeChatActivity({ ...snapshot, transcripts })).toMatchObject({
+    latest: { id: 'agent:turn-9', turnId: 'turn-9' },
   });
 });

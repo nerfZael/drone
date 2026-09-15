@@ -14,13 +14,13 @@ Empty chats return an empty message list. Missing chats and source read failures
 
 ## Activity and subscriptions
 
-Idle status and reads use the same history and pending-message projection. Completed CLI turn IDs reconcile their delivery records. Native `sent` records describe completed delivery and are excluded; queued/sending prompts and the native runtime's busy state still prevent idle. Runtime busy includes active runs and outstanding approval/input requests.
+Idle status and reads use the same history and pending-message projection. Completed CLI turn IDs reconcile their delivery records, including completions outside a bounded history read. Model-facing reads opt out of the brief completed-prompt grace period retained by rich chat UI reads. Native `sent` records describe completed delivery and are excluded; queued/sending prompts and the native runtime's busy state still prevent idle. Runtime busy includes active runs and outstanding approval/input requests.
 
-Failures retain failed status, whether represented by a prompt-delivery failure or an assistant completion. Subscription detection recognizes both and emits `chat.failed` once per failed message. It does not report a failed completion as a successful idle transition. Silent CLI completion still counts as finished.
+Failures retain failed status, whether represented by a prompt-delivery failure or an assistant completion. Subscription detection recognizes both and emits `chat.failed` once per failed message. It does not report a failed completion as a successful idle transition. Silent CLI completion still counts as finished and retains its turn order when timestamps match. Startup seeds count as queued work only before the chat exists.
 
 ## One search index
 
-Chat schema migration 14 rebuilds the existing FTS5 index with a source discriminator. CLI triggers maintain their rows as before. Before each search, authorized active native chats refresh their rows from a consistent snapshot of durable Blip history. Search then executes one FTS query, one relevance ordering, and one pagination operation.
+Chat schema migration 14 rebuilds the existing FTS5 index with a source discriminator. CLI triggers maintain their rows as before. Before each search, authorized active native chats refresh their rows from a consistent snapshot of durable Blip history. Search then executes one FTS query, one relevance ordering, and one pagination operation. Chat ownership breaks ties between cloned message IDs, keeping pages stable across index refreshes.
 
 A per-chat session/sequence/count cursor supports incremental appends. Rebinding, deletion, or rollback causes replacement of that chat's native index rows. The entry count is checked alongside the sequence so deletion in the middle of history cannot leave an old answer searchable. The refresh and cursor update share one Hub transaction; concurrent searches cannot duplicate rows. No runtime dual writes or background indexing worker are required.
 

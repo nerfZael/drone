@@ -3467,7 +3467,7 @@ export async function searchActiveChatMessages(opts: {
             WHERE c.drone_id = active_chat_message_search.drone_id AND c.chat_name = active_chat_message_search.chat_name
               AND ((json_extract(c.metadata_json, '$.agent.kind') = 'native' AND source = 'native')
                 OR (COALESCE(json_extract(c.metadata_json, '$.agent.kind'), '') != 'native' AND source IS NULL)))
-        ORDER BY rank, timestamp DESC, turn_id, role
+        ORDER BY rank, timestamp DESC, turn_id, role, drone_id, chat_name
         LIMIT ? OFFSET ?
       `).all(
         ftsQuery,

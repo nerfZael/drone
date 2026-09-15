@@ -27,6 +27,40 @@ const input = (entries: any[]) =>
     transcriptSeed: entries,
   }) as any;
 
+test('cloned messages have stable search pages regardless of backfill order', async () => {
+  await withTempDroneDataDir('shared-search-ties-', async () => {
+    const repo = new HubSessionRepository();
+    try {
+      for (const droneId of ['z', 'a']) {
+        await upsertChatInStore({
+          droneId,
+          chatName: 'default',
+          chatEntry: { id: `thread-${droneId}`, agent: { kind: 'native' } },
+        });
+        const session = await repo.create(input([message('cloned-answer', 'cobalt answer')]));
+        await repo.bindThread(`thread-${droneId}`, session.id);
+        await searchActiveChatMessages({ query: 'cobalt', droneId });
+      }
+      const page = async (offset: number) =>
+        (await searchActiveChatMessages({ query: 'cobalt', limit: 1, offset })).results[0].droneId;
+      assert.equal(await page(0), 'a');
+      assert.equal(await page(1), 'z');
+      // Re-index the first-inserted chat; row insertion order must not affect pages.
+      const db = requireHubDatabase();
+      await db.writeTransaction('force native refresh', (conn) => {
+        conn
+          .prepare("UPDATE native_chat_search_cursors SET session_id = '' WHERE drone_id = 'z'")
+          .run();
+      });
+      assert.equal(await page(0), 'a');
+      assert.equal(await page(1), 'z');
+    } finally {
+      repo.close();
+      await resetHubDatabaseForTests();
+    }
+  });
+});
+
 test('shared search backfills, appends, repairs edits and rebinds without duplicate or stale messages', async () => {
   await withTempDroneDataDir('shared-search-recovery-', async () => {
     const db = requireHubDatabase();

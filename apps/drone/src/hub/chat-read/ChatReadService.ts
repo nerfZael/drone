@@ -22,6 +22,7 @@ type SnapshotReader = (input: {
   tailRaw: string;
   includeTranscript: boolean;
   includePending: boolean;
+  excludeCompletedPending: true;
   maintenance: 'run';
   activityMode: 'summary' | 'full';
 }) => Promise<SnapshotResult>;
@@ -41,6 +42,7 @@ export class ChatReadService {
       tailRaw: String(limit),
       includeTranscript: true,
       includePending: true,
+      excludeCompletedPending: true,
       maintenance: 'run',
       activityMode: includeActivity ? 'full' : 'summary',
     });
