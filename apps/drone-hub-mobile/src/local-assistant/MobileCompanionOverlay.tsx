@@ -1,3 +1,4 @@
+import { MobileCompanionScreenPanel } from './MobileCompanionScreenPanel';
 import { MobileCompanionModelPicker } from './MobileCompanionModelPicker';
 import React from 'react';
 import Svg, { Circle } from 'react-native-svg';
@@ -158,6 +159,7 @@ export function MobileCompanionOverlay() {
   const liveActive = companion.live.status === 'connecting' || companion.live.status === 'listening';
   const livePaused = companion.live.status === 'paused';
   const visible = companion.overlayOpen;
+  const [sheetHeight, setSheetHeight] = React.useState(0);
   const composerFocused = companion.composerFocused;
   const reportOverlayInset = companion.reportOverlayInset;
   React.useEffect(() => {
@@ -434,11 +436,13 @@ export function MobileCompanionOverlay() {
   return (
     <View pointerEvents="box-none" style={styles.layer}>
       {workspaceDeviceId ? <MobileCompanionWorkspaceModal deviceId={workspaceDeviceId} onClose={() => setWorkspaceDeviceId(null)} /> : null}
+      {visible && companion.screen ? <MobileCompanionScreenPanel screen={companion.screen} bottomOffset={sheetHeight + marginBottom + 12} availableHeight={height - sheetHeight - insets.top - insets.bottom - 100} /> : null}
       <Animated.View
         accessibilityLabel="Companion"
         layout={LinearTransition.duration(SETTLE.duration).easing(SETTLE.easing)}
         onLayout={(event) => {
           const sheet = event.nativeEvent.layout.height;
+          setSheetHeight(sheet);
           // The chat screen already sits above the system inset; reserve the sheet plus its gaps.
           if (visible) reportOverlayInset(Math.round(sheet + SHEET_GAP));
         }}

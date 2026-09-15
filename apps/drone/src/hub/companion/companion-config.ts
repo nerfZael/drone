@@ -19,7 +19,7 @@ import {
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type CompanionSettings = {
-  schemaVersion: 12;
+  schemaVersion: 13;
   promptDeliveryMode: 'asap' | 'queue';
   provider: LlmProviderId;
   model: string;
@@ -383,6 +383,10 @@ export const COMPANION_TOOL_SUMMARIES = [
       'Request execution of the completed proposal using its targetId and latest baseRevision. With auto-approval enabled, executes and returns applied:true with actual operation results. Otherwise returns pending_review; the user can Apply the review card and execution results will arrive later. Never claim pending operations have executed.',
   },
   {
+    name: 'show_on_screen', label: 'Show on screen', category: 'actions', execution: 'browser', requires: null,
+    description: 'Display Markdown text above Companion, or in the Android assistant screen. Use action inspect to read current dimensions, show with markdown to replace content, or clear to dismiss. Wait for displayed:true before claiming success. Overflow returns measured dimensions and constraints; shorten and retry. No HTML, images, tables or fenced code. Content stays until replaced, dismissed, resized or Companion closes.',
+  },
+  {
     name: 'open_drone_chat',
     label: 'Open drone chat',
     category: 'actions',
@@ -438,12 +442,12 @@ export type CompanionToolName = CompanionToolCatalogEntry['name'];
 export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
-const COMPANION_SETTINGS_SCHEMA_VERSION = 12;
+const COMPANION_SETTINGS_SCHEMA_VERSION = 13;
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
 const LEGACY_PROPOSAL_TOOL_NAME = 'prepare_drone_draft';
 const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) =>
     name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'read_recorder' &&
@@ -456,12 +460,12 @@ const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   );
 const SCHEMA_V3_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) => name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'list_agent_models' && name !== 'read_recorder' && name !== 'apply_recorder_patch');
 const SCHEMA_V4_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) => name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'read_recorder' && name !== 'apply_recorder_patch');
 const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
@@ -525,6 +529,7 @@ function normalizeEnabledTools(value: unknown, storedSchemaVersion: number): Com
   if (storedSchemaVersion < 12 && enabled.has('apply_proposal_patch')) {
     enabled.add('create_proposal'); enabled.add('list_proposals'); enabled.add('discard_proposal');
   }
+  if (storedSchemaVersion < 13 && enabled.has('open_drone_chat')) enabled.add('show_on_screen');
   for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
   }

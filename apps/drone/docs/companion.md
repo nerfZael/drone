@@ -405,3 +405,60 @@ These changes protect sessions created by the updated runtime. An already-runnin
 older Hub still holds its Companion history only in memory; save important work
 before the first deployment/restart. Building the changes does not migrate that
 live history.
+
+## Show on screen
+
+Companion's `show_on_screen` browser tool displays session-local Markdown in the
+client running the conversation. It is available to ordinary Companion turns and
+the Companion work delegated from Live voice. It does not broadcast to other
+clients or save content to chat history.
+
+```json
+{"action":"inspect"}
+{"action":"show","markdown":"## Checking the deployment\n\n- API: **healthy**\n- Workers: checking…"}
+{"action":"clear"}
+```
+
+Desktop and mobile show a rectangular card above Companion. The Android phone
+assistant uses the space between its header and bottom controls, replacing the
+listening animation while content is displayed. The user can dismiss the card.
+Closing Companion, leaving the display surface, or changing its available size
+clears it; the agent must submit again after a resize or rotation.
+
+### Fit and recovery contract
+
+- `inspect` returns the current content width and height in client layout pixels,
+  a maximum input size of 8,000 characters, and the supported Markdown formats.
+  Zero dimensions mean that no usable display surface is currently available.
+- `show` validates the input, then measures it invisibly using the same renderer
+  and width as the visible card. It returns only after measurement, with
+  `displayed`, `constraints`, `measured` dimensions and `overflow` in pixels.
+- A candidate fitting both dimensions exactly is accepted. Oversized content
+  returns `CONTENT_DOES_NOT_FIT` and leaves the previous card intact. Shorten the
+  text, simplify headings/lists, and call again. Do not claim it appeared unless
+  the result says `displayed: true`. Markdown source line counts are not rendered
+  line counts: wrapping, paragraph spacing and native reading settings matter.
+- `SCREEN_CHANGED` means the client resized during measurement. Inspect or retry.
+  `SCREEN_UNAVAILABLE`, `DISPLAY_BUSY`, and `MEASUREMENT_TIMEOUT` include recovery
+  guidance. Dismissal or unmount resolves pending measurements; late callbacks
+  cannot restore dismissed content.
+- Empty input, input over the character limit, HTML, images, tables and fenced or
+  indented code blocks are rejected. Use paragraphs, headings, lists, emphasis,
+  inline code and links. This intentionally excludes scrolling content, remote
+  images, HTML execution, diagrams and expandable code/table widgets.
+- The display does not shrink text to force a fit or silently truncate it. Desktop
+  body text uses a 22px line height. Native text follows the app's Markdown reading
+  style and system font scaling, with its rendered height reported to the agent.
+
+The tool is enabled by default. Settings schema 13 adds it to older configurations
+that enabled chat navigation; existing current-version choices remain respected.
+Its implementation uses the existing Companion browser-tool request/result
+transport, with `CompanionScreen` managing validation and atomic replacement.
+No Android overlay permission or native service change is required: the existing
+Android assistant activity already hosts the React Native screen.
+
+Manual verification: show short and overflowing content on desktop, mobile and
+Android assistant; verify the old content survives rejection, retry succeeds,
+Dismiss works, and End/Mute/Pause stay reachable. Rotate the phone, resize the
+browser, open the keyboard, expand Companion, and test large system text. Confirm
+new dimensions are returned and no content is clipped or shown under controls.

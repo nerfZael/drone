@@ -23,6 +23,7 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'execute_proposal',
   'open_drone_chat',
   'highlight_drones',
+  'show_on_screen',
   'open_workspace_files',
   'set_editor_file_presentation',
   'get_workspace_window_layout',

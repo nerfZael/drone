@@ -40,3 +40,5 @@ export { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from './liv
 export { connectCompanionLiveReplies } from './companion-live-replies.js';
 
 export * from './companion-proposal-store.js';
+
+export * from './CompanionScreen.js';

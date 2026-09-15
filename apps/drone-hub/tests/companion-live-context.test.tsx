@@ -69,6 +69,14 @@ test('Live delegates through the existing backend with a fixed workspace and rej
       callId: 'context', tool: 'get_app_context', args: {} });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(results[0]).toMatchObject({ ok: true, result: { activeRepoPath: '/a' } });
+    companion.screen.resize(300, 200);
+    receive({ type: 'tool_call', messageId: prompts[0].messageId, generation: 1,
+      callId: 'display', tool: 'show_on_screen', args: { action: 'show', markdown: '**Found it**' } });
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(results).toHaveLength(1);
+    companion.screen.measured(companion.screen.getSnapshot().candidate!.id, 300, 22);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(results[1]).toMatchObject({ ok: true, callId: 'display', result: { displayed: true, measured: { height: 22 } } });
     const followUp = backend('Actually, find a different chat.', new AbortController().signal);
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(prompts).toHaveLength(2);

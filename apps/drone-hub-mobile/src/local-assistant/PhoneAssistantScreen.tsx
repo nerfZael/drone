@@ -1,3 +1,4 @@
+import { MobileCompanionScreenPanel } from './MobileCompanionScreenPanel';
 import React from 'react';
 import { ActivityIndicator, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -63,6 +64,8 @@ const PULSE = 2_200;
 export function PhoneAssistantScreen() {
   const requestId = usePhoneAssistantRequest();
   const companion = useMobileCompanion();
+  const display = React.useSyncExternalStore(companion.screen?.subscribe ?? emptySubscribe, companion.screen?.getSnapshot ?? emptySnapshot);
+  const [stageBounds, setStageBounds] = React.useState({ width: 0, height: 0 });
   const [laidOutRequest, setLaidOutRequest] = React.useState('');
   const launch = usePhoneAssistantLaunch({ requestId, rendered: laidOutRequest === requestId, available: companion.available,
     start: companion.startAssistantVoice });
@@ -98,7 +101,7 @@ export function PhoneAssistantScreen() {
       void launch.retry().catch(() => setActionError('Could not retry Companion. Hold the side button again.'));
     } };
   return <SafeAreaView key={requestId} style={styles.screen} onLayout={() => setLaidOutRequest(requestId)}>
-    <ScrollView bounces={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+    <View style={[styles.content, { flex: 1 }]}>
       <View style={styles.header}>
         <Text style={styles.brand}>Companion</Text>
         <View style={styles.target}>
@@ -106,18 +109,21 @@ export function PhoneAssistantScreen() {
           <Text numberOfLines={1} style={styles.targetText}>{live.targetName || 'Drone Hub'}</Text>
         </View>
       </View>
-      <View style={styles.stage}>
+      <View style={styles.stage} onLayout={(event) => { const { width, height } = event.nativeEvent.layout; setStageBounds({ width, height }); }}>
+        {companion.screen ? <MobileCompanionScreenPanel screen={companion.screen} fullscreen availableHeight={stageBounds.height - 80} availableWidth={stageBounds.width} /> : null}
+        {!display.markdown ? <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 26 }} showsVerticalScrollIndicator={false}>
         <Orb phase={phase} />
         <View style={styles.copy}>
           <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.headline}>{headlines[phase]}</Text>
           <Text style={styles.hint}>{hint(phase, live.targetName)}</Text>
         </View>
+        </ScrollView> : null}
+      </View>
+      <View style={styles.footer}>
         {error ? <View style={styles.error}>
           <TriangleAlert color={colors.danger} size={16} strokeWidth={2.3} />
           <Text style={styles.errorText}>{error}</Text>
         </View> : null}
-      </View>
-      <View style={styles.footer}>
         <View style={styles.controls}>
           <Control label="End" icon={X} tone="danger" onPress={() => {
             setActionError('');
@@ -137,7 +143,7 @@ export function PhoneAssistantScreen() {
           <ArrowUpRight color={colors.muted} size={15} strokeWidth={2.2} />
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
   </SafeAreaView>;
 }
 
@@ -259,3 +265,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
 });
+
+const emptyDisplay = { markdown: '' };
+const emptySubscribe = () => () => {};
+const emptySnapshot = () => emptyDisplay;
