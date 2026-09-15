@@ -103,3 +103,70 @@ describe('Electron global shortcuts', () => {
     expect(native.callbacks.size).toBe(0);
   });
 });
+
+describe('physical desktop shortcut ownership', () => {
+  const { createDesktopShortcutRegistrar } = require('../desktop/hub-electron-global-shortcuts.cjs');
+
+  test('reserves physical backquote instead of its layout-dependent Electron symbol and releases it before rebinding', async () => {
+    const native = fakeShortcuts();
+    const reservations: any[] = [];
+    let owned = false;
+    const reserve = (config: any) => {
+      expect(owned).toBe(false);
+      owned = true;
+      reservations.push(config);
+      return {
+        status: Promise.resolve({ toggleCompanion: { active: true, error: '' } }),
+        close: async () => { owned = false; },
+      };
+    };
+    const registrar = createDesktopShortcutRegistrar(native, () => {}, () => {}, reserve);
+    const config = { revision: 1, observedBackquote: true, bindings: {
+      toggleCompanion: binding('`'), openHome: binding('q', { ctrl: true }),
+    } };
+    const status = await registrar.configure(config);
+    expect([...native.callbacks.keys()]).toEqual(['Control+q']);
+    expect(reservations[0].bindings).toEqual({ toggleCompanion: binding('`') });
+    expect(status.actions.toggleCompanion.active).toBe(true);
+    expect(status.actions.openHome.active).toBe(true);
+    expect(status.running).toBe(true);
+    await registrar.configure({ ...config, revision: 2, suspended: true });
+    expect(reservations[1].suspended).toBe(true);
+    expect(native.suspended).toBe(true);
+    await registrar.close();
+    expect(owned).toBe(false);
+    expect(native.callbacks.size).toBe(0);
+  });
+
+  test('reports unavailable physical grabs without a leaking native fallback', async () => {
+    for (const result of ['conflict', 'missing helper']) {
+      const native = fakeShortcuts();
+      let closed = false;
+      const registrar = createDesktopShortcutRegistrar(native, () => {}, () => {}, () => ({
+        status: result === 'conflict'
+          ? Promise.resolve({ toggleCompanion: { active: false, error: 'Reserved elsewhere' } })
+          : Promise.reject(new Error('python3 unavailable')),
+        close: async () => { closed = true; },
+      }));
+      const status = await registrar.configure({ revision: 1, observedBackquote: true, bindings: { toggleCompanion: binding('~', { shift: true }) } });
+      expect(status.running).toBe(false);
+      expect(status.actions.toggleCompanion.active).toBe(false);
+      expect(status.actions.toggleCompanion.error).toContain(result === 'conflict' ? 'Reserved' : 'python3');
+      expect(native.callbacks.size).toBe(0);
+      await registrar.close();
+      expect(closed).toBe(true);
+    }
+  });
+
+  test('keeps native backquote registration on desktops without the X11 observer', async () => {
+    const native = fakeShortcuts();
+    const events: unknown[] = [];
+    const registrar = createDesktopShortcutRegistrar(native, (event: unknown) => events.push(event), () => {}, () => {
+      throw new Error('Physical reservation must only run for X11 observation');
+    });
+    await registrar.configure({ revision: 1, bindings: { toggleCompanion: binding('`') } });
+    native.callbacks.get('`')!();
+    expect(events).toEqual([{ revision: 1, actionId: 'toggleCompanion' }]);
+    await registrar.close();
+  });
+});

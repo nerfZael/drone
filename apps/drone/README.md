@@ -219,3 +219,17 @@ The Drone Hub sidebar shows drones **grouped into folder-like sections by defaul
 ## `dvm` integration
 
 `drone` calls `dvm` directly as a TypeScript library (workspace dependency), while `dvm` CLI remains available for manual operations.
+
+### Linux desktop backquote shortcuts
+
+On X11, desktop global shortcuts for the physical backquote/tilde key use a
+bundled helper that requires `python3` and `libX11`. It reserves the physical key
+so the shortcut does not also type into the focused application on layouts where
+Electron resolves backquote to another key. If the helper cannot start or the key
+is already reserved, shortcut settings report the binding as inactive.
+
+To verify keystroke suppression on an isolated display (requires Xvfb and libXtst):
+
+```sh
+python3 apps/drone/tests/x11-backquote.integration.py /usr/bin/Xvfb
+```

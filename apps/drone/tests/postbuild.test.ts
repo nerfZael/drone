@@ -32,7 +32,7 @@ describe('postbuild bundles', () => {
     expect(DRONE_HUB_ELECTRON_ICON_FILE).toBe('drone-hub-icon.png');
   });
 
-  test('creates a stable build identity from all runtime JavaScript', async () => {
+  test('creates a stable build identity from all runtime sources', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-build-id-'));
     await fs.mkdir(path.join(root, 'dist', 'hub'), { recursive: true });
     await fs.writeFile(path.join(root, 'dist', 'cli.js'), 'cli-v1');
@@ -44,14 +44,17 @@ describe('postbuild bundles', () => {
     expect(await runtimeBuildId(root)).toBe(first);
     await fs.writeFile(path.join(root, 'dist', 'hub', 'server.js'), 'server-v2');
     expect(await runtimeBuildId(root)).not.toBe(first);
+    const beforeHelper = await runtimeBuildId(root);
+    await fs.writeFile(path.join(root, 'dist', 'hub-x11-backquote.py'), 'helper-v1');
+    expect(await runtimeBuildId(root)).not.toBe(beforeHelper);
     expect(DRONE_HUB_BUILD_ID_FILE).toBe('build-id');
   });
 
-  test('refuses to create a build identity without runtime JavaScript', async () => {
+  test('refuses to create a build identity without runtime sources', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-empty-build-id-'));
     await fs.mkdir(path.join(root, 'dist'), { recursive: true });
 
-    await expect(runtimeBuildId(root)).rejects.toThrow('No runtime JavaScript found');
+    await expect(runtimeBuildId(root)).rejects.toThrow('No runtime sources found');
   });
 
   test('bundles the credential-free MCP bridge for Node', () => {

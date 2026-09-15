@@ -164,7 +164,7 @@ export class GlobalShortcutService {
         typeof actionId !== 'string' || !this.status.actions[actionId as DroneHubShortcutActionId]?.active) return false;
     if (this.captureActive()) return false;
     // X11 can resolve keypad and backquote accelerators to different physical
-    // keys. The observer dispatches them; Electron still owns registration.
+    // keys. The observer dispatches them; the desktop owns their reservations.
     if (!(this.hook && isObservedPhysicalKey(this.bindings[actionId as DroneHubShortcutActionId]?.key))) {
       const action = actionId as DroneHubShortcutActionId;
       const sequence = this.desktopPressSequences.get(action);
