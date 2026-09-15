@@ -648,34 +648,24 @@ test('cancelling an assistant invocation attached to established Live does not s
   } finally { await h.cleanup(); }
 });
 
-test('a repeated assistant press waits for cancelled audio startup to settle', async () => {
+test('phone assistant forwards startup cancellation to the Live session owner', async () => {
   const h = await harness();
   const originalStart = live.start;
-  const originalStop = live.stop;
-  let finish!: () => void;
-  let starts = 0;
-  let stops = 0;
-  let first!: Promise<void>;
-  let second!: Promise<void>;
+  const originalResume = live.resume;
+  const signals: AbortSignal[] = [];
   try {
     enabled = true;
-    live.stop = () => { stops++; originalStop(); };
-    live.start = async () => {
-      starts++;
-      if (starts === 1) await new Promise<void>((resolve) => { finish = resolve; });
-    };
-    const abort = new AbortController();
-    await act(async () => { first = h.context().startAssistantVoice(abort.signal); });
-    expect(starts).toBe(1);
-    await act(async () => {
-      abort.abort();
-      second = h.context().startAssistantVoice(new AbortController().signal);
-    });
-    expect(stops).toBe(1);
-    expect(starts).toBe(1);
-    await act(async () => { finish(); await first; await second; });
-    expect(starts).toBe(2);
-  } finally { live.start = originalStart; live.stop = originalStop; await h.cleanup(); }
+    live.start = async (_id: string, _name: string, _run: unknown, signal: AbortSignal) => { signals.push(signal); };
+    live.resume = async (signal: AbortSignal) => { signals.push(signal); };
+    const first = new AbortController();
+    await act(async () => { await h.context().startAssistantVoice(first.signal); });
+    first.abort();
+    live.status = 'paused';
+    await h.refresh();
+    const second = new AbortController();
+    await act(async () => { await h.context().startAssistantVoice(second.signal); });
+    expect(signals).toEqual([first.signal, second.signal]);
+  } finally { live.start = originalStart; live.resume = originalResume; await h.cleanup(); }
 });
 
 test('cancelling while the Hub preference response is pending cannot start audio later', async () => {

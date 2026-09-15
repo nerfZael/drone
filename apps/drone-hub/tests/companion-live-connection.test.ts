@@ -5,7 +5,7 @@ import { CompanionClientController, type CompanionServerMessage, type LivePcmCal
 import { waitForCompanionReply } from '../src/droneHub/companion/waitForCompanionReply';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(delayed = false) {
+function harness(delayed = false, release = async () => {}) {
   const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let socket: FakeSocket | undefined;
@@ -26,7 +26,7 @@ function harness(delayed = false) {
   let released = 0; let muted = false; let resumed = false;
   const played: string[] = []; const errors: string[] = []; const models: string[] = []; const events: unknown[] = [];
   const audio: LivePcmAudio = { mute: (value) => { muted = value; }, play: (value) => played.push(value),
-    resume: async () => { resumed = true; }, release: async () => { released++; } };
+    resume: async () => { resumed = true; }, release: async () => { released++; await release(); } };
   const connection = new CompanionLiveConnection({ onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
     onError: (error) => errors.push(error), onPlaybackBlocked() {}, openAudio: async (callbacks) => {
       capture = callbacks;
@@ -85,6 +85,29 @@ test('desktop cancel during microphone startup releases late audio without openi
     expect(h.socket()).toBeUndefined(); expect(h.released()).toBe(1);
     expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
   } finally { await h.cleanup(); }
+});
+
+test('desktop close is idempotent and waits for late audio and microphone release', async () => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  const h = harness(true, () => released);
+  try {
+    const starting = h.connection.start();
+    const closing = h.connection.close();
+    expect(h.connection.close()).toBe(closing);
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    h.finish();
+    await starting;
+    await tick();
+    expect(closed).toBe(false);
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
+    release();
+    await closing;
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
+    expect(h.released()).toBe(1);
+    expect(h.socket()).toBeUndefined();
+  } finally { release(); await h.cleanup(); }
 });
 
 test('desktop drops queued speech after a startup error and ignores late readiness', async () => {

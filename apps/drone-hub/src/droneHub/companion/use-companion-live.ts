@@ -1,30 +1,14 @@
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
-import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
+import { CompanionLiveController, type CompanionLiveTarget, type CompanionClientController } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
-import { CompanionLiveConversation } from './CompanionLiveConversation';
 
-type LiveStatus = 'idle' | 'connecting' | 'listening' | 'error';
-type LiveSession = { connection: CompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean };
-type LiveState = {
-  hasStarted: boolean;
-  status: LiveStatus;
-  capturing: boolean;
-  error: string;
-  captions: string;
-  queued: number;
-  muted: boolean;
-  playbackBlocked: boolean;
-  backendModel: string;
-  workspaceLabel: string;
-};
 type LiveSettings = {
   enabled: boolean;
   systemPrompt: string;
   defaultSystemPrompt: string;
   maxSystemPromptChars: number;
 };
-type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; workspaceLabel: string };
 type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
@@ -36,41 +20,19 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   const [systemPrompt, setSystemPrompt] = React.useState('');
   const [defaultSystemPrompt, setDefaultSystemPrompt] = React.useState('');
   const [maxSystemPromptChars, setMaxSystemPromptChars] = React.useState(0);
-  const [state, setState] = React.useState<LiveState>(EMPTY_STATE);
-  const active = React.useRef<LiveSession | null>(null);
   const mounted = React.useRef(true);
   const writing = React.useRef(false);
   const enabledRef = React.useRef(false);
   const settingsGeneration = React.useRef(0);
-  const desiredTarget = React.useRef<LiveTarget | null>(null);
-  const desiredMuted = React.useRef(false);
-  const reconnectAttempt = React.useRef(0);
-  const cancelScheduledReconnect = React.useRef<(() => void) | null>(null);
-  const startAttempt = React.useRef<(target: LiveTarget, reconnecting: boolean) => Promise<void>>(async () => {});
-
-  const cancelReconnect = React.useCallback((resetAttempts = true) => {
-    cancelScheduledReconnect.current?.();
-    cancelScheduledReconnect.current = null;
-    if (resetAttempts) reconnectAttempt.current = 0;
-  }, []);
-
-  const stop = React.useCallback(() => {
-    desiredTarget.current = null;
-    desiredMuted.current = false;
-    cancelReconnect();
-    const session = active.current;
-    active.current = null;
-    session?.replies?.stop();
-    session?.abort.abort();
-    session?.conversation.stop();
-    session?.connection.close();
-    if (mounted.current) setState((previous) => ({ ...previous, status: 'idle', capturing: false, error: '', muted: false, queued: 0, playbackBlocked: false }));
-  }, [cancelReconnect]);
-
-  const reset = React.useCallback(() => {
-    stop();
-    if (mounted.current) setState(EMPTY_STATE);
-  }, [stop]);
+  const scheduleRef = React.useRef(reconnectSchedule);
+  scheduleRef.current = reconnectSchedule;
+  const [live] = React.useState(() => new CompanionLiveController({
+    canStart: () => enabledRef.current,
+    createConnection: (options) => new CompanionLiveConnection(options),
+    schedule: (callback, delay) => scheduleRef.current(callback, delay),
+  }, controller));
+  const state = React.useSyncExternalStore(live.subscribe, live.getSnapshot, live.getSnapshot);
+  const { stop, reset, toggleMute, play } = live;
 
   const load = React.useCallback(async () => {
     if (writing.current) return;
@@ -157,103 +119,13 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     }
   }, []);
 
-  const scheduleReconnect = React.useCallback((target: LiveTarget) => {
-    if (!mounted.current || desiredTarget.current !== target) return;
-    cancelScheduledReconnect.current?.();
-    const delay = companionLiveReconnectDelay(reconnectAttempt.current++);
-    setState((previous) => ({
-      ...previous,
-      hasStarted: true,
-      status: 'connecting',
-      capturing: false,
-      error: '',
-      queued: 0,
-      playbackBlocked: false,
-      workspaceLabel: target.workspaceLabel,
-    }));
-    cancelScheduledReconnect.current = reconnectSchedule(() => {
-      cancelScheduledReconnect.current = null;
-      if (!mounted.current || desiredTarget.current !== target || active.current) return;
-      void startAttempt.current(target, true);
-    }, delay);
-  }, [reconnectSchedule]);
-
-  startAttempt.current = async (target, reconnecting) => {
-    if (active.current || desiredTarget.current !== target || !enabledRef.current) return;
-    if (reconnecting) {
-      setState((previous) => ({ ...previous, status: 'connecting', capturing: false, error: '', queued: 0, playbackBlocked: false }));
-    } else {
-      setState({ ...EMPTY_STATE, hasStarted: true, status: 'connecting', workspaceLabel: target.workspaceLabel });
-    }
-    let session: LiveSession;
-    const update = (patch: Partial<LiveState>) => {
-      if (mounted.current && active.current === session) setState((previous) => ({ ...previous, ...patch }));
-    };
-    const timing = new CompanionLiveTiming();
-    const connection = new CompanionLiveConnection({
-      timing,
-      onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
-      onCapturing: () => update({ capturing: true }),
-      onReady: (backendModel) => {
-        if (active.current !== session) return;
-        reconnectAttempt.current = 0;
-        session.replies?.ready();
-        update({ status: 'listening', error: '', backendModel });
-      },
-      onError: () => {
-        if (active.current !== session) return;
-        session.replies?.stop();
-        session.conversation.stop();
-        session.abort.abort();
-        session.connection.close();
-        active.current = null;
-        scheduleReconnect(target);
-      },
-      onPlaybackBlocked: (playbackBlocked) => update({ playbackBlocked }),
-    });
-    const conversation = new CompanionLiveConversation({
-      timing,
-      externalBackendReplies: Boolean(controller),
-      runBackend: async (prompt, telemetry) => {
-        if (active.current !== session) throw new Error('Voice conversation ended.');
-        return await target.runBackend(prompt, session.abort.signal, telemetry);
-      },
-      send: (event) => connection.send(event),
-      onTranscript: (rows) => update({ captions: rows.map((row) => `${row.role === 'user' ? 'You' : 'Companion'}: ${row.text}`).join('\n') }),
-      onQueue: (queued) => update({ queued }),
-    });
-    session = { connection, conversation, abort: new AbortController(), muted: desiredMuted.current };
-    session.replies = controller ? connectCompanionLiveReplies(controller, conversation) : undefined;
-    active.current = session;
-    if (session.muted) connection.mute(true);
-    await connection.start();
-  };
-
-  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string) => {
-    if (active.current || !enabledRef.current) return;
-    cancelReconnect();
-    desiredMuted.current = false;
-    const target = { runBackend, workspaceLabel };
-    desiredTarget.current = target;
-    await startAttempt.current(target, false);
-  }, [cancelReconnect]);
-
-  const toggleMute = React.useCallback(() => {
-    const session = active.current;
-    if (!session) return;
-    session.muted = !session.muted;
-    desiredMuted.current = session.muted;
-    session.connection.mute(session.muted);
-    setState((previous) => ({ ...previous, muted: session.muted }));
-  }, []);
-  const play = React.useCallback(() => { void active.current?.connection.play(); }, []);
-  const cancelPending = React.useCallback(() => {
-    // Stop voice as well so pending delegation cannot restart a user-cancelled backend task.
-    stop();
-  }, [stop]);
+  const start = React.useCallback((run: CompanionLiveTarget['run'], workspaceLabel: string) =>
+    live.start({ id: '', name: workspaceLabel, run }), [live]);
+  const cancelPending = stop;
 
   return {
     ...state,
+    workspaceLabel: state.targetName,
     enabled,
     resolved,
     loading,
@@ -273,10 +145,6 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     cancelPending,
   };
 }
-
-const EMPTY_STATE: LiveState = {
-  hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
-};
 
 async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt'>>): Promise<LiveSettings> {
   const url = '/api/settings/companion/live-voice';
