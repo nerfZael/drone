@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { act } from 'react';
 import { expect, spyOn, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
+import { Window } from 'happy-dom';
 import * as voiceModule from '../src/droneHub/chat/use-chat-voice-recorder';
 import * as liveModule from '../src/droneHub/companion/use-companion-live';
 import { CompanionProvider, useCompanion } from '../src/droneHub/companion/CompanionContext';
@@ -43,6 +45,16 @@ test('switching voice modes starts the selected input without closing Companion 
 
 test('stopped Live keeps the idle companion visible with a restart control until explicitly closed', async () => {
   const { CompanionOverlay } = await import('../src/droneHub/companion/CompanionOverlay');
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, HTMLElement: dom.HTMLElement,
+    ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ enabled: true, systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 8000 }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
   let hasStarted = false;
   let status: 'idle' | 'listening' = 'idle';
   const original = liveModule.useCompanionLive;
@@ -52,16 +64,29 @@ test('stopped Live keeps the idle companion visible with a restart control until
   const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue({
     status: 'idle', durationMillis: 0, discardRecording: async () => {},
   } as ReturnType<typeof voiceModule.useChatVoiceRecorder>);
-  const render = () => renderToStaticMarkup(<CompanionProvider><CompanionOverlay /></CompanionProvider>);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const render = async () => {
+    await act(async () => { root.render(<CompanionProvider><CompanionOverlay /></CompanionProvider>); });
+    return container.innerHTML;
+  };
   try {
-    expect(render()).toBe('');
+    expect(await render()).toBe('');
     hasStarted = true;
-    expect(render()).toContain('Start live voice');
+    expect(await render()).toContain('Start live voice');
     status = 'listening';
-    expect(render()).toContain('Stop live voice; submitted work continues');
+    expect(await render()).toContain('Stop live voice; submitted work continues');
     status = 'idle';
-    expect(render()).toContain('Start live voice');
+    expect(await render()).toContain('Start live voice');
     hasStarted = false;
-    expect(render()).toBe('');
-  } finally { voiceSpy.mockRestore(); liveSpy.mockRestore(); }
+    expect(await render()).toBe('');
+  } finally {
+    await act(async () => { root.unmount(); });
+    voiceSpy.mockRestore(); liveSpy.mockRestore();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+    }
+    dom.happyDOM.abort();
+  }
 });

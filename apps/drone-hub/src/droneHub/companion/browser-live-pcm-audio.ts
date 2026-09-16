@@ -1,11 +1,13 @@
 import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
+import type { AnnouncementPlayback } from './CompanionLiveAnnouncement';
 
 // Keep a small playout reserve for network/JS scheduling jitter. Rebuild it only
 // after the queue drains; adding it to every chunk would accumulate latency.
 const PLAYBACK_RESERVE_SECONDS = 0.25;
 
 export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
-  onPlaybackBlocked: (blocked: boolean) => void): Promise<LivePcmAudio> {
+  onPlaybackBlocked: (blocked: boolean) => void,
+  options: { muted?: boolean; onAnnouncementPlayback?: (event: AnnouncementPlayback) => void } = {}): Promise<LivePcmAudio> {
   callbacks.signal?.throwIfAborted();
   if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === 'undefined') {
     throw new Error('Live voice needs microphone access and Web Audio in a secure browser.');
@@ -47,11 +49,15 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
     }
     // Browsers can leave resume pending while autoplay is blocked, even after
     // closing the context. Cancellation must still settle microphone startup.
-    const resumeError = await Promise.race([resumed, stopped]);
+    // Automatic announcements may lack a browser gesture. Keep the audio handle
+    // available so the existing Play voice audio action can resume a suspended context.
+    const resumeError = options.onAnnouncementPlayback ? null : await Promise.race([resumed, stopped]);
     if (resumeError) throw resumeError;
+    if (options.onAnnouncementPlayback) onPlaybackBlocked(context.state !== 'running');
     callbacks.signal?.throwIfAborted();
     if (context.sampleRate !== 24_000) throw new Error('Live voice requires a 24 kHz audio context.');
     microphone.getTracks().forEach((track) => {
+      track.enabled = !options.muted;
       track.onended = () => callbacks.onError('Microphone disconnected. Start Live voice again.');
     });
     source = context.createMediaStreamSource(microphone);
@@ -82,10 +88,14 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           if (!binary.length || binary.length % 2) throw new Error('Invalid Live audio.');
           const buffer = context.createBuffer(1, binary.length / 2, 24_000);
           const samples = buffer.getChannelData(0);
+          let energy = 0;
           for (let i = 0; i < samples.length; i++) {
             const value = binary.charCodeAt(i * 2) | binary.charCodeAt(i * 2 + 1) << 8;
             samples[i] = (value >= 32768 ? value - 65536 : value) / 32768;
+            energy += samples[i] * samples[i];
           }
+          // Ignore near-silent generated PCM; Live can stream silence between speech.
+          const silent = Math.sqrt(energy / samples.length) < 0.003;
           const now = context.currentTime;
           const start = playbackEnd > now ? playbackEnd : now + PLAYBACK_RESERVE_SECONDS;
           if (start - now + binary.length / 48_000 > 5) {
@@ -95,9 +105,14 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           node.buffer = buffer;
           node.connect(context.destination);
           playing.add(node);
-          node.onended = () => { playing.delete(node); node.disconnect(); callbacks.onPlayback?.({ stage: 'completed', durationMs: buffer.duration * 1_000 }); };
+          node.onended = () => {
+            playing.delete(node); node.disconnect();
+            callbacks.onPlayback?.({ stage: 'completed', durationMs: buffer.duration * 1_000 });
+            options.onAnnouncementPlayback?.({ stage: 'completed', silent });
+          };
           node.start(start);
           callbacks.onPlayback?.({ stage: 'scheduled', queueMs: (start - now) * 1_000, durationMs: buffer.duration * 1_000 });
+          options.onAnnouncementPlayback?.({ stage: 'scheduled', silent });
           playbackEnd = start + buffer.duration;
           onPlaybackBlocked(context.state !== 'running');
         } catch (error) { callbacks.onError(error instanceof Error ? error.message : 'Live playback failed.'); }
