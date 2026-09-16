@@ -15,6 +15,10 @@ interface Window {
     readonly directApiToken?: string;
   };
   readonly droneHubDesktop?: {
+    notificationsSupported?(): Promise<boolean>;
+    showNotification?(input: { title: string; body: string; silent: boolean; target?: { droneId: string; chatName: string } }): Promise<void>;
+    onNotificationClick?(callback: (target: { droneId: string; chatName: string }) => void): () => void;
+    onNotificationError?(callback: (error: string) => void): () => void;
     reportDiagnostic?(record: Record<string, unknown>): void;
     onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;
   };

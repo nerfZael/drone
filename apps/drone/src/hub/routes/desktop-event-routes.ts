@@ -1,3 +1,5 @@
+import { DesktopNotificationObserver } from '../notifications/DesktopNotificationObserver';
+import type { ChatSubscriptionStatus } from '../subscriptions/resource-subscription-service';
 import type { ServerResponse } from 'node:http';
 
 import type { DroneChatBroadcaster } from '../drone-chat-broadcaster';
@@ -11,6 +13,7 @@ export type DesktopEventRouteDependencies = {
   };
   droneChatBroadcaster: DroneChatBroadcaster;
   droneRegistryBroadcaster: DroneRegistryBroadcaster;
+  readNotificationStatus: (chat: { droneId: string; chatName: string }) => Promise<ChatSubscriptionStatus & { droneName: string }>;
   nowIso: () => string;
   writeSseEvent: (response: ServerResponse, event: string, data: any) => void;
 };
@@ -31,7 +34,7 @@ export function registerDesktopEventRoutes(
   router: HubRouter,
   deps: DesktopEventRouteDependencies,
 ): void {
-  router.get('/api/desktop/events', ({ req, res }) => {
+  router.get('/api/desktop/events', ({ req, res, url }) => {
     res.statusCode = 200;
     res.setHeader('content-type', 'text/event-stream; charset=utf-8');
     res.setHeader('cache-control', 'no-cache, no-transform');
@@ -39,14 +42,25 @@ export function registerDesktopEventRoutes(
     req.socket.setTimeout(0);
     (res as ServerResponse & { flushHeaders?: () => void }).flushHeaders?.();
 
+    const observer = url.searchParams.get('notifications') === '1'
+      ? new DesktopNotificationObserver(deps.readNotificationStatus, (event) => {
+          deps.writeSseEvent(res, 'desktop_notification', event);
+        })
+      : null;
+    const unsubscribeNotifications = observer
+      ? hubChangeEvents.onDesktopNotification((event) => deps.writeSseEvent(res, 'desktop_notification', event))
+      : () => {};
     const unsubscribeAssistant = deps.assistantService.subscribeChanges((event) => {
       deps.writeSseEvent(res, 'assistant_change', event);
     });
     const unsubscribeRegistry = deps.droneRegistryBroadcaster.subscribe((event, data) => {
       deps.writeSseEvent(res, desktopRegistryEventName(event), data);
+      if (event === 'delta') observer?.update((data.upserts ?? []).flatMap((drone: any) =>
+        (drone.chats ?? []).map((chatName: string) => ({ droneId: drone.id, chatName }))));
     });
     const unsubscribeChat = deps.droneChatBroadcaster.subscribe((event, data) => {
       deps.writeSseEvent(res, desktopChatEventName(event), data);
+      if (event === 'snapshot' || event === 'chat_delta') observer?.update(data.chats ?? [], data.removed ?? []);
     });
     const unsubscribeDeliveries = hubChangeEvents.onResourceDeliveryChange(() => {
       deps.writeSseEvent(res, 'pending_events_changed', { at: deps.nowIso() });
@@ -65,6 +79,7 @@ export function registerDesktopEventRoutes(
     }
     const chatSnapshot = deps.droneChatBroadcaster.snapshot;
     if (chatSnapshot) {
+      observer?.update(chatSnapshot.chats);
       deps.writeSseEvent(res, 'chat_snapshot', chatSnapshot);
       deps.droneChatBroadcaster.schedule(0);
     } else {
@@ -81,6 +96,8 @@ export function registerDesktopEventRoutes(
       if (cleanedUp) return;
       cleanedUp = true;
       clearInterval(keepAlive);
+      observer?.close();
+      unsubscribeNotifications();
       unsubscribeAssistant();
       unsubscribeRegistry();
       unsubscribeChat();

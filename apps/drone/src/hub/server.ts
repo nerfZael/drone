@@ -5601,6 +5601,11 @@ async function startDroneHubApiServerWithLifecycle(
   const apiRouter = new HubRouter(json, readJsonBody);
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
   registerDesktopEventRoutes(apiRouter, {
+    readNotificationStatus: async (target) => {
+      const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();
+      const status = await readChatIdleStatus(registry, target, nativeChatIsBusy);
+      return { ...status, droneName: registry.drones[target.droneId]?.name || target.droneId };
+    },
     assistantService,
     droneChatBroadcaster,
     droneRegistryBroadcaster,

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,6 +23,9 @@ const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
 const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 
 let mainWindow = null;
+require('./hub-electron-notifications.cjs').registerDesktopNotifications({
+  ipcMain, Notification, getWindow: () => mainWindow, getIcon: resolveAppIconPath,
+});
 let hubLauncherProcess = null;
 let desktopStaticUiServer = null;
 let desktopGlobalShortcuts = null;
