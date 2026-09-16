@@ -5,7 +5,7 @@ import { formatReasoningLabel } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 
-const PROVIDERS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter' } as const;
+const PROVIDERS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter', cerebras: 'Cerebras' } as const;
 type Provider = keyof typeof PROVIDERS;
 type Choice = { provider: Provider; id: string; name: string; thinkingLevel: string };
 type Settings = { provider: Provider; model: string; thinkingLevel: string };

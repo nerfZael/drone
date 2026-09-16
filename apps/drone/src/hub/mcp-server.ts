@@ -1793,7 +1793,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         'List models available to a Drone Hub agent. Each model includes its supported reasoningLevels and defaultReasoningLevel when the agent reports them. For agent="native", provider may select the Built-in OpenAI, Codex, Gemini, or OpenRouter catalog. Container discovery reflects agents installed in Drone Hub drones; host discovery reflects agents installed on the Hub host. Use refresh only when a cached catalog may be stale.',
       inputSchema: {
         agent: z.enum(['native', 'cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']),
-        provider: z.enum(['openai', 'codex', 'gemini', 'openrouter']).optional(),
+        provider: z.enum(['openai', 'codex', 'gemini', 'openrouter', 'cerebras']).optional(),
         runtime: z.enum(['container', 'host']).optional(),
         refresh: z.boolean().optional(),
       },
@@ -2641,7 +2641,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Create drone chat',
       description:
-        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", or "openrouter".',
+        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", "openrouter", or "cerebras".',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -2653,7 +2653,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           )
           .optional(),
         provider: z
-          .enum(['openai', 'codex', 'gemini', 'openrouter'])
+          .enum(['openai', 'codex', 'gemini', 'openrouter', 'cerebras'])
           .describe(
             'Model provider for agent="native" only. Omit this field for agent="codex" and every other agent.',
           )

@@ -23,7 +23,7 @@ import { clearWelcomeDismissedAtForScope, resolveHubSetupScopeKey } from './setu
 import { readRegistryJsonFromSqlitePath } from './sqlite-registry-store';
 
 export type HubLaunchEnvSnapshot = {
-  llmProvider: 'openai' | 'gemini' | 'openrouter' | 'codex' | null;
+  llmProvider: 'openai' | 'gemini' | 'openrouter' | 'cerebras' | 'codex' | null;
   llmProviderRaw: string | null;
   openai: {
     hasValue: boolean;
@@ -32,6 +32,12 @@ export type HubLaunchEnvSnapshot = {
     fingerprint: string | null;
   };
   gemini: {
+    hasValue: boolean;
+    rawLength: number | null;
+    trimmedLength: number | null;
+    fingerprint: string | null;
+  };
+  cerebras?: {
     hasValue: boolean;
     rawLength: number | null;
     trimmedLength: number | null;

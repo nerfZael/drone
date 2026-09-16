@@ -1808,6 +1808,22 @@ async function generateModels() {
 		}));
 	allModels.push(...azureOpenAiModels);
 
+	// Keep the public Cerebras Qwen entry available when upstream catalogs lag.
+	allModels.unshift({
+		id: "qwen-3.8-27b",
+		name: "Qwen 3.8 27B",
+		api: "openai-completions",
+		provider: "cerebras",
+		baseUrl: "https://api.cerebras.ai/v1",
+		reasoning: true,
+		thinkingLevelMap: { off: "none", minimal: null, xhigh: null },
+		input: ["text", "image"],
+		cost: { input: 0.99, output: 1.49, cacheRead: 0, cacheWrite: 0 },
+		// Cerebras paid-tier limits.
+		contextWindow: 131072,
+		maxTokens: 40960,
+	});
+
 	for (const model of allModels) {
 		applyThinkingLevelMetadata(model);
 	}

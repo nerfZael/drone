@@ -13,6 +13,7 @@ export type HubAgentModelOption = {
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
+export const DEFAULT_CEREBRAS_MODEL = 'qwen-3.8-27b';
 export const DEFAULT_OPENROUTER_MODEL = 'openrouter/auto';
 
 const STANDARD_REASONING_LEVELS: NativeAgentThinkingLevel[] = ['off', 'low', 'medium', 'high'];
@@ -32,6 +33,7 @@ function modelOptions(
 }
 
 export const HUB_AGENT_MODEL_OPTIONS: HubAgentModelOption[] = [
+  ...modelOptions('cerebras', DEFAULT_CEREBRAS_MODEL, 'Qwen 3.8 27B'),
   ...modelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
   ...modelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
   ...modelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),

@@ -3833,11 +3833,12 @@ async function logProviderApiKeyResolution(
 }
 
 async function logHubLlmStartupSnapshot() {
-  const [openai, gemini, codex, openrouter] = await Promise.all([
+  const [openai, gemini, codex, openrouter, cerebras] = await Promise.all([
     collectProviderApiKeyDiagnostics('openai'),
     collectProviderApiKeyDiagnostics('gemini'),
     collectProviderApiKeyDiagnostics('codex'),
     collectProviderApiKeyDiagnostics('openrouter'),
+    collectProviderApiKeyDiagnostics('cerebras'),
   ]);
   hubLog('info', 'hub llm configuration snapshot', {
     ...llmProviderEnvLogMeta(),
@@ -3846,6 +3847,7 @@ async function logHubLlmStartupSnapshot() {
     gemini,
     codex,
     openrouter,
+    cerebras,
   });
 }
 

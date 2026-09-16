@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type CompanionProvider = 'openai' | 'codex' | 'gemini' | 'openrouter';
+export type CompanionProvider = 'openai' | 'codex' | 'gemini' | 'openrouter' | 'cerebras';
 
 export type CompanionSettingsDraft = {
   schemaVersion: number;

@@ -26,7 +26,7 @@ export class CompanionProposalModels {
     const models: CatalogModel[] = data.models.flatMap((model: any) => {
       const provider = model.provider ?? data.provider;
       if (typeof model.id !== 'string' || !model.id.trim()) return [];
-      if (agent === 'native' && !['openai', 'codex', 'gemini', 'openrouter'].includes(provider)) return [];
+      if (agent === 'native' && !['openai', 'codex', 'gemini', 'openrouter', 'cerebras'].includes(provider)) return [];
       return [{
         agent,
         ...(agent === 'native' ? { provider } : {}),

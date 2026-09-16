@@ -3,7 +3,7 @@ import { formatReasoningLabel } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { useCompanionSettings, type CompanionModelOption, type CompanionProvider, type CompanionSettingsResponse } from './use-companion-settings';
 
-const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter' } as const;
+const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter', cerebras: 'Cerebras' } as const;
 
 const SELECT_CLASS = 'min-w-0 max-w-[11rem] cursor-pointer truncate rounded-[5px] border border-transparent bg-transparent py-0.5 pl-1.5 pr-1 text-right text-xs text-[var(--fg)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40';
 

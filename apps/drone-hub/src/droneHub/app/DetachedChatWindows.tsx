@@ -1,3 +1,5 @@
+import { useDesktopChatRequests } from './desktop-chat-requests';
+import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
 import { SideChatForkContext } from '../chat/SideChatForkContext';
 import React from 'react';
@@ -33,7 +35,7 @@ export type DetachedChatWindowsProps = {
 const WindowContext = React.createContext<DetachedChatWindowsProps | null>(null);
 const nativeAdapter = adaptNativeAgentChatSurface();
 
-function DetachedChatContent({ chat, drone, context }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps }) {
+function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean }) {
   const [agent, setAgent] = React.useState<{ kind: string; id?: string } | null>(null);
   const [error, setError] = React.useState('');
   const [retry, setRetry] = React.useState(0);
@@ -88,7 +90,7 @@ function DetachedChatContent({ chat, drone, context }: { chat: DetachedChat; dro
   const content = agent.kind === 'native' && !draft ? (
     <ChatSurface adapter={nativeAdapter}>
       <AssistantDock {...actions} nativeChat={{ droneId: drone.id, chatName: chat.chatName }} autoFocus={false}
-        focusTargetId={`detached:${detachedChatKey(drone.id, chat.chatName)}`}
+        focusTargetId={`${desktop ? 'desktop' : 'detached'}:${detachedChatKey(drone.id, chat.chatName)}`}
         messageFeatures={{
           droneId: drone.id, droneHomePath: droneHomePath(drone), onOpenFileReference, onOpenLink: () => false,
           linkedPullRequestContext: { droneId: drone.id, repoPath: drone.repoPath ?? '', repoAttached: Boolean(drone.repoAttached ?? drone.repoPath), disabled: false, openPullRequestsData: null, openPullRequestsLoading: false, openPullRequestsError: null },
@@ -111,7 +113,7 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
   const drone = context.drones.find((item) => item.id === chat.droneId);
   const foreign = context.currentDroneId !== chat.droneId;
   const available = drone && [...drone.chats, ...(drone.workflowChats ?? [])].includes(chat.chatName);
-  return (
+  const content = (
     <div tabIndex={-1} data-side-chat-name={params.chatKey} data-detached-chat-key={params.chatKey} data-chat-drone-id={chat.droneId} data-chat-name={chat.chatName}
       className="dh-floating-chat flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]">
       <button type="button" onClick={() => dispatchAssistantOpenDroneChat(chat.droneId, chat.chatName)}
@@ -125,6 +127,7 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
       </div>
     </div>
   );
+  return content;
 }
 
 function DetachedTab(props: IDockviewPanelHeaderProps) {
@@ -155,6 +158,19 @@ function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
 }
 const components = { detached: DetachedPanel };
 const noWatermark = () => null;
+
+function DesktopChatWindows({ context }: { context: DetachedChatWindowsProps }) {
+  const windows = useDesktopChatRequests((state) => state.windows);
+  return <>{Object.entries(windows).map(([key, chat]) => {
+    const drone = context.drones.find((item) => item.id === chat.droneId);
+    const available = drone && [...drone.chats, ...(drone.workflowChats ?? [])].includes(chat.chatName);
+    return <DesktopChatWindow key={key} chatKey={key} title={`${drone?.name ?? 'Drone'} · ${chat.chatName}`}
+      request={chat.request} onClose={() => useDesktopChatRequests.getState().close(key)}>
+      {available ? <DetachedChatContent desktop chat={{ ...chat, open: true }} drone={drone} context={context} />
+        : <div role="status" className="p-3 text-[var(--muted)]">This chat is unavailable.</div>}
+    </DesktopChatWindow>;
+  })}</>;
+}
 
 export function DetachedChatWindows(props: DetachedChatWindowsProps) {
   const chats = useDetachedChatStore((state) => state.chats);
@@ -276,6 +292,7 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
   }, [focus, save]);
   return (
     <WindowContext.Provider value={props}>
+      <DesktopChatWindows context={props} />
       <div ref={rootRef} aria-hidden={!props.visible} className="dh-dockable-workspace dh-detached-chats absolute inset-0 z-30 pointer-events-none"
         style={{ ...hostBounds, visibility: props.visible ? 'visible' : 'hidden' }}>
         <DockviewReact className="dockview-theme-dark dh-dockview h-full" components={components} defaultTabComponent={DetachedTab} rightHeaderActionsComponent={DetachedHeaderActions}

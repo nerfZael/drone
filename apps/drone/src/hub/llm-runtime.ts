@@ -36,6 +36,7 @@ export function normalizeHubLlmProvider(raw: unknown): LlmProviderId {
 export function defaultHubLlmModelId(provider: LlmProviderId, purpose: 'small' | 'standard' = 'small'): string {
   if (provider === 'gemini') return DEFAULT_GEMINI_FLASH_MODEL_ID;
   if (provider === 'codex') return purpose === 'standard' ? 'gpt-5.3-codex' : 'gpt-5.3-codex-spark';
+  if (provider === 'cerebras') return 'qwen-3.8-27b';
   if (provider === 'openrouter') return DEFAULT_OPENROUTER_MODEL;
   return purpose === 'standard' ? 'gpt-4o' : 'gpt-4o-mini';
 }
@@ -171,11 +172,12 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
   const openai = createOpenAI({
     apiKey,
     ...(provider === 'openrouter' ? { baseURL: 'https://openrouter.ai/api/v1' } : {}),
+    ...(provider === 'cerebras' ? { baseURL: 'https://api.cerebras.ai/v1' } : {}),
   });
   return {
     provider,
     z,
     generateObject: ({ reasoning: _reasoning, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input)),
-    modelFactory: openai,
+    modelFactory: provider === 'cerebras' ? (modelId) => openai.chat(modelId) : openai,
   };
 }

@@ -1,3 +1,4 @@
+import { CerebrasKeySettings } from './CerebrasKeySettings';
 import React from 'react';
 import { UiButton, UiMenuSelect, UiSegmentedControl, UiSlider, UiSwitch } from '../../ui/components';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
@@ -19,6 +20,7 @@ import {
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
+  if (provider === 'cerebras') return 'Cerebras';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'gemini') return 'Gemini';
   return 'OpenAI';
@@ -365,6 +367,12 @@ export function GeneralSettingsTab({
               </div>
             </div>
             <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">Cerebras key</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
+                {llmSettings?.cerebras?.hasKey ? llmSettings.cerebras.keyHint ?? 'Configured' : 'Not configured'}
+              </div>
+            </div>
+            <div className="dh-settings-row px-3 py-3">
               <div className="dh-type-label">GROQ key</div>
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
@@ -389,6 +397,7 @@ export function GeneralSettingsTab({
               { value: 'gemini', label: 'Gemini' },
               { value: 'codex', label: 'Codex' },
               { value: 'openrouter', label: 'OpenRouter' },
+              { value: 'cerebras', label: 'Cerebras' },
             ]}
           onValueChange={setLlmProviderDraft}
           disabled={savingLlmProvider || llmSettingsLoading}
@@ -462,6 +471,7 @@ export function GeneralSettingsTab({
           options={[
             { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' },
             { value: 'codex', label: 'Codex' }, { value: 'openrouter', label: 'OpenRouter' },
+              { value: 'cerebras', label: 'Cerebras' },
           ]}
           onValueChange={llm.setNamingProviderDraft}
           disabled={llm.savingNamingProvider || llmSettingsLoading}
@@ -558,6 +568,8 @@ export function GeneralSettingsTab({
           onSave={() => void mutateApiKeySettings('gemini', 'save')}
           onClear={() => void mutateApiKeySettings('gemini', 'clear')}
         />
+
+        <CerebrasKeySettings />
 
         <ApiKeySettingsCard
           title="OpenRouter API key"

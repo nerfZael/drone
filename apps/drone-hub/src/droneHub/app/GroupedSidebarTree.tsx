@@ -1,4 +1,4 @@
-import { DetachedChatIndicator, detachChatMenuItem } from './DetachedChatIndicator';
+import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
 import React from 'react';
 import { SIDEBAR_CHAT_GROUP_REQUEST_EVENT } from './sidebar-group-draft-events';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
@@ -864,7 +864,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           y={contextMenuPosition.y}
           label={`Actions for ${chatName}`}
           items={[
-            detachChatMenuItem(drone.id, chatName),
+            ...detachChatMenuItems(drone.id, chatName),
             {
               id: 'mute-chat',
               label: directlyMuted ? 'Unmute chat' : 'Mute chat',

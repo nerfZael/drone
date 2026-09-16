@@ -2,9 +2,10 @@ import React from 'react';
 import type { MeshDevice } from './use-device-mesh';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
-type Credential = 'openai' | 'codex' | 'openrouter' | 'groq';
+type Credential = 'openai' | 'codex' | 'openrouter' | 'cerebras' | 'groq';
 
 function credentialLabel(credential: Credential): string {
+  if (credential === 'cerebras') return 'Cerebras API key';
   return credential === 'codex'
     ? 'Codex login'
     : credential === 'openrouter'
@@ -122,6 +123,14 @@ export function ProviderCredentialTransferPanel({
             className="h-9 rounded border border-[var(--border-subtle)] px-3 text-11 font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'openrouter' ? 'Copying…' : 'Copy OpenRouter key'}
+          </button>
+          <button
+            type="button"
+            disabled={!selectedSource || !selfIsAdministrator || busy !== null}
+            onClick={() => void importCredential('cerebras')}
+            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-11 font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
+          >
+            {busy === 'cerebras' ? 'Copying…' : 'Copy Cerebras key'}
           </button>
           <button
             type="button"

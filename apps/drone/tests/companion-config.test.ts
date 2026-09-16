@@ -15,12 +15,13 @@ import { withTempDroneDataDir } from './test-helpers';
 import { resetHubSettingsRepositoryForTests } from '../src/host/hub-settings-repository';
 
 describe('Companion settings', () => {
-  test('offers OpenAI, Codex, Gemini, and OpenRouter including Gemini 3.5 Flash-Lite', () => {
+  test('offers supported providers including Cerebras and Gemini 3.5 Flash-Lite', () => {
     expect(new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))).toEqual(new Set([
       'openai',
       'codex',
       'openrouter',
       'gemini',
+      'cerebras',
     ]));
     expect(
       HUB_AGENT_MODEL_OPTIONS.filter((option) => option.id === 'gemini-3.5-flash-lite').map(
@@ -126,7 +127,7 @@ describe('Companion settings', () => {
     expect(() => normalizeCompanionSettings({
       model: DEFAULT_COMPANION_SETTINGS.model,
       thinkingLevel: DEFAULT_COMPANION_SETTINGS.thinkingLevel,
-    })).toThrow('Companion provider must be openai, codex, gemini, or openrouter');
+    })).toThrow('Companion provider must be openai, codex, gemini, openrouter, or cerebras');
     expect(() => normalizeCompanionSettings({
       ...DEFAULT_COMPANION_SETTINGS,
       provider: 'gemini',

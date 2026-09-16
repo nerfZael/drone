@@ -52,6 +52,7 @@ export function UiActionMenu({
   className,
   panelClassName,
 }: UiActionMenuProps) {
+  const hostRef = React.useRef<HTMLDivElement>(null);
   const controlled = typeof openProp === 'boolean';
   const [internalOpen, setInternalOpen] = React.useState(false);
   const open = controlled ? openProp : internalOpen;
@@ -103,7 +104,7 @@ export function UiActionMenu({
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={setOpen} modal={false}>
-      <div className={cn('relative inline-flex', className)}>
+      <div ref={hostRef} className={cn('relative inline-flex', className)}>
         <DropdownMenu.Trigger asChild>
           {hasTriggerContent ? (
             <UiToolbarButton aria-label={label} size={size} active={open} disabled={disabled}>
@@ -113,7 +114,7 @@ export function UiActionMenu({
             <UiToolbarIconButton label={label} icon={icon} size={size} active={open} disabled={disabled} />
           )}
         </DropdownMenu.Trigger>
-        {portal && typeof document !== 'undefined' ? <DropdownMenu.Portal>{content}</DropdownMenu.Portal> : content}
+        {portal && typeof document !== 'undefined' ? <DropdownMenu.Portal container={hostRef.current?.ownerDocument.body}>{content}</DropdownMenu.Portal> : content}
       </div>
     </DropdownMenu.Root>
   );

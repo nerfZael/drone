@@ -555,8 +555,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     ? Number(raw.schemaVersion)
     : 0;
   const provider = raw.provider;
-  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter') {
-    throw new Error('Companion provider must be openai, codex, gemini, or openrouter');
+  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter' && provider !== 'cerebras') {
+    throw new Error('Companion provider must be openai, codex, gemini, openrouter, or cerebras');
   }
   const requestedModel = String(raw.model ?? '').trim();
   const requestedThinking = String(raw.thinkingLevel ?? '').trim() as CompanionThinkingLevel;
@@ -618,8 +618,8 @@ export async function writeCompanionSettings(value: unknown, beforeSave?: (setti
   const provider = raw.provider;
   const model = String(raw.model ?? '').trim();
   const thinkingLevel = String(raw.thinkingLevel ?? '').trim() as CompanionThinkingLevel;
-  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter') {
-    throw new Error('provider must be openai, codex, gemini, or openrouter');
+  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter' && provider !== 'cerebras') {
+    throw new Error('provider must be openai, codex, gemini, openrouter, or cerebras');
   }
   if (!matchingModel(provider, model, thinkingLevel)) {
     throw new Error('model and thinkingLevel are not supported for this provider');
@@ -635,7 +635,7 @@ export async function companionSettingsResponse() {
   await Promise.all([loadOpenRouterCatalog(), loadCodexCatalog()]);
   const settings = await readCompanionSettings();
   const credentialEntries = await Promise.all(
-    (['openai', 'codex', 'gemini', 'openrouter'] as const).map(async (provider) => [
+    (['openai', 'codex', 'gemini', 'openrouter', 'cerebras'] as const).map(async (provider) => [
       provider,
       Boolean((await resolveEffectiveProviderApiKeySettings(provider)).apiKey),
     ] as const),

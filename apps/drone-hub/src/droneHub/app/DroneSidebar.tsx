@@ -1,4 +1,4 @@
-import { DetachedChatIndicator, detachChatMenuItem } from './DetachedChatIndicator';
+import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
 import React from 'react';
 import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import { createPortal } from 'react-dom';
@@ -3668,7 +3668,7 @@ export function DroneSidebar({
           y={pinnedChatContextMenu.y}
           label={`Actions for ${pinnedChatContextMenu.chatName}`}
           items={[
-            detachChatMenuItem(pinnedChatContextMenu.droneId, pinnedChatContextMenu.chatName),
+            ...detachChatMenuItems(pinnedChatContextMenu.droneId, pinnedChatContextMenu.chatName),
             {
               id: 'mute',
               label: mutedChatIdSet.has(

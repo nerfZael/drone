@@ -30,17 +30,19 @@ export function createProviderCredentialsCapability(
     async invoke(operation, payload, context) {
       requireAdministrator(context);
       if (operation === 'credentials.inspect') {
-        const [openai, codexAuthJson, openrouter, groq] = await Promise.all([
+        const [openai, codexAuthJson, openrouter, groq, cerebras] = await Promise.all([
           resolveEffectiveProviderApiKeySettings('openai'),
           readCodexCliAuthJsonForTransfer(),
           resolveEffectiveProviderApiKeySettings('openrouter'),
           resolveGroqApiKeySettings(),
+          resolveEffectiveProviderApiKeySettings('cerebras'),
         ]);
         return {
           credentials: [
             { id: 'openai', available: Boolean(openai.apiKey), source: openai.source },
             { id: 'codex', available: Boolean(codexAuthJson), source: 'codex-cli' },
             { id: 'openrouter', available: Boolean(openrouter.apiKey), source: openrouter.source },
+            { id: 'cerebras', available: Boolean(cerebras.apiKey), source: cerebras.source },
             { id: 'groq', available: Boolean(groq.apiKey), source: groq.source },
           ],
         };
@@ -50,6 +52,8 @@ export function createProviderCredentialsCapability(
           ? 'codex'
           : operation === 'openrouter.export'
             ? 'openrouter'
+          : operation === 'cerebras.export'
+            ? 'cerebras'
           : operation === 'groq.export'
             ? 'groq'
             : 'openai';
@@ -57,6 +61,7 @@ export function createProviderCredentialsCapability(
         operation !== 'openai.export' &&
         operation !== 'codex.export' &&
         operation !== 'openrouter.export' &&
+        operation !== 'cerebras.export' &&
         operation !== 'groq.export'
       )
         throw Object.assign(new Error(`unsupported provider credential operation: ${operation}`), {
@@ -84,17 +89,19 @@ export function createProviderCredentialsCapability(
   };
 }
 
-async function apiKeyCredentialPlaintext(credential: 'openai' | 'openrouter' | 'groq'): Promise<string> {
+async function apiKeyCredentialPlaintext(credential: 'openai' | 'openrouter' | 'cerebras' | 'groq'): Promise<string> {
   const settings =
     credential === 'openai'
       ? await resolveEffectiveProviderApiKeySettings('openai')
       : credential === 'openrouter'
         ? await resolveEffectiveProviderApiKeySettings('openrouter')
+      : credential === 'cerebras'
+        ? await resolveEffectiveProviderApiKeySettings('cerebras')
       : await resolveGroqApiKeySettings();
   if (!settings.apiKey)
     throw Object.assign(
       new Error(
-        `this device has no ${credential === 'groq' ? 'GROQ' : credential === 'openrouter' ? 'OpenRouter' : 'OpenAI'} API key to copy`,
+        `this device has no ${credential === 'cerebras' ? 'Cerebras' : credential === 'groq' ? 'GROQ' : credential === 'openrouter' ? 'OpenRouter' : 'OpenAI'} API key to copy`,
       ),
       { code: 'CREDENTIAL_NOT_FOUND' },
     );

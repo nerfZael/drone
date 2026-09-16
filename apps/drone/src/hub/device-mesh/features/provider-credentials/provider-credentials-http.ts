@@ -21,6 +21,7 @@ import {
 type ImportedCredential =
   | { kind: 'openai-api-key'; apiKey: string }
   | { kind: 'openrouter-api-key'; apiKey: string }
+  | { kind: 'cerebras-api-key'; apiKey: string }
   | { kind: 'groq-api-key'; apiKey: string }
   | { kind: 'codex-auth-json'; authJson: string };
 
@@ -50,6 +51,8 @@ export class ProviderCredentialsHttp implements DeviceMeshHttpExtension {
           ? 'openai'
           : body.credential === 'openrouter'
             ? 'openrouter'
+          : body.credential === 'cerebras'
+            ? 'cerebras'
           : body.credential === 'groq'
             ? 'groq'
             : null;
@@ -67,7 +70,7 @@ export class ProviderCredentialsHttp implements DeviceMeshHttpExtension {
         !imported.apiKey.trim()
       )
         throw new Error(
-          `source returned an invalid ${credential === 'groq' ? 'GROQ' : credential === 'openrouter' ? 'OpenRouter' : 'OpenAI'} credential`,
+          `source returned an invalid ${credential === 'cerebras' ? 'Cerebras' : credential === 'groq' ? 'GROQ' : credential === 'openrouter' ? 'OpenRouter' : 'OpenAI'} credential`,
         );
       await upsertStoredProviderApiKey(credential, imported.apiKey);
     }

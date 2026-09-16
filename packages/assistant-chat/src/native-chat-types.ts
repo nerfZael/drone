@@ -4,7 +4,7 @@ import type { ChatQueueAction } from './chat-queue-actions.js';
 import type { PromptQueueInterruption } from './pending-prompts.js';
 import type { ChatQuestionRequest } from './chat-question-request.js';
 
-export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex' | 'openrouter';
+export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex' | 'openrouter' | 'cerebras';
 export type NativeAgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type NativeChatStatus =
   | 'idle'

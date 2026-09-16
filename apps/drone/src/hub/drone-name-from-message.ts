@@ -58,7 +58,7 @@ export async function retryTemporaryNameSuggestion<T>(
 }
 
 function defaultDroneNameModelId(provider: LlmProviderId): string {
-  return provider === 'gemini' || provider === 'openrouter'
+  return provider === 'gemini' || provider === 'openrouter' || provider === 'cerebras'
     ? defaultHubLlmModelId(provider, 'standard')
     : DEFAULT_DRONE_NAME_MODEL_ID;
 }

@@ -24,6 +24,7 @@ type ApiKeyMutationInput = {
 };
 
 function providerLabel(provider: LlmProviderId | ApiKeyProviderId): string {
+  if (provider === 'cerebras') return 'Cerebras';
   if (provider === 'codex') return 'Codex';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'groq') return 'GROQ';

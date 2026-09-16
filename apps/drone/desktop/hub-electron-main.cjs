@@ -1,3 +1,4 @@
+const { installChatWindows } = require('./hub-electron-chat-windows.cjs');
 const { app, BrowserWindow, Menu, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -414,10 +415,7 @@ function createWindow() {
     event.preventDefault();
     mainWindow.webContents.send(NAVIGATION_ZOOM_CHANNEL, { action });
   });
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url).catch(() => {});
-    return { action: 'deny' };
-  });
+  installChatWindows({ mainWindow, ipcMain, shell });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) return;
     event.preventDefault();

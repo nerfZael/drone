@@ -234,7 +234,7 @@ export class CompanionRuntime {
         if (saved && (saved.modelId !== settings.model || saved.modelProvider !== toBlipModelProvider(settings.provider))) {
           const provider = saved.modelProvider === 'openai-codex' ? 'codex'
             : saved.modelProvider === 'google' ? 'gemini' : saved.modelProvider;
-          if (['openai', 'codex', 'gemini', 'openrouter'].includes(provider)) {
+          if (['openai', 'codex', 'gemini', 'openrouter', 'cerebras'].includes(provider)) {
             try {
               await resolveNativeModel(provider, saved.modelId);
               restoredSettings = { ...settings, provider: provider as CompanionSettings['provider'], model: saved.modelId };

@@ -1,4 +1,4 @@
-import { DetachedChatIndicator, detachChatMenuItem } from '../app/DetachedChatIndicator';
+import { DetachedChatIndicator, detachChatMenuItems } from '../app/DetachedChatIndicator';
 import { detachableDroneChat } from '../app/detached-chat-store';
 import React from 'react';
 import { timeAgo } from '../../domain';
@@ -771,7 +771,6 @@ export const DroneCard = React.memo(function DroneCard({
   };
   const actionMenuItems: SidebarContextMenuItem[] = [];
   const detachableChat = detachableDroneChat(drone);
-  if (detachableChat && !isDraftDrone) actionMenuItems.push(detachChatMenuItem(drone.id, detachableChat));
   if (canTogglePinned) {
     actionMenuItems.push({
       id: 'pin',
@@ -788,6 +787,7 @@ export const DroneCard = React.memo(function DroneCard({
       onSelect: () => onTogglePinned?.(),
     });
   }
+  if (detachableChat && !isDraftDrone) actionMenuItems.push(...detachChatMenuItems(drone.id, detachableChat));
   if (canToggleMuted) {
     actionMenuItems.push({
       id: 'mute',

@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const {
   blipBundleArgs,
+  copyDroneHubElectronMain,
   CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
   DRONE_HUB_BUILD_ID_FILE,
@@ -15,6 +16,28 @@ const {
 import { requiredDroneDaemonRuntimeFiles } from '../src/hub/drone-daemon-runtime';
 
 describe('postbuild bundles', () => {
+  test('packages every local module required by the desktop entry points', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-desktop-build-'));
+    try {
+      await fs.symlink(path.resolve(__dirname, '../desktop'), path.join(root, 'desktop'), 'dir');
+      await fs.mkdir(path.join(root, 'dist'));
+      await copyDroneHubElectronMain(root);
+      const pending = ['hub-electron-main.cjs', 'hub-electron-preload.cjs'];
+      const visited = new Set<string>();
+      while (pending.length > 0) {
+        const filename = pending.pop()!;
+        if (visited.has(filename)) continue;
+        visited.add(filename);
+        const source = await fs.readFile(path.join(root, 'dist', filename), 'utf8');
+        for (const match of source.matchAll(/require\(['"](\.\/[^'"]+)['"]\)/g)) {
+          pending.push(path.join(path.dirname(filename), match[1]));
+        }
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('packages exactly the files required by a container daemon', () => {
     expect(CONTAINER_RUNTIME_FILES).toEqual([...requiredDroneDaemonRuntimeFiles()]);
   });

@@ -7,7 +7,7 @@ const DESKTOP_TITLE_BAR_HEIGHT = 29;
 window.addEventListener('DOMContentLoaded', () => {
   // Frameless Electron windows do not participate in X11 synchronized resize,
   // so Linux keeps its native frame and must not reserve a second title bar.
-  if (process.platform === 'linux') return;
+  if (process.platform === 'linux' || window.location.href === 'about:blank') return;
 
   document.documentElement.dataset.droneHubDesktop = 'true';
 
@@ -62,6 +62,9 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  setChatWindowAlwaysOnTop(name, enabled) {
+    return ipcRenderer.invoke('drone-hub:chat-window-pin', name, enabled);
+  },
   reportDiagnostic(record) {
     ipcRenderer.send('drone-hub:diagnostic', record);
   },

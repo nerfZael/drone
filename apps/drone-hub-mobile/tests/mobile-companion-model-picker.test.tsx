@@ -7,13 +7,14 @@ mock.module('react-native', () => ({
   StyleSheet: { create: (value: unknown) => value },
 }));
 const models = [
+  { provider: 'cerebras', id: 'qwen-3.8-27b', name: 'Qwen 3.8 27B', thinkingLevel: 'low' },
   { provider: 'openai', id: 'shared', name: 'OpenAI model', thinkingLevel: 'low' },
   { provider: 'codex', id: 'shared', name: 'Codex model', thinkingLevel: 'high' },
 ];
 const calls: any[] = [];
 let failSave = false;
 const response = { settings: { provider: 'openai', model: 'shared', thinkingLevel: 'low' }, models,
-  credentials: { openai: true, codex: true } };
+  credentials: { openai: true, codex: true, cerebras: true } };
 const request = async (_device: string, _capability: string, operation: string, payload: any) => {
   calls.push({ operation, payload });
   if (operation === 'model.settings.update' && failSave) throw new Error('Save failed');
@@ -46,6 +47,9 @@ test('provider selection scopes models without saving until an explicit model ch
     expect(calls.at(-1).payload).toEqual({ provider: 'codex', model: 'shared', thinkingLevel: 'high' });
     expect(JSON.stringify(root.toJSON())).not.toContain('Save failed');
     expect(JSON.stringify(root.toJSON())).toContain('Reasoning');
+    await press('Cerebras');
+    await press('Qwen 3.8 27B');
+    expect(calls.at(-1).payload).toEqual({ provider: 'cerebras', model: 'qwen-3.8-27b', thinkingLevel: 'low' });
   } finally {
     await act(async () => root.unmount());
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;

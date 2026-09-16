@@ -137,4 +137,42 @@ describe('provider credential transfer', () => {
       });
     });
   });
+  test('exports an Cerebras API key to an administrator device', async () => {
+    await withTempDroneDataDir('provider-credential-cerebras-', async () => {
+      await upsertStoredProviderApiKey('cerebras', 'cerebras-secret');
+      const sender = identity('desktop_1');
+      const recipient = identity('phone_1');
+      const transfer = createProviderCredentialRequest();
+      const capability = createProviderCredentialsCapability(sender);
+
+      const envelope = await capability.invoke(
+        'cerebras.export',
+        transfer.request,
+        {
+          sourceDevice: {
+            ...recipient,
+            administrator: true,
+            grants: [],
+            endpoints: [],
+            revokedAt: null,
+            addedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          requestId: 'request_1',
+        },
+      );
+      const plaintext = openProviderCredential({
+        envelope,
+        privateKey: transfer.privateKey,
+        senderDeviceId: sender.id,
+        recipientDeviceId: recipient.id,
+        senderIdentityPublicKey: sender.publicKey,
+      });
+
+      expect(JSON.parse(plaintext)).toMatchObject({
+        kind: 'cerebras-api-key',
+        apiKey: 'cerebras-secret',
+      });
+    });
+  });
 });

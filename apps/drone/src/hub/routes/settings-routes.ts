@@ -175,6 +175,7 @@ export function registerSettingsRoutes(
     { path: '/api/settings/gemini', provider: 'gemini' },
     { path: '/api/settings/codex', provider: 'codex' },
     { path: '/api/settings/openrouter', provider: 'openrouter' },
+    { path: '/api/settings/cerebras', provider: 'cerebras' },
     { path: '/api/settings/groq', provider: 'groq' },
     { path: '/api/settings/exa', provider: 'exa' },
   ];

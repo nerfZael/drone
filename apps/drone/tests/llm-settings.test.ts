@@ -336,6 +336,37 @@ describeSocketSuite('LLM settings api', () => {
     expect(cleared.data.source).toBeNull();
   });
 
+  test('stores Cerebras key for Hub agent settings', async () => {
+    const initial = await apiFetch('/api/settings/llm');
+    expect(initial.r.status).toBe(200);
+    expect(initial.data.cerebras.hasKey).toBe(false);
+
+    const saved = await apiFetch('/api/settings/cerebras', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'stored-cerebras-key' }),
+    });
+    expect(saved.r.status).toBe(200);
+    expect(saved.data.hasKey).toBe(true);
+    expect(saved.data.source).toBe('settings');
+    expect(saved.data.apiKey).toBeUndefined();
+
+    const hidden = await apiFetch('/api/settings/cerebras');
+    expect(hidden.r.status).toBe(200);
+    expect(hidden.data.hasKey).toBe(true);
+    expect(hidden.data.keyHint).toBe('stor...-key');
+    expect(hidden.data.apiKey).toBeUndefined();
+
+    const revealed = await apiFetch('/api/settings/cerebras?reveal=1');
+    expect(revealed.r.status).toBe(200);
+    expect(revealed.data.apiKey).toBe('stored-cerebras-key');
+
+    const cleared = await apiFetch('/api/settings/cerebras', { method: 'DELETE' });
+    expect(cleared.r.status).toBe(200);
+    expect(cleared.data.hasKey).toBe(false);
+    expect(cleared.data.source).toBeNull();
+  });
+
   test('stores GROQ key for voice transcription settings', async () => {
     const initial = await apiFetch('/api/settings/llm');
     expect(initial.r.status).toBe(200);

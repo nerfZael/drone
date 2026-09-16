@@ -94,6 +94,7 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
     'openai.export',
     'codex.export',
     'openrouter.export',
+    'cerebras.export',
     'groq.export',
   ],
 };

@@ -1,3 +1,4 @@
+import { useDesktopChatRequests } from './desktop-chat-requests';
 import React from 'react';
 import { detachedChatKey, useDetachedChatStore } from './detached-chat-store';
 import type { SidebarContextMenuItem } from './SidebarContextMenu';
@@ -19,4 +20,16 @@ export function detachChatMenuItem(droneId: string, chatName: string): SidebarCo
     id: 'detach-chat', label: open ? 'Focus detached chat' : 'Detach chat', icon: <IconDetachedChat />,
     onSelect: () => useDetachedChatStore.getState().detach(droneId, chatName),
   };
+}
+
+export function detachChatMenuItems(droneId: string, chatName: string): SidebarContextMenuItem[] {
+  return [
+    detachChatMenuItem(droneId, chatName),
+    ...(window.droneHubDesktop?.setChatWindowAlwaysOnTop ? [{
+      id: 'open-desktop-chat',
+      label: 'Open in desktop window',
+      icon: <IconDetachedChat />,
+      onSelect: () => useDesktopChatRequests.getState().request(droneId, chatName),
+    }] : []),
+  ];
 }

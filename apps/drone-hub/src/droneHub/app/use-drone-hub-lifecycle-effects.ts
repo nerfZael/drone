@@ -45,12 +45,13 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type LlmSettingsLike =
   | {
-      provider?: { selected?: 'openai' | 'gemini' | 'codex' | 'openrouter' };
-      namingProvider?: 'openai' | 'gemini' | 'codex' | 'openrouter';
+      provider?: { selected?: 'openai' | 'gemini' | 'codex' | 'openrouter' | 'cerebras' };
+      namingProvider?: 'openai' | 'gemini' | 'codex' | 'openrouter' | 'cerebras';
       openai?: { hasKey?: boolean };
       gemini?: { hasKey?: boolean };
       codex?: { hasKey?: boolean };
       openrouter?: { hasKey?: boolean };
+      cerebras?: { hasKey?: boolean };
     }
   | null
   | undefined;
