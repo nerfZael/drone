@@ -16,12 +16,14 @@ test('live delivery respects changes to preferences, deduplicates, navigates, an
   let clicked: ((target: any) => void) | null = null;
   let errorListener: ((error: string) => void) | null = null;
   let closed = false;
+  let cleared = 0;
   class Source {
     constructor(url: string) { expect(url).toBe('/api/desktop/events?notifications=1'); }
     addEventListener(name: string, listener: Function) { listeners.set(name, listener); }
     close() { closed = true; }
   }
   Object.assign(dom, { EventSource: Source, droneHubDesktop: {
+    clearNotifications: async () => { cleared++; },
     showNotification: async (payload: any) => { sent.push(payload); },
     onNotificationClick: (fn: any) => { clicked = fn; return () => { clicked = null; }; },
     onNotificationError: (fn: any) => { errorListener = fn; return () => { errorListener = null; }; },
@@ -42,6 +44,8 @@ test('live delivery respects changes to preferences, deduplicates, navigates, an
     useDesktopNotificationSettings.setState({ finished: false });
     emit({ ...event, id: 'two' });
     expect(sent).toHaveLength(1);
+    useDesktopNotificationSettings.setState({ enabled: false });
+    expect(cleared).toBe(1);
     let opened: any;
     dom.addEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, (e: any) => { opened = e.detail; });
     clicked!(sent[0].target);

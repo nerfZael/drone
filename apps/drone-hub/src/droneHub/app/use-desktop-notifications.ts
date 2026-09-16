@@ -9,6 +9,11 @@ export function useDesktopNotifications(): void {
     const desktop = window.droneHubDesktop;
     if (!desktop?.showNotification) return;
     const seen = new Set<string>();
+    const offSettings = useDesktopNotificationSettings.subscribe((settings, previous) => {
+      if (previous.enabled && !settings.enabled) {
+        void desktop.clearNotifications?.().catch((error) => settings.setError(String(error?.message || error)));
+      }
+    });
     const offClick = desktop.onNotificationClick?.(({ droneId, chatName }) => dispatchAssistantOpenDroneChat(droneId, chatName));
     const offError = desktop.onNotificationError?.((error) => useDesktopNotificationSettings.getState().setError(error));
     const unsubscribe = subscribeDesktopEvents({ handlers: {
@@ -23,6 +28,6 @@ export function useDesktopNotifications(): void {
         void desktop.showNotification!(payload).catch((error) => settings.setError(String(error?.message || error)));
       },
     } });
-    return () => { unsubscribe(); offClick?.(); offError?.(); };
+    return () => { unsubscribe(); offSettings(); offClick?.(); offError?.(); };
   }, []);
 }

@@ -5,6 +5,7 @@ export type DesktopNotificationPreferences = {
   messages: boolean;
   eventNames: string;
   sound: boolean;
+  durationSeconds?: number;
 };
 
 export function desktopNotificationPayload(data: unknown, settings: DesktopNotificationPreferences) {
@@ -22,6 +23,9 @@ export function desktopNotificationPayload(data: unknown, settings: DesktopNotif
   } else return null;
   const name = String(event.droneName || event.droneId).slice(0, 180);
   return {
+    name,
+    kind: event.kind,
+    durationSeconds: settings.durationSeconds ?? 8,
     title: `${name} ${event.kind === 'message' ? 'sent a message' : event.kind}`,
     body: (event.kind === 'message' ? String(event.body || event.eventName) : `Chat: ${event.chatName}\nClick to open in Drone Hub.`).slice(0, 500),
     silent: !settings.sound,

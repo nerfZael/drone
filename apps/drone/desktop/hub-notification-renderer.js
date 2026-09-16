@@ -1,0 +1,23 @@
+const bridge = window.notificationCard;
+let hovered = false;
+let focused = false;
+const updatePause = () => bridge.action(hovered || focused ? 'pause' : 'resume');
+document.body.addEventListener('mouseenter', () => { hovered = true; updatePause(); });
+document.body.addEventListener('mouseleave', () => { hovered = false; updatePause(); });
+document.body.addEventListener('focusin', () => { focused = true; updatePause(); });
+document.body.addEventListener('focusout', (event) => { focused = document.body.contains(event.relatedTarget); updatePause(); });
+window.addEventListener('blur', () => { focused = false; updatePause(); });
+document.getElementById('close').addEventListener('click', () => bridge.action('dismiss'));
+document.getElementById('open').addEventListener('click', () => bridge.action('open'));
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') bridge.action('dismiss'); });
+bridge.read().then((payload) => {
+  const named = payload.name && payload.kind !== 'test';
+  document.querySelector('.card').classList.toggle('failed', payload.kind === 'failed');
+  document.getElementById('symbol').textContent = payload.kind === 'failed' ? '!' : payload.kind === 'message' ? '•' : '✓';
+  document.getElementById('name').textContent = named ? payload.name : '';
+  document.getElementById('suffix').textContent = named ? ` ${payload.kind === 'message' ? 'sent a message' : payload.kind}` : payload.title;
+  document.getElementById('body').textContent = payload.body;
+  document.getElementById('body').title = payload.body;
+  document.getElementById('open').setAttribute('aria-label', `${payload.title}. Open in Drone Hub`);
+  bridge.action('ready');
+}).catch(() => bridge.action('dismiss'));
