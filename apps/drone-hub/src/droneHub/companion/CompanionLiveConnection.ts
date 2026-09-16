@@ -2,6 +2,7 @@ import { type CompanionLiveTiming, LiveAudioBuffer, type LivePcmAudio, type Live
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { browserMicrophoneCoordinator, type BrowserMicrophoneLease } from '../chat/browser-microphone-coordinator';
 import { openBrowserLivePcmAudio } from './browser-live-pcm-audio';
+import type { AnnouncementPlayback } from './CompanionLiveAnnouncement';
 
 type Options = {
   timing?: CompanionLiveTiming;
@@ -10,6 +11,7 @@ type Options = {
   onCapturing?(): void;
   onError(error: string): void;
   onPlaybackBlocked(blocked: boolean): void;
+  onAnnouncementPlayback?(event: AnnouncementPlayback): void;
   openAudio?(callbacks: LivePcmCallbacks): Promise<LivePcmAudio>;
 };
 
@@ -26,6 +28,7 @@ export class CompanionLiveConnection {
   private timeout?: ReturnType<typeof setTimeout>;
   private closeTimer?: ReturnType<typeof setTimeout>;
   private pendingAudio: Promise<void> = Promise.resolve();
+  private cleanup: Promise<void> = Promise.resolve();
   private readonly audioAbort = new AbortController();
   private readonly buffer: LiveAudioBuffer;
 
@@ -48,7 +51,9 @@ export class CompanionLiveConnection {
     this.pendingAudio = new Promise((resolve) => { settled = resolve; });
     try {
       try {
-        this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked)))({
+        this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked, {
+          muted: this.muted, onAnnouncementPlayback: this.options.onAnnouncementPlayback,
+        })))({
           signal: this.audioAbort.signal, onPlayback: (event) => this.options.timing?.playback(event), onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error),
         });
       } finally { settled(); }
@@ -96,8 +101,8 @@ export class CompanionLiveConnection {
     if (this.closed) return;
     try { await this.audio?.resume(); } catch { this.options.onPlaybackBlocked(true); }
   }
-  close(): void {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closed) return this.cleanup;
     this.closed = true;
     this.options.timing?.close();
     this.buffer.close();
@@ -106,7 +111,7 @@ export class CompanionLiveConnection {
     clearInterval(this.heartbeat);
     this.audio?.mute(true);
     const release = this.audio?.release();
-    void this.pendingAudio.then(async () => {
+    this.cleanup = this.pendingAudio.then(async () => {
       await (release ?? this.audio?.release());
     }).catch(() => undefined).finally(() => { this.audio = null; this.lease?.release(); this.lease = null; });
     if (this.socket?.readyState === WebSocket.OPEN) {
@@ -115,6 +120,7 @@ export class CompanionLiveConnection {
         this.closeTimer = setTimeout(() => this.socket?.close(), 6_000);
       } catch { this.socket.close(); }
     } else this.socket?.close();
+    return this.cleanup;
   }
   private sendMessage(message: Record<string, unknown>): boolean {
     try { this.socket?.send(JSON.stringify(message)); return true; }

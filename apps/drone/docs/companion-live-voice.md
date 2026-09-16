@@ -27,6 +27,39 @@ session with an error rather than silently losing the beginning of an utterance.
 - Turning the preference off ends voice. Typed submissions also end voice and use the normal backend path; typing is still rejected while Companion is busy.
 - A voice session captures its workspace at startup. Its panel shows that target. Navigation does not redirect tools; start a new voice session to capture a different workspace.
 
+### Subscription announcements (desktop)
+
+When Live voice is enabled but stopped, a new completed Companion subscription
+response opens a temporary Live session, announces the result, and stops again.
+The microphone stays muted, and this session cannot delegate new backend work.
+The menu identifies the announcement and keeps **End voice** available. Ordinary
+backend replies, empty results, and completed history do not start voice. Disabling
+Live voice prevents announcements and immediately stops an announcement in progress.
+An already-running conversation keeps its normal quiet-context reply delivery.
+
+Results arriving while the temporary session connects wait for readiness. Further
+subscription results wait for the preceding announcement to finish before using
+that session, so its final audio cannot end a newer announcement. New sessions
+also wait for previous microphone cleanup, and navigating away prevents late
+results from reopening voice. Long answers retain the existing spoken
+referral to the full response in Companion. **Play voice audio** remains available
+when browser autoplay is blocked. Connection and microphone failures return to
+stopped with an error, without automatic retries; the backend response remains visible.
+
+Live provides no authoritative output-audio completion event. Desktop detects
+audible PCM and waits until its local playback completes, then allows 2.5 seconds
+without more audible playback before closing. This is a heuristic: unusually long
+speech pauses or network gaps can end an announcement early. Each announcement
+has a fresh 90-second maximum to close stuck, silent, or blocked playback (startup
+also has a 90-second limit). Microphone access is still required
+to run the muted input audio clock. This behavior applies to desktop; mobile's
+existing pause/resume lifecycle is unchanged.
+
+Manual check: subscribe to an event, stop Live without disabling it, and trigger
+the event. Confirm the backend result is spoken with the mic muted and voice stops
+afterward. Repeat with Live disabled, with another event arriving during playback,
+with browser autoplay blocked, and with **End voice** pressed during connection.
+
 **Settings → Companion → Follow-up delivery** selects **ASAP** (default) or **Queue** for both Live and record-and-transcribe mode. Use the normal **Save** button; the preference persists in Hub settings and applies when a new backend run starts. An active run keeps its delivery setting. Queue runs follow-ups in order after the current request finishes. With ASAP, follow-ups steer the running agent. The running backend receives the correction without waiting for the entire task to finish and incorporates it at its next processing point. This does not interrupt an active model response or undo a tool action already underway. Requests arriving during startup are buffered until steering is available; requests arriving after the agent loop has finished start a new run. New speech paired with a pending delegation suppresses an older spoken result, but does not undo operations. A repeated notification alone does not hide the answer. Use the explicit stop control for urgent cancellation.
 
 ## Mobile
