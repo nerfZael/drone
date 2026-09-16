@@ -13,6 +13,7 @@ import {
 } from './companion.js';
 
 export type CompanionClientState = {
+  trigger: 'user' | 'subscription';
   status: CompanionStatus;
   error: string;
   reply: string;
@@ -98,6 +99,7 @@ type ActiveSession = {
 };
 
 const INITIAL_STATE: CompanionClientState = {
+  trigger: 'user',
   subscriptions: [],
   status: 'idle',
   error: '',
@@ -212,6 +214,7 @@ export class CompanionClientController {
       reply: '',
       transcript: prompt,
       replySource: undefined,
+      trigger: 'user',
       startedAt: steering ? this.state.startedAt : this.now(),
       endedAt: null,
       activity: steering ? this.state.activity : [],
@@ -267,6 +270,7 @@ export class CompanionClientController {
       reply: '',
       transcript: 'Proposal applied',
       replySource: undefined,
+      trigger: 'user',
       startedAt: this.now(),
       endedAt: null,
       activity: [],
@@ -392,6 +396,7 @@ export class CompanionClientController {
         session.latestMessageId = message.messageId;
         this.update({
           status: 'working', error: '', reply: '', transcript: 'Event notification', replySource: 'subscription',
+          trigger: 'subscription',
           endedAt: null,
         });
       }

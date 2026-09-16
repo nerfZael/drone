@@ -5,7 +5,7 @@ import { CompanionLiveTiming, CompanionClientController, type CompanionServerMes
 import { waitForCompanionReply } from '../src/droneHub/companion/waitForCompanionReply';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(delayed = false, timing?: CompanionLiveTiming) {
+function harness(delayed = false, delayedRelease = false, timing?: CompanionLiveTiming) {
   const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let socket: FakeSocket | undefined;
@@ -24,9 +24,13 @@ function harness(delayed = false, timing?: CompanionLiveTiming) {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { origin: 'http://localhost' } } });
   let capture!: LivePcmCallbacks; let finish!: (audio: LivePcmAudio) => void;
   let released = 0; let muted = false; let resumed = false;
+  let finishRelease!: () => void;
   const played: string[] = []; const errors: string[] = []; const models: string[] = []; const events: unknown[] = [];
   const audio: LivePcmAudio = { mute: (value) => { muted = value; }, play: (value) => played.push(value),
-    resume: async () => { resumed = true; }, release: async () => { released++; } };
+    resume: async () => { resumed = true; }, release: async () => {
+      released++;
+      if (delayedRelease) await new Promise<void>(resolve => { finishRelease = resolve; });
+    } };
   const connection = new CompanionLiveConnection({ timing, onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
     onError: (error) => errors.push(error), onPlaybackBlocked() {}, openAudio: async (callbacks) => {
       capture = callbacks;
@@ -34,7 +38,7 @@ function harness(delayed = false, timing?: CompanionLiveTiming) {
       return delayed ? new Promise((resolve) => { finish = resolve; }) : audio;
     } });
   return { connection, socket: () => socket!, capture: (value: string) => capture.onAudio(value),
-    finish: () => finish(audio), errors, models, events, played, released: () => released, muted: () => muted, resumed: () => resumed,
+    finish: () => finish(audio), finishRelease: () => finishRelease(), errors, models, events, played, released: () => released, muted: () => muted, resumed: () => resumed,
     async cleanup() {
       connection.close(); socket?.message({ type: 'live_closed' }); await tick();
       for (const [name, value] of [['WebSocket', originalSocket], ['window', originalWindow]] as const) {
@@ -83,6 +87,25 @@ test('desktop cancel during microphone startup releases late audio without openi
     expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
     h.finish(); await start; await tick();
     expect(h.socket()).toBeUndefined(); expect(h.released()).toBe(1);
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
+  } finally { await h.cleanup(); }
+});
+
+test('close exposes one cleanup promise that waits until audio and the microphone lease are released', async () => {
+  const h = harness(false, true);
+  try {
+    await h.connection.start();
+    const cleanup = h.connection.close();
+    expect(h.connection.close()).toBe(cleanup);
+    let done = false;
+    void cleanup.then(() => { done = true; });
+    await tick();
+    expect(done).toBe(false);
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
+    expect(h.released()).toBe(1);
+    h.finishRelease();
+    await cleanup;
+    expect(done).toBe(true);
     expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
   } finally { await h.cleanup(); }
 });
@@ -161,7 +184,7 @@ test('desktop keeps forwarding microphone audio through delegation and overlappi
 
 test('desktop persists startup and final events and correlates append acknowledgment', async () => {
   const timing = new CompanionLiveTiming(() => 10, () => {});
-  const h = harness(false, timing);
+  const h = harness(false, false, timing);
   try {
     await h.connection.start(); h.socket().open();
     h.socket().message({ type: 'live_ready', transport: 'pcm' });

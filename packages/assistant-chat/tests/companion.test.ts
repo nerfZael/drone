@@ -442,6 +442,7 @@ describe('Companion contracts', () => {
     connection.disconnect('Too late');
 
     expect(controller.getSnapshot()).toEqual({
+      trigger: 'user',
       status: 'idle',
       error: '',
       reply: '',
@@ -688,14 +689,14 @@ test('subscription resumes a completed Companion client and retains the latest b
   transport.message({ type: 'reply', messageId: 'user', reply: 'Watching' });
   transport.message({ type: 'status', messageId: 'user', status: 'completed' });
   transport.message({ type: 'subscription', messageId: 'event' });
-  expect(controller.getSnapshot()).toMatchObject({ status: 'working', transcript: 'Event notification', reply: '' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', trigger: 'subscription', transcript: 'Event notification', reply: '' });
   transport.message({ type: 'status', messageId: 'event', status: 'working' });
   transport.message({ type: 'tool_call', messageId: 'event', generation: 2, callId: 'context', tool: 'get_app_context', args: {} });
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(transport.toolResults.at(-1)).toMatchObject({ ok: true, result: { selectedChat: 'captured-chat' } });
   transport.message({ type: 'reply', messageId: 'event', reply: 'The chat finished.' });
   transport.message({ type: 'status', messageId: 'event', status: 'completed' });
-  expect(controller.getSnapshot()).toMatchObject({ status: 'completed', reply: 'The chat finished.' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'completed', trigger: 'subscription', reply: 'The chat finished.' });
   await controller.close();
   transport.message({ type: 'subscription', messageId: 'late' });
   expect(controller.getSnapshot().status).toBe('idle');
@@ -715,12 +716,12 @@ test('ASAP subscription owns the combined reply without overwriting a newer queu
     transport.message({ type: 'reply', messageId: 'event', reply: 'Event answer' });
     transport.message({ type: 'status', messageId: 'event', status: 'completed' });
     if (newerUser) {
-      expect(controller.getSnapshot()).toMatchObject({ status: 'working', reply: '', transcript: 'newer' });
+      expect(controller.getSnapshot()).toMatchObject({ status: 'working', trigger: 'user', reply: '', transcript: 'newer' });
       transport.message({ type: 'reply', messageId: 'newer', reply: 'Newer answer' });
       transport.message({ type: 'status', messageId: 'newer', status: 'completed' });
       expect(controller.getSnapshot().reply).toBe('Newer answer');
     } else {
-      expect(controller.getSnapshot()).toMatchObject({ status: 'completed', reply: 'Event answer' });
+      expect(controller.getSnapshot()).toMatchObject({ status: 'completed', trigger: 'subscription', reply: 'Event answer' });
     }
     await controller.close();
   }
