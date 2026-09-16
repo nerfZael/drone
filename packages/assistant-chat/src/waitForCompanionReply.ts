@@ -1,5 +1,8 @@
 import type { CompanionClientController } from './companion-client';
 
+/** A failure already published in controller state; Live's completion observer owns its delivery. */
+export class CompanionReportedError extends Error {}
+
 /** Subscribe before submitting so even an immediate reply or failure is observed. */
 export async function waitForCompanionReply(
   controller: CompanionClientController,
@@ -16,7 +19,8 @@ export async function waitForCompanionReply(
       const check = () => {
         const state = controller.getSnapshot();
         if (state.status === 'completed') resolve(state.reply);
-        else if (state.status === 'error' || state.status === 'cancelled' || state.status === 'idle') {
+        else if (state.status === 'error') reject(new CompanionReportedError(state.error || 'Companion failed.'));
+        else if (state.status === 'cancelled' || state.status === 'idle') {
           reject(new Error(state.error || 'Companion task was stopped.'));
         }
       };

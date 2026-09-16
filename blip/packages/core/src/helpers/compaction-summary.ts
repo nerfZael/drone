@@ -58,25 +58,35 @@ ${REQUIRED_HEADINGS.join('\n')}`;
 /** A candidate is returned only after every batch succeeds. Nothing is persisted here. */
 export async function modelSummary(input: SummaryInput): Promise<string> {
   const budget = compactionBudget(input.model, resolveCompactionSettings(input.plan.settings));
-  const maxTokens = Math.min(
+  const summaryTokens = Math.min(
     budget.summaryTokens,
     input.maxTokens ?? Number.POSITIVE_INFINITY,
   );
-  const options: SimpleStreamOptions =
-    input.model.reasoning && input.reasoning && input.reasoning !== 'off'
-      ? { maxTokens, reasoning: input.reasoning, apiKey: input.apiKey, signal: input.signal }
-      : { maxTokens, apiKey: input.apiKey, signal: input.signal };
+  const reasoning = input.model.reasoning && input.reasoning !== 'off' ? input.reasoning : undefined;
+  // Completions adapters (including Cerebras) use a combined reasoning + text
+  // cap. Keep the checkpoint limit independent, and give reasoning its own
+  // headroom. Other adapters may add that allowance themselves.
+  const combinedCap = input.model.api === 'openai-completions';
+  const maxTokens = reasoning && combinedCap
+    ? Math.min(
+        outputTokenAllowance(input.model, summaryTokens, true),
+        Math.max(summaryTokens, Math.floor(budget.contextWindow / 4)),
+      )
+    : summaryTokens;
+  const options: SimpleStreamOptions = {
+    maxTokens, reasoning, apiKey: input.apiKey, signal: input.signal,
+  };
   let summary = input.plan.previousSummary;
   const availableChars = () => {
     if (!(input.model.contextWindow > 0) || !Number.isFinite(input.model.contextWindow)) return 120_000;
-    const overhead = estimateContextTokens(input.model, summaryContext(summary, '')).inputTokens;
+    const overhead = estimateContextTokens(input.model, summaryContext(summary, '', summaryTokens)).inputTokens;
     const margin = Math.max(32, Math.ceil(budget.contextWindow * 0.05));
-    const outputAllowance = outputTokenAllowance(input.model, maxTokens, Boolean(input.model.reasoning && input.reasoning && input.reasoning !== 'off'));
+    const outputAllowance = combinedCap ? maxTokens : outputTokenAllowance(input.model, maxTokens, Boolean(reasoning));
     return (budget.contextWindow - outputAllowance - margin - overhead) * 4 - 4;
   };
   for (const batch of summaryInputBatches(input.plan, availableChars)) {
     input.signal?.throwIfAborted();
-    const context = summaryContext(summary, batch);
+    const context = summaryContext(summary, batch, summaryTokens);
     await input.onModelCall?.('started');
     let response: AssistantMessage;
     try {
@@ -107,9 +117,9 @@ export async function modelSummary(input: SummaryInput): Promise<string> {
   return summary;
 }
 
-function summaryContext(summary: string | undefined, batch: string): Context {
+function summaryContext(summary: string | undefined, batch: string, maxTokens: number): Context {
   return {
-    systemPrompt: SUMMARY_SYSTEM_PROMPT,
+    systemPrompt: `${SUMMARY_SYSTEM_PROMPT}\nThe final summary text (excluding reasoning) must fit within ${maxTokens} output tokens and ${Math.floor(maxTokens * 4)} characters. Prefer short factual bullets; preserve every required heading.`,
     messages: [{
       role: 'user',
       content: `Previous checkpoint (JSON string, or null):\n${JSON.stringify(summary ?? null)}\n\nChronological transcript fragments (JSON records, possibly split across batches; character offsets identify continuations):\n${batch}`,

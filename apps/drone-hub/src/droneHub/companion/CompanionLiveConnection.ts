@@ -18,6 +18,7 @@ export class CompanionLiveConnection {
   private audio: LivePcmAudio | null = null;
   private lease: BrowserMicrophoneLease | null = null;
   private closed = false;
+  private appendSequence = 0;
   private started = false;
   private ready = false;
   private capturing = false;
@@ -35,6 +36,7 @@ export class CompanionLiveConnection {
       const socket = this.socket;
       if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 2_000_000) throw new Error('Live connection is too slow.');
       socket.send(JSON.stringify({ type: 'live_event', event: { type: 'session.input_audio.append', audio } }));
+      this.options.timing?.once('first_input_audio_sent');
     }, (error) => this.fail(error));
   }
 
@@ -58,7 +60,10 @@ export class CompanionLiveConnection {
       this.socket = socket;
       socket.onopen = () => {
         if (this.closed) { socket.close(); return; }
-        if (!this.sendMessage({ type: 'live_start', transport: 'pcm' })) return;
+        if (!this.sendMessage({ type: 'live_start', transport: 'pcm', timingSessionId: this.options.timing?.sessionId })) return;
+        this.options.timing?.setSink(events => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'live_ping', timingEvents: events }));
+        });
         this.heartbeat = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) this.sendMessage({ type: 'live_ping' });
         }, 10_000);
@@ -76,8 +81,9 @@ export class CompanionLiveConnection {
           this.options.onReady(String(event.backendModel ?? ''));
         } else if (event.type === 'live_event') {
           const payload = event.event as Record<string, unknown> | undefined;
+          if (payload) this.options.timing?.providerEvent(payload);
           if (payload?.type === 'error') this.fail('Live voice reported an error. Start again.');
-          else if (payload?.type === 'session.output_audio.delta' && typeof payload.delta === 'string') { this.options.timing?.audioReceived(); this.audio?.play(payload.delta); }
+          else if (payload?.type === 'session.output_audio.delta' && typeof payload.delta === 'string') { const sampleId = this.options.timing?.audioReceived(); this.audio?.play(payload.delta, sampleId); }
           else if (payload && typeof payload === 'object') this.options.onEvent(payload);
         } else if (event.type === 'live_error') this.fail(String(event.error ?? 'Live voice failed.'));
       };
@@ -87,8 +93,11 @@ export class CompanionLiveConnection {
   }
 
   send(event: Record<string, unknown>): void {
+    if (this.closed) return;
+    event = { ...event, event_id: event.event_id ?? `append-${this.options.timing?.sessionId ?? 'live'}-${++this.appendSequence}` };
+    this.options.timing?.mark('append_submitted', { eventType: String(event.type), eventId: String(event.event_id), delegationId: typeof event.delegation_id === 'string' ? event.delegation_id : null });
     if (!this.closed && this.socket?.readyState === WebSocket.OPEN && this.sendMessage({ type: 'live_event', event })) {
-      this.options.timing?.mark('append_socket_sent', { eventType: String(event.type), delegationId: typeof event.delegation_id === 'string' ? event.delegation_id : null });
+      this.options.timing?.mark('append_socket_sent', { eventType: String(event.type), eventId: String(event.event_id), delegationId: typeof event.delegation_id === 'string' ? event.delegation_id : null });
     }
   }
   mute(muted: boolean): void { this.muted = muted; this.buffer.mute(muted); this.audio?.mute(muted); }
@@ -109,12 +118,16 @@ export class CompanionLiveConnection {
     void this.pendingAudio.then(async () => {
       await (release ?? this.audio?.release());
     }).catch(() => undefined).finally(() => { this.audio = null; this.lease?.release(); this.lease = null; });
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      try {
-        this.socket.send(JSON.stringify({ type: 'live_close' }));
-        this.closeTimer = setTimeout(() => this.socket?.close(), 6_000);
-      } catch { this.socket.close(); }
-    } else this.socket?.close();
+    const closeSocket = () => {
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        try {
+          this.socket.send(JSON.stringify({ type: 'live_close' }));
+          this.closeTimer = setTimeout(() => this.socket?.close(), 6_000);
+        } catch { this.socket.close(); }
+      } else this.socket?.close();
+    };
+    if (this.options.timing) void this.options.timing.drain().finally(closeSocket);
+    else closeSocket();
   }
   private sendMessage(message: Record<string, unknown>): boolean {
     try { this.socket?.send(JSON.stringify(message)); return true; }

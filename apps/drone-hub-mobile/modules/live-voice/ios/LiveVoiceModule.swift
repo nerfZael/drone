@@ -8,7 +8,7 @@ public class LiveVoiceModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("pcmAudio", "pcmError", "mediaControl")
+    Events("pcmAudio", "pcmError", "pcmPlayback", "mediaControl")
     AsyncFunction("armControls") { (id: String) in
       guard self.controls == nil else { throw LiveAudioError("Live headset controls are already active") }
       self.controls = LiveMediaControls(id: id) { [weak self] action in
@@ -31,7 +31,10 @@ public class LiveVoiceModule: Module {
       guard self.audio == nil else { throw LiveAudioError("Live audio is already running") }
       let audio = LivePcmAudio(
         onAudio: { [weak self] data in self?.sendEvent("pcmAudio", ["id": id, "audio": data]) },
-        onError: { [weak self] error in self?.sendEvent("pcmError", ["id": id, "error": error]) })
+        onError: { [weak self] error in self?.sendEvent("pcmError", ["id": id, "error": error]) },
+        onPlayback: { [weak self] sampleId, stage, queueMs, durationMs in
+          self?.sendEvent("pcmPlayback", ["id": id, "sampleId": sampleId, "stage": stage, "queueMs": queueMs, "durationMs": durationMs])
+        })
       self.audio = audio
       self.audioId = id
       do { try audio.start() }
@@ -45,6 +48,9 @@ public class LiveVoiceModule: Module {
     }.runOnQueue(.main)
     AsyncFunction("playPcm") { (id: String, data: String) in
       if self.audioId == id { try self.audio?.play(data) }
+    }.runOnQueue(.main)
+    AsyncFunction("playPcmMeasured") { (id: String, data: String, sampleId: Int) in
+      if self.audioId == id { try self.audio?.play(data, sampleId: sampleId) }
     }.runOnQueue(.main)
     OnDestroy {
       self.audio?.stop(); self.audio = nil; self.audioId = nil
@@ -70,11 +76,13 @@ private final class LivePcmAudio {
   private var observer: NSObjectProtocol?
   private let onAudio: (String) -> Void
   private let onError: (String) -> Void
+  private let onPlayback: (Int, String, Double, Double) -> Void
   private let wireFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
   private let playFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
 
-  init(onAudio: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
-    self.onAudio = onAudio; self.onError = onError
+  init(onAudio: @escaping (String) -> Void, onError: @escaping (String) -> Void,
+    onPlayback: @escaping (Int, String, Double, Double) -> Void) {
+    self.onAudio = onAudio; self.onError = onError; self.onPlayback = onPlayback
   }
   func start() throws {
     let session = AVAudioSession.sharedInstance()
@@ -119,7 +127,8 @@ private final class LivePcmAudio {
     player.play()
   }
   func mute(_ value: Bool) { lock.lock(); muted = value; lock.unlock() }
-  func play(_ audio: String) throws {
+  func play(_ audio: String, sampleId: Int? = nil) throws {
+    let enqueuedAt = ProcessInfo.processInfo.systemUptime
     guard audio.count <= 256000, let data = Data(base64Encoded: audio), data.count % 2 == 0 else {
       throw LiveAudioError("Invalid Live audio")
     }
@@ -146,6 +155,19 @@ private final class LivePcmAudio {
     if end - now > 120000 { throw LiveAudioError("Live playback fell behind. Start again.") }
     player.scheduleBuffer(buffer, at: AVAudioTime(sampleTime: start, atRate: 24000), options: [], completionHandler: nil)
     playbackEnd = end
+    if let sampleId { observePlayback(sampleId, start: start, end: end, enqueuedAt: enqueuedAt) }
+  }
+  private func observePlayback(_ sampleId: Int, start: AVAudioFramePosition, end: AVAudioFramePosition,
+    enqueuedAt: TimeInterval, began: Bool = false) {
+    guard !stopped, ProcessInfo.processInfo.systemUptime - enqueuedAt < 10 else { return }
+    let head = player.lastRenderTime.flatMap { player.playerTime(forNodeTime: $0) }?.sampleTime ?? 0
+    let elapsed = (ProcessInfo.processInfo.systemUptime - enqueuedAt) * 1000
+    let duration = Double(end - start) / 24
+    if head >= start && !began { onPlayback(sampleId, "started", elapsed, duration) }
+    if head >= end { onPlayback(sampleId, "completed", elapsed, duration); return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+      self?.observePlayback(sampleId, start: start, end: end, enqueuedAt: enqueuedAt, began: began || head >= start)
+    }
   }
   func stop() {
     lock.lock()

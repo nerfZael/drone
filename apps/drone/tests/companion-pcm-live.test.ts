@@ -94,3 +94,28 @@ for (const systemPrompt of [undefined, '', '  Custom voice instructions.\nKeep t
     h.session.close();
   });
 }
+
+test('PCM persists Hub handoffs and scoped client timings, and forwards only acknowledgment identifiers', async () => {
+  const { CompanionLiveTelemetry } = await import('../src/hub/companion/companion-live-telemetry');
+  const telemetry = new CompanionLiveTelemetry();
+  const h = harness({ telemetry });
+  h.session.handle({ type: 'live_start', transport: 'pcm', timingSessionId: 'live-test' }); await tick();
+  h.upstream.readyState = WebSocket.OPEN; h.upstream.emit('open');
+  h.event({ type: 'session.started' });
+  h.session.handle({ type: 'live_ping', timingEvents: [
+    { sessionId: 'live-test', sequence: 1, stage: 'capture_started', elapsedMs: 4, resultSequence: 0, audio: 'secret' },
+    { sessionId: 'other-session', sequence: 2, stage: 'session_closed', elapsedMs: 5, resultSequence: 0 },
+  ] });
+  h.session.handle({ type: 'live_event', event: { type: 'session.thinking.append', content: 'private result', delegation_id: 'd', event_id: 'append-1' } });
+  h.event({ type: 'session.thinking.appended', client_event_id: 'append-1', content: 'private result' });
+  expect(h.messages.at(-1)).toEqual({ type: 'live_event', event: { type: 'session.thinking.appended', client_event_id: 'append-1' } });
+  h.session.close(); h.event({ type: 'session.closed' }); await tick();
+  const report = telemetry.report([], 'live-test');
+  expect(report.appends).toHaveLength(1);
+  expect(report.appends[0].providerAcknowledgmentMs).not.toBeNull();
+  expect(report.events.some(e => e.stage === 'provider_session_started')).toBe(true);
+  expect(report.events.filter(e => e.source === 'client')).toHaveLength(1);
+  expect(JSON.stringify(report)).not.toContain('private result');
+  expect(JSON.stringify(report)).not.toContain('secret');
+  expect(telemetry.events('other-session')).toEqual([]);
+});

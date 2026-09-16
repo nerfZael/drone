@@ -1,3 +1,4 @@
+import { CompanionReportedError } from './waitForCompanionReply';
 import type { CompanionClientTelemetry } from './companion.js';
 import type { CompanionLiveTiming } from './companion-live-timing.js';
 import { LiveTranscript, type LiveTranscriptRow } from './live-transcript.js';
@@ -61,14 +62,22 @@ export class CompanionLiveConversation {
     this.options.onQueue(0);
   }
 
-  deliverBackendReply(reply: string): void {
+  deliverBackendReply(reply: string, announce = false): void {
     if (this.stopped) return;
-    const id = this.resultDelegationId;
-    this.resultDelegationId = null;
+    const id = announce ? null : this.resultDelegationId;
+    if (!announce) this.resultDelegationId = null;
     // A pending correction will produce a newer backend result.
-    if (this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
+    if (!announce && this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
     this.options.timing?.result(id);
-    this.appendContext(id, reply || 'The backend finished without a reply. Check Companion for details.');
+    this.appendContext(id, reply || 'The backend returned no answer. Completion of the requested action is unconfirmed.', announce);
+  }
+
+  deliverBackendError(error: string, announce = false): void {
+    if (this.stopped) return;
+    const id = announce ? null : this.resultDelegationId;
+    if (!announce) this.resultDelegationId = null;
+    if (!announce && this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
+    this.returnFailure(id, error, announce);
   }
 
   deliverBackendUpdate(text: string): void {
@@ -118,9 +127,14 @@ export class CompanionLiveConversation {
     const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors; timestamp ranges can overlap when speakers interrupt or acknowledge one another):\n${conversation}`;
     try {
       const reply = await this.options.runBackend(prompt, this.options.timing?.dispatch(request.id, Date.now() - request.receivedAt));
-      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a reply. Check Companion for details.');
+      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend returned no answer. Completion of the requested action is unconfirmed.');
     } catch (error) {
-      this.returnResult(request.id, dispatchedVersion, `The backend could not finish this request. ${error instanceof Error ? error.message : 'Check Companion for details.'}`);
+      // Controller errors are delivered by the observer, including while Live is reconnecting.
+      if (!(this.options.externalBackendReplies && error instanceof CompanionReportedError) &&
+        !this.stopped && dispatchedVersion === this.dispatchedUserVersion &&
+        !(this.pending.length && this.userVersion > dispatchedVersion)) {
+        this.returnFailure(request.id, error instanceof Error ? error.message : String(error || 'Unknown backend error.'));
+      }
     } finally {
       if (this.pending.length && !this.stopped) this.schedule();
     }
@@ -135,19 +149,28 @@ export class CompanionLiveConversation {
     this.appendContext(id, reply);
   }
 
-  private appendContext(id: string | null, text: string): void {
-    // All backend results are quiet context; Live decides whether to mention them.
+  private returnFailure(id: string | null, error: string, announce = false): void {
+    this.options.timing?.result(id, 'error');
+    // Keep the failure itself in Live context even when a provider returns a very long diagnostic.
+    // Full error text remains in controller state; never route it through the detailed-answer fallback.
+    const reason = [...(error.trim() || 'Unknown backend error.')].slice(0, 240).join('');
+    this.appendContext(id, `The Companion backend failed: ${reason}. The request did not complete. Do not claim success; any earlier actions may still have taken effect.`, announce);
+  }
+
+  private appendContext(id: string | null, text: string, announce = false): void {
+    // Subscription notifications request speech; ordinary replies retain quiet delivery.
+    const type = announce ? 'session.commentary.append' : 'session.thinking.append';
     // At most 400 UTF-8 bytes per append: safely below the API's 500-token limit,
     // including non-English text. Keep the exact full result in Companion's UI.
     const chunks = splitLiveCommentary(text);
     if (chunks.length > 4) {
       // Do not truncate an answer and accidentally omit a qualification or failure.
-      this.options.send({ type: 'session.thinking.append', delegation_id: id,
+      this.options.send({ type, delegation_id: id,
         content: 'The backend returned a detailed answer. The full answer is available in Companion on screen.' });
       return;
     }
     for (const content of chunks) {
-      this.options.send({ type: 'session.thinking.append', delegation_id: id, content });
+      this.options.send({ type, delegation_id: id, content });
     }
   }
 

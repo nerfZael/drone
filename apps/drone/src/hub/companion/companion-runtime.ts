@@ -1,3 +1,4 @@
+import { runCompanionPrompt } from './companion-run-outcome';
 import { droneRootPath } from '../../host/paths';
 import { resolveNativeModel } from '../assistant/resolve-native-model';
 import { workspaceWindowLayoutProperties } from './workspace-window-layout-schema';
@@ -135,6 +136,8 @@ export class CompanionRuntime {
   private changingSettings = false;
   private readonly repository = new HubSessionRepository(droneRootPath('companion-blip.sqlite'));
   private readonly host: BlipAssistantHost;
+
+  get liveTelemetry() { return this.deps.telemetry?.live; }
 
   constructor(private readonly deps: RuntimeDependencies) {
     this.host = new BlipAssistantHost(
@@ -301,15 +304,15 @@ export class CompanionRuntime {
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       telemetry?.markAgentRunStarted();
-      const prompt = () => input.proposalResult
+      const prompt = () => runCompanionPrompt(settings.provider, onEvent => input.proposalResult
         ? this.host.promptThreadWithToolResult(threadId, {
             toolName: 'execute_proposal',
             args: { targetId: input.proposalResult.targetId ?? COMPANION_PROPOSAL_TARGET_ID, baseRevision: input.proposalResult.revision },
             text: JSON.stringify(input.proposalResult, null, 2),
             details: input.proposalResult,
             isError: !input.proposalResult.execution.ok,
-          }, input.onEvent)
-        : this.host.promptThread(threadId, input.prompt, input.onEvent);
+          }, onEvent)
+        : this.host.promptThread(threadId, input.prompt, onEvent), input.onEvent);
       if (telemetry) {
         await telemetry.measure('agentRunMs', prompt);
         return await telemetry.measure('replyReadMs', () =>

@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { CompanionLiveConnection } from '../src/droneHub/companion/CompanionLiveConnection';
 import { browserMicrophoneCoordinator } from '../src/droneHub/chat/browser-microphone-coordinator';
-import { CompanionClientController, type CompanionServerMessage, type LivePcmCallbacks, type LivePcmAudio } from '@drone/assistant-chat';
+import { CompanionLiveTiming, CompanionClientController, type CompanionServerMessage, type LivePcmCallbacks, type LivePcmAudio } from '@drone/assistant-chat';
 import { waitForCompanionReply } from '../src/droneHub/companion/waitForCompanionReply';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(delayed = false) {
+function harness(delayed = false, timing?: CompanionLiveTiming) {
   const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let socket: FakeSocket | undefined;
@@ -27,7 +27,7 @@ function harness(delayed = false) {
   const played: string[] = []; const errors: string[] = []; const models: string[] = []; const events: unknown[] = [];
   const audio: LivePcmAudio = { mute: (value) => { muted = value; }, play: (value) => played.push(value),
     resume: async () => { resumed = true; }, release: async () => { released++; } };
-  const connection = new CompanionLiveConnection({ onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
+  const connection = new CompanionLiveConnection({ timing, onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
     onError: (error) => errors.push(error), onPlaybackBlocked() {}, openAudio: async (callbacks) => {
       capture = callbacks;
       capture.onAudio('AQI='); // Capture may begin before native/browser setup resolves.
@@ -155,5 +155,25 @@ test('desktop keeps forwarding microphone audio through delegation and overlappi
     expect(h.socket().sent.filter(m => m.event?.type === 'session.input_audio.append').map(m => m.event.audio)).toEqual(['AQI=', 'AwQ=', 'BQY=']);
     expect(h.played).toEqual(['Bwg=', 'CQo=']);
     expect(h.errors).toEqual([]);
+  } finally { await h.cleanup(); }
+});
+
+
+test('desktop persists startup and final events and correlates append acknowledgment', async () => {
+  const timing = new CompanionLiveTiming(() => 10, () => {});
+  const h = harness(false, timing);
+  try {
+    await h.connection.start(); h.socket().open();
+    h.socket().message({ type: 'live_ready', transport: 'pcm' });
+    h.connection.send({ type: 'session.thinking.append', content: 'private result', delegation_id: 'd' });
+    const sent = h.socket().sent.find(m => m.event?.type === 'session.thinking.append').event;
+    h.socket().message({ type: 'live_event', event: { type: 'session.thinking.appended', client_event_id: sent.event_id } });
+    h.connection.close(); await tick();
+    const events = h.socket().sent.flatMap(m => m.timingEvents ?? []);
+    expect(events[0].stage).toBe('session_started');
+    expect(events.at(-1).stage).toBe('session_closed');
+    expect(events.find(e => e.stage === 'append_acknowledged').eventId).toBe(sent.event_id);
+    expect(h.socket().sent.at(-1).type).toBe('live_close');
+    expect(JSON.stringify(events)).not.toContain('private result');
   } finally { await h.cleanup(); }
 });

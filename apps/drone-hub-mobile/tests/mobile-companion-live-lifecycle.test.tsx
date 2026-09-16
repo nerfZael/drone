@@ -364,7 +364,7 @@ test('mobile reconnect routes backend completion and subscription replies to the
     expect(old.sent).toEqual([]);
     expect(current.sent).toEqual([
       { type: 'session.thinking.append', delegation_id: null, content: 'Finished' },
-      { type: 'session.thinking.append', delegation_id: null, content: 'Notification' },
+      { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
     ]);
     await act(async () => { live.reset(); });
     expect(live.hasStarted).toBe(false);

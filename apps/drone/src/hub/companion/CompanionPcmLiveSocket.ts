@@ -1,7 +1,9 @@
+import type { HubLiveTiming } from './companion-live-telemetry';
 import { WebSocket } from 'ws';
 import { companionLiveSessionInstructions } from './companion-live-settings';
 
 type Dependencies = {
+  timing?: HubLiveTiming;
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
   enabled(): Promise<{ enabled: boolean; systemPrompt?: string }>;
@@ -14,6 +16,7 @@ export class CompanionPcmLiveSocket {
   private closed = false;
   private starting = false;
   private ready = false;
+  private appendSequence = 0;
   private lastPing = Date.now();
   private timeout?: ReturnType<typeof setTimeout>;
   private heartbeat?: ReturnType<typeof setInterval>;
@@ -51,14 +54,26 @@ export class CompanionPcmLiveSocket {
       outgoing = { type: event.type, content: event.content, delegation_id: event.delegation_id,
         event_id: typeof event.event_id === 'string' ? event.event_id.slice(0, 200) : undefined };
     }
+    const isAppend = outgoing.type !== 'session.input_audio.append';
+    if (isAppend) {
+      outgoing.event_id ??= `hub-append-${++this.appendSequence}`;
+      this.deps.timing?.mark('hub_append_received', { eventId: String(outgoing.event_id),
+        eventType: String(outgoing.type), delegationId: outgoing.delegation_id as string | null });
+    } else this.deps.timing?.once('hub_first_input_audio');
     if (this.upstream.bufferedAmount > 2_000_000) { this.fail('Live audio connection is too slow. Start again.'); return; }
-    try { this.upstream.send(JSON.stringify(outgoing)); }
+    try {
+      this.upstream.send(JSON.stringify(outgoing));
+      if (!isAppend) this.deps.timing?.once('hub_first_input_forwarded');
+      if (isAppend) this.deps.timing?.mark('hub_append_forwarded', { eventId: String(outgoing.event_id),
+        eventType: String(outgoing.type), delegationId: outgoing.delegation_id as string | null });
+    }
     catch { this.fail('Live audio connection failed.'); }
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.deps.timing?.mark('hub_close_requested');
     clearTimeout(this.timeout);
     clearInterval(this.heartbeat);
     const upstream = this.upstream;
@@ -72,18 +87,22 @@ export class CompanionPcmLiveSocket {
 
   private fail(error: string): void {
     if (this.closed) return;
+    this.deps.timing?.mark('hub_error');
     this.send({ type: 'live_error', error });
     this.close();
   }
 
   private async start(): Promise<void> {
     const [setting, credential, backend] = await Promise.all([this.deps.enabled(), this.deps.credentials(), this.deps.backend()]);
+    this.deps.timing?.mark('hub_setup_completed');
     if (this.closed) return;
     if (!setting.enabled) throw new Error('Enable Live voice before starting a conversation.');
     if (!credential.apiKey) throw new Error('Configure an OpenAI API key in Settings to use Live voice.');
+    this.deps.timing?.mark('provider_connect_started');
     const upstream = this.deps.connect('wss://api.openai.com/v1/live/sessions', credential.apiKey);
     this.upstream = upstream;
     upstream.on('open', () => {
+      this.deps.timing?.mark('provider_socket_open');
       if (this.closed) { upstream.terminate(); return; }
       try {
         upstream.send(JSON.stringify({ type: 'session.start', session: {
@@ -97,6 +116,7 @@ export class CompanionPcmLiveSocket {
       try { event = JSON.parse(raw.toString()); } catch { return; }
       if (!event || typeof event !== 'object' || Array.isArray(event)) return;
       if (event.type === 'session.closed') {
+        this.deps.timing?.mark('provider_session_closed');
         clearTimeout(this.closeTimer);
         clearTimeout(this.timeout);
         clearInterval(this.heartbeat);
@@ -106,7 +126,19 @@ export class CompanionPcmLiveSocket {
         return;
       }
       if (this.closed) return;
+      if (['session.thinking.appended', 'session.commentary.appended', 'session.instructions.appended'].includes(String(event.type))) {
+        this.deps.timing?.mark('provider_append_acknowledged', { eventType: String(event.type),
+          eventId: typeof event.client_event_id === 'string' ? event.client_event_id : undefined });
+        // Only forward the acknowledgment identifiers, never echoed content.
+        this.send({ type: 'live_event', event: { type: event.type, client_event_id: event.client_event_id } });
+      }
+      if (event.type === 'session.delegation.created') {
+        const delegation = event.delegation as { id?: unknown } | undefined;
+        this.deps.timing?.mark('provider_delegation_received', { delegationId: typeof delegation?.id === 'string' ? delegation.id : undefined });
+      }
+      if (event.type === 'session.output_audio.delta') this.deps.timing?.once('hub_first_output_audio');
       if (event.type === 'session.started' && !this.ready) {
+        this.deps.timing?.mark('provider_session_started');
         this.ready = true;
         clearTimeout(this.timeout);
         this.lastPing = Date.now();
@@ -120,6 +152,7 @@ export class CompanionPcmLiveSocket {
     });
     upstream.on('error', () => this.fail('Live voice connection failed. Start a new conversation.'));
     upstream.on('close', () => {
+      this.deps.timing?.mark('provider_disconnected');
       clearTimeout(this.closeTimer);
       this.fail('Live voice disconnected. Start a new conversation.');
     });

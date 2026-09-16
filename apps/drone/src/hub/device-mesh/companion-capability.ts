@@ -10,6 +10,7 @@ import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 import { CompanionRunSession } from '../companion/companion-run-session';
 import type { CompanionWorkspaceService } from '../companion/companion-workspaces';
 import type { CompanionRuntime } from '../companion/companion-runtime';
+import { CompanionLiveSocket } from '../companion/CompanionLiveSocket';
 import { CompanionLiveMeshSessions } from './CompanionLiveMeshSessions';
 import type { CapabilityHandler } from './device-mesh-types';
 
@@ -46,6 +47,7 @@ export function createCompanionCapability(
   workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save' | 'current'>,
 ): CapabilityHandler {
   const live = new CompanionLiveMeshSessions({
+    createSocket: send => new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry }),
     emit: (deviceId, payload) => broadcast(COMPANION_CAPABILITY.id, 'live.event', payload, 'live.start', [deviceId]),
   });
   const sessionsByDeviceId = new Map<string, CompanionMeshSession>();

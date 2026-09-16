@@ -72,13 +72,13 @@ export class CompanionLiveMeshSessions {
         socket.close(); this.retire(deviceId, id); this.sessions.delete(deviceId);
         void this.options.emit(deviceId, { sessionId: id, type: 'live_closed' }).catch(() => undefined);
       });
-      socket.handle({ type: 'live_start', sdp: payload.sdp, transport: payload.transport });
+      socket.handle({ type: 'live_start', sdp: payload.sdp, transport: payload.transport, timingSessionId: payload.timingSessionId });
       return { accepted: true, ...(audio ? { audioTransport: LIVE_AUDIO_TRANSPORT, audioAnswer: audio.answer } : {}) };
     }
     if (session?.id !== id) return { ok: true };
     if (operation === 'live.event' && session.audio && (payload.event as any)?.type === 'session.input_audio.append') throw new Error('Use the Live audio stream');
     if (operation === 'live.event') session.socket.handle({ type: 'live_event', event: payload.event });
-    else if (operation === 'live.ping') session.socket.handle({ type: 'live_ping' });
+    else if (operation === 'live.ping') session.socket.handle({ type: 'live_ping', timingEvents: payload.timingEvents });
     else throw new Error(`Unsupported Live operation: ${operation}`);
     return { ok: true };
   }

@@ -131,3 +131,18 @@ test('unsupported streaming versions are rejected before allocating or replacing
   expect(h.sockets).toHaveLength(1); expect(h.sockets[0].closed).toBe(0);
   h.live.close();
 });
+
+
+test('mesh timing batches follow session ownership and are not forwarded after replacement', async () => {
+  const h = harness();
+  await h.live.invoke('phone', 'live.start', { sessionId: 'a', transport: 'pcm', timingSessionId: 'live-a' });
+  expect(h.sockets[0].messages[0].timingSessionId).toBe('live-a');
+  const batch = [{ sessionId: 'live-a', sequence: 1 }];
+  await h.live.invoke('phone', 'live.ping', { sessionId: 'a', timingEvents: batch });
+  expect(h.sockets[0].messages.at(-1)).toEqual({ type: 'live_ping', timingEvents: batch });
+  await h.live.invoke('phone', 'live.start', { sessionId: 'b', transport: 'pcm', timingSessionId: 'live-b' });
+  await h.live.invoke('other', 'live.ping', { sessionId: 'b', timingEvents: batch });
+  await h.live.invoke('phone', 'live.ping', { sessionId: 'a', timingEvents: batch });
+  expect(h.sockets[1].messages).toHaveLength(1);
+  h.live.close();
+});

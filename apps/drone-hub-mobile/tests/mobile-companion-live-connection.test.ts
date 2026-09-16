@@ -1,13 +1,13 @@
 import { LIVE_AUDIO_TRANSPORT, LIVE_AUDIO_AUTH_SUITE } from '@drone/device-protocol';
 import { MobileLiveClock } from '../src/local-assistant/mobile-live-clock';
 import { expect, test } from 'bun:test';
-import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
+import { CompanionLiveTiming, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
 import { MobileCompanionLiveConnection } from '../src/local-assistant/MobileCompanionLiveConnection';
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const offer = { suite: LIVE_AUDIO_AUTH_SUITE, publicKey: 'test-key' };
 
-function harness(options: { schedule?: MobileLiveClock['schedule']; delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean; silentAudio?: boolean } = {}) {
+function harness(options: { timing?: CompanionLiveTiming; blockTelemetry?: boolean; schedule?: MobileLiveClock['schedule']; delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean; silentAudio?: boolean } = {}) {
   const coordinator = new MobileMicrophoneCoordinator();
   const requests: Array<{ operation: string; payload: any }> = [];
   const received: any[] = []; const errors: string[] = []; const ready: string[] = []; const played: string[] = [];
@@ -26,7 +26,7 @@ function harness(options: { schedule?: MobileLiveClock['schedule']; delayedAudio
   const streamed: string[] = [];
   let playback: (audio: string) => void = () => {};
   const connection = new MobileCompanionLiveConnection({
-    targetDeviceId: 'hub', sessionId: 'voice', microphoneCoordinator: coordinator, schedule: options.schedule,
+    timing: options.timing,    targetDeviceId: 'hub', sessionId: 'voice', microphoneCoordinator: coordinator, schedule: options.schedule,
     openLiveAudio: async (_target, _session, onAudio) => {
       playback = onAudio;
       if (options.delayedStream) await new Promise<void>((resolve) => { finishStream = resolve; });
@@ -38,6 +38,7 @@ function harness(options: { schedule?: MobileLiveClock['schedule']; delayedAudio
     },
     request: async (_device, _capability, operation, payload) => {
       requests.push({ operation, payload });
+      if (options.blockTelemetry && operation === 'live.ping' && (payload as any)?.timingEvents) await new Promise(() => {});
       if (options.blockEvents && operation === 'live.event') await new Promise<void>((resolve) => { releaseEvent = resolve; });
       if (options.rejectStart && operation === 'live.start') throw new Error('No API credentials');
       if (options.delayedStart && operation === 'live.start') await new Promise<void>((resolve) => { finishStart = resolve; });
@@ -208,4 +209,45 @@ test('screen-off startup deadline releases capture when the Hub never becomes re
     await h.connection.close();
     expect(h.coordinator.getSnapshot()).toBeNull();
   } finally { clock.close(); await h.connection.close(); }
+});
+
+
+test('mobile persists session timing over authenticated controls before closing the audio stream', async () => {
+  const timing = new CompanionLiveTiming(() => 10, () => {});
+  const h = harness({ timing });
+  try {
+    await h.connection.start();
+    h.emit({ type: 'live_ready', transport: 'pcm', backendModel: 'chosen' });
+    h.connection.send({ type: 'session.thinking.append', content: 'private', delegation_id: 'd' });
+    await tick();
+    const sent = h.requests.find(r => r.operation === 'live.event')!.payload.event;
+    h.emit({ type: 'live_event', event: { type: 'session.thinking.appended', client_event_id: sent.event_id } });
+    await h.connection.close(); await tick();
+    const events = h.requests.flatMap(r => r.payload.timingEvents ?? []);
+    expect(h.requests[0].payload.timingSessionId).toBe(timing.sessionId);
+    expect(events[0].stage).toBe('session_started');
+    expect(events.at(-1).stage).toBe('session_closed');
+    expect(events.find(e => e.stage === 'append_acknowledged').eventId).toBe(sent.event_id);
+    expect(h.requests.at(-1)!.operation).toBe('live.close');
+    expect(JSON.stringify(events)).not.toContain('private');
+  } finally { await h.connection.close(); }
+});
+
+
+test('stalled telemetry cannot hold mobile teardown after the native-clock deadline', async () => {
+  let now = 0;
+  const clock = new MobileLiveClock(() => now, () => () => {});
+  const timing = new CompanionLiveTiming(() => now, () => {});
+  const h = harness({ timing, schedule: clock.schedule, blockTelemetry: true });
+  try {
+    await h.connection.start(); h.emit({ type: 'live_ready', transport: 'pcm' });
+    const closed = h.connection.close();
+    await Promise.resolve();
+    expect(h.streamClosed()).toBe(0);
+    expect(h.released()).toBe(1);
+    now = 300; clock.tick(); await closed;
+    expect(h.streamClosed()).toBe(1);
+    expect(h.requests.at(-1)!.operation).toBe('live.close');
+    expect(h.errors).toEqual([]);
+  } finally { clock.close(); }
 });

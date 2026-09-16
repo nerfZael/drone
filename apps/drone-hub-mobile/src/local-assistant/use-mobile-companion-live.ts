@@ -48,7 +48,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     const session = active.current; active.current = null;
     session?.replies?.stop();
     session?.abort.abort(); session?.conversation.stop();
-    const released = session?.connection.close(); // Close GPT-Live immediately, before cues or native cleanup.
+    const released = session?.connection.close(); // Stop local audio immediately; remote teardown allows a bounded diagnostic flush.
     cleanup.current = Promise.all([cleanup.current, pendingSetup.current, released]).then(() => undefined);
   }, []);
   const stop = React.useCallback(() => {
@@ -157,7 +157,8 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     // Observe immediately: the backend can finish while previous audio is releasing
     // or native microphone setup is still pending. Flush only after Live is ready.
     const replies = controller ? connectCompanionLiveReplies(controller, {
-      deliverBackendReply: (reply) => session.conversation.deliverBackendReply(reply),
+      deliverBackendError: (error, announce) => session.conversation.deliverBackendError(error, announce),
+      deliverBackendReply: (reply, announce) => session.conversation.deliverBackendReply(reply, announce),
       deliverBackendUpdate: (text) => session.conversation.deliverBackendUpdate(text),
     }) : undefined;
     preparingReplies.current = replies ?? null;

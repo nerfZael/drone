@@ -57,8 +57,9 @@ type NativePcm = {
   startPcm(id: string): Promise<void>;
   stopPcm(id: string): Promise<void>;
   playPcm(id: string, audio: string): Promise<void>;
+  playPcmMeasured?(id: string, audio: string, sampleId: number): Promise<void>;
   mutePcm(id: string, muted: boolean): Promise<void>;
-  addListener(event: string, callback: (event: { id: string; audio?: string; error?: string }) => void): { remove(): void };
+  addListener(event: string, callback: (event: { id: string; audio?: string; error?: string; sampleId?: number; stage?: 'started' | 'completed'; queueMs?: number; durationMs?: number }) => void): { remove(): void };
 };
 
 export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped: () => void = () => {},
@@ -106,6 +107,11 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     subscriptions.push(native.addListener('pcmAudio', (event) => {
       if (!closed && event.id === id && event.audio) callbacks.onAudio(event.audio);
     }));
+    subscriptions.push(native.addListener('pcmPlayback', (event) => {
+      if (!closed && event.id === id && event.sampleId !== undefined && (event.stage === 'started' || event.stage === 'completed')) {
+        callbacks.onPlayback?.({ stage: event.stage, sampleId: event.sampleId, queueMs: event.queueMs, durationMs: event.durationMs });
+      }
+    }));
     subscriptions.push(native.addListener('pcmError', (event) => {
       if (!closed && event.id === id) callbacks.onError(event.error ?? 'Live microphone failed.');
     }));
@@ -122,9 +128,14 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     const report = (error: unknown) => { if (!closed) callbacks.onError(error instanceof Error ? error.message : 'Live audio failed.'); };
     return {
       mute(muted) { if (!closed) void native.mutePcm(id, muted).catch(report); },
-      play(audio) { if (!closed) void native.playPcm(id, audio).then(() => {
-        if (!closed) callbacks.onPlayback?.({ stage: 'native_enqueued' });
-      }).catch(report); },
+      play(audio, sampleId) {
+        if (closed) return;
+        const submitted = sampleId !== undefined && native.playPcmMeasured
+          ? native.playPcmMeasured(id, audio, sampleId) : native.playPcm(id, audio);
+        void submitted.then(() => {
+          if (!closed && sampleId !== undefined) callbacks.onPlayback?.({ stage: 'native_enqueued', sampleId });
+        }).catch(report);
+      },
       async resume() {},
       release,
     };

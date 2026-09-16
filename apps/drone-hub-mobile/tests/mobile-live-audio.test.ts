@@ -56,10 +56,10 @@ test('native Live captures during startup and releases audio before background p
   const audio = await openMobileLiveAudio({ onPlayback: event => playback.push(event), onAudio: (data) => captured.push(data), onError() {} }, () => { stopRequested = true; });
   expect(calls).toEqual(['service.start', 'background:true', 'microphone.open']); expect(captured).toEqual(['AQI=']);
   listeners.get('pcmAudio')?.({ id: 'stale', audio: 'AwQ=' }); expect(captured).toHaveLength(1);
-  audio.play('BQY='); expect(calls.at(-1)).toBe('play:BQY=');
+  audio.play('BQY=', 7); expect(calls.at(-1)).toBe('play:BQY=');
   expect(playback).toEqual([]); // Calling play is not evidence of playback.
   await Promise.resolve();
-  expect(playback).toEqual([{ stage: 'native_enqueued' }]);
+  expect(playback).toEqual([{ stage: 'native_enqueued', sampleId: 7 }]);
   stopped(); expect(stopRequested).toBe(true);
   await audio.release(); await audio.release();
   expect(calls.slice(-3)).toEqual(['microphone.stop', 'background:false', 'service.stop']); expect(listeners.size).toBe(0);

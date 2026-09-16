@@ -74,7 +74,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
     return {
       mute(muted) { microphone?.getTracks().forEach((track) => { track.enabled = !muted; }); },
       async resume() { await context.resume(); onPlaybackBlocked(context.state !== 'running'); },
-      play(audio) {
+      play(audio, sampleId) {
         if (closed) return;
         try {
           if (audio.length > 256_000) throw new Error('Live audio chunk is too large.');
@@ -95,9 +95,18 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           node.buffer = buffer;
           node.connect(context.destination);
           playing.add(node);
-          node.onended = () => { playing.delete(node); node.disconnect(); callbacks.onPlayback?.({ stage: 'completed', durationMs: buffer.duration * 1_000 }); };
+          node.onended = () => { playing.delete(node); node.disconnect(); if (sampleId !== undefined) callbacks.onPlayback?.({ stage: 'completed', sampleId, durationMs: buffer.duration * 1_000 }); };
           node.start(start);
-          callbacks.onPlayback?.({ stage: 'scheduled', queueMs: (start - now) * 1_000, durationMs: buffer.duration * 1_000 });
+          if (sampleId !== undefined) {
+            callbacks.onPlayback?.({ stage: 'scheduled', sampleId, queueMs: (start - now) * 1_000, durationMs: buffer.duration * 1_000 });
+            const queuedAt = performance.now();
+            const observeStart = () => {
+              if (closed || performance.now() - queuedAt > 10_000) return;
+              if (context.currentTime <= start) { setTimeout(observeStart, 10); return; }
+              callbacks.onPlayback?.({ stage: 'started', sampleId, queueMs: performance.now() - queuedAt, durationMs: buffer.duration * 1_000 });
+            };
+            setTimeout(observeStart, 10);
+          }
           playbackEnd = start + buffer.duration;
           onPlaybackBlocked(context.state !== 'running');
         } catch (error) { callbacks.onError(error instanceof Error ? error.message : 'Live playback failed.'); }

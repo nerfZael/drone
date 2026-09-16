@@ -40,7 +40,7 @@ import {
   truncateUtf8Bytes,
 } from './assistant-filesystem-utils';
 import { bashQuote, normalizeContainerPath } from './hub-format';
-import { resolveDroneFromRegistryRef } from './drone-lifecycle-service';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import { readTransferBytes, writeTransferBytes } from './assistant/transfer-file-io';
 import {
   createDroneDaemonGitRunner,
@@ -195,24 +195,15 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
   }): Promise<{ id: string; drone: any; name: string; runtime: DroneRuntime; targetPath: string }> {
     const ref = String(opts.droneId ?? '').trim();
     if (!ref) throw new Error('missing droneId');
-    let resolvedError = '';
     const host = ref.startsWith('host:')
       ? (await listHostWorkspaces()).find((workspace) => workspace.id === ref)
       : undefined;
+    const canonical = host ? null : await resolveCanonicalDroneOrPendingForReadRef(ref);
+    if (canonical?.kind === 'pending') throw new Error(`drone "${ref}" is still starting`);
     const resolved = host
-      ? {
-          id: host.id,
-          drone: hostWorkspaceFilesystemEntry(host),
-        }
-      : await resolveDroneFromRegistryRef(ref, {
-          onStillStarting: () => {
-            resolvedError = `drone "${ref}" is still starting`;
-          },
-          onUnknown: () => {
-            resolvedError = `unknown drone: ${ref}`;
-          },
-        });
-    if (!resolved) throw new Error(resolvedError || `unknown drone: ${ref}`);
+      ? { id: host.id, drone: hostWorkspaceFilesystemEntry(host) }
+      : canonical?.kind === 'real' ? canonical : null;
+    if (!resolved) throw new Error(`unknown drone: ${ref}`);
     const targetPath = normalizeAssistantFsPathForRuntime(resolved.drone, opts.path ?? '', {
       fallbackToHome: opts.fallbackToHome,
     });

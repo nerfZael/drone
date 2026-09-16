@@ -61,7 +61,7 @@ export class LiveAudioBuffer {
 
 export type LivePcmAudio = {
   mute(muted: boolean): void;
-  play(audio: string): void;
+  play(audio: string, sampleId?: number): void;
   resume(): Promise<void>;
   release(): Promise<void>;
 };

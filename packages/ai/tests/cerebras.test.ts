@@ -27,6 +27,26 @@ describe('Cerebras Qwen Companion transport', () => {
     },
   );
 
+  test('records rate-limit attempts and SDK retry gaps without response secrets', async () => {
+    const responses = [
+      new Response('{"error":{"message":"private provider message"}}', {
+        status: 429, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' },
+      }),
+      new Response('data: {"id":"ok","choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => responses.shift()!));
+    const response = await streamSimpleOpenAICompletions(model, context, { apiKey: 'private-key', maxRetries: 1 }).result();
+    expect(response.stopReason).toBe('stop');
+    const attempts = response.requestMetrics!.attempts!;
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({ status: 429, retryAfterMs: 1 });
+    expect(attempts[1].status).toBe(200);
+    expect(attempts[1].startedMs).toBeGreaterThanOrEqual(attempts[0].startedMs + attempts[0].durationMs!);
+    expect(JSON.stringify(attempts)).not.toMatch(/private|authorization|messages/);
+  });
+
   test('streams reasoning and tool arguments, then replays reasoning with matching tool results', async () => {
     const chunk = (delta: any, finish_reason: string | null = null) => ({
       id: 'completion', object: 'chat.completion.chunk', created: 1, model: model.id,

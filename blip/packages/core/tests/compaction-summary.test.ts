@@ -29,6 +29,47 @@ const session: BlipSessionState = {
 };
 
 describe('Compaction summary reliability and coverage', () => {
+  test('retains high reasoning with a separate combined completion budget', async () => {
+    const result = await modelSummary({
+      model: { ...model, api: 'openai-completions', reasoning: true, maxTokens: 40960 }, reasoning: 'high',
+      plan: plan([entry('task', user('Keep the investigation going'))]),
+      streamFn: (_model, context, options) => {
+        expect(options?.reasoning).toBe('high');
+        expect(options?.maxTokens).toBe(20480);
+        expect(context.systemPrompt).toContain('4096 output tokens');
+        return stream(() => fauxAssistantMessage(summaryText('Continue investigation')))(_model, context, options);
+      },
+    });
+    expect(result).toContain('Continue investigation');
+  });
+
+  test('reserves combined completion headroom when splitting a large transcript', async () => {
+    const smallModel = { ...model, api: 'openai-completions', reasoning: true, contextWindow: 16_000, maxTokens: 8_192 } as Model<any>;
+    let calls = 0;
+    await modelSummary({ model: smallModel, reasoning: 'high',
+      plan: plan([entry('large', user('Keep every relevant constraint. '.repeat(4000)))]),
+      streamFn: (_model, context, options) => {
+        calls++;
+        expect(options?.reasoning).toBe('high');
+        expect(options?.maxTokens).toBe(4000);
+        expect(estimateContextTokens(smallModel, context).inputTokens + options!.maxTokens!).toBeLessThan(smallModel.contextWindow);
+        return stream(() => fauxAssistantMessage(summaryText('Preserve constraints')))(_model, context, options);
+      },
+    });
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  test('does not double-add reasoning headroom for adapters that allocate it themselves', async () => {
+    await modelSummary({ model: { ...model, api: 'anthropic-messages', reasoning: true }, reasoning: 'high',
+      plan: plan([entry('task', user('Continue work'))]),
+      streamFn: (_model, context, options) => {
+        expect(options?.reasoning).toBe('high');
+        expect(options?.maxTokens).toBe(4096);
+        return stream(() => fauxAssistantMessage(summaryText('Continue work')))(_model, context, options);
+      },
+    });
+  });
+
   test('retries actual provider overflow with smaller batches and accounts for the rejected call', async () => {
     const inputPlan = plan([entry('large', user('fact '.repeat(40_000)))]);
     const contexts: Context[] = [];

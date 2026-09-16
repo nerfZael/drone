@@ -17,6 +17,7 @@ export type CompanionClientState = {
   error: string;
   reply: string;
   transcript: string;
+  replySource?: 'subscription';
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
@@ -210,6 +211,7 @@ export class CompanionClientController {
       error: '',
       reply: '',
       transcript: prompt,
+      replySource: undefined,
       startedAt: steering ? this.state.startedAt : this.now(),
       endedAt: null,
       activity: steering ? this.state.activity : [],
@@ -264,6 +266,7 @@ export class CompanionClientController {
       error: '',
       reply: '',
       transcript: 'Proposal applied',
+      replySource: undefined,
       startedAt: this.now(),
       endedAt: null,
       activity: [],
@@ -388,13 +391,13 @@ export class CompanionClientController {
       if (!hasPendingUserMessage) {
         session.latestMessageId = message.messageId;
         this.update({
-          status: 'working', error: '', reply: '', transcript: 'Event notification',
+          status: 'working', error: '', reply: '', transcript: 'Event notification', replySource: 'subscription',
           endedAt: null,
         });
       }
       return;
     }
-    if (message.type === 'status' && message.status === 'completed') {
+    if ((message.type === 'status' && message.status === 'completed') || message.type === 'error') {
       const messageId = message.messageId ?? session.latestMessageId;
       if (messageId === session.latestMessageId) session.messageExecutors.clear();
       else if (messageId) session.messageExecutors.delete(messageId);
@@ -403,7 +406,7 @@ export class CompanionClientController {
     // browser tool calls, and session-wide failures must still terminate the session.
     if (
       message.messageId && message.messageId !== session.latestMessageId &&
-      (message.type === 'reply' ||
+      (message.type === 'reply' || message.type === 'error' ||
         (message.type === 'status' && message.status === 'completed'))
     ) return;
     if (message.type === 'status' && message.status === 'working') {

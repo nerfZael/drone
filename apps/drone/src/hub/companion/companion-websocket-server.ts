@@ -49,7 +49,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       }
       if (String(message?.type).startsWith('live_')) {
         if (session) return;
-        live ??= new CompanionLiveSocket(send);
+        live ??= new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry });
         live.handle(message as unknown as { type?: string });
         return;
       }

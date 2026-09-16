@@ -6,7 +6,7 @@ import { CompanionClientController, waitForCompanionReply, type CompanionServerM
 import { CompanionLiveConnection } from '../src/droneHub/companion/CompanionLiveConnection';
 import { useCompanionLive } from '../src/droneHub/companion/use-companion-live';
 
-test('desktop supplies quiet backend completion context after restarting Live, including subscription results', async () => {
+test('desktop supplies backend completion context after restarting Live, including subscription results', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const set = (key: string, value: unknown) => {
@@ -71,7 +71,7 @@ test('desktop supplies quiet backend completion context after restarting Live, i
     });
     expect(sent.map(({ event }) => event)).toEqual([
       { type: 'session.thinking.append', delegation_id: null, content: 'Finished' },
-      { type: 'session.thinking.append', delegation_id: null, content: 'Notification' },
+      { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
     ]);
     expect(sent.every(({ connection }) => connection === current.connection)).toBe(true);
     await act(async () => { live.reset(); });

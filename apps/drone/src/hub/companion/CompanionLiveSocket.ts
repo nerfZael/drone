@@ -1,11 +1,13 @@
+import type { CompanionLiveTelemetry, HubLiveTiming } from './companion-live-telemetry';
 import { WebSocket } from 'ws';
 import { CompanionPcmLiveSocket } from './CompanionPcmLiveSocket';
 import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 import { readCompanionSettings } from './companion-config';
 import { companionLiveSessionInstructions, readCompanionLiveSettings } from './companion-live-settings';
 
-type LiveMessage = { transport?: unknown; type?: string; sdp?: unknown; event?: unknown };
+type LiveMessage = { timingSessionId?: unknown; timingEvents?: unknown; transport?: unknown; type?: string; sdp?: unknown; event?: unknown };
 type Dependencies = {
+  telemetry?: CompanionLiveTelemetry;
   fetch: typeof fetch;
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
@@ -15,6 +17,7 @@ type Dependencies = {
 
 /** One authenticated browser socket owns one Live session and its cleanup sideband. */
 export class CompanionLiveSocket {
+  private timing?: HubLiveTiming;
   private pcm: CompanionPcmLiveSocket | undefined;
   private upstream: WebSocket | null = null;
   private starting = false;
@@ -41,10 +44,15 @@ export class CompanionLiveSocket {
   }
 
   handle(message: LiveMessage): void {
+    if (message.type === 'live_start' && !this.starting && !this.closed) {
+      this.timing = this.deps.telemetry?.begin(message.timingSessionId);
+      this.timing?.mark('hub_start_received');
+    }
+    if (message.type === 'live_ping') this.timing?.client(message.timingEvents);
     if (this.pcm) { this.pcm.handle(message); return; }
     if (message.type === 'live_start' && message.transport === 'pcm' && !this.closed && !this.starting) {
       this.starting = true;
-      this.pcm = new CompanionPcmLiveSocket(this.send, this.deps);
+      this.pcm = new CompanionPcmLiveSocket(this.send, { ...this.deps, timing: this.timing });
       this.pcm.handle(message);
       return;
     }

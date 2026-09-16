@@ -146,7 +146,34 @@ private fun openingCapture() {
   println("Opening speech survives pending output routing; explicit mute still silences capture; cue routing needs no server audio")
 }
 
+private fun measuredPlayback() {
+  val observed = CopyOnWriteArrayList<String>()
+  val audio = LivePcmAudio({}, { error(it) }, onPlayback = { id, stage, _, duration ->
+    check(id == 7 && duration == 100.0)
+    observed.add(stage)
+  })
+  audio.start()
+  val track = AudioTrack.latest
+  try {
+    audio.play(encode(chunk(9)), 7)
+    waitUntil { track.snapshot().size == 2 }
+    android.os.Handler.advanceTimeBy(10)
+    check(observed.isEmpty()) { "Enqueue/write must not imply playback" }
+    track.nowFrames = 6001 // Pass the 250 ms reserve and render the first sample.
+    android.os.Handler.advanceTimeBy(10)
+    check(observed.toList() == listOf("started"))
+    track.nowFrames = 8400
+    android.os.Handler.advanceTimeBy(10)
+    check(observed.toList() == listOf("started", "completed"))
+    audio.play(encode(chunk(10)), 8)
+    waitUntil { track.snapshot().size >= 3 }
+  } finally { audio.stop(); android.os.Handler.advanceTimeBy(20) }
+  check(observed.size == 2) { "Stopping must discard unplayed samples" }
+  println("Sampled playback follows the output frame clock, preserves IDs and ignores enqueue/stop")
+}
+
 fun main() {
+  measuredPlayback()
   bluetoothVolumeSettling()
   recordingCue()
   openingCapture()

@@ -98,6 +98,11 @@ export function registerCompanionRoutes(
     }
   });
 
+  router.get('/api/companion/telemetry/live', async ({ url, fail, json }) => {
+    if (!telemetry) { fail(503, 'Companion telemetry is unavailable.'); return; }
+    json(200, { ok: true, ...telemetry.live.report(telemetry.list(2_000), url.searchParams.get('sessionId') || undefined) });
+  });
+
   router.get('/api/companion/telemetry', async ({ url, fail, json }) => {
     if (!telemetry) {
       fail(503, 'Companion telemetry is unavailable.');

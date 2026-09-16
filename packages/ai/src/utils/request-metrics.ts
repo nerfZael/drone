@@ -15,6 +15,8 @@ export interface RequestMetrics {
 	firstContentMs?: number;
 	status?: number;
 	chunkCount: number;
+	/** Individual SDK fetch attempts; gaps between attempts expose retry backoff. */
+	attempts?: { startedMs: number; durationMs?: number; status?: number; failed?: boolean; retryAfterMs?: number }[];
 	payload?: PayloadSize & {
 		messages: (PayloadSize & { index: number; role: string; toolCallCount: number; content: PayloadSize; toolCalls: PayloadSize; reasoning: PayloadSize })[];
 		tools: (PayloadSize & { index: number })[];
@@ -53,4 +55,26 @@ export function measureProviderUsage(value: unknown): Record<string, number> {
 		if (typeof number === "number" && Number.isFinite(number)) result[path] = number;
 	}
 	return result;
+}
+
+/** Wrap the SDK transport without recording URLs, bodies, credentials, or error messages. */
+export function measureRequestAttempts(metrics: RequestMetrics, elapsed: () => number, transport: typeof globalThis.fetch = globalThis.fetch): typeof globalThis.fetch {
+	return async (input, init) => {
+		const attempt: NonNullable<RequestMetrics["attempts"]>[number] = { startedMs: elapsed() };
+		(metrics.attempts ??= []).push(attempt);
+		try {
+			const response = await transport(input, init);
+			attempt.status = response.status;
+			const retryMs = response.headers.get("retry-after-ms");
+			const retrySeconds = response.headers.get("retry-after");
+			const delay = retryMs !== null ? Number(retryMs) : retrySeconds !== null ? Number(retrySeconds) * 1000 : NaN;
+			if (Number.isFinite(delay) && delay >= 0) attempt.retryAfterMs = delay;
+			return response;
+		} catch (error) {
+			attempt.failed = true;
+			throw error;
+		} finally {
+			attempt.durationMs = Math.max(0, elapsed() - attempt.startedMs);
+		}
+	};
 }

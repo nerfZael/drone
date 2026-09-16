@@ -1,3 +1,4 @@
+import { CompanionLiveTelemetry } from './companion-live-telemetry';
 import { CompanionCompactionTelemetryCollector, type CompanionCompactionTelemetry } from './companion-compaction-telemetry';
 import type { BlipRuntimeEvent } from '@blip/core';
 import type { BlipContextUsage, BlipSessionTiming } from '@blip/protocol';
@@ -416,6 +417,7 @@ function distribution(values: number[]) {
 }
 
 export class CompanionTelemetryService {
+  readonly live: CompanionLiveTelemetry;
   private readonly store: CompanionTelemetryStore | null;
   private readonly recent: CompanionRunTelemetryRecord[] = [];
   private readonly pendingTranscriptions = new Map<string, CompanionTranscriptionTelemetry>();
@@ -425,6 +427,7 @@ export class CompanionTelemetryService {
   private readonly heartbeatMs: number;
 
   constructor(input: { database?: HubDatabase | null; log?: TelemetryLog; heartbeatMs?: number } = {}) {
+    this.live = new CompanionLiveTelemetry(input.database);
     this.store = CompanionTelemetryStore.open(input.database);
     this.log = input.log;
     this.heartbeatMs = input.heartbeatMs ?? 15_000;

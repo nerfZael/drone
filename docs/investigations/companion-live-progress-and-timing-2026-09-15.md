@@ -4,13 +4,15 @@
 
 GPT-Live still owns delegation. Transcript deltas never initiate backend work on their own, and the existing delegation debounce is unchanged.
 
-Complete public assistant messages that precede tool work now reach Live through `session.thinking.append`. Live decides whether to mention them. Final backend replies also use `session.thinking.append` following the user’s quiet-delivery experiment. This is unconditional application routing, with no backend model classification. Live can still choose to mention the context. This follows the [Live delegation guide](https://developers.openai.com/api/docs/guides/live-delegation): thinking appends supply background context, while commentary requests spoken delivery.
+Complete public assistant messages that precede tool work now reach Live through `session.thinking.append`. Live decides whether to mention them. Ordinary final backend replies also use `session.thinking.append` following the user’s quiet-delivery experiment. Subscription responses now request speech through `session.commentary.append`; see the [September 16 notification investigation](companion-idle-notification-2026-09-16.md). Routing uses subscription provenance, with no backend model classification. This follows the [Live delegation guide](https://developers.openai.com/api/docs/guides/live-delegation): thinking appends supply background context, while commentary requests spoken delivery.
 
 Blip marks assistant messages ending with `stopReason: toolUse` as intermediate. Companion forwards those messages with a stable update ID and request ownership. It does not forward reasoning, raw tool payloads, token fragments, incomplete/failed messages, or the final message through this channel. Updates are deduplicated and filtered for the latest request. Ownership is frozen at the start of each model response, so a correction arriving during streaming does not relabel old progress. Progress received before Live is ready is discarded; final replies still wait for readiness. Oversized progress is skipped whole to avoid dropping a qualification, and accepted messages use at most four 400-byte appends.
 
 Timestamped transcript fragments are grouped separately for each speaker, ordered by their audio offsets, and merged across short acknowledgments. Late fragments can repair provisional groups while preserving the older group ID. The 1.2-second grouping gap is a display heuristic, not a turn boundary. Backend context includes timestamp ranges so overlapping speech remains identifiable. Missing or invalid timestamps retain legacy grouping; timestamp-less groups sort after timestamped groups. Storage is bounded to 18,000 characters including row overhead and 2,000 fragments.
 
 ## Timing collection
+
+The initial implementation below was extended on 16 September with [persistent session reports and native playback observations](companion-live-session-timing-2026-09-16.md). The statement below that client timing is only local describes the original version.
 
 Both clients log bounded, content-free JSON with the prefix `[CompanionLiveTiming]`. Each connection attempt has a new `sessionId`, and elapsed times use the client's monotonic clock. At most 2,000 records are emitted per attempt. Stages include:
 

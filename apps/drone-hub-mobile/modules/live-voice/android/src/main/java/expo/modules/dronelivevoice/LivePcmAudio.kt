@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.sin
@@ -25,7 +26,8 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private val onHeadsetDisconnected: () -> Unit = {},
   awaitHeadset: Boolean = false,
   private val isVoiceRouteReady: () -> Boolean = { true },
-  private val bluetoothWarmupMs: Long = 750) {
+  private val bluetoothWarmupMs: Long = 750,
+  private val onPlayback: (Int, String, Double, Double) -> Unit = { _, _, _, _ -> }) {
   @Volatile private var running = false
   @Volatile private var muted = false
   @Volatile private var playbackReady = !awaitHeadset
@@ -98,6 +100,8 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private var captureThread: Thread? = null
   private var playbackThread: Thread? = null
   private val playback = ArrayBlockingQueue<ByteArray>(100)
+  private data class PlaybackSample(val id: Int, val enqueuedAt: Long)
+  private val samples = ConcurrentHashMap<ByteArray, PlaybackSample>()
   private val queuedBytes = AtomicInteger(0)
   private val playbackProgress = AtomicInteger(0)
   private var recoveryWatchdog: Runnable? = null
@@ -211,6 +215,9 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
               val queuedFrames = (writtenFrames - (output.playbackHeadPosition.toLong() and 0xffffffffL)) and 0xffffffffL
               Log.i("DroneLiveVoice", "Start cue playback begins after ${queuedFrames / 24} ms queued audio")
             }
+            val sample = samples.remove(bytes)
+            val startFrame = writtenFrames
+            if (sample != null) observePlayback(output, sample, startFrame, bytes.size / 2)
             write(bytes)
             if (running && bytes === recordingCueBytes) Log.i("DroneLiveVoice", "Start cue submitted to Live output")
             queuedBytes.addAndGet(-bytes.size)
@@ -256,11 +263,37 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     whenPlaybackReady(callback)
   }
 
-  fun play(audio: String) {
+  // Observe the AudioTrack frame counter, never treat a successful write as audible playback.
+  private fun observePlayback(output: AudioTrack, sample: PlaybackSample, startFrame: Long, frames: Int) {
+    val deadline = SystemClock.elapsedRealtime() + 10000
+    var started = false
+    val check = object : Runnable {
+      override fun run() {
+        if (!running || SystemClock.elapsedRealtime() > deadline) return
+        val head = output.playbackHeadPosition.toLong() and 0xffffffffL
+        val passed = (head - (startFrame and 0xffffffffL)) and 0xffffffffL
+        if (passed > 0 && passed < 0x80000000L) {
+          if (!started) {
+            started = true
+            onPlayback(sample.id, "started", (SystemClock.elapsedRealtime() - sample.enqueuedAt).toDouble(), frames / 24.0)
+          }
+          if (passed >= frames) {
+            onPlayback(sample.id, "completed", (SystemClock.elapsedRealtime() - sample.enqueuedAt).toDouble(), frames / 24.0)
+            return
+          }
+        }
+        handler.postDelayed(this, 10)
+      }
+    }
+    handler.post(check)
+  }
+
+  fun play(audio: String, sampleId: Int? = null) {
     if (!running) return
     require(audio.length <= 256000) { "Invalid Live audio chunk" }
     val bytes = Base64.decode(audio, Base64.DEFAULT)
     require(bytes.isNotEmpty() && bytes.size % 2 == 0) { "Invalid Live PCM audio" }
+    if (sampleId != null && samples.size < 32) samples[bytes] = PlaybackSample(sampleId, SystemClock.elapsedRealtime())
     enqueue(bytes)
   }
 
@@ -273,6 +306,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       var droppedBytes = 0
       for (pending in playback.toTypedArray()) {
         if (pending !== recordingCueBytes && playback.remove(pending)) {
+          samples.remove(pending)
           queuedBytes.addAndGet(-pending.size)
           droppedBytes += pending.size
         }
@@ -295,9 +329,9 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     }
     // A large write can itself still be in flight. Discard this chunk too if it
     // cannot fit; preserve the memory bound even when the device stops consuming.
-    if (queuedBytes.get() + bytes.size > 240000) return
+    if (queuedBytes.get() + bytes.size > 240000) { samples.remove(bytes); return }
     queuedBytes.addAndGet(bytes.size)
-    if (!playback.offer(bytes)) queuedBytes.addAndGet(-bytes.size)
+    if (!playback.offer(bytes)) { samples.remove(bytes); queuedBytes.addAndGet(-bytes.size) }
   }
   // Stop capture and discard assistant speech immediately, retaining only the
   // already-routed output for the local acknowledgement. No second tone player.
@@ -320,7 +354,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     recorder?.release(); recorder = null
     echo?.release(); echo = null
     noise?.release(); noise = null
-    playback.clear(); queuedBytes.set(0)
+    playback.clear(); samples.clear(); queuedBytes.set(0)
     if (retainOutput) {
       stoppedOutput = true
       // Bound retention even if JS never requests the acknowledgement.

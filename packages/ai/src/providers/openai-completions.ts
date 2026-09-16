@@ -1,4 +1,4 @@
-import { measurePayload, measureProviderUsage } from "../utils/request-metrics.js";
+import { measurePayload, measureProviderUsage, measureRequestAttempts } from "../utils/request-metrics.js";
 import OpenAI from "openai";
 import type {
 	ChatCompletionAssistantMessageParam,
@@ -143,7 +143,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			const compat = getCompat(model);
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
+			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat, measureRequestAttempts(metrics, elapsed));
 			let params = buildParams(model, context, options, compat, cacheRetention);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
@@ -446,6 +446,7 @@ function createClient(
 	optionsHeaders?: Record<string, string>,
 	sessionId?: string,
 	compat: ResolvedOpenAICompletionsCompat = getCompat(model),
+	transport?: typeof globalThis.fetch,
 ) {
 	if (!apiKey) {
 		if (!process.env.OPENAI_API_KEY) {
@@ -490,6 +491,7 @@ function createClient(
 		apiKey,
 		baseURL: isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl,
 		dangerouslyAllowBrowser: true,
+		fetch: transport,
 		defaultHeaders,
 	});
 }

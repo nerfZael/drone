@@ -135,8 +135,8 @@ test('playback timing reports the audio-clock reserve without claiming audio has
   const h = harness();
   try {
     const audio = await h.open();
-    audio.play(btoa('\0'.repeat(4800)));
-    expect(h.playback).toEqual([{ stage: 'scheduled', queueMs: 250, durationMs: 100 }]);
+    audio.play(btoa('\0'.repeat(4800)), 7);
+    expect(h.playback).toEqual([{ stage: 'scheduled', sampleId: 7, queueMs: 250, durationMs: 100 }]);
     await audio.release();
     expect(h.playback).toHaveLength(1);
   } finally { h.restore(); }

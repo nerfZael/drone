@@ -54,7 +54,7 @@ class LiveVoiceModule : Module() {
   private var bluetoothRoute: LiveBluetoothRoute? = null
   override fun definition() = ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("stopped", "pcmAudio", "pcmError", "mediaControl", "controlTick")
+    Events("stopped", "pcmAudio", "pcmError", "pcmPlayback", "mediaControl", "controlTick")
     AsyncFunction("requestHeadsetPermission") { promise: Promise ->
       val context = appContext.reactContext ?: error("React context is unavailable")
       if (Build.VERSION.SDK_INT < 31 || LiveBluetoothRoute.candidate(context) == null || LiveBluetoothRoute.permitted(context)) {
@@ -147,7 +147,9 @@ class LiveVoiceModule : Module() {
         { audio -> sendEvent("pcmAudio", mapOf("id" to id, "audio" to audio)) },
         { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) },
         { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }, awaitHeadset,
-        { LiveVoiceSession.mediaControls?.hasVoiceModeSettled() == true })
+        { LiveVoiceSession.mediaControls?.hasVoiceModeSettled() == true },
+        onPlayback = { sampleId, stage, queueMs, durationMs -> sendEvent("pcmPlayback",
+          mapOf("id" to id, "sampleId" to sampleId, "stage" to stage, "queueMs" to queueMs, "durationMs" to durationMs)) })
       pcm = audio
       pcmId = id
       LiveVoiceSession.stopAudio = {
@@ -170,6 +172,9 @@ class LiveVoiceModule : Module() {
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("playPcm") { id: String, audio: String ->
       if (pcmId == id) pcm?.play(audio)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("playPcmMeasured") { id: String, audio: String, sampleId: Int ->
+      if (pcmId == id) pcm?.play(audio, sampleId)
     }.runOnQueue(Queues.MAIN)
     OnActivityEntersForeground { foreground = true }
     OnActivityEntersBackground { foreground = false }

@@ -36,6 +36,7 @@ import {
   type PromptSubmissionSource,
 } from '../host/prompt-queue-repository';
 import { loadRegistry } from '../host/registry';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import {
   hubLog,
   parseLlmProvider,
@@ -1406,8 +1407,11 @@ export class HubAssistantService {
     kind: 'read' | 'write' | 'execute' = 'read',
     threadId?: string,
   ): Promise<string> {
-    const regAny: any = await loadRegistry();
-    const droneId = droneIdByAssistantRef(regAny, droneRef);
+    const ref = String(droneRef ?? '').trim();
+    if (!ref) throw new Error('missing drone id');
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(ref);
+    if (!resolved) throw new Error(`unknown drone: ${ref}`);
+    const droneId = resolved.id;
     const allowed = this.allowedDroneIdSet(kind, threadId);
     if (allowed && !allowed.has(droneId))
       throw new Error(`assistant ${kind} scope does not include drone: ${droneRef}`);

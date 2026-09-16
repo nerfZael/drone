@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { measurePayload, measureProviderUsage } from "../src/utils/request-metrics.js";
+import { measurePayload, measureProviderUsage, measureRequestAttempts, type RequestMetrics } from "../src/utils/request-metrics.js";
 import { getModel } from "../src/models.js";
 import { streamOpenAICompletions } from "../src/providers/openai-completions.js";
 import type { Model } from "../src/types.js";
@@ -24,6 +24,18 @@ vi.mock("openai", () => ({ default: class {
 const model = { ...getModel("openai", "gpt-4o"), api: "openai-completions" } as Model<"openai-completions">;
 
 describe("request metrics", () => {
+	test("records failed attempts while preserving the original transport error", async () => {
+		const metrics: RequestMetrics = { version: 1, startedAt: 0, chunkCount: 0 };
+		const error = new Error("private transport details");
+		let now = 5;
+		const transport = measureRequestAttempts(metrics, () => now, async () => {
+			now = 12;
+			throw error;
+		});
+		await expect(transport("https://private.example", { headers: { authorization: "secret" } })).rejects.toBe(error);
+		expect(metrics.attempts).toEqual([{ startedMs: 5, durationMs: 7, failed: true }]);
+		expect(JSON.stringify(metrics)).not.toMatch(/private|secret/);
+	});
 	test("measures UTF-8 bytes without retaining payload content", () => {
 		const payload = { messages: [{ role: "user", content: "secret 🐝" }, { role: "tool", content: "result" }], tools: [{ function: { name: "private_tool" } }] };
 		const measured = measurePayload(payload)!;

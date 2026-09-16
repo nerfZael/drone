@@ -35,7 +35,7 @@ const settings = {
   summaryMaxTokens: 200,
 };
 
-async function fixture(oldText = 'old response '.repeat(500)) {
+async function fixture(oldText = 'old response '.repeat(500), summaryModel = model) {
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'compaction-budget-'));
   const repository = new SessionStore(workspace);
   const state = await repository.create({
@@ -63,7 +63,8 @@ async function fixture(oldText = 'old response '.repeat(500)) {
   const manager = new BlipContextManager({
     state,
     repository,
-    model,
+    model: summaryModel,
+    reasoning: 'high',
     settings,
     streamFn,
     activeTurnId: () => undefined,
@@ -111,11 +112,12 @@ describe('shared compaction validation', () => {
     expect(messages[1]).toMatchObject({ role: 'user', content: 'Keep the latest request exactly' });
   });
 
-  test('rejects an oversized summary without a second generation or checkpoint', async () => {
-    const f = await fixture();
+  test('rejects an oversized checkpoint even when high reasoning has a larger completion cap', async () => {
+    const f = await fixture(undefined, { ...model, api: 'openai-completions', reasoning: true, maxTokens: 8192 });
     f.setSummary(summaryText('x'.repeat(2000)));
     await f.manager.compact();
     expect(f.requests).toHaveLength(1);
+    expect(f.requests[0].maxTokens).toBeGreaterThan(200);
     expect(f.events).toContainEqual(
       expect.objectContaining({
         type: 'compaction_skipped',
