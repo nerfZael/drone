@@ -12,7 +12,7 @@ export const SETTINGS_TABS: Array<{
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
   },
-  { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'System notifications for drone completion, failure, and selected custom events.' },
+  { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'Floating desktop cards for drone completion, failure, and selected custom events.' },
   { id: 'usage', label: 'Usage', title: 'Usage analytics', description: 'Token consumption, estimated cost, and model prices for new agent executions.' },
   {
     id: 'companion',

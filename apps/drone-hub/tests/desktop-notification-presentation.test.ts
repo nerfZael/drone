@@ -7,6 +7,7 @@ const event = { id: 'event', droneId: 'id', droneName: 'Reviewer', chatName: 'ch
 test('consistent completion and failure titles, exact navigation target, no transcript leakage', () => {
   for (const kind of ['finished', 'failed']) {
     expect(desktopNotificationPayload({ ...event, kind, body: 'private run output' }, settings)).toEqual({
+      name: 'Reviewer', kind, durationSeconds: 8,
       title: `Reviewer ${kind}`, body: 'Chat: checks\nClick to open in Drone Hub.', silent: true,
       target: { droneId: 'id', chatName: 'checks' },
     });

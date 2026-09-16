@@ -17,11 +17,12 @@ export const useDesktopNotificationSettings = create<State>()(persist((set) => (
   messages: false,
   eventNames: 'chat_message',
   sound: false,
+  durationSeconds: 8,
   error: null,
   update: (patch) => set(patch),
   setError: (error) => set({ error }),
 }), {
   name: profileStorageKey('droneHub.desktopNotifications'),
-  partialize: ({ enabled, finished, failed, messages, eventNames, sound }) =>
-    ({ enabled, finished, failed, messages, eventNames, sound }),
+  partialize: ({ enabled, finished, failed, messages, eventNames, sound, durationSeconds }) =>
+    ({ enabled, finished, failed, messages, eventNames, sound, durationSeconds }),
 }));

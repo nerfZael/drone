@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Drone Hub notification</title>
+<style>
+:root { color-scheme: dark light; --panel:#171d27; --border:#3b4557; --fg:#e5e9f0; --muted:#a5afbe; --accent:#b3a0ff; --green:#71cf9e; --red:#ff8d91; }
+@media (prefers-color-scheme: light) { :root { --panel:#fff; --border:#d0d6df; --fg:#202631; --muted:#525e70; --accent:#7050b0; --green:#247347; --red:#b82f3e; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--panel); color:var(--fg); font:13px/1.4 system-ui,sans-serif; }
+.card { display:flex; gap:8px; padding:12px; height:100vh; border:1px solid var(--border); border-radius:8px; }
+button { border:0; color:inherit; background:transparent; font:inherit; cursor:pointer; }
+button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; border-radius:4px; }
+#open { flex:1; min-width:0; text-align:left; padding:0; }
+#close { align-self:flex-start; width:24px; height:24px; font-size:20px; line-height:20px; color:var(--muted); }
+#close:hover { color:var(--fg); background:var(--border); border-radius:4px; }
+.heading { font-weight:600; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+#name { color:var(--accent); }
+#symbol { color:var(--green); }
+.failed #symbol,.failed #suffix { color:var(--red); }
+#body { margin-top:5px; color:var(--muted); white-space:pre-wrap; overflow:hidden; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.brand { color:var(--muted); font-size:10px; margin-top:4px; }
+</style>
+<script src="hub-notification-renderer.js" defer></script>
+</head>
+<body><div class="card" role="status" aria-live="polite">
+<button id="open" type="button"><div class="heading"><span id="symbol" aria-hidden="true"></span> <span id="name"></span><span id="suffix"></span></div><div id="body"></div><div class="brand">Drone Hub</div></button>
+<button id="close" type="button" aria-label="Dismiss notification" title="Dismiss notification">×</button>
+</div></body>
+</html>

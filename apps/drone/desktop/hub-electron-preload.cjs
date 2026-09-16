@@ -62,6 +62,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  clearNotifications: () => ipcRenderer.invoke('drone-hub:notification-clear'),
   notificationsSupported: () => ipcRenderer.invoke('drone-hub:notification-supported'),
   showNotification: (input) => ipcRenderer.invoke('drone-hub:notification-show', input),
   onNotificationClick(callback) {
