@@ -124,6 +124,28 @@ initial-word transcription, and final Live usage. iOS compilation requires Xcode
 
 ## Implementation
 
+`CompanionLiveController` in `@drone/assistant-chat` owns the client Live lifecycle
+for both apps: startup, pause/resume, reconnect backoff, mute intent, conversation
+events, and backend reply attachment. React hooks subscribe to its snapshot. Each
+attempt has its own identity and abort signal; late events cannot change a newer
+attempt. Stop invalidates the attempt immediately, while a subsequent start waits
+for audio cleanup. Browser and mobile connection handles both expose idempotent,
+awaitable `close()` methods for that cleanup.
+
+Desktop subscription announcements use the same controller and cleanup ordering.
+`CompanionLiveAnnouncement` queues completed replies and ends the muted session
+after speaker playback; announcement failures stop without reconnecting. Mobile
+does not opt into stopped-voice announcements.
+
+`MobileCompanionLivePlatform` retains the native responsibilities: permissions,
+headset controls and cues, background scheduling, and mesh connection creation.
+It serializes control acquisition/release, allowing controls to survive a pause
+or remain armed for the opt-in headset shortcut without keeping the microphone or
+Live connection open. The phone assistant still validates its native launch and
+Hub preference, then passes startup cancellation to the shared controller. Its
+launch signal cannot stop an existing call that it did not start. Backend tasks
+keep their separate lifetime; stopping voice only aborts the voice reply waiter.
+
 `GET` and `PUT /api/settings/companion/live-voice` read and patch the independent `companion-live-voice` settings record. The response contains `enabled`, `systemPrompt`, `defaultSystemPrompt`, and `maxSystemPromptChars`. Writes accept `enabled`, `systemPrompt`, or both and preserve omitted values. Existing records containing only `enabled` receive the default prompt when read. This avoids overwriting either the prompt or backend model settings when the toggle changes.
 
 A dedicated connection to the authenticated `/api/companion/stream` WebSocket

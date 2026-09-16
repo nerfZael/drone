@@ -43,3 +43,6 @@ export * from './companion-proposal-store.js';
 
 export * from './companion-live-timing.js';
 export * from './CompanionScreen.js';
+
+export * from './CompanionLiveController.js';
+export * from './CompanionLiveAnnouncement.js';

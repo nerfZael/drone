@@ -11,6 +11,7 @@ let prepareAudio: () => Promise<void> = async () => {};
 const connections: Array<{ options: any; closed: number; sent: Record<string, unknown>[] }> = [];
 let mediaAction: ((action: 'play' | 'pause' | 'stop' | 'end') => void) | undefined;
 let controlsReleased = 0;
+let registerControls: () => Promise<void> = async () => {};
 let controlSchedule: MobileLiveClock['schedule'] | undefined;
 const cues: string[] = [];
 const controlStates: string[] = [];
@@ -26,7 +27,7 @@ let stopFromNotification: (() => void) | undefined;
 mock.module('react-native', () => ({ Platform: platform, AppState: appState }));
 mock.module('../src/local-assistant/mobile-live-controls', () => ({ openMobileLiveControls: async (action: typeof mediaAction, standby = false) => {
   controlModes.push(standby);
-  mediaAction = action; return { schedule: controlSchedule, update: async (state: string) => { controlStates.push(state); }, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
+  mediaAction = action; await registerControls(); return { schedule: controlSchedule, update: async (state: string) => { controlStates.push(state); }, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
 } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => 'voice-session' }));
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => ({ request: async () => ({}), subscribe: () => () => {} }) }));
@@ -605,6 +606,101 @@ test('Live uses the controls clock to dispatch a background backend task without
   } finally {
     appState.currentState = 'active'; controlSchedule = undefined;
     await act(async () => { root?.unmount(); }); clock.close();
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('End during native control registration cancels startup without opening audio', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  const registered = Promise.withResolvers<void>();
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  let starting!: Promise<void>;
+  try {
+    registerControls = () => registered.promise;
+    const count = connections.length; const releases = controlsReleased;
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { starting = live.start('hub', 'Hub', async () => 'reply'); });
+    await act(async () => { mediaAction?.('end'); });
+    expect(live.status).toBe('idle');
+    await act(async () => { registered.resolve(); await starting; });
+    expect(connections).toHaveLength(count);
+    expect(controlsReleased).toBe(releases + 1);
+  } finally {
+    registered.resolve(); registerControls = async () => {};
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('app pause updates headset controls before slow audio cleanup finishes', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  const released = Promise.withResolvers<void>();
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    releaseAudio = () => released.promise;
+    await act(async () => { live.pause(); });
+    expect(live.status).toBe('paused');
+    expect(controlStates.at(-1)).toBe('paused');
+  } finally {
+    released.resolve(); releaseAudio = async () => {};
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('retired headset controls cannot end a new start waiting for old audio cleanup', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  const released = Promise.withResolvers<void>();
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  let restarting!: Promise<void>;
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    const previousControls = mediaAction;
+    const count = connections.length;
+    releaseAudio = () => released.promise;
+    await act(async () => { void live.stop(); restarting = live.start('hub', 'Hub', async () => 'reply'); });
+    await act(async () => { previousControls?.('end'); released.resolve(); await restarting; });
+    expect(connections).toHaveLength(count + 1);
+    expect(live.status).toBe('listening');
+  } finally {
+    released.resolve(); releaseAudio = async () => {};
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('ending voice immediately prevents a background restart using retiring controls', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  const released = Promise.withResolvers<void>();
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    const count = connections.length;
+    releaseAudio = () => released.promise;
+    await act(async () => {
+      appState.currentState = 'background';
+      void live.stop();
+      void live.start('hub', 'Hub', async () => 'reply');
+    });
+    expect(live.status).toBe('idle');
+    await act(async () => { released.resolve(); });
+    expect(connections).toHaveLength(count);
+  } finally {
+    released.resolve(); releaseAudio = async () => {}; appState.currentState = 'active';
+    await act(async () => { root?.unmount(); });
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });

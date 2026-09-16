@@ -91,6 +91,27 @@ test('desktop cancel during microphone startup releases late audio without openi
   } finally { await h.cleanup(); }
 });
 
+test('desktop close is idempotent and waits for late audio and microphone release', async () => {
+  const h = harness(true, true);
+  try {
+    const starting = h.connection.start();
+    const closing = h.connection.close();
+    expect(h.connection.close()).toBe(closing);
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    h.finish();
+    await starting;
+    await tick();
+    expect(closed).toBe(false);
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
+    h.finishRelease();
+    await closing;
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
+    expect(h.released()).toBe(1);
+    expect(h.socket()).toBeUndefined();
+  } finally { h.finishRelease(); await h.cleanup(); }
+});
+
 test('close exposes one cleanup promise that waits until audio and the microphone lease are released', async () => {
   const h = harness(false, true);
   try {

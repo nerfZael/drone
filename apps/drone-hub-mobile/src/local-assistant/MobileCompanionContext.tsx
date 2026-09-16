@@ -421,7 +421,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     [close, controller, executeMobileTool, mesh.request, mesh.subscribe],
   );
 
-  const startLive = React.useCallback(async () => {
+  const startLive = React.useCallback(async (startupSignal?: AbortSignal) => {
     const activeTarget = workspaceTargetRef.current;
     if (!activeTarget || !available) throw new Error(unavailableReason || 'Companion is unavailable.');
     if (voice.session.kind !== 'idle' || !voice.session.microphoneAvailable) {
@@ -442,7 +442,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
       observeMobileLiveWorkspace(liveScope, workspaceTargetRef.current, 'delegation');
       return waitForCompanionReply(controller, () => run(prompt, telemetry, undefined, liveScope), signal);
-    });
+    }, startupSignal);
   }, [available, unavailableReason, targetCapability, live.start, voice, controller, run]);
   headsetCallbacks.current = { start: async () => {
     if (preparingVoice.current) throw new Error('Companion is already preparing voice.');
@@ -452,14 +452,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const startAssistantVoiceImpl = async (signal: AbortSignal) => {
     if (signal.aborted) return;
     if (liveActive) return;
-    const startOwnedAudio = async (start: () => Promise<void>) => {
-      // Only cancel audio started by this request, never an already-established conversation.
-      const cancel = () => live.stop();
-      signal.addEventListener('abort', cancel, { once: true });
-      try { if (!signal.aborted) await start(); }
-      finally { signal.removeEventListener('abort', cancel); }
-    };
-    if (live.status === 'paused') { await startOwnedAudio(live.resume); return; }
+    if (live.status === 'paused') { await live.resume(signal); return; }
     if (preparingVoice.current) throw new Error('Companion is already preparing voice.');
     const activeTarget = workspaceTargetRef.current;
     if (!activeTarget || !available) throw new Error(unavailableReason || 'Companion is unavailable.');
@@ -470,14 +463,14 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         'live.settings.get', undefined, signal) as { enabled?: unknown };
       if (signal.aborted || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
       if (preference?.enabled !== true) throw new Error('Enable Companion Live voice in Drone Hub settings first.');
-      await startOwnedAudio(startLive);
+      await startLive(signal);
     } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
   };
   const assistantStartImpl = React.useRef(startAssistantVoiceImpl);
   assistantStartImpl.current = startAssistantVoiceImpl;
   const assistantStartup = React.useRef(Promise.resolve());
   const startAssistantVoice = React.useCallback((signal: AbortSignal) => {
-    // A new press waits for the cancelled request's audio cleanup before starting again.
+    // Serialize Hub preference checks. Live itself owns startup cancellation and audio cleanup.
     const pending = assistantStartup.current.catch(() => {}).then(async () => {
       if (!signal.aborted) await assistantStartImpl.current(signal);
     });
