@@ -6,7 +6,7 @@ import { registerDesktopEventRoutes } from '../src/hub/routes/desktop-event-rout
 import { hubChangeEvents } from '../src/hub/hub-change-events';
 
 describe('desktop event routes', () => {
-  test('multiplexes assistant, registry, and chat events onto one SSE response', async () => {
+  test.each([false, true])('multiplexes events with notification opt-in %s', async (notifications) => {
     const writes: Array<{ event: string; data: any }> = [];
     let assistantSubscriber: ((data: any) => void) | null = null;
     let registrySubscriber: ((event: string, data: any) => void) | null = null;
@@ -41,6 +41,7 @@ describe('desktop event routes', () => {
     };
     const router = new HubRouter(() => {}, async () => null);
     registerDesktopEventRoutes(router, {
+      readNotificationStatus: async () => ({ droneName: 'Drone A', idle: true, reason: 'no_messages', latest: null }),
       assistantService: {
         subscribeChanges(subscriber) {
           assistantSubscriber = subscriber;
@@ -67,7 +68,7 @@ describe('desktop event routes', () => {
     });
 
     expect(
-      await router.handle(req as any, res as any, new URL('http://hub.test/api/desktop/events')),
+      await router.handle(req as any, res as any, new URL(`http://hub.test/api/desktop/events${notifications ? '?notifications=1' : ''}`)),
     ).toBe(true);
     assistantSubscriber?.({ threadId: 'assistant-1' });
     registrySubscriber?.('delta', { upserts: [{ id: 'drone-b' }] });
@@ -83,8 +84,13 @@ describe('desktop event routes', () => {
       'chat_delta',
       'pending_events_changed',
     ]);
+    const notification = { id: 'event-1', kind: 'message' as const, droneId: 'drone-a', droneName: 'Drone A', chatName: 'default', eventName: 'chat_message', body: 'Ready' };
+    hubChangeEvents.emitDesktopNotification(notification);
+    if (notifications) expect(writes.at(-1)).toEqual({ event: 'desktop_notification', data: notification });
+    else expect(writes.at(-1)?.event).toBe('pending_events_changed');
     req.emit('close');
     const closedCount = writes.length;
+    hubChangeEvents.emitDesktopNotification(notification);
     hubChangeEvents.emitResourceDeliveryChange();
     expect(writes.length).toBe(closedCount);
     expect(stopped).toEqual(['registry', 'chat']);

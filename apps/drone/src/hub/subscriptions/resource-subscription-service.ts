@@ -638,6 +638,17 @@ export class ResourceSubscriptionService {
       }),
       description,
     );
+    if (result.emitted) {
+      hubChangeEvents.emitDesktopNotification({
+        id: result.event.id,
+        kind: 'message',
+        droneId: source.droneId,
+        droneName: this.deps.repository.resolveChatResource(source.chatId)?.droneName || source.droneId,
+        chatName: source.chatName,
+        eventName: name,
+        body: typeof data.message === 'string' ? data.message.slice(0, 500) : name,
+      });
+    }
     return {
       emitted: result.emitted,
       name,

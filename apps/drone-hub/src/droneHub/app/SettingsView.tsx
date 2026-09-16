@@ -1,3 +1,4 @@
+import { NotificationsSettingsTab } from './NotificationsSettingsTab';
 import { CustomEventsSettingsTab } from './CustomEventsSettingsTab';
 import { UsageAnalyticsView } from '../usage/UsageAnalyticsView';
 import React from 'react';
@@ -238,6 +239,7 @@ export function SettingsView({
         />
       );
     }
+    if (activeTab === 'notifications') return <NotificationsSettingsTab />;
     if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
