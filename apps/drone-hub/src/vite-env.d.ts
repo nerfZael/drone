@@ -16,6 +16,7 @@ interface Window {
   };
   readonly droneHubDesktop?: {
     setChatWindowAlwaysOnTop?(name: string, enabled: boolean): Promise<boolean>;
+    notificationDisplay?(): Promise<'cards' | null>;
     clearNotifications?(): Promise<void>;
     notificationsSupported?(): Promise<boolean>;
     showNotification?(input: { title: string; body: string; silent: boolean; name?: string; kind?: string; durationSeconds?: number; target?: { droneId: string; chatName: string } }): Promise<void>;
