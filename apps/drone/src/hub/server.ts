@@ -1,3 +1,5 @@
+import { ChatReadService } from './chat-read/ChatReadService';
+import { registerChatReadRoutes } from './routes/chat-read-routes';
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
 import { readChatIdleStatus } from './chat-idle-status';
 import { ExpiringMap } from '@drone/hub-model';
@@ -5757,6 +5759,7 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
   });
   registerBackgroundResource('change request events', changeRequestFeature.stop);
+  registerChatReadRoutes(apiRouter, new ChatReadService(readChatSnapshot));
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

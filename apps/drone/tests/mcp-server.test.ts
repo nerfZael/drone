@@ -1,3 +1,4 @@
+import { ChatReadService } from '../src/hub/chat-read/ChatReadService';
 import { describe, expect, test } from 'bun:test';
 
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
@@ -1690,7 +1691,7 @@ describe('Drone Hub assistant MCP transport', () => {
       globalThis.fetch = (async (input) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
         requests.push(url);
-        return Response.json({ draft: false, pending: [], transcripts: [{
+        return Response.json(await new ChatReadService(async () => ({ ok: true, id: 'test-drone', chat: 'default', draft: false, pending: [], transcripts: [{
           turn: 7, id: 'turn-7', at: '2026-09-12T00:00:00Z', ok: false,
           model: 'test-model', reasoning: 'medium',
           prompt: 'p'.repeat(10_000), output: 'o'.repeat(10_000), error: 'e'.repeat(10_000),
@@ -1703,7 +1704,8 @@ describe('Drone Hub assistant MCP transport', () => {
           agentPlan: { items: [{ text: 'UNEXPECTED_METADATA' }] },
           attachments: [{ dataBase64: 'UNEXPECTED_METADATA' }],
           unknownFutureField: 'UNEXPECTED_METADATA',
-        }] });
+        }] })).read({ droneRef: 'test-drone', chatName: 'default', limit: Number(url.searchParams.get('limit')),
+          includeActivity: url.searchParams.get('activity') === 'full' }));
       }) as typeof fetch;
       process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
       process.env.DRONE_TOKEN = 'chat-projection-token';
@@ -1717,32 +1719,33 @@ describe('Drone Hub assistant MCP transport', () => {
         expect(read.isError).not.toBe(true);
         const data = read.structuredContent as any;
         expect(data.includeActivity).toBe(includeActivity === true);
-        expect(data.turns).toHaveLength(1);
-        expect(data.turns[0]).toMatchObject({
-          turn: 7, id: 'turn-7', ok: false, model: 'test-model', reasoning: 'medium',
-          promptOriginalLength: 10_000, outputOriginalLength: 10_000, errorOriginalLength: 10_000,
-          promptTruncated: true, outputTruncated: true, errorTruncated: true,
+        expect(data.historyKind).toBe('messages');
+        expect(data.messages).toHaveLength(3);
+        expect(data.messages.map((message: any) => message.role)).toEqual(['user', 'assistant', 'error']);
+        for (const message of data.messages) {
+          expect(message.text).toHaveLength(4000);
+          expect(message.textOriginalLength).toBe(10000);
+          expect(message.textTruncated).toBe(true);
+        }
+        expect(data.messages[1]).toMatchObject({
           activitySummary: { available: true, source: 'codex', messageCount: 2, toolCallCount: 1, truncated: false },
           fileChangesSummary: { changed: 1, additions: 2, deletions: 3, attribution: 'partial', truncated: true },
-          attachmentCount: 1,
         });
-        for (const key of ['prompt', 'output', 'error']) expect(data.turns[0][key]).toHaveLength(4000);
         const serialized = JSON.stringify(data);
         expect(serialized).not.toContain('UNEXPECTED_METADATA');
         if (includeActivity) {
           expect(data.turns[0].activity).toEqual(activity);
         } else {
-          expect(data.turns[0].activity).toBeUndefined();
+          expect(data.turns).toBeUndefined();
           expect(serialized).not.toContain('DETAILED_REASONING');
           expect(serialized).not.toContain('NESTED_TOOL_OUTPUT');
           expect(serialized.length).toBeLessThan(14_000);
         }
         expect(JSON.parse((read.content as any)[0].text)).toEqual(data);
         expect(requests).toHaveLength(1);
-        expect(requests[0].searchParams.get('transcript')).toBe('tail');
-        expect(requests[0].searchParams.get('tail')).toBe('1');
+        expect(requests[0].pathname).toBe('/api/drones/test-drone/chats/default/messages');
+        expect(requests[0].searchParams.get('limit')).toBe('1');
         expect(requests[0].searchParams.get('activity')).toBe(includeActivity ? 'full' : 'summary');
-        expect(requests[0].searchParams.get('pending')).toBe('all');
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;
@@ -1763,20 +1766,21 @@ describe('Drone Hub assistant MCP transport', () => {
       globalThis.fetch = (async (input) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
         requests.push(url.pathname + url.search);
-        if (url.pathname !== '/api/drones/draft-drone/chats/draft/state') {
-          return Response.json({ error: 'unexpected request' }, { status: 500 });
-        }
-        expect(url.searchParams.get('pending')).toBe('all');
-        if (custom && url.searchParams.get('transcript') !== 'none') {
-          return Response.json({ error: 'custom agent has no transcript' }, { status: 410 });
-        }
-        return Response.json({
-          draft: true, transcripts: [],
+        const snapshot = {
+          ok: true as const, id: 'draft-drone', chat: 'draft', draft: true, transcripts: [],
           pending: Array.from({ length: 3 }, (_, i) => ({
             id: `prompt-${i}`, at: '2026-09-11T16:17:36.000Z', state: 'queued', prompt: '  Question with whitespace  ',
             attachments: [{ dataBase64: 'do-not-expose-attachments' }],
           })),
-        });
+        };
+        if (url.pathname.endsWith('/messages')) {
+          if (custom) return Response.json({ error: 'custom agent has no transcript' }, { status: 410 });
+          return Response.json(await new ChatReadService(async () => snapshot).read({
+            droneRef: 'draft-drone', chatName: 'draft', limit: 2, maxChars: 10,
+          }));
+        }
+        expect(url.searchParams.get('pending')).toBe('all');
+        return Response.json(snapshot);
       }) as typeof fetch;
       process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
       process.env.DRONE_TOKEN = 'draft-read-token';
@@ -1788,7 +1792,7 @@ describe('Drone Hub assistant MCP transport', () => {
         } });
         expect(read.isError).not.toBe(true);
         expect(read.structuredContent).toMatchObject({
-          draft: true, turns: [], pendingCount: 3, pendingTruncated: true,
+          draft: true, pendingCount: 3, pendingTruncated: true,
         });
         const pending = (read.structuredContent as any).pending;
         expect(pending).toHaveLength(2);

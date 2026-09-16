@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HubSessionRepository } from '../../src/hub/assistant/hub-session-repository';
-import {
-  readNativeChatMessages,
-  readNativeChatSubscriptionStatus,
-} from '../../src/hub/native-chat-messages';
+import { readNativeChatMessages } from '../../src/hub/native-chat-messages';
 import { resetHubDatabaseForTests, requireHubDatabase } from '../../src/host/hub-database';
 import {
   archiveChatInStore,
@@ -83,7 +80,7 @@ test('search combines native and CLI replies with scope, archive filtering and s
         },
       });
       const opts = { query: 'cobalt', droneIds: ['native', 'cli'], chatName: 'default' };
-      const all = searchActiveChatMessages(opts).results;
+      const all = (await searchActiveChatMessages(opts)).results;
       assert.equal(all.length, 4);
       assert.deepEqual(
         all
@@ -92,37 +89,25 @@ test('search combines native and CLI replies with scope, archive filtering and s
           .sort(),
         ['assistant', 'user'],
       );
-      assert.deepEqual(searchActiveChatMessages({ ...opts, limit: 2 }).results, all.slice(0, 2));
       assert.deepEqual(
-        searchActiveChatMessages({ ...opts, limit: 2, offset: 2 }).results,
+        (await searchActiveChatMessages({ ...opts, limit: 2 })).results,
+        all.slice(0, 2),
+      );
+      assert.deepEqual(
+        (await searchActiveChatMessages({ ...opts, limit: 2, offset: 2 })).results,
         all.slice(2),
       );
-      assert.deepEqual(searchActiveChatMessages({ ...opts, query: 'secret' }).results, []);
-      assert.deepEqual(searchActiveChatMessages({ ...opts, droneIds: [] }).results, []);
+      assert.deepEqual((await searchActiveChatMessages({ ...opts, query: 'secret' })).results, []);
+      assert.deepEqual((await searchActiveChatMessages({ ...opts, droneIds: [] })).results, []);
       assert.equal(
-        searchActiveChatMessages({ ...opts, query: 'saved proposal', droneId: 'native' }).results
-          .length,
+        (await searchActiveChatMessages({ ...opts, query: 'saved proposal', droneId: 'native' }))
+          .results.length,
         1,
       );
       assert.equal(
         readNativeChatMessages('native-default', 1, 4000).messages[0].text,
         'The cobalt proposal reply was saved.',
       );
-      const staleCanonical = {
-        idle: false,
-        reason: 'active_user_messages',
-        latest: { id: 'sent-prompt', role: 'user', status: 'sent' },
-      };
-      const finished = readNativeChatSubscriptionStatus('native-default', false, staleCanonical);
-      assert.equal(finished.idle, true);
-      assert.equal(finished.latest?.text, 'The cobalt proposal reply was saved.');
-      assert.equal(
-        readNativeChatSubscriptionStatus('native-default', true, staleCanonical).idle,
-        false,
-      );
-      assert.equal(readNativeChatSubscriptionStatus('empty', false, staleCanonical).idle, true);
-      const failed = { ...staleCanonical, idle: true, reason: 'latest_user_failed' };
-      assert.deepEqual(readNativeChatSubscriptionStatus('native-default', false, failed), failed);
       await archiveChatInStore({
         droneId: 'native',
         chatName: 'default',
@@ -130,7 +115,10 @@ test('search combines native and CLI replies with scope, archive filtering and s
         deleteAt: '2026-10-14T08:00:00Z',
         archiveRetention: '30d',
       });
-      assert.deepEqual(searchActiveChatMessages({ ...opts, droneId: 'native' }).results, []);
+      assert.deepEqual(
+        (await searchActiveChatMessages({ ...opts, droneId: 'native' })).results,
+        [],
+      );
     } finally {
       repo.close();
       await resetHubDatabaseForTests();

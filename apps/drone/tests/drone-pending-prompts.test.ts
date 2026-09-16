@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { updateRegistry } from '../src/host/registry';
 import { normalizeChatImageAttachments } from '../src/hub/chat-attachments';
+import { ChatReadService } from '../src/hub/chat-read/ChatReadService';
 import {
   createDronePendingPromptStore,
   filterCompletedSentPromptBlockers,
@@ -31,6 +32,53 @@ const pendingPromptStore = createDronePendingPromptStore({
 });
 
 describe('drone pending prompt store', () => {
+  test('bounded model reads exclude completed delivery records outside the selected history', async () => {
+    await withTempDroneDataDir('drone-pending-read-', async () => {
+      const at = new Date().toISOString();
+      const latest = { id: 'latest', at, prompt: 'latest', output: 'answer', ok: true };
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          drone: {
+            id: 'drone',
+            name: 'drone',
+            chats: {
+              default: {
+                turns: [{ id: 'done', at, prompt: 'first', output: 'done', ok: true }, latest],
+                pendingPrompts: [
+                  { id: 'done', at, prompt: 'first', state: 'sent' },
+                  { id: 'next', at, prompt: 'next', state: 'queued' },
+                ],
+              },
+            },
+          },
+        };
+      });
+      const retained = await pendingPromptStore.readPendingPrompts({
+        droneId: 'drone',
+        chatName: 'default',
+      });
+      expect(retained.map((prompt) => prompt.id)).toContain('done');
+      const service = new ChatReadService(async (input) => ({
+        ok: true,
+        id: 'drone',
+        chat: 'default',
+        transcripts: [latest],
+        turnCount: 2,
+        pending: await pendingPromptStore.readPendingPrompts({
+          droneId: input.droneRef,
+          chatName: input.chatName,
+          excludeCompleted: input.excludeCompletedPending,
+        }),
+      }));
+      expect(
+        await service.read({ droneRef: 'drone', chatName: 'default', limit: 1 }),
+      ).toMatchObject({
+        pendingCount: 1,
+        pending: [{ id: 'next' }],
+      });
+    });
+  });
+
   test('omits completed sent blockers but retains unresolved sent prompts', () => {
     const at = '2026-03-26T10:00:00.000Z';
     const prompts = [

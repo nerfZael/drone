@@ -129,7 +129,7 @@ export function createDronePendingPromptStore(deps: {
   function pruneCompletedPendingPrompts(
     list: PendingPrompt[],
     turnsRaw: unknown,
-    opts?: { keepRecentlyCompleted?: boolean; nowMs?: number },
+    opts?: { keepRecentlyCompleted?: boolean; excludeCompleted?: boolean; nowMs?: number },
   ): PendingPrompt[] {
     const visible = list.filter(
       (item) => !(item.state === 'sent' && item.action?.type === 'send-in-new-chat'),
@@ -148,6 +148,7 @@ export function createDronePendingPromptStore(deps: {
       typeof opts?.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
 
     return visible.filter((item) => {
+      if (opts?.excludeCompleted && turnById.has(item.id)) return false;
       if (isTerminalPendingPrompt(item)) return true;
       const turn = turnById.get(item.id);
       if (!turn) return true;
@@ -171,7 +172,7 @@ export function createDronePendingPromptStore(deps: {
 
   function pendingPromptsFromChatEntry(
     entry: any,
-    opts?: { keepRecentlyCompleted?: boolean },
+    opts?: { keepRecentlyCompleted?: boolean; excludeCompleted?: boolean },
   ): PendingPrompt[] {
     const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     const pending = pruneCompletedPendingPrompts(
@@ -218,7 +219,10 @@ export function createDronePendingPromptStore(deps: {
         .filter((p: PendingPrompt) => p.id && p.prompt.trim())
         .slice(-60),
       entry?.turns,
-      { keepRecentlyCompleted: opts?.keepRecentlyCompleted === true },
+      {
+        keepRecentlyCompleted: opts?.keepRecentlyCompleted === true,
+        excludeCompleted: opts?.excludeCompleted,
+      },
     );
     return pending;
   }
@@ -337,6 +341,7 @@ export function createDronePendingPromptStore(deps: {
   async function readPendingPrompts(opts: {
     droneId: string;
     chatName: string;
+    excludeCompleted?: boolean;
   }): Promise<PendingPrompt[]> {
     if (!(globalThis as any).Bun) {
       const ref = normalizeDroneIdentity(opts.droneId);
@@ -355,6 +360,7 @@ export function createDronePendingPromptStore(deps: {
       });
       return pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
         keepRecentlyCompleted: true,
+        excludeCompleted: opts.excludeCompleted,
       }).slice(-50);
     }
 
@@ -382,18 +388,25 @@ export function createDronePendingPromptStore(deps: {
       const stored = queue.list({ droneId, chatName, limit: 60 }) as PendingPrompt[];
       const projected = readChatFromStore({ droneId, chatName });
       const turns = projected.available && projected.chat ? projected.chat.turns : entry?.turns;
-      return pruneCompletedPendingPrompts(stored, turns, { keepRecentlyCompleted: true }).slice(
-        -50,
-      );
+      return pruneCompletedPendingPrompts(stored, turns, {
+        keepRecentlyCompleted: true,
+        excludeCompleted: opts.excludeCompleted,
+      }).slice(-50);
     }
     if (entry) {
       await importChatFromRegistry({ droneId, chatName, chatEntry: entry });
       const read = readChatFromStore({ droneId, chatName });
       if (read.available && read.chat) {
-        return pendingPromptsFromChatEntry(read.chat, { keepRecentlyCompleted: true }).slice(-50);
+        return pendingPromptsFromChatEntry(read.chat, {
+          keepRecentlyCompleted: true,
+          excludeCompleted: opts.excludeCompleted,
+        }).slice(-50);
       }
     }
-    return pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
+    return pendingPromptsFromChatEntry(entry, {
+      keepRecentlyCompleted: true,
+      excludeCompleted: opts.excludeCompleted,
+    }).slice(-50);
   }
 
   function readPendingPrompt(opts: {

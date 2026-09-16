@@ -51,7 +51,7 @@ test('active chat keyword search indexes visible text and drops archived chats',
       },
     });
 
-    const active = searchActiveChatMessages({ query: 'cobalt deployment' });
+    const active = await searchActiveChatMessages({ query: 'cobalt deployment' });
     expect(active.results.length).toBe(3);
     expect(active.results.map((result) => result.role).sort()).toEqual([
       'assistant',
@@ -59,13 +59,15 @@ test('active chat keyword search indexes visible text and drops archived chats',
       'user',
     ]);
     expect(
-      searchActiveChatMessages({
-        query: 'cobalt deployment',
-        droneIds: ['search-drone'],
-      }).results.map((result) => result.droneId),
+      (
+        await searchActiveChatMessages({
+          query: 'cobalt deployment',
+          droneIds: ['search-drone'],
+        })
+      ).results.map((result) => result.droneId),
     ).toEqual(['search-drone', 'search-drone']);
     expect(
-      searchActiveChatMessages({ query: 'cobalt deployment', droneIds: [] }).results,
+      (await searchActiveChatMessages({ query: 'cobalt deployment', droneIds: [] })).results,
     ).toEqual([]);
 
     await archiveChatInStore({
@@ -76,10 +78,12 @@ test('active chat keyword search indexes visible text and drops archived chats',
       archiveRetention: '30d',
     });
     expect(
-      searchActiveChatMessages({
-        query: 'cobalt deployment',
-        droneIds: ['search-drone'],
-      }).results,
+      (
+        await searchActiveChatMessages({
+          query: 'cobalt deployment',
+          droneIds: ['search-drone'],
+        })
+      ).results,
     ).toEqual([]);
   } finally {
     await resetHubDatabaseForTests();
