@@ -1,3 +1,5 @@
+import { ChatReadService } from './chat-read/ChatReadService';
+import { registerChatReadRoutes } from './routes/chat-read-routes';
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
 import { readChatIdleStatus } from './chat-idle-status';
 import { ExpiringMap } from '@drone/hub-model';
@@ -5601,6 +5603,11 @@ async function startDroneHubApiServerWithLifecycle(
   const apiRouter = new HubRouter(json, readJsonBody);
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
   registerDesktopEventRoutes(apiRouter, {
+    readNotificationStatus: async (target) => {
+      const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();
+      const status = await readChatIdleStatus(registry, target, nativeChatIsBusy);
+      return { ...status, droneName: registry.drones[target.droneId]?.name || target.droneId };
+    },
     assistantService,
     droneChatBroadcaster,
     droneRegistryBroadcaster,
@@ -5759,6 +5766,7 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
   });
   registerBackgroundResource('change request events', changeRequestFeature.stop);
+  registerChatReadRoutes(apiRouter, new ChatReadService(readChatSnapshot));
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

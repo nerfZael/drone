@@ -638,6 +638,17 @@ export class ResourceSubscriptionService {
       }),
       description,
     );
+    if (result.emitted) {
+      hubChangeEvents.emitDesktopNotification({
+        id: result.event.id,
+        kind: 'message',
+        droneId: source.droneId,
+        droneName: this.deps.repository.resolveChatResource(source.chatId)?.droneName || source.droneId,
+        chatName: source.chatName,
+        eventName: name,
+        body: typeof data.message === 'string' ? data.message.slice(0, 500) : name,
+      });
+    }
     return {
       emitted: result.emitted,
       name,
@@ -1293,7 +1304,7 @@ function chatCursor(
         validIso(status.latest?.at, '') ||
         `cycle-${crypto.randomUUID()}`,
     lastFailureId:
-      status.latest?.role === 'user' && status.latest?.status === 'failed'
+      status.latest?.status === 'failed'
         ? String(status.latest?.id ?? '').trim()
         : '',
   };
@@ -1329,7 +1340,7 @@ export function detectChatSubscriptionChanges(
   const events: ResourceEvent[] = [];
   const latestId = String(status.latest?.id ?? '').trim();
   const latestFailed =
-    status.latest?.role === 'user' && status.latest?.status === 'failed' && latestId;
+    status.latest?.status === 'failed' && latestId;
   if (
     latestFailed &&
     cursor.lastFailureId !== latestId &&

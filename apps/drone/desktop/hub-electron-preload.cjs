@@ -65,6 +65,18 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
   setChatWindowAlwaysOnTop(name, enabled) {
     return ipcRenderer.invoke('drone-hub:chat-window-pin', name, enabled);
   },
+  notificationsSupported: () => ipcRenderer.invoke('drone-hub:notification-supported'),
+  showNotification: (input) => ipcRenderer.invoke('drone-hub:notification-show', input),
+  onNotificationClick(callback) {
+    const listener = (_event, target) => callback(target);
+    ipcRenderer.on('drone-hub:notification-click', listener);
+    return () => ipcRenderer.removeListener('drone-hub:notification-click', listener);
+  },
+  onNotificationError(callback) {
+    const listener = (_event, error) => callback(error);
+    ipcRenderer.on('drone-hub:notification-error', listener);
+    return () => ipcRenderer.removeListener('drone-hub:notification-error', listener);
+  },
   reportDiagnostic(record) {
     ipcRenderer.send('drone-hub:diagnostic', record);
   },

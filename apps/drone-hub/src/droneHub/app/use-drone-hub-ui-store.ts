@@ -1521,6 +1521,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           settingsActiveTab:
             persisted.settingsActiveTab === 'general' ||
+            persisted.settingsActiveTab === 'notifications' ||
             persisted.settingsActiveTab === 'companion' ||
             persisted.settingsActiveTab === 'devices' ||
             persisted.settingsActiveTab === 'sync' ||

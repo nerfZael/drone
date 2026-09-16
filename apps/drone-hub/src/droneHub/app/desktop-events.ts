@@ -2,6 +2,7 @@ type DesktopEventHandler = (event: MessageEvent) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 const EVENT_NAMES = [
+  'desktop_notification',
   'pending_events_changed',
   'assistant_change',
   'registry_snapshot',
@@ -50,7 +51,7 @@ function ensureSource(): void {
     notifyConnected(false, true);
     return;
   }
-  source = new window.EventSource('/api/desktop/events');
+  source = new window.EventSource(`/api/desktop/events${window.droneHubDesktop?.showNotification ? '?notifications=1' : ''}`);
   source.addEventListener('connected', () => notifyConnected(true));
   for (const eventName of EVENT_NAMES) {
     source.addEventListener(eventName, (event) => {

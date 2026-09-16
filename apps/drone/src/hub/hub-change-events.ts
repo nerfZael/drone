@@ -1,6 +1,10 @@
+import type { DesktopNotificationEvent } from './notifications/DesktopNotificationObserver';
+
 type DroneChatChange = { droneId: string; chatName: string };
 
 type Listener<T> = (change: T) => void;
+
+const desktopNotificationListeners = new Set<Listener<DesktopNotificationEvent>>();
 
 const registryListeners = new Set<Listener<void>>();
 const summaryListeners = new Set<Listener<void>>();
@@ -8,6 +12,15 @@ const chatListeners = new Set<Listener<DroneChatChange>>();
 const resourceDeliveryListeners = new Set<Listener<void>>();
 
 export const hubChangeEvents = {
+  emitDesktopNotification(event: DesktopNotificationEvent): void {
+    for (const listener of desktopNotificationListeners) {
+      try { listener(event); } catch { /* UI delivery cannot fail a custom event. */ }
+    }
+  },
+  onDesktopNotification(listener: Listener<DesktopNotificationEvent>): () => void {
+    desktopNotificationListeners.add(listener);
+    return () => desktopNotificationListeners.delete(listener);
+  },
   emitResourceDeliveryChange(): void {
     for (const listener of resourceDeliveryListeners) {
       try {

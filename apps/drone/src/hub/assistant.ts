@@ -1,8 +1,8 @@
+import { chatReadSnapshotFromRegistry, summarizeChatActivity } from './chat-read/helpers/chat-read-model';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { buildHostWorkspaces } from './assistant/host-workspaces';
 import {
-  completedTurnIds as createCompletedTurnIds,
   isAgentTransportInterruption,
   isSendInNewChatQueueAction,
   normalizeChangeRequestPermissions,
@@ -179,33 +179,6 @@ type AssistantPromptEvent =
   | { type: 'error'; threadId?: string; error: string };
 
 type AssistantAccessScope = NativeChatAccessScope;
-
-type ChatTimelineMessage = {
-  id: string;
-  role: 'user' | 'agent';
-  status: 'queued' | 'sending' | 'sent' | 'completed' | 'failed';
-  text: string;
-  at: string;
-  updatedAt?: string;
-  completedAt?: string;
-  error?: string;
-  droneId: string;
-  chatName: string;
-  turnId?: string;
-  userMessageId?: string;
-};
-
-type ChatMessagePage = {
-  droneId: string;
-  chatName: string;
-  messages: ChatTimelineMessage[];
-  total: number;
-  limit: number;
-  pageStart: number;
-  pageEnd: number;
-  olderCursor: string | null;
-  newerCursor: string | null;
-};
 
 export type AssistantSnapshot = NativeChatSnapshot;
 
@@ -435,11 +408,6 @@ function normalizeFetchContentLivecrawl(
 function normalizeChatNameForAssistant(raw: unknown): string {
   const value = String(raw ?? '').trim();
   return value || 'default';
-}
-
-function safeMessageAt(raw: unknown, fallback: string): string {
-  const value = String(raw ?? '').trim();
-  return value || fallback;
 }
 
 function messageResponseSizeBytes(value: unknown): number {
@@ -746,158 +714,12 @@ function applyAssistantSystemPromptPatches(prompt: string, rawPatches: unknown):
   return normalizeAssistantSystemPrompt(next);
 }
 
-function buildChatTimelineMessages(
-  regAny: any,
-  opts: { droneId: string; chatName: string },
-  options?: { requireChat?: boolean },
-): ChatTimelineMessage[] {
-  const { id: droneId, drone } = droneEntryByAssistantId(regAny, opts.droneId);
-  const chatName = normalizeChatNameForAssistant(opts.chatName);
-  const chat = drone?.chats?.[chatName] ?? (chatName === 'default' ? drone?.chats?.default : null);
-  const pendingSeedPrompt = chatName === 'default' ? cleanOptionalString(drone?.seed?.prompt) : '';
-  if (!chat) {
-    if (pendingSeedPrompt) {
-      return [
-        {
-          id: 'user:startup-seed',
-          role: 'user',
-          status: 'queued',
-          text: pendingSeedPrompt,
-          at: safeMessageAt(drone?.updatedAt ?? drone?.createdAt, nowIso()),
-          droneId,
-          chatName,
-          turnId: 'startup-seed',
-        },
-      ];
-    }
-    if (options?.requireChat) throw new Error(`unknown chat: ${droneId}/${chatName}`);
-    return [];
-  }
-
-  const out: ChatTimelineMessage[] = [];
-  const turns = Array.isArray(chat.turns) ? chat.turns : [];
-  for (let i = 0; i < turns.length; i += 1) {
-    const turn = turns[i] as any;
-    const turnId = String(turn?.id ?? `turn-${i + 1}`).trim() || `turn-${i + 1}`;
-    const promptAt = safeMessageAt(turn?.promptAt ?? turn?.at, nowIso());
-    const completedAt =
-      typeof turn?.completedAt === 'string' && turn.completedAt.trim()
-        ? turn.completedAt.trim()
-        : undefined;
-    const ok = turn?.ok !== false;
-    const userMessageId = `user:${turnId}`;
-    out.push({
-      id: userMessageId,
-      role: 'user',
-      status: 'completed',
-      text: String(turn?.prompt ?? ''),
-      at: promptAt,
-      ...(completedAt ? { completedAt } : {}),
-      droneId,
-      chatName,
-      turnId,
-    });
-    out.push({
-      id: `agent:${turnId}`,
-      role: 'agent',
-      status: ok ? 'completed' : 'failed',
-      text: String(turn?.output ?? ''),
-      at: safeMessageAt(completedAt ?? turn?.at ?? promptAt, promptAt),
-      ...(completedAt ? { completedAt } : {}),
-      ...(turn?.error ? { error: String(turn.error) } : {}),
-      droneId,
-      chatName,
-      turnId,
-      userMessageId,
-    });
-  }
-
-  const pending = Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : [];
-  const completedTurnIds = createCompletedTurnIds(turns);
-  for (const item of pending as any[]) {
-    const id = String(item?.id ?? '').trim();
-    if (!id || completedTurnIds.has(id)) continue;
-    const status: ChatTimelineMessage['status'] = normalizePendingPromptState(
-      item?.state,
-      'queued',
-    );
-    out.push({
-      id: `user:${id}`,
-      role: 'user',
-      status,
-      text: String(item?.prompt ?? ''),
-      at: safeMessageAt(item?.at, nowIso()),
-      ...(typeof item?.updatedAt === 'string' && item.updatedAt.trim()
-        ? { updatedAt: item.updatedAt.trim() }
-        : {}),
-      ...(item?.error ? { error: String(item.error) } : {}),
-      droneId,
-      chatName,
-      turnId: id,
-    });
-  }
-
-  return out.sort((a, b) => {
-    const aMs = Date.parse(a.at);
-    const bMs = Date.parse(b.at);
-    if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
-    if (a.turnId && a.turnId === b.turnId && a.role !== b.role) return a.role === 'user' ? -1 : 1;
-    return a.id.localeCompare(b.id);
-  });
-}
-
 export function summarizeAssistantChatIdle(
-  regAny: any,
+  registry: any,
   target: AssistantChatIdleTarget,
   options?: { requireChat?: boolean },
 ): AssistantChatIdleStatus {
-  const messages = buildChatTimelineMessages(regAny, target, options);
-  const activeUserMessages = messages.filter(
-    (message) =>
-      message.role === 'user' &&
-      (message.status === 'queued' || message.status === 'sending' || message.status === 'sent'),
-  ).length;
-  const queuedUserMessages = messages.filter(
-    (message) => message.role === 'user' && message.status === 'queued',
-  ).length;
-  const failedUserMessages = messages.filter(
-    (message) => message.role === 'user' && message.status === 'failed',
-  ).length;
-  const latest = messages[messages.length - 1] ?? null;
-  const reason: AssistantChatIdleStatus['reason'] =
-    activeUserMessages > 0
-      ? 'active_user_messages'
-      : !latest
-        ? 'no_messages'
-        : latest.role === 'agent'
-          ? 'latest_agent_message'
-          : latest.status === 'failed'
-            ? 'latest_user_failed'
-            : 'latest_user_message';
-  const idle =
-    activeUserMessages === 0 &&
-    (reason === 'no_messages' ||
-      reason === 'latest_agent_message' ||
-      reason === 'latest_user_failed');
-  return {
-    droneId: target.droneId,
-    chatName: normalizeChatNameForAssistant(target.chatName),
-    idle,
-    reason,
-    activeUserMessages,
-    queuedUserMessages,
-    failedUserMessages,
-    latest: latest
-      ? {
-          id: latest.id,
-          role: latest.role,
-          status: latest.status,
-          at: latest.at,
-          text: latest.text,
-          ...(latest.turnId ? { turnId: latest.turnId } : {}),
-        }
-      : null,
-  };
+  return summarizeChatActivity(chatReadSnapshotFromRegistry(registry, target, options?.requireChat === true));
 }
 
 function sanitizeMessage(message: any): any {

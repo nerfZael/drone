@@ -1,3 +1,4 @@
+import { useDesktopNotifications } from './droneHub/app/use-desktop-notifications';
 import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
 import { ChatWindowLayoutController } from './droneHub/chat-layout/ChatWindowLayoutController';
@@ -1989,6 +1990,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [setCollapsedGroups],
   );
+  useDesktopNotifications();
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleAssistantOpenDroneChat = (event: Event) => {
