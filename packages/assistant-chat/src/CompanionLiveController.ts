@@ -1,4 +1,5 @@
 import { CompanionLiveConversation } from './CompanionLiveConversation.js';
+import { CompanionLiveAnnouncement, type AnnouncementPlayback } from './CompanionLiveAnnouncement.js';
 import type { CompanionClientController } from './companion-client.js';
 import type { CompanionClientTelemetry } from './companion.js';
 import { companionLiveReconnectDelay } from './companion-live-reconnect.js';
@@ -9,8 +10,10 @@ export type CompanionLiveTarget = {
   id: string;
   name: string;
   run(prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry): Promise<string>;
+  announcement?: string;
 };
 export type CompanionLiveState = {
+  announcing: boolean;
   hasStarted: boolean;
   status: 'idle' | 'connecting' | 'listening' | 'paused' | 'error';
   capturing: boolean;
@@ -41,6 +44,7 @@ export type CompanionLiveConnectionOptions = {
   onReady(model: string): void;
   onError(error: string): void;
   onPlaybackBlocked(blocked: boolean): void;
+  onAnnouncementPlayback?(event: AnnouncementPlayback): void;
   onStop(): void;
 };
 type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -57,6 +61,7 @@ type Attempt = {
   prepared: Promise<void>;
   connection?: CompanionLiveConnectionHandle;
   conversation: CompanionLiveConversation;
+  announcement?: CompanionLiveAnnouncement;
   replies?: ReturnType<typeof connectCompanionLiveReplies>;
 };
 
@@ -79,6 +84,7 @@ export class CompanionLiveController {
   };
 
   readonly start = async (target: CompanionLiveTarget, signal?: AbortSignal): Promise<void> => {
+    if (!signal?.aborted && this.state.announcing) void this.stop();
     if (signal?.aborted || this.attempt || this.platform.canStart?.() === false) return;
     this.cancelRetry();
     target = { ...target };
@@ -87,10 +93,20 @@ export class CompanionLiveController {
     const cancel = () => { if (this.target === target) void this.stop(); };
     signal?.addEventListener('abort', cancel, { once: true });
     try {
-      this.setState({ ...EMPTY, hasStarted: true, status: 'connecting', targetDeviceId: target.id, targetName: target.name });
+      this.setState({ ...EMPTY, hasStarted: true, announcing: Boolean(target.announcement), muted: Boolean(target.announcement),
+        status: 'connecting', targetDeviceId: target.id, targetName: target.name });
       await this.connect(target, false);
     }
     finally { signal?.removeEventListener('abort', cancel); }
+  };
+
+  /** Desktop opts into stopped-voice announcements; active calls already deliver replies. */
+  readonly announce = (reply: string): void => {
+    if (!reply.trim() || this.platform.canStart?.() === false) return;
+    if (this.attempt?.announcement) { this.attempt.announcement.deliver(reply); return; }
+    if (this.attempt || this.target) return;
+    void this.start({ id: '', name: 'Subscription update', announcement: reply,
+      run: async () => { throw new Error('Subscription announcements do not run backend tasks.'); } });
   };
 
   readonly resume = async (signal?: AbortSignal): Promise<void> => {
@@ -102,7 +118,7 @@ export class CompanionLiveController {
     this.cancelRetry();
     this.endAttempt('stop');
     this.finishControls(false);
-    this.setState({ status: 'idle', capturing: false, error: '', queued: 0, muted: false, playbackBlocked: false });
+    this.setState({ announcing: false, status: 'idle', capturing: false, error: '', queued: 0, muted: false, playbackBlocked: false });
     return this.cleanup;
   };
 
@@ -116,7 +132,7 @@ export class CompanionLiveController {
 
   readonly reset = (): void => { void this.stop(); this.setState(EMPTY); };
   readonly toggleMute = (): void => {
-    if (!this.attempt?.connection) return;
+    if (!this.attempt?.connection || this.state.announcing) return;
     const muted = !this.state.muted;
     this.attempt.connection.mute(muted);
     this.setState({ muted });
@@ -145,7 +161,13 @@ export class CompanionLiveController {
     const attempt: Attempt = { abort, conversation, prepared: new Promise((resolve) => { prepared = resolve; }) };
     this.attempt = attempt;
     // Listen before cleanup/permissions, so completions during setup are buffered.
-    attempt.replies = this.backend ? connectCompanionLiveReplies(this.backend, conversation) : undefined;
+    if (target.announcement) {
+      attempt.announcement = new CompanionLiveAnnouncement(
+        (event) => { if (current()) attempt.connection?.send(event); },
+        (error) => { if (current()) this.finishAnnouncement(error); },
+      );
+      attempt.announcement.deliver(target.announcement);
+    } else attempt.replies = this.backend ? connectCompanionLiveReplies(this.backend, conversation) : undefined;
     try {
       await previousCleanup;
       if (!current()) return;
@@ -153,21 +175,32 @@ export class CompanionLiveController {
       if (!current()) return;
       attempt.connection = this.platform.createConnection({
         target, signal: abort.signal, timing, reconnecting,
-        onEvent: (event) => { if (current()) conversation.receive(event); },
+        onEvent: (event) => {
+          if (current() && (!attempt.announcement || event.type === 'session.output_transcript.delta')) conversation.receive(event);
+        },
         onCapturing: () => update({ capturing: true }),
         onReady: (backendModel) => {
           if (!current()) return;
           this.reconnectAttempt = 0;
           attempt.replies?.ready();
+          attempt.announcement?.connected();
           update({ status: 'listening', error: '', backendModel });
         },
         onError: (error) => {
           if (!current()) return;
+          if (attempt.announcement) { this.finishAnnouncement(error); return; }
           console.warn('[CompanionLive] Session failed', error);
           this.endAttempt('reconnect');
           this.scheduleReconnect(target);
         },
-        onPlaybackBlocked: (playbackBlocked) => update({ playbackBlocked }),
+        onPlaybackBlocked: (playbackBlocked) => {
+          if (!current()) return;
+          attempt.announcement?.playbackBlocked(playbackBlocked);
+          update({ playbackBlocked });
+        },
+        onAnnouncementPlayback: attempt.announcement ? (event) => {
+          if (current()) attempt.announcement?.playback(event);
+        } : undefined,
         onStop: () => { if (current()) void this.stop(); },
       });
       prepared();
@@ -175,6 +208,10 @@ export class CompanionLiveController {
       await attempt.connection.start();
     } catch (error) {
       if (current()) {
+        if (attempt.announcement) {
+          this.finishAnnouncement(error instanceof Error ? error.message : 'Live voice could not start.');
+          return;
+        }
         console.warn('[CompanionLive] Session setup failed', error);
         this.endAttempt('reconnect');
         this.scheduleReconnect(target);
@@ -182,10 +219,16 @@ export class CompanionLiveController {
     } finally { prepared(); if (!attempt.connection) timing.close(); }
   }
 
+  private finishAnnouncement(error?: string): void {
+    void this.stop();
+    if (error) this.setState({ error });
+  }
+
   private endAttempt(reason: CompanionLiveCloseReason): void {
     const attempt = this.attempt;
     this.attempt = null;
     if (!attempt) return;
+    attempt.announcement?.stop();
     attempt.replies?.stop();
     attempt.conversation.stop();
     attempt.abort.abort();
@@ -229,6 +272,7 @@ export class CompanionLiveController {
 }
 
 const EMPTY: CompanionLiveState = {
+  announcing: false,
   hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0,
   muted: false, playbackBlocked: false, backendModel: '', targetDeviceId: '', targetName: '',
 };

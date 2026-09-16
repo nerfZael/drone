@@ -21,13 +21,14 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   const [defaultSystemPrompt, setDefaultSystemPrompt] = React.useState('');
   const [maxSystemPromptChars, setMaxSystemPromptChars] = React.useState(0);
   const mounted = React.useRef(true);
+  const pageActive = React.useRef(true);
   const writing = React.useRef(false);
   const enabledRef = React.useRef(false);
   const settingsGeneration = React.useRef(0);
   const scheduleRef = React.useRef(reconnectSchedule);
   scheduleRef.current = reconnectSchedule;
   const [live] = React.useState(() => new CompanionLiveController({
-    canStart: () => enabledRef.current,
+    canStart: () => enabledRef.current && mounted.current && pageActive.current,
     createConnection: (options) => new CompanionLiveConnection(options),
     schedule: (callback, delay) => scheduleRef.current(callback, delay),
   }, controller));
@@ -58,12 +59,15 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     void load();
     const refresh = () => void load();
     window.addEventListener('focus', refresh);
-    const leave = () => stop();
+    const leave = () => { pageActive.current = false; void stop(); };
+    const show = () => { pageActive.current = true; };
     window.addEventListener('pagehide', leave);
+    window.addEventListener('pageshow', show);
     return () => {
       mounted.current = false;
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pagehide', leave);
+      window.removeEventListener('pageshow', show);
       stop();
     };
   }, [load, stop]);
@@ -107,6 +111,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       setSystemPrompt(result.systemPrompt);
       setDefaultSystemPrompt(result.defaultSystemPrompt);
       setMaxSystemPromptChars(result.maxSystemPromptChars);
+      if (!result.enabled) void stop();
       return true;
     } catch (error) {
       if (mounted.current && generation === settingsGeneration.current) {
@@ -117,7 +122,18 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       writing.current = false;
       if (mounted.current && generation === settingsGeneration.current) setSaving(false);
     }
-  }, []);
+  }, [stop]);
+
+  React.useEffect(() => {
+    if (!controller) return;
+    let previous = controller.getSnapshot();
+    return controller.subscribe(() => {
+      const next = controller.getSnapshot();
+      const completed = next.status === 'completed' && previous.status !== 'completed';
+      previous = next;
+      if (completed && next.trigger === 'subscription') live.announce(next.reply);
+    });
+  }, [controller, live]);
 
   const start = React.useCallback((run: CompanionLiveTarget['run'], workspaceLabel: string) =>
     live.start({ id: '', name: workspaceLabel, run }), [live]);

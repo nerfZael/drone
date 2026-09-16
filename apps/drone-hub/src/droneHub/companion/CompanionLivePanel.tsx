@@ -20,11 +20,13 @@ export function CompanionLivePanel() {
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 11a7 7 0 0 1-14 0M12 18v3" /></svg>}
           label="Microphone"
-          description={live.muted ? 'Unmute microphone' : 'Mute microphone'}
+          description={live.announcing ? 'Muted while announcing a subscription update' : live.muted ? 'Unmute microphone' : 'Mute microphone'}
           meta={live.muted ? 'Muted' : 'Live'}
           checked={!live.muted}
           onSelect={live.toggleMute}
+          disabled={live.announcing}
         />
+        {live.announcing ? <p className="px-2.5 py-1.5 text-xs text-[var(--fg-secondary)]">Announcing a subscription update. Voice will stop automatically.</p> : null}
         <CompanionMenuItem
           icon={<svg {...iconProps} fill="currentColor" stroke="none"><rect x="7" y="7" width="10" height="10" rx="1" /></svg>}
           label="End voice"

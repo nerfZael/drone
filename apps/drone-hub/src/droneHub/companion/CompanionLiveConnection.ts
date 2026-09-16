@@ -2,6 +2,7 @@ import { type CompanionLiveTiming, LiveAudioBuffer, type LivePcmAudio, type Live
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { browserMicrophoneCoordinator, type BrowserMicrophoneLease } from '../chat/browser-microphone-coordinator';
 import { openBrowserLivePcmAudio } from './browser-live-pcm-audio';
+import type { AnnouncementPlayback } from './CompanionLiveAnnouncement';
 
 type Options = {
   timing?: CompanionLiveTiming;
@@ -10,6 +11,7 @@ type Options = {
   onCapturing?(): void;
   onError(error: string): void;
   onPlaybackBlocked(blocked: boolean): void;
+  onAnnouncementPlayback?(event: AnnouncementPlayback): void;
   openAudio?(callbacks: LivePcmCallbacks): Promise<LivePcmAudio>;
 };
 
@@ -25,8 +27,8 @@ export class CompanionLiveConnection {
   private heartbeat?: ReturnType<typeof setInterval>;
   private timeout?: ReturnType<typeof setTimeout>;
   private closeTimer?: ReturnType<typeof setTimeout>;
-  private cleanup: Promise<void> = Promise.resolve();
   private pendingAudio: Promise<void> = Promise.resolve();
+  private cleanup: Promise<void> = Promise.resolve();
   private readonly audioAbort = new AbortController();
   private readonly buffer: LiveAudioBuffer;
 
@@ -49,7 +51,9 @@ export class CompanionLiveConnection {
     this.pendingAudio = new Promise((resolve) => { settled = resolve; });
     try {
       try {
-        this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked)))({
+        this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked, {
+          muted: this.muted, onAnnouncementPlayback: this.options.onAnnouncementPlayback,
+        })))({
           signal: this.audioAbort.signal, onPlayback: (event) => this.options.timing?.playback(event), onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error),
         });
       } finally { settled(); }

@@ -112,7 +112,7 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      13,
+      14,
     );
     assert.ok(
       requireHubDatabase().read((connection) =>

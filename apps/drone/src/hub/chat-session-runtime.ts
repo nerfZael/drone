@@ -1024,10 +1024,15 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   async function buildPendingRowsForChat(opts: {
     droneId: string;
     chatName: string;
+    excludeCompletedPending?: boolean;
   }): Promise<PendingPrompt[]> {
-    return (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(
-      -50,
-    );
+    return (
+      await readPendingPrompts({
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+        excludeCompleted: opts.excludeCompletedPending,
+      })
+    ).slice(-50);
   }
 
   function formatTranscriptRow(turnIndex: number, turn: any): any {
@@ -1216,6 +1221,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     tailRaw?: string | null;
     includeTranscript: boolean;
     includePending: boolean;
+    excludeCompletedPending?: boolean;
     includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
@@ -1303,7 +1309,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     }
 
     const pending = opts.includePending
-      ? await buildPendingRowsForChat({ droneId, chatName: opts.chatName })
+      ? await buildPendingRowsForChat({
+          droneId,
+          chatName: opts.chatName,
+          excludeCompletedPending: opts.excludeCompletedPending,
+        })
       : [];
     const chatId = String((entry as any)?.id ?? '').trim() || null;
     const turnCount =
@@ -1347,6 +1357,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     tailRaw?: string | null;
     includeTranscript: boolean;
     includePending: boolean;
+    excludeCompletedPending?: boolean;
     includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
@@ -1458,6 +1469,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const pending = opts.includePending
       ? pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
           keepRecentlyCompleted: true,
+          excludeCompleted: opts.excludeCompletedPending,
         })
       : [];
     opts.mark?.('format');

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pendingChatSummary } from './chat-read/helpers/chat-read-presentation';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -898,33 +899,6 @@ async function updateUiPreferences(
   throw new Error('Failed to update UI preferences');
 }
 
-function pendingChatSummary(response: any, limit: number, maxCharsPerField: number) {
-  const pendingMessages = Array.isArray(response?.pending) ? response.pending : [];
-  const pending = pendingMessages.slice(0, limit).map((item: any) => {
-    const prompt = truncateString(String(item?.prompt ?? ''), maxCharsPerField);
-    return {
-      id: cleanString(item?.id),
-      at: cleanString(item?.at),
-      state: cleanString(item?.state, 'queued'),
-      status: response?.draft === true ? 'held_in_draft' : cleanString(item?.state, 'queued'),
-      prompt: prompt.value,
-      promptOriginalLength: prompt.originalLength,
-      ...(prompt.truncated ? { promptTruncated: true } : {}),
-    };
-  });
-  return {
-    draft: response?.draft === true,
-    pending,
-    pendingCount: pendingMessages.length,
-    pendingTruncated: pendingMessages.length > pending.length,
-    ...(response?.draft === true && pendingMessages.length > 0
-      ? {
-          message: 'Pending messages are held until this draft chat is published. They have not started execution.',
-        }
-      : {}),
-  };
-}
-
 type McpChatTreeSnapshot = {
   drone: {
     id: string;
@@ -1327,62 +1301,6 @@ function normalizeRenameRequests(args: any = {}) {
       seen.add(item.drone);
       return true;
     });
-}
-
-function boundedTranscriptTurn(turn: any, maxCharsPerField: number, includeActivity = false) {
-  // Deliberate conversational projection: never spread raw turn data into model text.
-  const result: Record<string, unknown> = {};
-  for (const key of ['id', 'at', 'promptAt', 'startedAt', 'completedAt', 'model', 'reasoning']) {
-    if (typeof turn?.[key] === 'string') result[key] = turn[key].slice(0, 256);
-  }
-  if (Number.isSafeInteger(turn?.turn) && turn.turn > 0) result.turn = turn.turn;
-  for (const key of ['ok', 'inheritedFromClone', 'silentCompletion']) {
-    if (typeof turn?.[key] === 'boolean') result[key] = turn[key];
-  }
-  for (const key of ['prompt', 'output', 'error']) {
-    if (typeof turn?.[key] !== 'string') continue;
-    const next = truncateString(turn[key], maxCharsPerField);
-    result[key] = next.value;
-    result[`${key}OriginalLength`] = next.originalLength;
-    if (next.truncated) {
-      result[`${key}Truncated`] = true;
-      result.truncated = true;
-    }
-  }
-  const summary = turn?.activitySummary;
-  if (summary?.available === true) {
-    result.activitySummary = {
-      available: true,
-      source: typeof summary.source === 'string' ? summary.source.slice(0, 128) : undefined,
-      messageCount: boundedCount(summary.messageCount),
-      toolCallCount: boundedCount(summary.toolCallCount),
-      truncated: summary.truncated === true,
-    };
-  }
-  if (turn?.fileChanges?.counts) {
-    const changes = turn.fileChanges;
-    const counts = changes.counts;
-    result.fileChangesSummary = {
-      changed: boundedCount(counts.changed),
-      additions: boundedCount(counts.additions),
-      deletions: boundedCount(counts.deletions),
-      ...(['exact', 'base-normalized', 'partial', 'unavailable'].includes(changes.attribution)
-        ? { attribution: changes.attribution } : {}),
-      ...(changes.truncated === true || changes.metadataTruncated === true
-        ? { truncated: true } : {}),
-    };
-  }
-  if (Array.isArray(turn?.attachments) && turn.attachments.length > 0) {
-    result.attachmentCount = turn.attachments.length;
-  }
-  // Detailed evidence is opt-in. The shared Blip result budget still applies to model requests.
-  if (includeActivity && turn?.activity) result.activity = turn.activity;
-  return result;
-}
-
-function boundedCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(value))) : 0;
 }
 
 async function createDronePreferences(services: HubServices, repoPath = '') {
@@ -1881,7 +1799,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         const id = cleanString(drone.id);
         if (id) droneById.set(id, drone);
       }
-      const search = searchActiveChatMessages({
+      const search = await searchActiveChatMessages({
         query: args.query,
         droneIds: [...droneById.keys()],
         chatName: cleanString(args.chatName) || undefined,
@@ -3613,7 +3531,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. Native chats return bounded visible messages with historyKind=messages, without detailed activity. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
+      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. All chats return bounded visible messages with historyKind=messages. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -3629,40 +3547,10 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       const includeActivity = args.includeActivity === true;
       try {
         const response = await requestJson(
-          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?transcript=tail&tail=${limit}&pending=all&activity=${includeActivity ? 'full' : 'summary'}`,
+          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}&maxChars=${maxCharsPerField}&activity=${includeActivity ? 'full' : 'summary'}`,
           { method: 'GET' },
         );
-        if (response?.agent?.kind === 'native') {
-          const history = await requestJson(
-            `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/native/messages?limit=${limit * 2}&maxChars=${maxCharsPerField}`,
-            { method: 'GET' },
-          );
-          return toolResult({
-            ok: true, drone: args.drone, chat, historyKind: 'messages',
-            messages: history.messages, hasOlder: history.hasOlder,
-            // Native completion leaves shared prompts marked sent. Those are
-            // delivery records, not evidence that the native agent is running.
-            ...pendingChatSummary({ ...response, pending: (Array.isArray(response.pending) ? response.pending : []).filter(
-              (prompt: any) => prompt.state !== 'sent',
-            ) }, limit, maxCharsPerField),
-            limit, maxCharsPerField, includeActivity: false,
-          });
-        }
-        const turns = Array.isArray(response?.transcripts)
-          ? response.transcripts
-              .slice(-limit)
-              .map((turn: any) => boundedTranscriptTurn(turn, maxCharsPerField, includeActivity))
-          : [];
-        return toolResult({
-          ok: true,
-          drone: args.drone,
-          chat,
-          turns,
-          ...pendingChatSummary(response, limit, maxCharsPerField),
-          limit,
-          maxCharsPerField,
-          includeActivity,
-        });
+        return toolResult(response);
       } catch (error: any) {
         if (error?.status !== 410) throw error;
         const state = await requestJson(
