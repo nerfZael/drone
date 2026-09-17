@@ -50,3 +50,16 @@ test('a missing layout callback times out and allows a new request', async () =>
   const retry = screen.execute({ markdown: 'Visible' }); screen.measured(2, 300, 22);
   expect(await retry).toMatchObject({ displayed: true });
 }, 7000);
+
+test('a scrollable desktop host can retain accepted content while moving or resizing', async () => {
+  const screen = new CompanionScreen();
+  screen.resize(400, 300);
+  const shown = screen.execute({ markdown: 'Keep this display' });
+  screen.measured(screen.getSnapshot().candidate!.id, 100, 50);
+  await shown;
+  screen.resize(300, 200, '', { preserveContent: true });
+  expect(screen.getSnapshot().markdown).toBe('Keep this display');
+  expect(screen.constraints()).toMatchObject({ width: 300, height: 200 });
+  screen.resize(200, 100);
+  expect(screen.getSnapshot().markdown).toBe('');
+});

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Dialog } from 'radix-ui';
+import { useCrossWindowFocus } from '../use-cross-window-focus';
 import { cn } from '../cn';
 import { UiIconButton } from './Button';
 
@@ -40,6 +41,7 @@ export type UiDialogProps = {
   initialFocusRef?: React.RefObject<HTMLElement | null>;
   className?: string;
   bodyClassName?: string;
+  portalContainer?: HTMLElement;
 };
 
 export function UiDialog({
@@ -58,7 +60,9 @@ export function UiDialog({
   initialFocusRef,
   className,
   bodyClassName,
+  portalContainer,
 }: UiDialogProps) {
+  const portalFocus = useCrossWindowFocus(portalContainer);
   const panelClassName = cn(
     'fixed left-1/2 top-1/2 z-[121] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[var(--radius-xlarge)] border bg-[var(--panel-overlay)] shadow-[var(--edge-highlight),var(--shadow-dialog)] animate-dialog-in focus:outline-none motion-reduce:animate-none',
     sizeClassName[size],
@@ -122,15 +126,19 @@ export function UiDialog({
 
   const dialog = (
     <>
-      <Dialog.Overlay className="fixed inset-0 z-[120] bg-[var(--scrim)] backdrop-blur-sm animate-overlay-in motion-reduce:animate-none" />
+      {portalFocus.external
+        ? <div className="fixed inset-0 z-[120] bg-[var(--scrim)] backdrop-blur-sm" onClick={() => dismissible && onClose()} />
+        : <Dialog.Overlay className="fixed inset-0 z-[120] bg-[var(--scrim)] backdrop-blur-sm animate-overlay-in motion-reduce:animate-none" />}
       <Dialog.Content
         aria-modal="true"
         {...(description ? {} : { 'aria-describedby': undefined })}
         onOpenAutoFocus={(event) => {
-          if (!initialFocusRef?.current) return;
+          if (!initialFocusRef?.current) { portalFocus.onOpenAutoFocus(event); return; }
           event.preventDefault();
           initialFocusRef.current.focus();
         }}
+        onCloseAutoFocus={portalFocus.onCloseAutoFocus}
+        onKeyDown={portalFocus.onKeyDown}
         onEscapeKeyDown={(event) => {
           if (!dismissible) event.preventDefault();
         }}
@@ -145,8 +153,8 @@ export function UiDialog({
   );
 
   return (
-    <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && dismissible && onClose()}>
-      <Dialog.Portal>{dialog}</Dialog.Portal>
+    <Dialog.Root modal={!portalFocus.external} open={open} onOpenChange={(nextOpen) => !nextOpen && dismissible && onClose()}>
+      <Dialog.Portal container={portalContainer}>{dialog}</Dialog.Portal>
     </Dialog.Root>
   );
 }

@@ -1,3 +1,4 @@
+import { useCompanionWindow } from './companion-window';
 import React from 'react';
 import { CompanionOperationHeadline } from './CompanionOperationHeadline';
 import { Tooltip } from 'radix-ui';
@@ -235,6 +236,7 @@ function ProposalOperationHoverCard({
   droneLabel(droneId: string): string;
   children: React.ReactElement;
 }) {
+  const companionWindow = useCompanionWindow();
   const createLocation = operation.type === 'create_drone'
     ? proposalLocation(operation, defaultRepoPath)
     : null;
@@ -246,7 +248,7 @@ function ProposalOperationHoverCard({
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
-      <Tooltip.Portal>
+      <Tooltip.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
         <Tooltip.Content
           side="left"
           align="center"
@@ -698,6 +700,7 @@ export function CompanionProposalCard({
   onDiscard?(): void;
   historyDetails?: CompanionProposalHistoryDetails;
 }) {
+  const companionWindow = useCompanionWindow();
   const operationResult = React.useMemo(
     () => new Map((execution?.operations ?? executionProgress?.operations ?? []).map((item) => [item.id, item])),
     [execution, executionProgress],
@@ -858,6 +861,7 @@ export function CompanionProposalCard({
       </aside>
       {/* Full-size preview for long proposals: every step open, nothing clamped. */}
       <UiDialog
+        portalContainer={companionWindow.portalContainer}
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         eyebrow={historyDetails ? 'Executed proposal' : 'Companion proposal'}

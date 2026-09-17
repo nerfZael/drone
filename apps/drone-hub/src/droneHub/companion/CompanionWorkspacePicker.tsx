@@ -41,11 +41,11 @@ export function CompanionWorkspacePicker({ onClose }: { onClose(): void }) {
               last = controls?.[controls.length - 1];
             if (
               event.shiftKey &&
-              (document.activeElement === first || document.activeElement === panel.current)
+              (panel.current?.ownerDocument.activeElement === first || panel.current?.ownerDocument.activeElement === panel.current)
             ) {
               event.preventDefault();
               last?.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
+            } else if (!event.shiftKey && panel.current?.ownerDocument.activeElement === last) {
               event.preventDefault();
               first?.focus();
             }

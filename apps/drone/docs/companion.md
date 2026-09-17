@@ -1,5 +1,19 @@
 # Companion
 
+## Floating desktop window
+
+In the desktop app, open Companion’s options menu and turn on **Floating window**. Companion moves to a resizable native window, requested always on top. Turning the switch off or closing the native title bar returns it to the main app, restoring the main window if minimized. The in-panel **Close Companion** button retains its existing session-closing behavior. When there is no visible Companion content, the floating window hides and returns for the next session.
+
+The choice lasts until the main app reloads or closes; it is not a saved Hub setting. Window size and position are not persisted across detaching again. The floating window belongs to the main app’s lifetime, but remains usable while the main window is minimized. It uses normal desktop window controls and does not request visibility across every virtual desktop or above full-screen apps.
+
+Moving the existing React portal retains the conversation, recording/live connection, in-flight work, proposals, open panels and editor drafts. Menus, proposal dialogs, theme changes, and the generated display follow the window. Portable Companion editors use a shadow root and Monaco’s textarea input to retain their model, selection and undo history while keeping keyboard focus in the correct document. Previously accepted generated display content is retained and can scroll after resizing; pending layout measurements can still return `SCREEN_CHANGED` for the agent to retry.
+
+This toggle is desktop-only. Electron documents [always-on-top as unsupported on native Wayland](https://www.electronjs.org/docs/latest/api/browser-window#winsetalwaysontopflag-level-relativelevel), where the window behaves as a normal floating window. Wayland also restricts programmatic positioning and focus. Windows, macOS and X11 use Electron’s normal floating level; this does not promise visibility over system UI or other desktops.
+
+Focused regression check (no app build or Hub server required): `node apps/drone-hub/scripts/smoke-companion-window.cjs` (prefix with `xvfb-run -a` for Linux CI). It checks real Electron window creation, toggling, native close, visibility, state retention, Monaco typing/undo and cross-window menu/dialog keyboard focus. Its editor loads the installed Monaco package locally.
+
+Manual acceptance: switch modes during a recording, live conversation, and running proposal; verify no restart or duplicate work. Edit an unsaved prompt/instructions draft, move the window, type and undo, then save. Open history/subscriptions/proposal details; resize, change theme, minimize the main app, close the floating title bar, and reopen Companion. Check placement and stacking on the target OS, especially native Wayland and macOS full-screen/Spaces.
+
 Desktop Companion now includes an optional, remembered [Live voice mode](companion-live-voice.md). It defaults off and uses GPT-Live 1 with client delegation to the existing configured Companion backend. See that document for controls, lifecycle, and manual validation.
 
 | Field               | Value                                                                                                                                  |

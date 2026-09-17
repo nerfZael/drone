@@ -15,6 +15,7 @@ const {
   resolveHubApiTokenPath,
   startDesktopStaticUiServer,
 } = require('./hub-electron-static-server.cjs');
+const { installCompanionWindow } = require('./hub-electron-companion.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 const { connectDesktopGlobalShortcuts } = require('./hub-electron-global-shortcuts.cjs');
 const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
@@ -418,7 +419,8 @@ function createWindow() {
     event.preventDefault();
     mainWindow.webContents.send(NAVIGATION_ZOOM_CHANNEL, { action });
   });
-  installChatWindows({ mainWindow, ipcMain, shell });
+  const openOtherWindow = installChatWindows({ mainWindow, ipcMain, shell });
+  installCompanionWindow({ owner: mainWindow, ipcMain, shell, isQuitting: () => isQuitting, openOtherWindow });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) return;
     event.preventDefault();

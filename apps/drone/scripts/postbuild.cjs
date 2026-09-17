@@ -140,6 +140,7 @@ async function copyDroneHubElectronMain(root) {
     'hub-notification-preload.cjs',
     'hub-notification.html',
     'hub-notification-renderer.js',
+    'hub-electron-companion.cjs',
     'hub-electron-global-shortcuts.cjs',
     'hub-x11-backquote.cjs',
     'hub-x11-backquote.py',

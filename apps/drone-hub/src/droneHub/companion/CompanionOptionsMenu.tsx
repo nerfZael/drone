@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCompanionWindow } from './companion-window';
 import { contextMenuItemBaseClass, contextMenuSeparatorClass } from '../../ui/dropdown';
 import { useCompanion } from './CompanionContext';
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
@@ -99,6 +100,7 @@ export function CompanionOptionsMenu({
   onClose(): void;
 }) {
   const companion = useCompanion();
+  const companionWindow = useCompanionWindow();
   if (!companion) return null;
   const live = companion.live;
   const liveConversation = live?.status === 'listening' || live?.status === 'connecting';
@@ -141,6 +143,13 @@ export function CompanionOptionsMenu({
       ) : null}
 
       <CompanionMenuSection label="Companion">
+        {companionWindow.supported ? <CompanionMenuItem
+          icon={<svg {...iconProps}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M14 3h7v7M21 3l-9 9" /></svg>}
+          label="Floating window"
+          description="Show Companion in a separate window, kept on top where supported; closing the window returns it to the app"
+          checked={companionWindow.detached}
+          onSelect={pick(companionWindow.toggle)}
+        /> : null}
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" /></svg>}
           label="Execution history"

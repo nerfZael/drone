@@ -1,4 +1,5 @@
 import React from 'react';
+import { PortableEditorHost } from './PortableEditorHost';
 import { desktopMonacoTheme } from '../../theme';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
@@ -43,6 +44,8 @@ type ChatComposerEditorProps = {
   onSendQueued: () => void;
   ariaLabel: string;
   maxHeight?: string;
+  /** Keep input and keyboard focus scoped to an editor that can move between windows. */
+  portable?: boolean;
 };
 
 function clampSelection(selection: ChatComposerSelection, value: string): ChatComposerSelection {
@@ -68,6 +71,7 @@ export const ChatComposerEditor = React.forwardRef<
     onSendQueued,
     ariaLabel,
     maxHeight,
+    portable,
   },
   forwardedRef,
 ) {
@@ -160,8 +164,9 @@ export const ChatComposerEditor = React.forwardRef<
       blur: () => {
         focusWhenEditorMountsRef.current = false;
         const editorNode = editorRef.current?.getDomNode();
-        const activeElement = document.activeElement;
-        if (activeElement instanceof HTMLElement && editorNode?.contains(activeElement)) {
+        const root = editorNode?.getRootNode() as Document | ShadowRoot | undefined;
+        const activeElement = root?.activeElement as HTMLElement | null;
+        if (activeElement && editorNode?.contains(activeElement)) {
           activeElement.blur();
         }
         fallbackRef.current?.blur();
@@ -211,6 +216,9 @@ export const ChatComposerEditor = React.forwardRef<
   const options = React.useMemo<MonacoEditorProps['options']>(
     () => ({
       readOnly: disabled || readOnly,
+      // Native EditContext belongs to the creating JS window; portable views
+      // use Monaco's textarea input so it follows the editor's owner document.
+      ...(portable ? { editContext: false } : {}),
       cursorBlinking: readOnly ? 'solid' : 'blink',
       ariaLabel,
       automaticLayout: true,
@@ -236,7 +244,7 @@ export const ChatComposerEditor = React.forwardRef<
       parameterHints: { enabled: false },
       contextmenu: true,
     }),
-    [ariaLabel, disabled, editorZoomLevel, readOnly],
+    [ariaLabel, disabled, editorZoomLevel, readOnly, portable],
   );
 
   const fallback = (
@@ -309,7 +317,7 @@ export const ChatComposerEditor = React.forwardRef<
     />
   );
 
-  return (
+  const editor = (
     <AppShortcutBoundary
       data-editor-zoom-surface="chat-composer-editor"
       data-chat-input-focus-id={focusTargetId || undefined}
@@ -341,4 +349,5 @@ export const ChatComposerEditor = React.forwardRef<
       </MonacoEditorErrorBoundary>
     </AppShortcutBoundary>
   );
+  return portable ? <PortableEditorHost>{editor}</PortableEditorHost> : editor;
 });
