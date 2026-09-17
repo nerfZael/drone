@@ -12,14 +12,16 @@ export function prepareCompanionWindow(source: Document, target: Document): () =
       if (value === null) target.documentElement.removeAttribute(name);
       else target.documentElement.setAttribute(name, value);
     }
-    target.documentElement.style.setProperty('--companion-max-height', `${Math.max(48, (target.defaultView?.screen.availHeight || 900) - 32)}px`);
     target.body.className = source.body.className;
     target.body.style.cssText = 'margin:0; overflow:hidden; background:transparent';
   };
   const stopStyles = syncDocumentStyles(source, target.head);
   copyTheme();
   const style = target.createElement('style');
+  // The max height is a conservative limit until the desktop reports the room around the bar;
+  // it lives in a stylesheet so theme syncing of the root element's style attribute cannot wipe it.
   style.textContent = `
+    :root { --companion-max-height: ${Math.max(48, (target.defaultView?.screen.availHeight || 900) - 32)}px; }
     html, body { background: transparent !important; }
     [data-companion-window-panel] aside { max-height: min(36rem, calc(var(--companion-max-height) - 16px)); }
     [data-companion-drag-handle] { -webkit-app-region: drag; }

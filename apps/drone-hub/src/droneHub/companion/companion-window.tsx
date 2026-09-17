@@ -7,6 +7,8 @@ import { prepareCompanionWindow } from './helpers/prepare-companion-window';
 type CompanionWindowState = {
   supported: boolean;
   detached: boolean;
+  /** Where content goes relative to the bar when detached: up from a bar low on the screen, down from a high one. */
+  flow: CompanionWindowFlow;
   error: string;
   toggle(): void;
   portalContainer?: HTMLElement;
@@ -14,7 +16,7 @@ type CompanionWindowState = {
 };
 
 const CompanionWindowContext = React.createContext<CompanionWindowState>({
-  supported: false, detached: false, error: '', toggle() {},
+  supported: false, detached: false, flow: 'up', error: '', toggle() {},
 });
 
 export function useCompanionWindow() {
@@ -30,6 +32,7 @@ export function useCompanionWindowHost(visible: boolean) {
   const floatingRef = React.useRef<Window | null>(null);
   const cleanupRef = React.useRef<(() => void) | null>(null);
   const [error, setError] = React.useState('');
+  const [placement, setPlacement] = React.useState<CompanionWindowPlacement | null>(null);
   const restoreAttempted = React.useRef(false);
   const attach = React.useCallback((savePreference = true) => {
     if (savePreference) useDroneHubUiStore.getState().setCompanionWindowDetached(false);
@@ -38,6 +41,7 @@ export function useCompanionWindowHost(visible: boolean) {
     cleanupRef.current = null;
     floatingRef.current = null;
     setFloating(null);
+    setPlacement(null);
     bridge?.control('attach');
   }, [bridge, host]);
 
@@ -56,9 +60,20 @@ export function useCompanionWindowHost(visible: boolean) {
     };
   }, [host, bridge]);
   React.useEffect(() => bridge?.onClose(() => attach()), [bridge, attach]);
+  // Subscribe for the hook's whole life: the desktop announces placement as soon as it creates the window.
+  React.useEffect(() => bridge?.onPlacement?.(setPlacement), [bridge]);
+  React.useEffect(() => {
+    if (!floating || !placement) return;
+    // Appended after the window's base styles so it wins; removed when the window closes.
+    const style = floating.document.createElement('style');
+    style.dataset.companionPlacement = placement.flow;
+    style.textContent = `:root { --companion-max-height: ${Math.max(48, Math.floor(placement.maxHeight))}px; }`;
+    floating.document.head.append(style);
+    return () => style.remove();
+  }, [floating, placement]);
   React.useEffect(() => {
     if (!floating || !bridge || !host) return;
-    const stopSizing = observeCompanionWindowSize(host, floating, height => bridge.control('resize', { height }));
+    const stopSizing = observeCompanionWindowSize(host, floating, size => bridge.control('resize', size));
     bridge.control(visible ? 'show' : 'hide');
     return stopSizing;
   }, [bridge, floating, host, visible]);
@@ -95,7 +110,7 @@ export function useCompanionWindowHost(visible: boolean) {
   }, [attach, detach]);
 
   const state: CompanionWindowState = {
-    supported: Boolean(bridge), detached: Boolean(floating), error, toggle,
+    supported: Boolean(bridge), detached: Boolean(floating), flow: floating && placement ? placement.flow : 'up', error, toggle,
     portalContainer: host,
     ownerWindow: floating ?? (typeof window === 'undefined' ? undefined : window),
   };

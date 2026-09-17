@@ -88,6 +88,15 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
       ipcRenderer.on('drone-hub:companion-window-close', listener);
       return () => ipcRenderer.removeListener('drone-hub:companion-window-close', listener);
     },
+    onPlacement(callback) {
+      if (typeof callback !== 'function') return () => {};
+      const listener = (_event, placement) => {
+        if (!placement || (placement.flow !== 'up' && placement.flow !== 'down') || !Number.isFinite(placement.maxHeight)) return;
+        callback({ flow: placement.flow, maxHeight: placement.maxHeight });
+      };
+      ipcRenderer.on('drone-hub:companion-window-placement', listener);
+      return () => ipcRenderer.removeListener('drone-hub:companion-window-placement', listener);
+    },
   },
   reportDiagnostic(record) {
     ipcRenderer.send('drone-hub:diagnostic', record);

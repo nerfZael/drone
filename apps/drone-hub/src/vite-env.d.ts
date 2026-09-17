@@ -8,6 +8,22 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
+/** Which way the floating Companion window lays out content away from its bar. */
+type CompanionWindowFlow = 'up' | 'down';
+
+type CompanionWindowSize = {
+  height: number;
+  flow: CompanionWindowFlow;
+  /** The bar's height and its distance from the window edge it is docked to. */
+  bar: { height: number; inset: number };
+};
+
+type CompanionWindowPlacement = {
+  flow: CompanionWindowFlow;
+  /** Tallest window that keeps the bar in place inside the work area. */
+  maxHeight: number;
+};
+
 interface Window {
   readonly __DRONE_HUB_RUNTIME_CONFIG__?: {
     readonly desktop?: boolean;
@@ -22,8 +38,9 @@ interface Window {
     onNotificationClick?(callback: (target: { droneId: string; chatName: string }) => void): () => void;
     onNotificationError?(callback: (error: string) => void): () => void;
     companionWindow?: {
-      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize', size?: { height: number }): void;
+      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize', size?: CompanionWindowSize): void;
       onClose(callback: () => void): () => void;
+      onPlacement?(callback: (placement: CompanionWindowPlacement) => void): () => void;
     };
     reportDiagnostic?(record: Record<string, unknown>): void;
     onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;

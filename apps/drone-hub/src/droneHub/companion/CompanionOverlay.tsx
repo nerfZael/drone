@@ -173,8 +173,12 @@ export function CompanionOverlay() {
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
+  // Floating window: the bar is docked to one window edge and never moves. Everything else
+  // stacks away from it, upward when the bar sits low on the screen and downward when it sits high.
+  const flowsDown = companionWindow.detached && companionWindow.flow === 'down';
+  const popoverSide = flowsDown ? 'bottom' : 'top';
   return companionWindow.render(
-    <div data-companion-surface="true" data-companion-window-panel="true" style={companionWindow.detached ? { position: 'absolute', top: 'auto', bottom: 0, right: 0, width: '100%', maxHeight: 'var(--companion-max-height)', overflowY: 'auto', padding: 8, alignItems: 'flex-end', flexDirection: 'column' } : recorderHeight > 0 ? {
+    <div data-companion-surface="true" data-companion-window-panel="true" data-companion-flow={companionWindow.detached ? companionWindow.flow : undefined} style={companionWindow.detached ? { position: 'absolute', top: flowsDown ? 0 : 'auto', bottom: flowsDown ? 'auto' : 0, right: 0, width: '100%', maxHeight: 'var(--companion-max-height)', overflowY: 'auto', padding: 8, alignItems: 'flex-end', flexDirection: flowsDown ? 'column-reverse' : 'column' } : recorderHeight > 0 ? {
       zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
@@ -209,19 +213,20 @@ export function CompanionOverlay() {
           onDiscard={() => companion.discardProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
         />
       ) : null}
-      <div className={`flex min-h-0 flex-col gap-3 ${companionWindow.detached ? 'w-fit max-w-full' : 'w-full'} ${companionWindow.detached ? '' : panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
+      <div className={`flex min-h-0 w-full gap-3 ${flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companionWindow.detached ? '' : panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
       {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
-      {/* The proposal strip docks onto the window's top edge so it works even when the window is a single row. */}
-      <div className={`flex min-h-0 w-full flex-col ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}>
+      {/* The proposal strip docks onto the window's outer edge so it works even when the window is a single row. */}
+      <div className={`flex min-h-0 w-full ${flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}>
       <CompanionProposalStrip
         proposals={companion.proposals}
         selectedId={companion.selectedProposalId}
         selectedOpen={!proposalHidden}
+        edge={flowsDown ? 'bottom' : 'top'}
         onSelect={(targetId) => {
           setProposalVisibility({ targetId, autoApprove: companion.autoApprove,
             hidden: targetId === companion.selectedProposalId ? !proposalHidden : false });
@@ -230,11 +235,11 @@ export function CompanionOverlay() {
         }}
       />
       <aside
-        className={`flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] ${companion.proposals.length > 0 ? 'rounded-tr-none' : ''}`}
+        className={`flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
         aria-label="Companion"
       >
-      {/* Header doubles as the user's message once a transcript exists. */}
-      <div data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
+      {/* Header doubles as the user's message once a transcript exists. In the floating window it is the bar that stays put. */}
+      <div data-companion-window-bar="true" data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
         <Popover.Root open={expanded} onOpenChange={setExpanded}>
           <Popover.Trigger asChild>
             <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}
@@ -247,7 +252,7 @@ export function CompanionOverlay() {
             </button>
           </Popover.Trigger>
           <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
-            <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side="top" align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
+            <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side={popoverSide} align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
               className="z-[110] w-[min(24rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--shadow-dialog)]">
               <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 text-xs text-[var(--muted)]">
                 <span className="flex-1">{active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)} · {companion.activity.length} tool calls</span>
@@ -411,7 +416,7 @@ export function CompanionOverlay() {
               </button>
             </Popover.Trigger>
             <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
-              <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side="top" align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
+              <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side={popoverSide} align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
                 className="z-[110] w-[min(21rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-[var(--shadow-dialog)]">
                 <CompanionOptionsMenu
                   historyOpen={historyOpen}
@@ -451,7 +456,7 @@ export function CompanionOverlay() {
           ) : null}
           {companion.reply ? (
             <div data-companion-drag-handle={companionWindow.detached || undefined}
-              className={`px-3 pb-2 pt-0.5 ${companionWindow.detached ? 'cursor-move select-none' : ''}`}>
+              className={`px-3 ${companionWindow.detached && !flowsDown ? 'pb-0.5 pt-2' : 'pb-2 pt-0.5'} ${companionWindow.detached ? 'cursor-move select-none' : ''}`}>
               <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
             </div>
           ) : null}

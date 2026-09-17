@@ -8,7 +8,8 @@ function proposalStatusSuffix(status: ProposalSummary['status']): string {
 }
 
 /**
- * Numbered tabs for the pending proposals, attached to the top edge of the Companion window.
+ * Numbered tabs for the pending proposals, attached to an edge of the Companion window:
+ * the top edge normally, the bottom edge when the floating window lays content out below its bar.
  * Horizontal so it never depends on the window's height, which can be a single row.
  * Pressing the reviewed number again asks the owner to hide or show its card.
  */
@@ -16,18 +17,22 @@ export function CompanionProposalStrip({
   proposals,
   selectedId,
   selectedOpen = true,
+  edge = 'top',
   onSelect,
 }: {
   proposals: readonly ProposalSummary[];
   selectedId: string | null;
   selectedOpen?: boolean;
+  edge?: 'top' | 'bottom';
   onSelect(targetId: string): void;
 }) {
   if (proposals.length === 0) return null;
   return (
     <nav
       aria-label="Pending proposals"
-      className="flex max-w-[20rem] shrink-0 items-center gap-1 self-end rounded-t-lg border border-b-0 border-[var(--border)] bg-[var(--panel-raised)] px-1.5 pb-0.5 pt-1 shadow-[var(--edge-highlight)]"
+      className={`flex max-w-[20rem] shrink-0 items-center gap-1 self-end border border-[var(--border)] bg-[var(--panel-raised)] px-1.5 shadow-[var(--edge-highlight)] ${
+        edge === 'bottom' ? 'rounded-b-lg border-t-0 pb-1 pt-0.5' : 'rounded-t-lg border-b-0 pb-0.5 pt-1'
+      }`}
     >
       <span className="shrink-0 px-1 text-[10px] uppercase tracking-wider text-[var(--muted-dim)]">
         {proposals.length === 1 ? 'Proposal' : 'Proposals'}

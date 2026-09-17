@@ -16,11 +16,14 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
   const controls: string[] = [];
+  const sizes: CompanionWindowSize[] = [];
   let onClose: (() => void) | undefined;
+  let onPlacement: ((placement: CompanionWindowPlacement) => void) | undefined;
   Object.assign(source, {
     droneHubDesktop: { companionWindow: {
-      control: (action: string) => controls.push(action),
+      control: (action: string, size?: CompanionWindowSize) => { controls.push(action); if (action === 'resize' && size) sizes.push(size); },
       onClose: (callback: () => void) => { onClose = callback; return () => { onClose = undefined; }; },
+      onPlacement: (callback: (placement: CompanionWindowPlacement) => void) => { onPlacement = callback; return () => { onPlacement = undefined; }; },
     } },
     open: () => child,
   });
@@ -35,6 +38,7 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     const [count, setCount] = React.useState(0);
     React.useEffect(() => { mounts++; return () => { mounts--; }; }, []);
     return <><button id="toggle" onClick={floating.toggle}>{String(floating.detached)}</button>
+      <span id="flow">{floating.flow}</span>
       <button id="count" onClick={() => setCount(c => c + 1)}>{count}</button>
       <textarea defaultValue="unsaved draft" /><div role="alert">{floating.error}</div></>;
   }
@@ -62,11 +66,19 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     expect(child.document.querySelector('base')!.href).toBe(source.document.baseURI);
     expect(child.document.querySelector('[data-drone-hub-desktop-title-bar]')).toBeNull();
     expect(controls).toContain('show');
+    expect(sizes.at(-1)).toMatchObject({ flow: 'up', bar: { inset: 0 } });
+    expect(child.document.getElementById('flow')!.textContent).toBe('up');
+    // The desktop decides which way content flows from the bar and how tall the window may grow.
+    await act(async () => onPlacement!({ flow: 'down', maxHeight: 420 }));
+    expect(child.document.getElementById('flow')!.textContent).toBe('down');
+    const maxHeight = () => [...child.document.querySelectorAll('style')].filter(el => el.textContent?.includes('--companion-max-height')).map(el => el.textContent?.match(/--companion-max-height: (\d+px)/)?.[1]);
+    expect(maxHeight().at(-1)).toBe('420px');
     await act(async () => {
       source.document.documentElement.dataset.theme = 'light';
       await new Promise(resolve => setTimeout(resolve, 0));
     });
     expect(child.document.documentElement.dataset.theme).toBe('light');
+    expect(maxHeight().at(-1)).toBe('420px');
     await click(child.document, 'count');
     expect(child.document.getElementById('count')!.textContent).toBe('2');
     await act(async () => root.render(<Host visible={false} />));
@@ -78,6 +90,7 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     expect(source.document.getElementById('count')!.textContent).toBe('2');
     expect(source.document.getElementById('toggle')!.textContent).toBe('false');
     expect(controls.at(-1)).toBe('attach');
+    expect(source.document.getElementById('flow')!.textContent).toBe('up');
     expect(useDroneHubUiStore.getState().companionWindowDetached).toBe(false);
     expect(mounts).toBe(1);
     Object.assign(source, { open: () => null });
@@ -103,6 +116,7 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     useDroneHubUiStore.setState({ companionWindowDetached: previousDetached });
     expect(mounts).toBe(0);
     expect(onClose).toBeUndefined();
+    expect(onPlacement).toBeUndefined();
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
