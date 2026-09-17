@@ -167,7 +167,7 @@ export function CompanionOverlay() {
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
   return companionWindow.render(
-    <div data-companion-surface="true" style={companionWindow.detached ? { position: 'relative', inset: 'auto', width: '100%', maxHeight: 'none', padding: 12, alignItems: 'stretch', flexDirection: 'column' } : recorderHeight > 0 ? {
+    <div data-companion-surface="true" data-companion-window-panel="true" style={companionWindow.detached ? { position: 'absolute', top: 'auto', bottom: 0, right: 0, width: '100%', maxHeight: 'var(--companion-max-height)', overflowY: 'auto', padding: 8, alignItems: 'stretch', flexDirection: 'column' } : recorderHeight > 0 ? {
       zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
@@ -227,7 +227,10 @@ export function CompanionOverlay() {
         aria-label="Companion"
       >
       {/* Header doubles as the user's message once a transcript exists. */}
-      <div className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
+      <div data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
+        {companionWindow.detached ? <span title="Drag Companion" className="flex h-7 w-2 shrink-0 cursor-move items-center text-[var(--muted-dim)]" aria-label="Drag Companion">
+          <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" aria-hidden="true"><circle cx="2" cy="3" r="1" /><circle cx="6" cy="3" r="1" /><circle cx="2" cy="7" r="1" /><circle cx="6" cy="7" r="1" /><circle cx="2" cy="11" r="1" /><circle cx="6" cy="11" r="1" /></svg>
+        </span> : null}
         <Popover.Root open={expanded} onOpenChange={setExpanded}>
           <Popover.Trigger asChild>
             <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}

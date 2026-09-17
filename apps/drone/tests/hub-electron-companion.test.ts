@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { expect, test } from 'bun:test';
 const { installCompanionWindow } = require('../desktop/hub-electron-companion.cjs');
+const workArea = { x: 100, y: 50, width: 1920, height: 1040 };
+const screen = { getPrimaryDisplay: () => ({ workArea }), getDisplayMatching: () => ({ workArea }) };
 
 class Contents extends EventEmitter {
   mainFrame = {};
@@ -13,6 +15,9 @@ class Window extends EventEmitter {
   webContents = new Contents();
   destroyed = false;
   visible = false;
+  bounds = { x: 1540, y: 1010, width: 464, height: 64 };
+  getBounds() { return this.bounds; }
+  setBounds(bounds: typeof this.bounds) { this.bounds = bounds; }
   menu: unknown = 'default';
   isMinimized() { return false; }
   restore() {}
@@ -27,14 +32,14 @@ test('Companion windows are bounded, always on top, protected from navigation, a
   const owner = new Window();
   const ipcMain = new EventEmitter();
   const external: string[] = [];
-  installCompanionWindow({ owner, ipcMain, shell: { openExternal: async (url: string) => { external.push(url); } }, isQuitting: () => false });
+  installCompanionWindow({ owner, ipcMain, screen, shell: { openExternal: async (url: string) => { external.push(url); } }, isQuitting: () => false });
   const open = owner.webContents.handler;
   expect(open({ url: 'about:blank', frameName: 'unrelated' }).action).toBe('deny');
   expect(open({ url: 'https://example.com', frameName: 'drone-hub-companion' }).action).toBe('deny');
   expect(external).toEqual(['https://example.com']);
   expect(open({ url: 'about:blank', frameName: 'drone-hub-companion' })).toMatchObject({
     action: 'allow', outlivesOpener: false,
-    overrideBrowserWindowOptions: { alwaysOnTop: true, show: false, frame: true, minWidth: 380 },
+    overrideBrowserWindowOptions: { alwaysOnTop: true, show: false, frame: false, transparent: true, resizable: false, width: 464, height: 64, x: 1540, y: 1010 },
   });
   const child = new Window();
   owner.webContents.emit('did-create-window', child, { frameName: 'drone-hub-companion' });
@@ -78,7 +83,7 @@ test('Companion and chat window handlers coexist without exposing Companion to c
   });
   const shell = { openExternal: async () => {} };
   const openOtherWindow = installChatWindows({ mainWindow: owner, ipcMain, shell });
-  installCompanionWindow({ owner, ipcMain, shell, isQuitting: () => false, openOtherWindow });
+  installCompanionWindow({ owner, ipcMain, screen, shell, isQuitting: () => false, openOtherWindow });
   expect(owner.webContents.handler({ url: 'about:blank', frameName: 'drone-hub-chat:test' }).action).toBe('allow');
   expect(owner.webContents.handler({ url: 'about:blank', frameName: 'drone-hub-companion' }).action).toBe('allow');
   const child = new Window();
@@ -87,4 +92,29 @@ test('Companion and chat window handlers coexist without exposing Companion to c
   owner.destroy();
   expect(child.destroyed).toBe(true);
   expect(handlers.size).toBe(0);
+});
+
+test('content sizing grows upward, shrinks, clamps to the work area, and rejects untrusted or invalid sizes', () => {
+  const owner = new Window();
+  const ipcMain = new EventEmitter();
+  installCompanionWindow({ owner, ipcMain, screen, shell: { openExternal: async () => {} }, isQuitting: () => false });
+  const child = new Window();
+  owner.webContents.emit('did-create-window', child, { frameName: 'drone-hub-companion' });
+  const trusted = { sender: owner.webContents, senderFrame: owner.webContents.mainFrame };
+  const resize = (height: unknown, event = trusted) => ipcMain.emit('drone-hub:companion-window', event, 'resize', { height });
+  resize(600);
+  expect(child.bounds).toEqual({ x: 1540, y: 474, width: 464, height: 600 });
+  resize(58);
+  expect(child.bounds).toEqual({ x: 1540, y: 1016, width: 464, height: 58 });
+  for (const size of [NaN, Infinity, '600', undefined]) resize(size);
+  resize(900, { sender: owner.webContents, senderFrame: {} });
+  resize(900, { sender: child.webContents, senderFrame: child.webContents.mainFrame });
+  expect(child.bounds.height).toBe(58);
+  resize(999999);
+  expect(child.bounds).toEqual({ x: 1540, y: 66, width: 464, height: 1008 });
+  // A user drag establishes a new bottom-right corner for subsequent growth.
+  child.bounds = { x: 600, y: 300, width: 464, height: 60 };
+  resize(160);
+  expect(child.bounds).toEqual({ x: 600, y: 200, width: 464, height: 160 });
+  owner.destroy();
 });
