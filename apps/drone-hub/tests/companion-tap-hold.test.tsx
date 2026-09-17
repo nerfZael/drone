@@ -38,13 +38,14 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
   const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation(() => ({ ...useLive(), enabled: false, loading: false, resolved: true }));
   const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue(voice);
   const prompts: Parameters<CompanionClientTransport['sendPrompt']>[0][] = [];
+  const cancelledRuns: string[] = [];
   let closes = 0;
   let deferClose = false;
   let finishClosing: (() => void) | undefined;
   const transportSpy = spyOn(transportModule, 'createCompanionWebSocketTransport').mockImplementation(() => ({
     open: async () => undefined,
     sendPrompt: input => { prompts.push(input); },
-    sendToolResult: () => {}, sendProposalResult: () => {}, cancel: () => {}, close: () => {
+    sendToolResult: () => {}, sendProposalResult: () => {}, cancel: runId => { cancelledRuns.push(runId); }, close: () => {
       closes++;
       if (deferClose) return new Promise<void>(resolve => { finishClosing = resolve; });
     },
@@ -105,14 +106,16 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     const startsBeforeReset = starts;
     press();
     await release(1600);
-    expect(voice.status).toBe('recording');
-    expect(starts).toBe(startsBeforeReset + 1);
+    expect(voice.status).toBe('idle');
+    expect(starts).toBe(startsBeforeReset);
+    expect(cancelledRuns).toEqual([prompts[0].runId]);
     expect(discards.at(-1)).toBe(false);
     expect(closes).toBe(1);
     expect(cues.at(-1)).toBe('reset');
     pending[3]('stale request after reset');
     await flush();
     expect(prompts).toHaveLength(3);
+    await tap(); // Recording only resumes after an explicit tap.
     await tap();
     pending[4]('fresh request');
     await flush();
@@ -140,8 +143,10 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     const reset = companion.resetContext();
     await flush();
     expect(finishClosing).toBeDefined();
-    expect(starts).toBe(startsBeforeSlowReset + 1);
-    expect(voice.status).toBe('recording'); // Keep capturing while connection teardown is pending.
+    expect(starts).toBe(startsBeforeSlowReset);
+    expect(voice.status).toBe('idle'); // Stop the microphone without waiting for the connection.
+    expect(cancelledRuns.at(-1)).toBe(prompts.at(-1)?.runId);
+    await tap(); // An explicit new recording is allowed during teardown.
     await tap();
     pending[6]('recorded during reset');
     await flush();
@@ -184,12 +189,23 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     await companion.resetContext();
     finishOldStart(false);
     await oldStart;
+    expect(voice.status).toBe('idle'); // Reset during startup never reopens the microphone.
+    await tap();
     const pendingBeforeSend = pending.length;
     const sending = companion.toggle();
     expect(pending).toHaveLength(pendingBeforeSend + 1); // Old startup cannot clear the replacement recording.
     pending.at(-1)!('request after startup reset');
     await sending;
     expect(prompts.at(-1)?.prompt).toBe('request after startup reset');
+
+    await tap();
+    voice.toggleRecordingPause();
+    const startsBeforePausedReset = starts;
+    press();
+    await release(1600);
+    expect(voice.status).toBe('idle');
+    expect(starts).toBe(startsBeforePausedReset);
+    expect(cancelledRuns.at(-1)).toBe(prompts.at(-1)?.runId);
   } finally {
     await companion?.close();
     voiceSpy.mockRestore(); liveSpy.mockRestore(); transportSpy.mockRestore(); cueSpy.mockRestore();

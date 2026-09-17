@@ -63,8 +63,8 @@ export function CompanionSettingsTab({ settings }: {
       <p className="text-xs text-[var(--muted)]">
         With Live voice off, tap the Companion shortcut to start recording; tap again to stop, transcribe, and send.
         Tap again to record while the previous clip processes. Hold for 0.6 seconds then release to stop and discard
-        the current recording, or hold for 1.5 seconds then release to reset context. Reset discards unsent audio
-        and keeps the microphone on only if it was already recording. Tones indicate start, send, cancel, and reset.
+        the current recording, or hold for 1.5 seconds then release to stop recording and the Companion agent,
+        discard unsent audio, and clear context. Recording stays off until you tap again. Tones indicate start, send, cancel, and reset.
       </p>
       {live ? <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <label className="flex items-center gap-2 text-sm font-semibold text-[var(--fg)]">

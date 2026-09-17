@@ -136,10 +136,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposalDroneNames, setProposalDroneNames] = React.useState<Readonly<Record<string, string>>>({});
   const autoApproveSettings = useCompanionAutoApprove();
   const autoApprove = autoApproveSettings.enabled;
-  // Patching selects a draft before execute_proposal runs. Gate review data in
-  // this render so neither the card nor its tabs can flash before auto-approval.
-  // An unresolved setting must not briefly behave like manual approval either.
-  const reviewProposals = !autoApprove && !autoApproveSettings.loading;
+  // Keep proposals available for manual inspection in auto-approve mode.
+  // Wait for settings before exposing drafts so unresolved settings cannot open a card.
+  const reviewProposals = !autoApproveSettings.loading;
   const proposal = reviewProposals && selectedProposal?.visible ? selectedProposal.proposal : null;
   const autoApproveSettingsRef = React.useRef(autoApproveSettings);
   autoApproveSettingsRef.current = autoApproveSettings;
@@ -170,9 +169,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
   voiceStatusRef.current = voice.status;
 
-  const close = React.useCallback(async () => {
+  const close = React.useCallback(async (stopApplyingProposal = false) => {
     screen.clear();
-    if (proposalExecutingRef.current) return;
+    if (proposalExecutingRef.current && !stopApplyingProposal) return;
     shortcutPress.cancel();
     setShortcutHint(null);
     live.reset();
@@ -260,11 +259,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       });
       if (!workspace) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
       execution = await workspace.executeProposal(entry.proposal, entry.context!, (progress) => {
-        if (proposalStore.executingId === entry.id) {
-          latestProgress = progress;
-          setProposalExecutionProgress(progress);
-          reportActions?.(progress.operations);
-        }
+        // Reset clears the executing entry. Stop at the next progress boundary
+        // so an in-flight operation cannot launch the rest of the old proposal.
+        if (proposalStore.executingId !== entry.id) throw new Error('Companion proposal was stopped.');
+        latestProgress = progress;
+        setProposalExecutionProgress(progress);
+        reportActions?.(progress.operations);
       });
     } catch (error) {
       execution = companionProposalInterruptedExecution(entry.proposal, error, latestProgress);
@@ -434,32 +434,18 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [captureWorkspace, close, controller, run, voice, live, startLiveVoice]);
 
   const resetContext = React.useCallback(async () => {
-    if (resettingRef.current || switchingVoiceRef.current) return;
-    if (proposalExecutingRef.current) {
-      controller.reportVoiceError('Wait for the proposal to finish before resetting Companion.');
-      return;
-    }
-    const wasRecording = ['starting', 'recording', 'paused'].includes(voice.status);
-    const wasPaused = voice.status === 'paused';
-    const recording = recordingWorkspaceRef.current;
+    if (resettingRef.current) return;
     resettingRef.current = true;
-    const closing = close();
-    // Capture can resume immediately. Requests from the fresh recording wait
-    // for the previous conversation to close before opening a new one.
+    const closing = close(true);
+    // An explicit tap may start a fresh recording while teardown completes,
+    // but its request must wait for the previous conversation to close.
     voiceSubmissionQueueRef.current = closing.catch(() => {});
     try {
-      if (wasRecording) {
-        const nextRecording = { workspace: recording ? recording.workspace : captureWorkspace() };
-        recordingWorkspaceRef.current = nextRecording;
-        const started = await voice.startRecording();
-        if (recordingWorkspaceRef.current !== nextRecording) return;
-        if (!started) recordingWorkspaceRef.current = null;
-        else if (wasPaused) voice.toggleRecordingPause();
-      }
+      await closing;
     } finally {
-      try { await closing; } finally { resettingRef.current = false; }
+      resettingRef.current = false;
     }
-  }, [captureWorkspace, close, controller, voice]);
+  }, [close]);
 
   // Keep the callbacks fresh while a key is held, even if recording causes a render.
   const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext });

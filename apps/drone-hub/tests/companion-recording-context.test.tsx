@@ -2,6 +2,7 @@ import React from 'react';
 import { expect, spyOn, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { CompanionClientTransport, CompanionServerMessage } from '@drone/assistant-chat';
+import { executeCompanionProposal, type CompanionProposalExecutor } from '@drone/assistant-chat';
 import * as voiceModule from '../src/droneHub/chat/use-chat-voice-recorder';
 import * as transportModule from '../src/droneHub/companion/companion-websocket-transport';
 import * as liveModule from '../src/droneHub/companion/use-companion-live';
@@ -32,12 +33,13 @@ test('recording origin survives pause, navigation, transcription, proposal creat
   const prompts: Parameters<CompanionClientTransport['sendPrompt']>[0][] = [];
   const results: Parameters<CompanionClientTransport['sendToolResult']>[0][] = [];
   const proposalResults: Parameters<CompanionClientTransport['sendProposalResult']>[0][] = [];
+  const cancelledRuns: string[] = [];
   const transport: CompanionClientTransport = {
     open: async (input) => { receive = input.onMessage; return undefined; },
     sendPrompt: (input) => { prompts.push(input); },
     sendToolResult: (input) => { results.push(input); },
     sendProposalResult: (input) => { proposalResults.push(input); },
-    cancel: () => {}, close: () => {},
+    cancel: runId => { cancelledRuns.push(runId); }, close: () => {},
   };
   const transportSpy = spyOn(transportModule, 'createCompanionWebSocketTransport').mockReturnValue(transport);
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -47,6 +49,8 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     let workspace!: NonNullable<ReturnType<typeof useCompanionWorkspace>>;
     let repo = '/a';
     let executedRepo: string | undefined;
+    let pendingOperation: Promise<void> | null = null;
+    const executedGroups: string[] = [];
     function Harness() {
       companion = useCompanion()!;
       workspace = useCompanionWorkspace()!;
@@ -54,8 +58,15 @@ test('recording origin survives pause, navigation, transcription, proposal creat
         getAppContext: () => ({ activeRepoPath: repo, selectedDrone: { id: repo }, selectedChat: repo + '-chat' }),
         resolveDroneName: () => null,
         resolveDroneCreationDefaults: () => null,
-        executeProposal: async (_proposal, context) => {
+        executeProposal: async (_proposal, context, onProgress) => {
           executedRepo = context.defaultRepoPath;
+          if (pendingOperation) return await executeCompanionProposal(_proposal, {
+            createGroup: async operation => {
+              executedGroups.push(operation.name);
+              await pendingOperation;
+              return {};
+            },
+          } as CompanionProposalExecutor, { onProgress });
           return { ok: true, operations: [] };
         },
         openDroneChat: () => ({}), highlightDrones: () => ({}),
@@ -63,7 +74,7 @@ test('recording origin survives pause, navigation, transcription, proposal creat
       return null;
     }
     renderToStaticMarkup(<ActiveComposerProvider><CompanionWorkspaceProvider><CompanionProvider><Harness /></CompanionProvider></CompanionWorkspaceProvider></ActiveComposerProvider>);
-    const tool = async (name: 'get_app_context' | 'apply_proposal_patch', args = {}) => {
+    const tool = async (name: 'get_app_context' | 'create_proposal' | 'apply_proposal_patch', args = {}) => {
       receive({ type: 'tool_call', messageId: prompts.at(-1)!.messageId,
         generation: 1, callId: String(results.length), tool: name, args });
       for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -150,6 +161,33 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     const beforeLateSend = prompts.length;
     expect(await lateSend('finished transcribing after close')).toMatchObject({ ok: false });
     expect(prompts).toHaveLength(beforeLateSend);
+
+    expect(await companion.submitText('create two groups')).toEqual({ ok: true });
+    const draft = await tool('create_proposal') as { targetId: string; revision: string };
+    await tool('apply_proposal_patch', {
+      targetId: draft.targetId, baseRevision: draft.revision,
+      content: JSON.stringify({ version: 1, title: 'Two groups', operations: [
+        { id: 'first', type: 'create_group', name: 'First' },
+        { id: 'second', type: 'create_group', name: 'Second' },
+      ] }),
+    });
+    let finishOperation!: () => void;
+    pendingOperation = new Promise<void>(resolve => { finishOperation = resolve; });
+    const applying = companion.executeProposal(draft.targetId);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(executedGroups).toEqual(['First']);
+    await companion.toggle();
+    const cancellations = cancelledRuns.length;
+    const resultCount = proposalResults.length;
+    companion.handleShortcut({ phase: 'down' });
+    companion.handleShortcut({ phase: 'up', heldMs: 1600 });
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(voice.status).toBe('idle');
+    expect(cancelledRuns).toHaveLength(cancellations + 1);
+    finishOperation();
+    await applying;
+    expect(executedGroups).toEqual(['First']); // No remaining operations after stop/reset.
+    expect(proposalResults).toHaveLength(resultCount); // No continuation into the cleared session.
 
   } finally {
     await companion?.close();

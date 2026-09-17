@@ -112,9 +112,15 @@ export function CompanionOverlay() {
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
   const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
-  // The reviewed proposal can be tucked away behind its strip number; a change of selection brings the card back.
-  const [proposalHidden, setProposalHidden] = React.useState(false);
-  React.useEffect(() => { setProposalHidden(false); }, [companion?.selectedProposalId]);
+  // Default each new selection to closed in auto-approve mode, without a frame
+  // flashing open before an effect runs. Explicit number clicks override the default.
+  const [proposalVisibility, setProposalVisibility] = React.useState<{
+    targetId: string | null; autoApprove: boolean; hidden: boolean;
+  } | null>(null);
+  const proposalHidden = proposalVisibility !== null
+    && proposalVisibility.targetId === companion?.selectedProposalId
+    && proposalVisibility?.autoApprove === companion?.autoApprove
+    ? proposalVisibility.hidden : Boolean(companion?.autoApprove);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen;
   const [, tick] = React.useState(0);
@@ -191,8 +197,9 @@ export function CompanionOverlay() {
         selectedId={companion.selectedProposalId}
         selectedOpen={!proposalHidden}
         onSelect={(targetId) => {
-          if (targetId === companion.selectedProposalId) setProposalHidden((hidden) => !hidden);
-          else { companion.selectProposal(targetId); setProposalHidden(false); }
+          setProposalVisibility({ targetId, autoApprove: companion.autoApprove,
+            hidden: targetId === companion.selectedProposalId ? !proposalHidden : false });
+          if (targetId !== companion.selectedProposalId) companion.selectProposal(targetId);
           setHistoryOpen(false);
         }}
       />
@@ -295,7 +302,7 @@ export function CompanionOverlay() {
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           {companion.shortcutHint ? (
             <span role="status" className="text-xs text-[var(--fg)]">
-              {companion.shortcutHint === 'reset' ? 'Release to reset context' : 'Release to stop and discard recording · keep holding to reset'}
+              {companion.shortcutHint === 'reset' ? 'Release to stop Companion and clear context' : 'Release to stop and discard recording · keep holding to reset'}
             </span>
           ) : companion.transcript ? (
             <button

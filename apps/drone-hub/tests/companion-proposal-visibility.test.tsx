@@ -19,6 +19,8 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
       Object.defineProperty(globalThis, key, { configurable: true, value });
     };
+    set('ResizeObserver', dom.ResizeObserver);
+    set('MutationObserver', dom.MutationObserver);
     set('window', dom); set('document', dom.document); set('IS_REACT_ACT_ENVIRONMENT', true);
     set('fetch', async () => Response.json({ enabled: false, systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 8000 }));
     let settings = { enabled: mode.startsWith('auto'), loading: mode.startsWith('loading') || mode === 'load-error', saving: false, error: '', toggle: async () => {} };
@@ -43,6 +45,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
     dom.document.body.append(element);
     const root = createRoot(element as unknown as HTMLElement);
     const hiddenCommits: string[] = [];
+    let inspectingProposal = false;
     function Harness() {
       companion = useCompanion()!;
       useCompanionWorkspace()!.registerWorkspaceTarget({
@@ -59,7 +62,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       });
       // Inspect every committed frame, not just the DOM after async execution finishes.
       React.useLayoutEffect(() => {
-        if (settings.enabled || settings.loading) hiddenCommits.push(element.innerHTML);
+        if ((settings.enabled || settings.loading) && !inspectingProposal) hiddenCommits.push(element.innerHTML);
       });
       return <CompanionOverlay />;
     }
@@ -72,7 +75,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       });
     };
     const expectReview = (visible: boolean) => {
-      expect(Boolean(element.querySelector('[aria-label="Pending proposals"]'))).toBe(visible);
+      expect(Boolean(element.querySelector('[aria-label="Pending proposals"]'))).toBe(companion.proposals.length > 0);
       expect(element.textContent!.includes('Apply proposal')).toBe(visible);
     };
     try {
@@ -96,7 +99,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       }
       const autoApproved = settings.enabled;
       if (!autoApproved) {
-        // Toggling the setting hides an existing selection immediately, then restores it.
+        // Toggling auto-approve changes the default card visibility, keeping its number available.
         settings = { ...settings, enabled: true };
         await act(async () => { render(); });
         expectReview(false);
@@ -119,6 +122,20 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
         expect(companion.selectedProposalId).toBe(targetId);
         expect(executions).toBe(0);
       }
+      const toggleProposal = async () => {
+        await act(async () => {
+          element.querySelector<HTMLButtonElement>('[aria-label="Pending proposals"] button')!.click();
+        });
+      };
+      if (autoApproved) {
+        expect(element.querySelector('[aria-label="Pending proposals"] button')?.textContent).toBe('1');
+        inspectingProposal = true;
+        await toggleProposal();
+        expectReview(true);
+        await toggleProposal();
+        expectReview(false);
+        inspectingProposal = false;
+      }
       await tool('execute_proposal', { targetId, baseRevision: '1' });
       if (!autoApproved) {
         expect(results.at(-1)).toMatchObject({ result: { status: 'pending_review' } });
@@ -134,7 +151,13 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       }
       expect(executions).toBe(1);
       expect(companion.proposalExecuting).toBe(true);
-      if (!autoApproved) expect(element.textContent).toContain('Applying');
+      if (autoApproved) {
+        inspectingProposal = true;
+        await toggleProposal();
+        expect(element.textContent).toContain('Applying');
+        await toggleProposal();
+        inspectingProposal = false;
+      } else expect(element.textContent).toContain('Applying');
       await act(async () => { finish.resolve(); });
       expectReview(false);
       expect(companion.proposalHistory).toHaveLength(1);
@@ -142,7 +165,6 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       expect(companion.proposalHistory[0]!.execution.ok).toBe(mode !== 'auto-failure');
       expect(hiddenCommits.length).toBeGreaterThan(0);
       for (const html of hiddenCommits) {
-        expect(html).not.toContain('aria-label="Pending proposals"');
         expect(html).not.toContain('Apply proposal');
         expect(html).not.toContain('aria-label="Companion proposal');
       }
