@@ -3,6 +3,7 @@ import {
   type DroneHubGlobalShortcutSettingsResponse,
 } from '@drone/hub-model';
 import React from 'react';
+import type { CompanionShortcutEvent } from '../companion/companion-shortcut';
 
 import { requestJson } from '../http';
 import {
@@ -14,14 +15,20 @@ import type { ShortcutActionId } from './shortcuts';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 export function useGlobalShortcutClient(): React.MutableRefObject<
-  ((actionId: ShortcutActionId) => void) | null
+  ((actionId: ShortcutActionId, event?: CompanionShortcutEvent) => void) | null
 > {
-  const actionHandlerRef = React.useRef<((actionId: ShortcutActionId) => void) | null>(null);
+  const actionHandlerRef = React.useRef<((actionId: ShortcutActionId, event?: CompanionShortcutEvent) => void) | null>(null);
 
   React.useEffect(() => {
     const randomClientId = window.crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
     const clientId = `hub-${randomClientId.replace(/[^A-Za-z0-9_-]/g, '')}`;
     let closed = false;
+    let companionPressed = false;
+    const cancelCompanionPress = () => {
+      if (!companionPressed) return;
+      companionPressed = false;
+      actionHandlerRef.current?.('toggleCompanion', { phase: 'cancel' });
+    };
     let lastActivity = '';
     let activityQueue = Promise.resolve();
 
@@ -65,15 +72,22 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
       } catch {
         return;
       }
+      if (!data || typeof data !== 'object') return;
       const actionId = (data as { actionId?: unknown } | null)?.actionId;
       if (
         document.hasFocus() &&
         document.activeElement instanceof Element &&
         document.activeElement.closest('[data-shortcut-binding-capture="true"]')
       ) {
+        cancelCompanionPress();
         return;
       }
-      if (isDroneHubShortcutActionId(actionId)) actionHandlerRef.current?.(actionId);
+      const { phase, heldMs } = data as { phase?: unknown; heldMs?: unknown };
+      const gesture = phase === 'down' || phase === 'up' || phase === 'cancel'
+        ? { phase, heldMs: typeof heldMs === 'number' && Number.isFinite(heldMs) ? Math.max(0, heldMs) : undefined } as CompanionShortcutEvent
+        : undefined;
+      if (actionId === 'toggleCompanion' && gesture) companionPressed = gesture.phase === 'down';
+      if (isDroneHubShortcutActionId(actionId)) actionHandlerRef.current?.(actionId, gesture);
     };
 
     const source = new window.EventSource(
@@ -81,6 +95,7 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
     );
     source.addEventListener('connected', onConnected);
     source.addEventListener('shortcut', onShortcut);
+    source.addEventListener('error', cancelCompanionPress);
     source.addEventListener('settings', (event) => {
       try { applySettings(JSON.parse((event as MessageEvent).data)); } catch { /* Ignore malformed events. */ }
     });
@@ -92,6 +107,7 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
 
     return () => {
       closed = true;
+      cancelCompanionPress();
       source.close();
       clearActiveGlobalShortcutSettings();
       window.removeEventListener('focus', sendActivity);

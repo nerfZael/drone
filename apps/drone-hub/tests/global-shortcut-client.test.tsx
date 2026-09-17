@@ -37,8 +37,9 @@ test('canvas focus keeps global companion recording enabled; binding capture sus
     } } as any;
   });
   const actions: string[] = [];
+  const gestures: unknown[] = [];
   function Harness() {
-    useGlobalShortcutClient().current = (actionId) => { actions.push(actionId); };
+    useGlobalShortcutClient().current = (actionId, gesture) => { actions.push(actionId); gestures.push(gesture); };
     return <>
       <div tabIndex={0} data-shortcut-capture="true" data-drone-canvas-viewport="1">
         <textarea />
@@ -74,6 +75,16 @@ test('canvas focus keeps global companion recording enabled; binding capture sus
     expect(activities.at(-1)).toMatchObject({ focused: true, capturing: false });
     source.send('shortcut', { actionId: 'toggleCompanion' });
     expect(actions).toHaveLength(4);
+    source.send('shortcut', { actionId: 'toggleCompanion', phase: 'down' });
+    source.send('shortcut', { actionId: 'toggleCompanion', phase: 'up', heldMs: 720 });
+    expect(gestures.slice(-2)).toEqual([{ phase: 'down', heldMs: undefined }, { phase: 'up', heldMs: 720 }]);
+    source.send('shortcut', { actionId: 'toggleCompanion', phase: 'down' });
+    source.dispatchEvent(new dom.Event('error'));
+    expect(gestures.at(-1)).toEqual({ phase: 'cancel' });
+    source.send('shortcut', { actionId: 'toggleCompanion', phase: 'down' });
+    await act(async () => { capture.focus(); });
+    source.send('shortcut', { actionId: 'toggleCompanion', phase: 'up', heldMs: 2000 });
+    expect(gestures.at(-1)).toEqual({ phase: 'cancel' });
   } finally {
     await act(async () => { root.unmount(); });
     requestSpy.mockRestore();

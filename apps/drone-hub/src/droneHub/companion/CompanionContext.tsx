@@ -27,7 +27,11 @@ import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
 import {
   shouldCancelCompanionRecordingWithEscape,
+  CompanionShortcutPress,
+  isCompanionShortcutDoubleTap,
+  type CompanionShortcutEvent,
 } from './companion-shortcut';
+import { playCompanionRecordingCue, prepareCompanionRecordingCues } from './companion-recording-cues';
 import { createCompanionWebSocketTransport } from './companion-websocket-transport';
 import { useCompanionLive } from './use-companion-live';
 import { LIVE_COMPANION_PROMPT_PREFIX } from './CompanionLiveConversation';
@@ -54,6 +58,10 @@ type CompanionContextValue = {
   live: ReturnType<typeof useCompanionLive>;
   status: CompanionStatus;
   recordingPaused: boolean;
+  pendingTranscriptions: number;
+  shortcutHint: 'cancel' | 'reset' | null;
+  handleShortcut(event?: CompanionShortcutEvent): void;
+  resetContext(): Promise<void>;
   error: string;
   reply: string;
   transcript: string;
@@ -141,6 +149,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const [proposalHistory, setProposalHistory] = React.useState<CompanionProposalHistoryEntry[]>([]);
   const voiceSubmissionGenerationRef = React.useRef(0);
+  const voiceSubmissionQueueRef = React.useRef(Promise.resolve());
+  const resettingRef = React.useRef(false);
+  const [shortcutPress] = React.useState(() => new CompanionShortcutPress());
+  const [shortcutHint, setShortcutHint] = React.useState<'cancel' | 'reset' | null>(null);
+  const lastLiveShortcutAtRef = React.useRef(0);
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
   const textSubmissionGenerationRef = React.useRef(0);
   const captureWorkspace = React.useCallback(() => workspace?.capture() ?? null, [workspace]);
@@ -149,7 +162,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     (message: string) => controller.reportVoiceError(message),
     [controller],
   );
-  const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
+  const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion', backgroundTranscription: true });
   const live = useCompanionLive(controller);
   const [switchingVoice, setSwitchingVoice] = React.useState(false);
   const switchingVoiceRef = React.useRef(false);
@@ -160,24 +173,28 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const close = React.useCallback(async () => {
     screen.clear();
     if (proposalExecutingRef.current) return;
+    shortcutPress.cancel();
+    setShortcutHint(null);
     live.reset();
+    voiceSubmissionQueueRef.current = Promise.resolve();
     voiceSubmissionGenerationRef.current += 1;
     textSubmissionGenerationRef.current += 1;
     recordingWorkspaceRef.current = null;
-    await controller.close();
-    await voice.discardRecording();
     proposalStore.clear();
     setProposalActionError('');
     setProposalHistory([]);
     setActionNotifications([]);
     setProposalExecutionProgress(null);
     setProposalDroneNames({});
+    await Promise.all([controller.close(), voice.discardRecording()]);
   }, [controller, voice.discardRecording, live.reset]);
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
     live.cancelPending();
     textSubmissionGenerationRef.current += 1;
+    voiceSubmissionGenerationRef.current += 1;
+    voiceSubmissionQueueRef.current = Promise.resolve();
     void controller.cancel();
   }, [controller, live.cancelPending]);
 
@@ -186,11 +203,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [voice.toggleRecordingPause]);
 
   const discardRecording = React.useCallback(async () => {
-    voiceSubmissionGenerationRef.current += 1;
+    shortcutPress.cancel();
+    setShortcutHint(null);
     recordingWorkspaceRef.current = null;
-    await voice.discardRecording();
+    await voice.discardRecording({ preserveTranscriptions: true });
     controller.resetIfNoSession();
-  }, [controller, voice.discardRecording]);
+  }, [controller, shortcutPress, voice.discardRecording]);
   discardVoiceRecordingRef.current = discardRecording;
 
   const proposalContext = (capturedWorkspace: CapturedCompanionWorkspace | null): CompanionProposalExecutionContext => {
@@ -369,51 +387,133 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const toggle = React.useCallback(async (finishForModeSwitch = false) => {
     if (live.loading || live.saving || (switchingVoiceRef.current && !finishForModeSwitch)) return;
+    prepareCompanionRecordingCues();
     if (!live.resolved) {
       controller.reportVoiceError('Could not load the voice preference. Retry the Live voice setting before starting the microphone.');
       return;
     }
-    if (live.enabled && voice.status === 'idle') {
+    if (live.enabled && (voice.status === 'idle' || voice.status === 'transcribing')) {
       if (live.status === 'connecting' || live.status === 'listening') { live.stop(); return; }
       await startLiveVoice();
       return;
     }
-    if (voice.status === 'starting' || voice.status === 'transcribing') return;
+    if (voice.status === 'starting') return;
     if (voice.status === 'recording' || voice.status === 'paused') {
       const recording = recordingWorkspaceRef.current;
       if (!recording) return;
       const capturedWorkspace = recording.workspace;
       recordingWorkspaceRef.current = null;
-      const token = controller.getToken();
       const voiceSubmissionGeneration = voiceSubmissionGenerationRef.current;
       const messageId = newId();
       const audioDurationMs = voice.durationMillis;
       const transcriptionStartedAt = performance.now();
-      const text = await voice.stopRecordingForTranscript({ telemetryId: messageId });
-      const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
-      if (
-        !controller.isCurrent(token) ||
-        voiceSubmissionGenerationRef.current !== voiceSubmissionGeneration
-      ) return;
-      if (controller.getSnapshot().status === 'error') return;
-      await run(text, capturedWorkspace, { version: 1, transcriptionMs, audioDurationMs }, messageId);
+      const transcript = voice.stopRecordingForTranscript({ telemetryId: messageId }).then(text => ({
+        text, transcriptionMs: Math.max(0, performance.now() - transcriptionStartedAt),
+      }));
+      playCompanionRecordingCue('send');
+      // Uploads can overlap; agent requests retain the order of the user's taps.
+      const sending = voiceSubmissionQueueRef.current.then(async () => {
+        const { text, transcriptionMs } = await transcript;
+        if (voiceSubmissionGenerationRef.current !== voiceSubmissionGeneration || !text.trim()) return;
+        await run(text, capturedWorkspace, { version: 1, transcriptionMs, audioDurationMs }, messageId);
+      });
+      voiceSubmissionQueueRef.current = sending.catch(() => {});
+      await sending;
       return;
     }
-    if (recordingWorkspaceRef.current) return;
+    // The recorder may have failed independently. Its synchronous status is
+    // authoritative; a stale workspace reference must not prevent restarting.
     const capturedWorkspace = captureWorkspace();
-    const status = controller.getSnapshot().status;
-    if (status === 'cancelled' || status === 'error') await close();
     const recording = { workspace: capturedWorkspace };
     recordingWorkspaceRef.current = recording;
     const started = await voice.startRecording();
     if (recordingWorkspaceRef.current !== recording) return;
+    if (started) playCompanionRecordingCue('start');
     if (!started) recordingWorkspaceRef.current = null;
     if (!started && controller.getSnapshot().status !== 'error') controller.resetIfNoSession();
   }, [captureWorkspace, close, controller, run, voice, live, startLiveVoice]);
 
+  const resetContext = React.useCallback(async () => {
+    if (resettingRef.current || switchingVoiceRef.current) return;
+    if (proposalExecutingRef.current) {
+      controller.reportVoiceError('Wait for the proposal to finish before resetting Companion.');
+      return;
+    }
+    const wasRecording = ['starting', 'recording', 'paused'].includes(voice.status);
+    const wasPaused = voice.status === 'paused';
+    const recording = recordingWorkspaceRef.current;
+    resettingRef.current = true;
+    const closing = close();
+    // Capture can resume immediately. Requests from the fresh recording wait
+    // for the previous conversation to close before opening a new one.
+    voiceSubmissionQueueRef.current = closing.catch(() => {});
+    try {
+      if (wasRecording) {
+        const nextRecording = { workspace: recording ? recording.workspace : captureWorkspace() };
+        recordingWorkspaceRef.current = nextRecording;
+        const started = await voice.startRecording();
+        if (recordingWorkspaceRef.current !== nextRecording) return;
+        if (!started) recordingWorkspaceRef.current = null;
+        else if (wasPaused) voice.toggleRecordingPause();
+      }
+    } finally {
+      try { await closing; } finally { resettingRef.current = false; }
+    }
+  }, [captureWorkspace, close, controller, voice]);
+
+  // Keep the callbacks fresh while a key is held, even if recording causes a render.
+  const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext });
+  shortcutActionsRef.current = { toggle, discardRecording, resetContext };
+  const handleShortcut = React.useCallback((event?: CompanionShortcutEvent) => {
+    if (event?.phase === 'cancel') {
+      shortcutPress.cancel();
+      setShortcutHint(null);
+      return;
+    }
+    if (event?.phase === 'up') {
+      shortcutPress.up(event.heldMs);
+      setShortcutHint(null);
+      return;
+    }
+    if (live.enabled) {
+      // Live voice retains its existing press / double-press behavior.
+      const now = Date.now();
+      if (isCompanionShortcutDoubleTap(lastLiveShortcutAtRef.current, now)) {
+        lastLiveShortcutAtRef.current = 0;
+        void close();
+      } else {
+        lastLiveShortcutAtRef.current = now;
+        void toggle();
+      }
+      return;
+    }
+    if (!event) { void toggle(); return; }
+    prepareCompanionRecordingCues();
+    let previewed: 'cancel' | 'reset' | null = null;
+    shortcutPress.down(gesture => {
+      const actions = shortcutActionsRef.current;
+      if (gesture === 'tap') { void actions.toggle(); return; }
+      if (previewed !== gesture) playCompanionRecordingCue(gesture);
+      if (gesture === 'cancel') void actions.discardRecording();
+      else void actions.resetContext();
+    }, gesture => {
+      previewed = gesture;
+      setShortcutHint(gesture);
+      playCompanionRecordingCue(gesture);
+    });
+  }, [close, live.enabled, shortcutPress, toggle]);
+
+  React.useEffect(() => {
+    shortcutPress.cancel();
+    setShortcutHint(null);
+    return () => shortcutPress.cancel();
+  }, [live.enabled, shortcutPress]);
+
   const toggleLiveVoice = React.useCallback(async () => {
-    if (switchingVoiceRef.current || live.loading || live.saving ||
+    if (resettingRef.current || switchingVoiceRef.current || live.loading || live.saving ||
       voice.status === 'starting' || voice.status === 'transcribing') return;
+    shortcutPress.cancel();
+    setShortcutHint(null);
     switchingVoiceRef.current = true;
     setSwitchingVoice(true);
     const generation = voiceSubmissionGenerationRef.current;
@@ -437,12 +537,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       switchingVoiceRef.current = false;
       setSwitchingVoice(false);
     }
-  }, [captureWorkspace, live, startLiveVoice, toggle, voice]);
+  }, [captureWorkspace, live, shortcutPress, startLiveVoice, toggle, voice]);
 
   const submitText = React.useCallback(
     async (prompt: string, capturedWorkspace = captureWorkspace()): Promise<CompanionTextSubmitResult> => {
       const text = String(prompt ?? '').trim();
       if (!text) return { ok: false, error: 'There is no dictated text to send.' };
+      if (resettingRef.current) return { ok: false, error: 'Companion is resetting. Please send again when it finishes.' };
       if (voiceStatusRef.current !== 'idle') {
         return { ok: false, error: 'Companion is already handling a voice recording.' };
       }
@@ -478,6 +579,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(
     () => () => {
       textSubmissionGenerationRef.current += 1;
+      voiceSubmissionGenerationRef.current += 1;
       recordingWorkspaceRef.current = null;
       void controller.suspend();
       void voice.discardRecording();
@@ -503,6 +605,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
       recordingPaused: voice.status === 'paused',
+      pendingTranscriptions: voice.pendingTranscriptions ?? 0,
+      shortcutHint,
+      handleShortcut,
+      resetContext,
       durationMillis: voice.durationMillis,
       proposals: reviewProposals ? proposalStore.listPending() : [],
       selectedProposalId: proposalStore.selectedId,
@@ -541,6 +647,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       proposalStore, proposalStoreVersion, proposalActionError,
+      shortcutHint, handleShortcut, resetContext, voice.pendingTranscriptions,
       close,
       live,
       autoApproveSettings.error,

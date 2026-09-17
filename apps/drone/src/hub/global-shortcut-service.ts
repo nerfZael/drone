@@ -49,6 +49,8 @@ export type GlobalShortcutDispatchEvent = {
   id: string;
   actionId: DroneHubShortcutActionId;
   at: string;
+  phase?: 'down' | 'up' | 'cancel';
+  heldMs?: number;
 };
 
 export type DesktopShortcutConfiguration = {
@@ -90,6 +92,7 @@ export class GlobalShortcutService {
   private readonly desktopDispatchedSequences = new Map<DroneHubShortcutActionId, number>();
   private readonly clients = new Map<string, GlobalShortcutClient>();
   private dispatchSequence = 0;
+  private readonly companionPresses = new Map<number, { at: number; clientId?: string; dispatched: boolean }>();
   private desktop: { id: string; send: (config: DesktopShortcutConfiguration) => void } | null = null;
   private desktopRevision = 0;
   private desktopPending: Promise<void> | null = null;
@@ -154,6 +157,9 @@ export class GlobalShortcutService {
       })),
     };
     this.status.running = Object.values(this.status.actions).some((action) => action?.active);
+    if (this.status.actions.toggleCompanion?.active && !this.observesCompanion()) {
+      this.status.warning = 'Companion hold gestures require the host keyboard listener. Only tap actions are available for this global shortcut.';
+    }
     this.finishDesktopUpdate?.();
     this.notifySettingsChanged();
     return true;
@@ -163,6 +169,10 @@ export class GlobalShortcutService {
     if (this.desktop?.id !== id || revision !== this.desktopRevision ||
         typeof actionId !== 'string' || !this.status.actions[actionId as DroneHubShortcutActionId]?.active) return false;
     if (this.captureActive()) return false;
+    // The observer supplies a paired press/release for Companion. Native HTTP
+    // callbacks can arrive before keydown or after keyup, so never interpret
+    // them as a separate tap when the binding is observable.
+    if (actionId === 'toggleCompanion' && this.observesCompanion()) return true;
     // X11 can resolve keypad and backquote accelerators to different physical
     // keys. The observer dispatches them; the desktop owns their reservations.
     if (!(this.hook && isObservedPhysicalKey(this.bindings[actionId as DroneHubShortcutActionId]?.key))) {
@@ -364,7 +374,7 @@ export class GlobalShortcutService {
 
     this.compiledByKeycode = compiledByKeycode;
     this.keydownListener = (event) => this.handleKeyDown(event);
-    this.keyupListener = (event) => this.pressedKeycodes.delete(event.keycode);
+    this.keyupListener = (event) => this.handleKeyUp(event);
     try {
       hookModule.uIOhook.on('keydown', this.keydownListener);
       hookModule.uIOhook.on('keyup', this.keyupListener);
@@ -391,6 +401,10 @@ export class GlobalShortcutService {
   }
 
   private stopHook(): void {
+    for (const press of this.companionPresses.values()) {
+      if (press.clientId) this.dispatch('toggleCompanion', { phase: 'cancel' }, press.clientId);
+    }
+    this.companionPresses.clear();
     if (this.hook && this.keydownListener)
       this.hook.removeListener('keydown', this.keydownListener);
     if (this.hook && this.keyupListener) this.hook.removeListener('keyup', this.keyupListener);
@@ -417,27 +431,63 @@ export class GlobalShortcutService {
       modifiersMatch(candidate.binding, event, this.deps.platform),
     );
     if (!matched) return;
+    if (matched.actionId === 'toggleCompanion') {
+      this.companionPresses.set(event.keycode, { at: this.deps.now(), dispatched: false });
+    }
     if (this.desktop) {
       // Native X11 callbacks repeat while a key is held. Record physical presses
       // to deduplicate callbacks, but let native registration authorize dispatch.
       this.desktopPressSequences.set(matched.actionId, (this.desktopPressSequences.get(matched.actionId) ?? 0) + 1);
-      if (!isObservedPhysicalKey(matched.binding.key) || !this.status.actions[matched.actionId]?.active || this.captureActive()) return;
+      if ((!isObservedPhysicalKey(matched.binding.key) && matched.actionId !== 'toggleCompanion') ||
+        !this.status.actions[matched.actionId]?.active || this.captureActive()) return;
     }
-    this.dispatch(matched.actionId);
+    if (this.captureActive()) return;
+    if (matched.actionId === 'toggleCompanion') this.dispatchCompanionDown(event.keycode);
+    else this.dispatch(matched.actionId);
   }
 
-  private dispatch(actionId: DroneHubShortcutActionId): void {
-    const clients = [...this.clients.values()].sort(compareClients);
+  private observesCompanion(): boolean {
+    return this.hook !== null && [...this.compiledByKeycode.values()].some(bindings =>
+      bindings.some(binding => binding.actionId === 'toggleCompanion'));
+  }
+
+  private dispatchCompanionDown(keycode: number): void {
+    const press = this.companionPresses.get(keycode);
+    if (!press || press.dispatched) return;
+    press.dispatched = true;
+    press.clientId = this.dispatch('toggleCompanion', { phase: 'down' });
+  }
+
+  private handleKeyUp(event: KeyboardHookEvent): void {
+    this.pressedKeycodes.delete(event.keycode);
+    const press = this.companionPresses.get(event.keycode);
+    this.companionPresses.delete(event.keycode);
+    if (!press?.clientId) return;
+    // Deliver release to the window that received the press, even after focus
+    // changes. Releasing a modifier first must not prevent the matching keyup.
+    this.dispatch('toggleCompanion', {
+      phase: this.captureActive() ? 'cancel' : 'up',
+      heldMs: Math.max(0, this.deps.now() - press.at),
+    }, press.clientId);
+  }
+
+  private dispatch(
+    actionId: DroneHubShortcutActionId,
+    gesture: Pick<GlobalShortcutDispatchEvent, 'phase' | 'heldMs'> = {},
+    clientId?: string,
+  ): string | undefined {
+    const clients = [...this.clients.values()].filter(client => !clientId || client.id === clientId).sort(compareClients);
     if (clients.length === 0) return;
     const event: GlobalShortcutDispatchEvent = {
       id: `global-shortcut-${this.deps.now()}-${++this.dispatchSequence}`,
       actionId,
+      ...gesture,
       at: new Date(this.deps.now()).toISOString(),
     };
     for (const client of clients) {
       try {
         client.send(event);
-        return;
+        return client.id;
       } catch {
         this.clients.delete(client.id);
       }

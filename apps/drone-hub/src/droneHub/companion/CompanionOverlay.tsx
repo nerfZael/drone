@@ -134,7 +134,7 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
   }, [companion?.proposalHistory.length]);
-  if (!companion || (companion.status === 'idle' && !companion.live?.hasStarted && !panelOpen)) return null;
+  if (!companion || (companion.status === 'idle' && !companion.live?.hasStarted && !companion.shortcutHint && !panelOpen)) return null;
   const active = companion.status === 'working';
   const liveActive = companion.live?.status === 'connecting' || companion.live?.status === 'listening';
   const duration = companion.startedAt != null
@@ -293,7 +293,11 @@ export function CompanionOverlay() {
           </Popover.Portal>
         </Popover.Root>
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
-          {companion.transcript ? (
+          {companion.shortcutHint ? (
+            <span role="status" className="text-xs text-[var(--fg)]">
+              {companion.shortcutHint === 'reset' ? 'Release to reset context' : 'Release to stop and discard recording · keep holding to reset'}
+            </span>
+          ) : companion.transcript ? (
             <button
               type="button"
               onClick={() => setTranscriptExpanded((value) => !value)}
@@ -323,6 +327,11 @@ export function CompanionOverlay() {
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
+        {companion.pendingTranscriptions > 0 && companion.status !== 'transcribing' ? (
+          <span role="status" className="text-[10px] text-[var(--muted)]">
+            Transcribing {companion.pendingTranscriptions} {companion.pendingTranscriptions === 1 ? 'clip' : 'clips'}
+          </span>
+        ) : null}
         <div className="flex items-center gap-1.5">
           <CompanionSubscriptions subscriptions={companion.subscriptions ?? []} />
           <CompanionHeaderButton

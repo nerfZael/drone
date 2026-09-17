@@ -31,7 +31,7 @@ import { useCompanion } from '../companion/CompanionContext';
 import {
   COMPANION_SHORTCUT_DOUBLE_TAP_MS,
   companionProposalShortcutGesture,
-  isCompanionShortcutDoubleTap,
+  type CompanionShortcutEvent,
   shouldConsumeCompanionProposalShortcut,
 } from '../companion/companion-shortcut';
 import {
@@ -191,8 +191,9 @@ export function useDroneHubLifecycleEffects({
     (update) => flushSync(update),
   ));
   const companion = useCompanion();
-  const toggleCompanionRecording = companion?.toggle;
-  const closeCompanion = companion?.close;
+  const companionShortcutRef = React.useRef(companion?.handleShortcut);
+  companionShortcutRef.current = companion?.handleShortcut;
+  const localCompanionKeyRef = React.useRef<string | null>(null);
   const applyCompanionProposal = companion?.executeProposal;
   const toggleCompanionAutoApprove = companion?.status === 'idle'
     ? undefined
@@ -212,7 +213,6 @@ export function useDroneHubLifecycleEffects({
   applyCompanionProposalRef.current = applyCompanionProposal;
   canApplyCompanionProposalRef.current = canApplyCompanionProposal;
   companionProposalRef.current = companion?.proposal ?? null;
-  const lastCompanionShortcutAtRef = React.useRef(0);
   const lastCompanionProposalShortcutAtRef = React.useRef(0);
   const pendingCompanionProposalApplyTimerRef = React.useRef<number | null>(null);
   const lastChatVoiceShortcutAtRef = React.useRef(0);
@@ -226,18 +226,11 @@ export function useDroneHubLifecycleEffects({
     if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
     return hadPendingDraft || pendingFrame !== null;
   }, []);
-  const runCompanionShortcut = React.useCallback((): boolean => {
-    if (!toggleCompanionRecording) return false;
-    const now = Date.now();
-    if (isCompanionShortcutDoubleTap(lastCompanionShortcutAtRef.current, now)) {
-      lastCompanionShortcutAtRef.current = 0;
-      void closeCompanion?.();
-    } else {
-      lastCompanionShortcutAtRef.current = now;
-      void toggleCompanionRecording();
-    }
+  const runCompanionShortcut = React.useCallback((event?: CompanionShortcutEvent): boolean => {
+    if (!companionShortcutRef.current) return false;
+    companionShortcutRef.current(event);
     return true;
-  }, [closeCompanion, toggleCompanionRecording]);
+  }, []);
   React.useEffect(() => () => {
     if (pendingCompanionProposalApplyTimerRef.current !== null) {
       window.clearTimeout(pendingCompanionProposalApplyTimerRef.current);
@@ -545,9 +538,17 @@ export function useDroneHubLifecycleEffects({
       if (/^(save|load)Layout[0-9]$/.test(actionId)) return executeWorkspacePreset(actionId, currentDrone?.id, () => presetDroneRef.current === currentDrone?.id);
       shortcutActionHandlers[actionId as ShortcutActionId]();
     };
-    const runShortcutAction = (actionId: ShortcutActionId, _event: KeyboardEvent): boolean =>
-      shortcutActionHandlers[actionId]();
-    const runGlobalShortcutAction = (actionId: ShortcutActionId) => {
+    const runShortcutAction = (actionId: ShortcutActionId, event: KeyboardEvent): boolean => {
+      if (actionId === 'toggleCompanion') {
+        if (localCompanionKeyRef.current) return true;
+        if (!runCompanionShortcut({ phase: 'down' })) return false;
+        localCompanionKeyRef.current = event.code || event.key;
+        return true;
+      }
+      return shortcutActionHandlers[actionId]();
+    };
+    const runGlobalShortcutAction = (actionId: ShortcutActionId, event?: CompanionShortcutEvent) => {
+      if (actionId === 'toggleCompanion') { runCompanionShortcut(event); return; }
       if (actionId === 'toggleChatComposerEditorMode') {
         toggleCurrentChatComposerEditorMode();
         return;
@@ -601,6 +602,11 @@ export function useDroneHubLifecycleEffects({
     };
 
     const onChatComposerEditorShortcutCapture = (e: KeyboardEvent) => {
+      if (e.repeat && localCompanionKeyRef.current === (e.code || e.key)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       if (quickActions.getSnapshot()) {
         if (!e.repeat && !e.isComposing && isActiveGlobalShortcutMatch(e)) {
           e.preventDefault();
@@ -651,7 +657,7 @@ export function useDroneHubLifecycleEffects({
         return;
       }
       if (matched?.id === 'toggleCompanion') {
-        if (!runCompanionShortcut()) return;
+        if (!runShortcutAction(matched.id, e)) return;
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -730,6 +736,13 @@ export function useDroneHubLifecycleEffects({
       e.preventDefault();
     };
     const onKeyUpCapture = (e: KeyboardEvent) => {
+      if (localCompanionKeyRef.current === (e.code || e.key)) {
+        localCompanionKeyRef.current = null;
+        runCompanionShortcut({ phase: e.isComposing || quickActions.getSnapshot() ? 'cancel' : 'up' });
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       const binding = shortcutBindings.applyCompanionProposal;
       if (binding?.key !== 'capslock' || !isShortcutMatch(binding, e)) return;
       const captureRoot =
@@ -738,6 +751,12 @@ export function useDroneHubLifecycleEffects({
       e.preventDefault();
       e.stopPropagation();
     };
+    const onBlur = () => {
+      if (!localCompanionKeyRef.current) return;
+      localCompanionKeyRef.current = null;
+      runCompanionShortcut({ phase: 'cancel' });
+    };
+    window.addEventListener('blur', onBlur);
     document.addEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
     document.addEventListener('keyup', onKeyUpCapture, { capture: true });
     document.addEventListener('keydown', onKeyDown);
@@ -748,6 +767,7 @@ export function useDroneHubLifecycleEffects({
       document.removeEventListener('keydown', onChatComposerEditorShortcutCapture, {
         capture: true,
       });
+      window.removeEventListener('blur', onBlur);
       document.removeEventListener('keyup', onKeyUpCapture, { capture: true });
       document.removeEventListener('keydown', onKeyDown);
     };

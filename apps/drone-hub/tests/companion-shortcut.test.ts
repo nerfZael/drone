@@ -6,7 +6,56 @@ import {
   isCompanionShortcutDoubleTap,
   shouldConsumeCompanionProposalShortcut,
   shouldCancelCompanionRecordingWithEscape,
+  companionRecordingGesture,
+  CompanionShortcutPress,
 } from '../src/droneHub/companion/companion-shortcut';
+
+describe('Companion tap and hold', () => {
+  test('classifies release at the cancel and reset thresholds', () => {
+    expect(companionRecordingGesture(599)).toBe('tap');
+    expect(companionRecordingGesture(600)).toBe('cancel');
+    expect(companionRecordingGesture(1499)).toBe('cancel');
+    expect(companionRecordingGesture(1500)).toBe('reset');
+  });
+
+  test('acts only on release, ignores repeat downs, and treats quick taps independently', () => {
+    let now = 0;
+    const press = new CompanionShortcutPress(() => now);
+    const actions: string[] = [];
+    const release = (action: string) => actions.push(action);
+    press.down(release, () => {});
+    now = 100;
+    press.down(release, () => {});
+    expect(actions).toEqual([]);
+    press.up();
+    press.down(release, () => {});
+    press.up();
+    expect(actions).toEqual(['tap', 'tap']);
+    press.down(release, () => {});
+    press.up(700); // Use host duration, independent of network delays.
+    press.down(release, () => {});
+    press.up(1600);
+    expect(actions).toEqual(['tap', 'tap', 'cancel', 'reset']);
+    press.down(release, () => {});
+    press.cancel();
+    press.up();
+    expect(actions).toHaveLength(4);
+  });
+
+  test('hold thresholds only preview; reset never executes cancel first', async () => {
+    const press = new CompanionShortcutPress();
+    const actions: string[] = [];
+    const previews: string[] = [];
+    try {
+      press.down(action => actions.push(action), action => previews.push(action));
+      await new Promise(resolve => setTimeout(resolve, 1550));
+      expect(previews).toEqual(['cancel', 'reset']);
+      expect(actions).toEqual([]);
+      press.up(1550);
+      expect(actions).toEqual(['reset']);
+    } finally { press.cancel(); }
+  });
+});
 
 describe('Companion proposal shortcut', () => {
   test('consumes Caps Lock even while Apply is unavailable so capitalization is not toggled', () => {

@@ -297,7 +297,7 @@ export class CompanionClientController {
   async close(): Promise<void> {
     this.resumeRunId = null;
     try { this.options.sessionStore?.write(null); } catch {}
-    this.generation += 1;
+    const generation = ++this.generation;
     const session = this.activeSession;
     this.activeSession = null;
     this.update({ subscriptions: [] });
@@ -311,7 +311,7 @@ export class CompanionClientController {
       }
       await closeTransport(session.transport);
     }
-    this.replace(INITIAL_STATE);
+    if (this.isCurrent(generation)) this.replace(INITIAL_STATE);
   }
 
   /** Window teardown stops execution while retaining the identity needed to resume. */
@@ -324,7 +324,7 @@ export class CompanionClientController {
   }
 
   async cancel(): Promise<void> {
-    this.generation += 1;
+    const generation = ++this.generation;
     const session = this.activeSession;
     this.activeSession = null;
     this.update({ subscriptions: [] });
@@ -338,7 +338,7 @@ export class CompanionClientController {
       }
       await closeTransport(session.transport);
     }
-    this.update({ status: 'cancelled', endedAt: this.now() });
+    if (this.isCurrent(generation)) this.update({ status: 'cancelled', endedAt: this.now() });
   }
 
   private createSession(input: {

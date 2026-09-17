@@ -138,7 +138,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleCompanion',
     label: 'Toggle Companion recording',
-    description: 'Starts Companion recording, or stops and transcribes the current request.',
+    description: 'With Live voice off: tap to start, or stop and send. Hold 0.6s then release to stop and discard; hold 1.5s then release to reset context.',
   },
   {
     id: 'applyCompanionProposal',

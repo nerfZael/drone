@@ -176,11 +176,13 @@ export async function transcribeChatVoiceAudio(
 export function useChatVoiceRecorder({
   onError,
   microphoneOwner = 'voice-message',
+  backgroundTranscription = false,
 }: {
   onError: (message: string) => void;
   microphoneOwner?: BrowserMicrophoneOwner;
+  backgroundTranscription?: boolean;
 }) {
-  const [status, setStatus] = React.useState<ChatVoiceRecordingStatus>('idle');
+  const [, setStatus] = React.useState<ChatVoiceRecordingStatus>('idle');
   const [durationMillis, setDurationMillis] = React.useState(0);
   const statusRef = React.useRef<ChatVoiceRecordingStatus>('idle');
   const captureRef = React.useRef<ChatVoiceCapture | null>(null);
@@ -188,7 +190,8 @@ export function useChatVoiceRecorder({
   const stopPromiseRef = React.useRef<Promise<string> | null>(null);
   const mountedRef = React.useRef(false);
   const microphoneLeaseRef = React.useRef<BrowserMicrophoneLease | null>(null);
-  const transcriptionAbortRef = React.useRef<AbortController | null>(null);
+  const transcriptionsRef = React.useRef(new Set<AbortController>());
+  const [pendingTranscriptions, setPendingTranscriptions] = React.useState(0);
 
   const releaseMicrophone = React.useCallback((lease = microphoneLeaseRef.current) => {
     lease?.release();
@@ -216,28 +219,33 @@ export function useChatVoiceRecorder({
     return () => {
       mountedRef.current = false;
       startIdRef.current += 1;
-      stopCapture(captureRef.current);
+      const capture = captureRef.current;
       captureRef.current = null;
-      transcriptionAbortRef.current?.abort();
-      transcriptionAbortRef.current = null;
+      stopCapture(capture);
+      for (const transcription of transcriptionsRef.current) transcription.abort();
+      transcriptionsRef.current.clear();
       releaseMicrophone();
     };
   }, [releaseMicrophone, stopCapture]);
 
-  const discardRecording = React.useCallback(async () => {
+  const discardRecording = React.useCallback(async (options?: { preserveTranscriptions?: boolean }) => {
     startIdRef.current += 1;
     stopPromiseRef.current = null;
-    transcriptionAbortRef.current?.abort();
-    transcriptionAbortRef.current = null;
-    stopCapture(captureRef.current);
+    if (!options?.preserveTranscriptions) {
+      for (const transcription of transcriptionsRef.current) transcription.abort();
+      transcriptionsRef.current.clear();
+      setPendingTranscriptions(0);
+    }
+    const capture = captureRef.current;
     captureRef.current = null;
+    stopCapture(capture);
     releaseMicrophone();
     setDurationMillis(0);
-    setStatusValue('idle');
+    setStatusValue(transcriptionsRef.current.size ? 'transcribing' : 'idle');
   }, [releaseMicrophone, setStatusValue, stopCapture]);
 
   const startRecording = React.useCallback(async () => {
-    if (statusRef.current !== 'idle') return false;
+    if (statusRef.current !== 'idle' && !(backgroundTranscription && statusRef.current === 'transcribing')) return false;
     if (!navigator.mediaDevices?.getUserMedia) {
       onError('Browser microphone recording is not available here.');
       return false;
@@ -324,7 +332,7 @@ export function useChatVoiceRecorder({
       }
       return false;
     }
-  }, [microphoneOwner, onError, releaseMicrophone, setStatusValue, stopCapture]);
+  }, [backgroundTranscription, microphoneOwner, onError, releaseMicrophone, setStatusValue, stopCapture]);
 
   const toggleRecordingPause = React.useCallback(() => {
     const capture = captureRef.current;
@@ -367,51 +375,64 @@ export function useChatVoiceRecorder({
       setStatusValue('transcribing');
       onError('');
       const transcriptionAbort = new AbortController();
-      transcriptionAbortRef.current = transcriptionAbort;
+      transcriptionsRef.current.add(transcriptionAbort);
+      setPendingTranscriptions(transcriptionsRef.current.size);
+      const microphoneLease = microphoneLeaseRef.current;
       try {
         let audio: ArrayBuffer;
         try {
-          audio = await finishMediaRecording(capture);
+          const finished = finishMediaRecording(capture);
+          // stop() seals the clip synchronously. Free the microphone before the
+          // final data event / upload so the next tap can start another clip.
+          if (backgroundTranscription) {
+            capture.stream.getTracks().forEach((track) => track.stop());
+            releaseMicrophone(microphoneLease);
+          }
+          audio = await finished;
         } finally {
           capture.stream.getTracks().forEach((track) => track.stop());
-          releaseMicrophone();
+          releaseMicrophone(microphoneLease);
         }
-        if (audio.byteLength <= 0) return '';
-        return await transcribeChatVoiceAudio(audio, capture.mimeType, {
+        if (transcriptionAbort.signal.aborted || audio.byteLength <= 0) return '';
+        const text = await transcribeChatVoiceAudio(audio, capture.mimeType, {
           signal: transcriptionAbort.signal,
           telemetryId: options?.telemetryId,
         });
+        return transcriptionAbort.signal.aborted ? '' : text;
       } catch (err: any) {
-        if (startIdRef.current === transcriptionId) {
+        if (!transcriptionAbort.signal.aborted && (backgroundTranscription || startIdRef.current === transcriptionId)) {
           onError(err?.message ?? String(err));
         }
         return '';
       } finally {
-        if (transcriptionAbortRef.current === transcriptionAbort) {
-          transcriptionAbortRef.current = null;
+        transcriptionsRef.current.delete(transcriptionAbort);
+        if (mountedRef.current) setPendingTranscriptions(transcriptionsRef.current.size);
+        if (backgroundTranscription ? statusRef.current === 'transcribing' : startIdRef.current === transcriptionId) {
+          setStatusValue(transcriptionsRef.current.size ? 'transcribing' : 'idle');
         }
-        if (startIdRef.current === transcriptionId) setStatusValue('idle');
       }
     },
-    [onError, releaseMicrophone, setStatusValue],
+    [backgroundTranscription, onError, releaseMicrophone, setStatusValue],
   );
 
   const stopRecordingForTranscript = React.useCallback(
     async (options?: { telemetryId?: string }): Promise<string> => {
+      if (backgroundTranscription) return transcribeRecording(options);
       if (stopPromiseRef.current) return stopPromiseRef.current;
       const promise = transcribeRecording(options);
       stopPromiseRef.current = promise;
       try {
         return await promise;
       } finally {
-        stopPromiseRef.current = null;
+        if (stopPromiseRef.current === promise) stopPromiseRef.current = null;
       }
     },
-    [transcribeRecording],
+    [backgroundTranscription, transcribeRecording],
   );
 
   return {
-    status,
+    get status() { return statusRef.current; },
+    pendingTranscriptions,
     durationMillis,
     startRecording,
     toggleRecordingPause,

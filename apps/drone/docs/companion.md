@@ -52,6 +52,16 @@ The existing built-in agent belongs to a drone chat. Companion belongs to the wh
 
 On desktop, each Companion recording captures the repository, drone, chat, selection, pane, and file context when recording starts, before microphone startup. Pause/resume, navigation, transcription, and ASAP follow-ups do not replace that recording's context. Each new recording captures a fresh context. Text submissions capture at Send; the Dictation scratchpad's Companion destination captures as soon as the destination button/shortcut is pressed, before awaiting outstanding transcriptions.
 
+With Live voice off, the desktop Companion shortcut acts on key release:
+
+- Tap to start recording. Tap again to stop, transcribe, and send; recording stays off.
+- Taps are independent, even in quick succession. A new recording can start while earlier clips transcribe. Transcriptions may run concurrently, but requests are sent to the agent in tap order.
+- Hold for 600 ms then release to stop and discard the current recording, without transcribing or sending it. Conversation context and previously submitted clips are preserved.
+- Hold for 1.5 seconds then release to reset context and discard unsent audio, including pending transcriptions. Recording resumes only if it was active before reset (and remains paused if paused). Reset is unavailable while a proposal is being applied.
+- Distinct tones indicate recording started, transcription started, and the cancel/reset hold thresholds. Hold hints show what releasing will do; passing the cancel threshold does not cancel before a longer reset hold.
+
+Live voice and the Caps Lock proposal shortcut retain their existing gestures. Local shortcuts support press/release directly; global hold gestures require the host keyboard listener (currently used with the Linux X11 desktop). Native-only global shortcut backends expose activation without release and retain tap actions, with a warning in global shortcut settings. No speculative transcription or transcription timing setting is used.
+
 `get_app_context` returns the message's captured selection. Composer and editor tools remain bound to the captured target IDs, read current contents/revisions of those targets, and fail if the original target is no longer available. New proposals inherit their default repository from the originating message rather than the current UI selection; an existing proposal keeps its original default when revised. Tool executors are correlated by message ID so follow-up requests cannot overwrite one another's context. Captures are discarded on completion, cancellation, or close. Navigation tools still act on the UI, and workspace access grants remain current.
 
 ```text

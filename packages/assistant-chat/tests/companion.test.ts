@@ -483,6 +483,30 @@ describe('Companion contracts', () => {
   });
 });
 
+for (const action of ['close', 'cancel'] as const) {
+  test(`a delayed ${action} cannot overwrite a newer Companion conversation`, async () => {
+    const oldConnection = clientTransport();
+    const nextConnection = clientTransport();
+    let id = 0;
+    const controller = new CompanionClientController({ createId: () => `session-${++id}` });
+    let finishClosing!: () => void;
+    oldConnection.transport.close = () => new Promise<void>(resolve => { finishClosing = resolve; });
+    await controller.submitPrompt({ prompt: 'old request', createTransport: () => oldConnection.transport, executeTool: () => ({}) });
+    const closing = controller[action]();
+    await controller.submitPrompt({ prompt: 'new request', createTransport: () => nextConnection.transport, executeTool: () => ({}) });
+    try {
+      const sessionId = controller.getSessionId();
+      finishClosing();
+      await closing;
+      expect(controller.getSessionId()).toBe(sessionId);
+      expect(controller.getSnapshot()).toMatchObject({ status: 'working', transcript: 'new request' });
+    } finally {
+      finishClosing?.();
+      await controller.close();
+    }
+  });
+}
+
 test('queued messages use their own tool executor and reject expired or ambiguous contexts', async () => {
   const connection = clientTransport();
   const controller = new CompanionClientController({ createId: () => 'session' });

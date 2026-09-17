@@ -68,28 +68,58 @@ function createService(initialBindings: unknown, options: { env?: NodeJS.Process
     platform: 'linux',
     env: options.env ?? { DISPLAY: ':1' },
   };
-  return { service: new GlobalShortcutService(deps), hook, getLoadCount: () => loadCount };
+  return { service: new GlobalShortcutService(deps), hook, advance: (ms: number) => { now += ms; }, getLoadCount: () => loadCount };
 }
 
 describe('GlobalShortcutService', () => {
+  test('custom Companion bindings use physical releases regardless of native callback order', async () => {
+    const binding = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+    const { service, hook, advance } = createService({ toggleCompanion: binding });
+    await service.start();
+    let config: any;
+    const events: GlobalShortcutDispatchEvent[] = [];
+    service.connectClient('client-one', event => events.push(event));
+    service.connectDesktop('desktop-one', value => { config = value; });
+    try {
+      service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
+      service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+      expect(events).toHaveLength(0); // Native callback arrived before the observer.
+      hook.emit('keydown', keyboardEvent(16));
+      service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+      hook.emit('keydown', keyboardEvent(16));
+      advance(1700);
+      hook.emit('keyup', keyboardEvent(16));
+      service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+      expect(events.map(event => event.phase)).toEqual(['down', 'up']);
+      expect(events[1].heldMs).toBeGreaterThanOrEqual(1700);
+      events.length = 0;
+      hook.emit('keydown', keyboardEvent(16));
+      advance(700);
+      hook.emit('keyup', keyboardEvent(16));
+      service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+      expect(events.map(event => event.phase)).toEqual(['down', 'up']);
+      expect(events[1].heldMs).toBeGreaterThanOrEqual(700);
+    } finally { service.close(); }
+  });
+
   test('requires native dispatch for ordinary X11 keys and ignores auto-repeat callbacks', async () => {
     const binding = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
-    const { service, hook } = createService({ toggleCompanion: binding });
+    const { service, hook } = createService({ openHome: binding });
     await service.start();
     let config: any;
     const events: GlobalShortcutDispatchEvent[] = [];
     service.connectClient('client-one', (event) => events.push(event));
     service.connectDesktop('desktop-one', (value) => { config = value; });
-    service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
+    service.reportDesktopStatus('desktop-one', config.revision, { actions: { openHome: { active: true } } });
     hook.emit('keydown', keyboardEvent(16));
     expect(events).toHaveLength(0);
-    service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+    service.dispatchDesktop('desktop-one', config.revision, 'openHome');
     hook.emit('keydown', keyboardEvent(16));
-    service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+    service.dispatchDesktop('desktop-one', config.revision, 'openHome');
     expect(events).toHaveLength(1);
     hook.emit('keyup', keyboardEvent(16));
     hook.emit('keydown', keyboardEvent(16));
-    service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+    service.dispatchDesktop('desktop-one', config.revision, 'openHome');
     expect(events).toHaveLength(2);
     service.close();
   });
@@ -113,13 +143,13 @@ describe('GlobalShortcutService', () => {
         service.updateClientActivity('client-one', { focused, visible: focused });
         press(); press(); release();
       }
-      expect(events.map((event) => event.actionId)).toEqual(['toggleCompanion', 'toggleCompanion']);
+      expect(events.map((event) => event.phase)).toEqual(['down', 'up', 'down', 'up']);
       service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
-      expect(events).toHaveLength(2); // Native callbacks cannot double-toggle or dispatch the wrong key.
+      expect(events).toHaveLength(4); // Native callbacks cannot double-toggle or dispatch the wrong key.
       service.updateClientActivity('client-one', { focused: true, capturing: true });
       service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
       press(); release();
-      expect(events).toHaveLength(2);
+      expect(events).toHaveLength(4);
       service.close();
     }
   });
@@ -143,18 +173,45 @@ describe('GlobalShortcutService', () => {
       hook.emit('keyup', keyboardEvent(keycode));
     }
     service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(4);
     service.updateClientActivity('client-one', { focused: true, capturing: true });
     service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
     hook.emit('keydown', keyboardEvent(79));
     hook.emit('keyup', keyboardEvent(79));
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(4);
+    service.close();
+  });
+
+  test('pairs releases with the original client, measures holds, and cancels on reconfiguration', async () => {
+    const binding = { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: true };
+    const { service, hook, advance } = createService({ toggleCompanion: binding });
+    await service.start();
+    const first: GlobalShortcutDispatchEvent[] = [];
+    const second: GlobalShortcutDispatchEvent[] = [];
+    service.connectClient('client-first', event => first.push(event));
+    service.connectClient('client-second', event => second.push(event));
+    service.updateClientActivity('client-first', { focused: true });
+    hook.emit('keydown', keyboardEvent(41, { shiftKey: true }));
+    hook.emit('keydown', keyboardEvent(41, { shiftKey: true }));
+    expect(first.map(event => event.phase)).toEqual(['down']);
+    service.updateClientActivity('client-first', { focused: false });
+    service.updateClientActivity('client-second', { focused: true });
+    advance(650);
+    hook.emit('keyup', keyboardEvent(41)); // Shift was released first.
+    expect(first.map(event => event.phase)).toEqual(['down', 'up']);
+    expect(first[1].heldMs).toBeGreaterThanOrEqual(650);
+    expect(second).toHaveLength(0);
+    hook.emit('keydown', keyboardEvent(41, { shiftKey: true }));
+    await service.update({});
+    expect(second.map(event => event.phase)).toEqual(['down', 'cancel']);
+    hook.emit('keyup', keyboardEvent(41));
+    expect(second).toHaveLength(2);
     service.close();
   });
 
   test('hands ownership to desktop and rejects stale or unregistered dispatches', async () => {
     const binding = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
-    const { service, hook } = createService({ toggleCompanion: binding });
+    const { service, hook } = createService({ openHome: binding });
     await service.start();
     const configurations: any[] = [];
     const events: GlobalShortcutDispatchEvent[] = [];
@@ -165,21 +222,21 @@ describe('GlobalShortcutService', () => {
     expect(service.snapshot().status.running).toBe(false);
     expect(() => service.connectDesktop('desktop-two', () => {})).toThrow('already connected');
     const revision = configurations[0].revision;
-    expect(service.reportDesktopStatus('desktop-one', revision, { actions: { toggleCompanion: { active: true } } })).toBe(true);
-    expect(service.dispatchDesktop('desktop-one', revision, 'toggleCompanion')).toBe(true);
-    expect(service.dispatchDesktop('desktop-two', revision, 'toggleCompanion')).toBe(false);
-    expect(service.dispatchDesktop('desktop-one', revision, 'openHome')).toBe(false);
-    const update = service.update({ toggleCompanion: { ...binding, key: 'p' } });
+    expect(service.reportDesktopStatus('desktop-one', revision, { actions: { openHome: { active: true } } })).toBe(true);
+    expect(service.dispatchDesktop('desktop-one', revision, 'openHome')).toBe(true);
+    expect(service.dispatchDesktop('desktop-two', revision, 'openHome')).toBe(false);
+    expect(service.dispatchDesktop('desktop-one', revision, 'toggleCompanion')).toBe(false);
+    const update = service.update({ openHome: { ...binding, key: 'p' } });
     await Promise.resolve();
     const nextRevision = configurations.at(-1).revision;
     expect(service.reportDesktopStatus('desktop-one', revision, { actions: {} })).toBe(false);
-    expect(service.dispatchDesktop('desktop-one', revision, 'toggleCompanion')).toBe(false);
-    service.reportDesktopStatus('desktop-one', nextRevision, { actions: { toggleCompanion: { active: false, error: 'Reserved' } } });
-    expect((await update).status.actions.toggleCompanion?.error).toBe('Reserved');
+    expect(service.dispatchDesktop('desktop-one', revision, 'openHome')).toBe(false);
+    service.reportDesktopStatus('desktop-one', nextRevision, { actions: { openHome: { active: false, error: 'Reserved' } } });
+    expect((await update).status.actions.openHome?.error).toBe('Reserved');
     expect(events).toHaveLength(1);
     disconnect();
     expect(hook.listenerCount('keydown')).toBe(1);
-    expect(service.dispatchDesktop('desktop-one', nextRevision, 'toggleCompanion')).toBe(false);
+    expect(service.dispatchDesktop('desktop-one', nextRevision, 'openHome')).toBe(false);
     service.close();
   });
 
@@ -199,7 +256,7 @@ describe('GlobalShortcutService', () => {
   test('registers, reconnects, updates and releases through the desktop HTTP connection', async () => {
     const { connectDesktopGlobalShortcuts } = require('../desktop/hub-electron-global-shortcuts.cjs');
     const binding = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
-    const { service, hook } = createService({ toggleCompanion: binding });
+    const { service, hook } = createService({ openHome: binding });
     await service.start();
     const router = new HubRouter((res, status, body) => {
       res.writeHead(status, { 'content-type': 'application/json' });
@@ -243,11 +300,11 @@ describe('GlobalShortcutService', () => {
       await waitUntil(() => events.length === 2);
       const response = await fetch(`${apiUrl}/api/settings/global-shortcuts`, {
         method: 'PUT', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
-        body: JSON.stringify({ bindings: { toggleCompanion: { ...binding, key: 'p' } } }),
+        body: JSON.stringify({ bindings: { openHome: { ...binding, key: 'p' } } }),
       });
       const settings = await response.json() as any;
-      expect(settings.status.actions.toggleCompanion.active).toBe(false);
-      expect(settings.status.actions.toggleCompanion.error).toContain('unavailable');
+      expect(settings.status.actions.openHome.active).toBe(false);
+      expect(settings.status.actions.openHome.error).toContain('unavailable');
       expect(callbacks.has('q')).toBe(false);
       await desktop.close();
       expect(callbacks.size).toBe(0);
