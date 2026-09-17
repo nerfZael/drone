@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+module.exports = async function checkCompanionPanel({ owner, BrowserWindow, screen, url, waitFor }) {
+  await owner.loadURL(url);
+  const js = code => owner.webContents.executeJavaScript(code, true);
+  await waitFor(() => js('Boolean(document.querySelector(\'[aria-label="Companion options"]\'))'), 'real Companion overlay');
+  await js('document.querySelector(\'[aria-label="Companion options"]\').click()');
+  await waitFor(() => js("Boolean([...document.querySelectorAll('[role=switch]')].find(el => el.textContent.includes('Floating window')))"), 'floating switch');
+  await js("[...document.querySelectorAll('[role=switch]')].find(el => el.textContent.includes('Floating window')).click()");
+  const child = BrowserWindow.getAllWindows().find(win => win !== owner);
+  assert(child);
+  const childJs = code => child.webContents.executeJavaScript(code, true);
+  await waitFor(() => child.isVisible() && child.getBounds().height < 100, 'compact listening panel');
+  const compact = child.getBounds();
+  const area = screen.getPrimaryDisplay().workArea;
+  assert.equal(compact.x + compact.width, area.x + area.width - 16);
+  assert.equal(compact.y + compact.height, area.y + area.height - 16);
+  assert.equal(child.isResizable(), false);
+  assert.equal(await childJs("getComputedStyle(document.body).backgroundColor"), 'rgba(0, 0, 0, 0)');
+  assert.equal(await childJs("Boolean(document.querySelector('.drone-hub-desktop-title-bar'))"), false);
+  const boundsBefore = child.getBounds();
+  await js("updateCompanionPanel({status:'completed', reply:'A reply that grows the panel. '.repeat(90)})");
+  await waitFor(() => child.getBounds().height > 150, 'reply expands compact panel');
+  assert.equal(child.getBounds().y + child.getBounds().height, boundsBefore.y + boundsBefore.height);
+  await js("updateCompanionPanel({status:'recording', reply:''})");
+  await waitFor(() => child.getBounds().height < 100, 'clearing reply shrinks panel');
+  await childJs('document.querySelector(\'[aria-label="Companion options"]\').click()');
+  await waitFor(() => child.getBounds().height >= Math.min(600, area.height - 32), 'room for options');
+  await waitFor(() => childJs("[...document.querySelectorAll('[role=switch]')].some(el => el.textContent.includes('Floating window'))"), 'options visible');
+  const menuBounds = await childJs("JSON.stringify([...document.querySelectorAll('[data-companion-surface]')].find(el => el.getAttribute('aria-label') === 'Companion options').getBoundingClientRect().toJSON())");
+  const menu = JSON.parse(menuBounds);
+  assert(menu.y >= 0 && menu.bottom <= child.getBounds().height + 1);
+  await childJs('document.querySelector(\'[aria-label="Companion options"]\').click()');
+  await waitFor(() => child.getBounds().height < 100, 'closing options shrinks panel');
+  if (process.env.COMPANION_SCREENSHOT) fs.writeFileSync(process.env.COMPANION_SCREENSHOT, (await child.webContents.capturePage()).toPNG());
+  console.log(`PASS: actual Companion panel ${compact.width}×${compact.height}, primary-display bottom-right, transparent background, reply/menu growth and shrink`);
+};

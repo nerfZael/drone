@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { observeCompanionWindowSize } from './helpers/observe-companion-window-size';
 import { prepareCompanionWindow } from './helpers/prepare-companion-window';
 
 type CompanionWindowState = {
@@ -52,8 +53,11 @@ export function useCompanionWindowHost(visible: boolean) {
   }, [host, bridge]);
   React.useEffect(() => bridge?.onClose(attach), [bridge, attach]);
   React.useEffect(() => {
-    if (floating) bridge?.control(visible ? 'show' : 'hide');
-  }, [bridge, floating, visible]);
+    if (!floating || !bridge || !host) return;
+    const stopSizing = observeCompanionWindowSize(host, floating, height => bridge.control('resize', { height }));
+    bridge.control(visible ? 'show' : 'hide');
+    return stopSizing;
+  }, [bridge, floating, host, visible]);
 
   const toggle = React.useCallback(() => {
     if (!bridge || !host) return;
@@ -61,7 +65,7 @@ export function useCompanionWindowHost(visible: boolean) {
     if (floatingRef.current) { attach(); return; }
     let child: Window | null = null;
     try {
-      child = window.open('about:blank', 'drone-hub-companion', 'width=520,height=680');
+      child = window.open('about:blank', 'drone-hub-companion');
       if (!child) throw new Error('The desktop window could not be opened.');
       cleanupRef.current = prepareCompanionWindow(document, child.document);
       child.document.body.append(host);

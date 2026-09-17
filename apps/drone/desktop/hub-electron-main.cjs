@@ -420,7 +420,7 @@ function createWindow() {
     mainWindow.webContents.send(NAVIGATION_ZOOM_CHANNEL, { action });
   });
   const openOtherWindow = installChatWindows({ mainWindow, ipcMain, shell });
-  installCompanionWindow({ owner: mainWindow, ipcMain, shell, isQuitting: () => isQuitting, openOtherWindow });
+  installCompanionWindow({ owner: mainWindow, ipcMain, shell, screen, isQuitting: () => isQuitting, openOtherWindow });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) return;
     event.preventDefault();

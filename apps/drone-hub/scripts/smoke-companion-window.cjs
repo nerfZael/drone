@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process');
 const repo = path.resolve(__dirname, '../../..');
 
 async function runElectron() {
-  const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
+  const { app, BrowserWindow, Menu, ipcMain, shell, screen } = require('electron');
   const { installChatWindows } = require('../../drone/desktop/hub-electron-chat-windows.cjs');
   const { installCompanionWindow } = require('../../drone/desktop/hub-electron-companion.cjs');
   app.commandLine.appendSwitch('disable-gpu');
@@ -18,10 +18,10 @@ async function runElectron() {
   } });
   let quitting = false;
   const openOtherWindow = installChatWindows({ mainWindow: owner, ipcMain, shell });
-  installCompanionWindow({ owner, ipcMain, shell, isQuitting: () => quitting, openOtherWindow });
+  installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting: () => quitting, openOtherWindow });
   const errors = [];
   const undoModifier = process.platform === 'darwin' ? 'meta' : 'control';
-  owner.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message); });
+  owner.webContents.on('console-message', (_event, level, message) => { if (level >= 3) { errors.push(message); console.error(message); } });
   const js = (code) => owner.webContents.executeJavaScript(code, true);
   const waitFor = async (check, label) => {
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -31,6 +31,7 @@ async function runElectron() {
     throw new Error(`Timed out: ${label}\n${errors.join('\n')}`);
   };
   try {
+    if (process.env.COMPANION_PANEL_ONLY === '1') { await require('./check-companion-panel.cjs')({owner, BrowserWindow, screen, url:process.env.COMPANION_TEST_URL.replace('companion-window-test','companion-panel-test'), waitFor}); return; }
     await owner.loadURL(process.env.COMPANION_TEST_URL);
     await waitFor(() => js('Boolean(window.companionTest)'), 'fixture mount');
     assert.equal(await js("Boolean(window.open('about:blank', 'drone-hub-chat:smoke'))"), true);
@@ -116,23 +117,38 @@ async function main() {
   const { createServer } = await import('vite');
   const server = await createServer({
     configFile: false, root: repo,
-    plugins: [{ name: 'fixture', configureServer(server) {
+    define: { __DRONE_HUB_BUILD_ID__: JSON.stringify('companion-smoke'), __DRONE_HUB_BUILD_TIME__: JSON.stringify('test') },
+    css: { postcss: { plugins: [require('tailwindcss')({ ...require('tailwindcss/loadConfig')(path.join(repo, 'apps/drone-hub/tailwind.config.ts')), content: [path.join(repo, 'apps/drone-hub/src/**/*.{ts,tsx}')] }), require('autoprefixer')()] } },
+    plugins: [{ name: 'fixture', transform(code, id) {
+      if (id.endsWith('/companion/CompanionContext.tsx')) return 'export function useCompanion() { return window.companionPanelState; }';
+    }, configureServer(server) {
+      server.middlewares.use('/api/settings/companion', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ settings: { provider: 'openai', model: '', thinkingLevel: '' }, models: [], credentials: { openai: true } }));
+      });
+      server.middlewares.use('/companion-panel-test', (_req, res) => {
+        res.setHeader('Content-Type', 'text/html');
+        res.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/apps/drone-hub/tests/fixtures/companion-panel.tsx"></script></body></html>');
+      });
       server.middlewares.use('/companion-window-test', (_req, res) => {
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/apps/drone-hub/tests/fixtures/companion-window.tsx"></script></body></html>');
       });
     } }],
     resolve: { alias: { '@drone/assistant-chat': path.join(repo, 'packages/assistant-chat/src/index.ts'), '@drone/device-protocol': path.join(repo, 'packages/device-protocol/src/index.ts'), '@blip/protocol': path.join(repo, 'blip/packages/protocol/src/index.ts') } },
+    optimizeDeps: { entries: [path.join(repo, 'apps/drone-hub/tests/fixtures/companion-window.tsx'), path.join(repo, 'apps/drone-hub/tests/fixtures/companion-panel.tsx')] },
     server: { host: '127.0.0.1', port: 0 },
   });
   await server.listen();
   try {
-    const child = spawn(require('electron'), ['--no-sandbox', __filename], {
-      stdio: 'inherit',
-      env: { ...process.env, COMPANION_TEST_URL: `${server.resolvedUrls.local[0]}companion-window-test` },
+    for (const panelOnly of ['0', '1']) {
+      const child = spawn(require('electron'), ['--no-sandbox', __filename], {
+        stdio: 'inherit',
+        env: { ...process.env, COMPANION_PANEL_ONLY: panelOnly, COMPANION_TEST_URL: `${server.resolvedUrls.local[0]}companion-window-test` },
     });
     const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
     if (code !== 0) throw new Error(`Electron check exited with ${code}`);
+    }
   } finally { await server.close(); }
 }
 main().catch(error => { console.error(error); process.exit(1); });

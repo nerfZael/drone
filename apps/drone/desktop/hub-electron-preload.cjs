@@ -79,8 +79,8 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
     return () => ipcRenderer.removeListener('drone-hub:notification-error', listener);
   },
   companionWindow: {
-    control(action) {
-      if (['show', 'hide', 'close', 'attach'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action);
+    control(action, size) {
+      if (['show', 'hide', 'close', 'attach', 'resize'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);
     },
     onClose(callback) {
       if (typeof callback !== 'function') return () => {};
