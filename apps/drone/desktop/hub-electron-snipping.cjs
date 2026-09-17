@@ -32,7 +32,7 @@ function selectScreenSource(sources, display, displays = [display], platform = p
   return source;
 }
 
-function installSnipping({ owner, ipcMain, BrowserWindow, desktopCapturer, screen, getCursorPoint = captureCursorPoint }) {
+function installSnipping({ owner, ipcMain, BrowserWindow, desktopCapturer, screen, getCursorPoint = captureCursorPoint, platform = process.platform }) {
   const channel = 'drone-hub:companion-capture';
   let busy = false;
   let cancel = null;
@@ -52,9 +52,18 @@ function installSnipping({ owner, ipcMain, BrowserWindow, desktopCapturer, scree
       if (owner.isDestroyed()) return null;
       if (mode === 'region') {
         const selection = await new Promise((resolve, reject) => {
+          // On X11, mapping a fixed-size, monitor-sized window can move it to
+          // another equally sized monitor. Anchor a smaller normal window on
+          // the target display, then request fullscreen before showing it.
+          const fullscreen = platform === 'linux';
+          const initialBounds = fullscreen ? {
+            ...display.bounds,
+            width: Math.max(1, Math.min(800, Math.floor(display.bounds.width / 2))),
+            height: Math.max(1, Math.min(600, Math.floor(display.bounds.height / 2))),
+          } : display.bounds;
           const overlay = new BrowserWindow({
-            ...display.bounds, show: false, frame: false, resizable: false, movable: false,
-            alwaysOnTop: true, skipTaskbar: true, fullscreenable: false,
+            ...initialBounds, show: false, frame: false, resizable: fullscreen, movable: fullscreen,
+            alwaysOnTop: true, skipTaskbar: true, fullscreenable: fullscreen,
             webPreferences: { preload: path.join(__dirname, 'hub-snipping-preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
           });
           const resultChannel = 'drone-hub:snip-selection';
@@ -79,7 +88,8 @@ function installSnipping({ owner, ipcMain, BrowserWindow, desktopCapturer, scree
           overlay.loadFile(path.join(__dirname, 'hub-snipping.html')).then(() => {
             if (settled) return;
             overlay.webContents.send('drone-hub:snip-image', captured.toDataURL());
-            overlay.setBounds(display.bounds);
+            if (fullscreen) overlay.setFullScreen(true);
+            else overlay.setBounds(display.bounds);
             overlay.setAlwaysOnTop(true, 'screen-saver');
             overlay.show();
             overlay.focus();

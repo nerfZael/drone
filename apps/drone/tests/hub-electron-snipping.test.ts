@@ -17,7 +17,7 @@ test('capture matches display identity rather than source order and refuses unkn
   expect(() => selectScreenSource(sources, { id: 3 })).toThrow('could not be matched');
 });
 
-function fixture() {
+function fixture(platform = 'linux') {
   const ipc = Object.assign(new EventEmitter(), {
     handle: (_channel: string, fn: any) => { handler = fn; }, removeHandler: () => {},
   });
@@ -28,16 +28,20 @@ function fixture() {
   class Overlay extends EventEmitter {
     webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: () => {}, send: () => {} });
     destroyed = false;
+    fullscreen = false;
+    fullscreenAtShow = false;
     constructor(public options: any) { super(); windows.push(this); }
     isDestroyed() { return this.destroyed; }
     destroy() { this.destroyed = true; this.emit('closed'); }
     async loadFile() {}
-    setBounds() {} setAlwaysOnTop() {} show() {} focus() {}
+    setBounds() {} setAlwaysOnTop() {} focus() {}
+    setFullScreen(value: boolean) { this.fullscreen = value; }
+    show() { this.fullscreenAtShow = this.fullscreen; }
   }
   const owner = Object.assign(new EventEmitter(), { webContents: { mainFrame: {} }, isDestroyed: () => false });
   const event = { sender: owner.webContents, senderFrame: owner.webContents.mainFrame };
   const sources: any[] = [];
-  installSnipping({ owner, ipcMain: ipc, BrowserWindow: Overlay, getCursorPoint: (screen: any) => screen.getCursorScreenPoint(),
+  installSnipping({ owner, ipcMain: ipc, BrowserWindow: Overlay, platform, getCursorPoint: (screen: any) => screen.getCursorScreenPoint(),
     screen: { getAllDisplays: () => [{ id: 42 }], getCursorScreenPoint: () => ({ x: -10, y: 10 }), getDisplayNearestPoint: () => ({ id: 42, scaleFactor: 2, bounds: { x: -100, y: 0, width: 100, height: 50 } }) },
     desktopCapturer: { getSources: async (input: any) => { sources.push(input); return [{ display_id: '42', thumbnail: image }]; } },
   });
@@ -105,3 +109,20 @@ test('truncated IDs never override exact matches or guess through a collision', 
   expect(() => selectScreenSource([{ display_id: '', thumbnail }], display, [display], 'linux')).toThrow('could not be matched');
   expect(() => selectScreenSource([{ ...exact, thumbnail: { isEmpty: () => true } }], display)).toThrow('capture is empty');
 });
+
+for (const platform of ['linux', 'darwin', 'win32']) {
+  test(`snipping anchors the overlay before showing it on ${platform}`, async () => {
+    const f = fixture(platform);
+    const result = f.handler('region');
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const overlay = f.windows[0];
+    const fullscreen = platform === 'linux';
+    expect(overlay.options).toMatchObject({
+      x: -100, y: 0, width: fullscreen ? 50 : 100, height: fullscreen ? 25 : 50,
+      show: false, frame: false, fullscreenable: fullscreen, resizable: fullscreen,
+    });
+    expect(overlay.fullscreenAtShow).toBe(fullscreen);
+    f.owner.emit('closed');
+    expect(await result).toBeNull();
+  });
+}
