@@ -7,15 +7,21 @@ import {
   shouldConsumeCompanionProposalShortcut,
   shouldCancelCompanionRecordingWithEscape,
   companionRecordingGesture,
+  companionHoldAction,
+  normalizeCompanionShortcutDurations,
+  validCompanionShortcutDurations,
+  DEFAULT_COMPANION_SHORTCUT_DURATIONS,
   CompanionShortcutPress,
 } from '../src/droneHub/companion/companion-shortcut';
 
 describe('Companion tap and hold', () => {
   test('classifies release at the cancel and reset thresholds', () => {
-    expect(companionRecordingGesture(599)).toBe('tap');
-    expect(companionRecordingGesture(600)).toBe('cancel');
-    expect(companionRecordingGesture(1499)).toBe('cancel');
-    expect(companionRecordingGesture(1500)).toBe('reset');
+    expect(companionRecordingGesture(299)).toBe('tap');
+    expect(companionRecordingGesture(300)).toBe('pause');
+    expect(companionRecordingGesture(799)).toBe('pause');
+    expect(companionRecordingGesture(800)).toBe('cancel');
+    expect(companionRecordingGesture(1299)).toBe('cancel');
+    expect(companionRecordingGesture(1300)).toBe('reset');
   });
 
   test('acts only on release, ignores repeat downs, and treats quick taps independently', () => {
@@ -32,9 +38,9 @@ describe('Companion tap and hold', () => {
     press.up();
     expect(actions).toEqual(['tap', 'tap']);
     press.down(release, () => {});
-    press.up(700); // Use host duration, independent of network delays.
+    press.up(900); // Use host duration, independent of network delays.
     press.down(release, () => {});
-    press.up(1600);
+    press.up(1400);
     expect(actions).toEqual(['tap', 'tap', 'cancel', 'reset']);
     press.down(release, () => {});
     press.cancel();
@@ -47,13 +53,47 @@ describe('Companion tap and hold', () => {
     const actions: string[] = [];
     const previews: string[] = [];
     try {
-      press.down(action => actions.push(action), action => previews.push(action));
-      await new Promise(resolve => setTimeout(resolve, 1550));
-      expect(previews).toEqual(['cancel', 'reset']);
+      press.down(action => actions.push(action), action => previews.push(action), { pauseMs: 200, cancelMs: 400, resetMs: 600 });
+      await new Promise(resolve => setTimeout(resolve, 650));
+      expect(previews).toEqual(['pause', 'cancel', 'reset']);
       expect(actions).toEqual([]);
-      press.up(1550);
+      press.up(650);
       expect(actions).toEqual(['reset']);
     } finally { press.cancel(); }
+  });
+});
+
+describe('Companion configurable holds', () => {
+  test('validates increasing durations and repairs malformed persisted settings', () => {
+    for (const value of [null, {}, { pauseMs: 100, cancelMs: 300, resetMs: 500 },
+      { pauseMs: 600, cancelMs: 650, resetMs: 2500 },
+      { pauseMs: 600, cancelMs: 2500, resetMs: 1500 },
+      { pauseMs: 600, cancelMs: 1500, resetMs: Infinity }]) {
+      expect(validCompanionShortcutDurations(value)).toBe(false);
+      expect(normalizeCompanionShortcutDurations(value)).toEqual(DEFAULT_COMPANION_SHORTCUT_DURATIONS);
+    }
+    expect(validCompanionShortcutDurations({ pauseMs: 300, cancelMs: 800, resetMs: 1200 })).toBe(true);
+  });
+
+  test('a saved duration change only applies to the next press', () => {
+    const press = new CompanionShortcutPress();
+    const durations = { pauseMs: 300, cancelMs: 800, resetMs: 1200 };
+    const actions: string[] = [];
+    press.down(action => actions.push(action), () => {}, durations);
+    durations.resetMs = 2000;
+    press.up(1300);
+    press.down(action => actions.push(action), () => {}, durations);
+    press.up(1300);
+    expect(actions).toEqual(['reset', 'cancel']);
+  });
+
+  test('the middle hold cancels active audio and closes only an already stopped recorder', () => {
+    for (const status of ['starting', 'recording', 'paused']) expect(companionHoldAction('cancel', status)).toBe('cancel');
+    for (const status of ['idle', 'transcribing']) expect(companionHoldAction('cancel', status)).toBe('close');
+    expect(companionHoldAction('pause', 'recording')).toBe('pause');
+    expect(companionHoldAction('pause', 'paused')).toBe('resume');
+    expect(companionHoldAction('pause', 'idle')).toBe(null);
+    expect(companionHoldAction('reset', 'paused')).toBe('reset');
   });
 });
 

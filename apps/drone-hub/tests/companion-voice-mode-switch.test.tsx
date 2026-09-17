@@ -55,21 +55,27 @@ test('stopped Live keeps the idle companion visible with a restart control until
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
+  let enabled = true;
   let hasStarted = false;
   let status: 'idle' | 'listening' = 'idle';
   const original = liveModule.useCompanionLive;
   const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation(() => ({
-    ...original(), enabled: true, loading: false, saving: false, resolved: true, hasStarted, status,
+    ...original(), enabled, loading: false, saving: false, resolved: true, hasStarted, status,
   }));
-  const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue({
-    status: 'idle', durationMillis: 0, discardRecording: async () => {},
-  } as ReturnType<typeof voiceModule.useChatVoiceRecorder>);
+  const voice = {
+    status: 'idle' as ReturnType<typeof voiceModule.useChatVoiceRecorder>['status'], durationMillis: 0,
+    startRecording: async () => { voice.status = 'recording'; return true; },
+    discardRecording: async () => { voice.status = 'idle'; },
+  } as ReturnType<typeof voiceModule.useChatVoiceRecorder>;
+  const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue(voice);
+  let companion!: NonNullable<ReturnType<typeof useCompanion>>;
+  function Harness() { companion = useCompanion()!; return <CompanionOverlay />; }
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
   const render = async () => {
-    await act(async () => { root.render(<CompanionProvider><CompanionOverlay /></CompanionProvider>); });
-    return container.innerHTML;
+    await act(async () => { root.render(<CompanionProvider><Harness /></CompanionProvider>); });
+    return Array.from(dom.document.body.children).map(child => child.innerHTML).join('');
   };
   try {
     expect(await render()).toBe('');
@@ -81,6 +87,26 @@ test('stopped Live keeps the idle companion visible with a restart control until
     expect(await render()).toContain('Start live voice');
     hasStarted = false;
     expect(await render()).toBe('');
+    enabled = false;
+    await render();
+    const gesture = async (heldMs: number) => {
+      await act(async () => {
+        companion.handleShortcut({ phase: 'down' });
+        companion.handleShortcut({ phase: 'up', heldMs });
+      });
+    };
+    await gesture(30);
+    expect(voice.status).toBe('recording');
+    await gesture(900);
+    expect(voice.status).toBe('idle');
+    expect(companion.panelVisibility).toBe('open');
+    expect(await render()).toContain('Close Companion');
+    await gesture(900);
+    expect(companion.panelVisibility).toBe('closed');
+    expect(await render()).toBe('');
+    await gesture(30);
+    expect(voice.status).toBe('recording');
+    expect(await render()).toContain('Close Companion');
   } finally {
     await act(async () => { root.unmount(); });
     voiceSpy.mockRestore(); liveSpy.mockRestore();

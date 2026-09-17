@@ -70,9 +70,11 @@ With Live voice off, the desktop Companion shortcut acts on key release:
 
 - Tap to start recording. Tap again to stop, transcribe, and send; recording stays off.
 - Taps are independent, even in quick succession. A new recording can start while earlier clips transcribe. Transcriptions may run concurrently, but requests are sent to the agent in tap order.
-- Hold for 600 ms then release to stop and discard the current recording, without transcribing or sending it. Conversation context and previously submitted clips are preserved.
-- Hold for 1.5 seconds then release to stop recording, cancel the Companion agent, clear context, and discard unsent audio, including pending transcriptions. Recording stays off until an explicit new tap. If a proposal operation is already in flight, it may finish, but the remaining operations are stopped at the next progress boundary.
-- Distinct tones indicate recording started, transcription started, and the cancel/reset hold thresholds. Hold hints show what releasing will do; passing the cancel threshold does not cancel before a longer reset hold.
+- Hold for 0.3 seconds then release to pause or resume the microphone, retaining the current clip. Tap while paused to send that clip. Previously submitted work continues.
+- Hold for 0.8 seconds then release to stop and discard an active or paused recording without sending it, keeping the panel open. If recording was already stopped at keydown, this hold closes the panel and stops Companion work while preserving conversation context for reopening.
+- Hold for 1.3 seconds then release to stop recording, cancel the Companion agent, clear context, and discard unsent audio, including pending transcriptions. Recording stays off until an explicit new tap. If a proposal operation is already in flight, it may finish, but the remaining operations are stopped at the next progress boundary.
+- Distinct tones indicate recording started, transcription started, and each hold action. Hold hints show what releasing will do; longer holds never execute shorter actions first.
+- All three hold durations are configurable in Companion settings and saved on this desktop. Durations must increase, be between 0.2 and 10 seconds, and remain at least 0.2 seconds apart. Changes apply to the next key press.
 
 Live voice and the Caps Lock proposal shortcut retain their existing gestures. Local shortcuts support press/release directly; global hold gestures require the host keyboard listener (currently used with the Linux X11 desktop). Native-only global shortcut backends expose activation without release and retain tap actions, with a warning in global shortcut settings. No speculative transcription or transcription timing setting is used.
 

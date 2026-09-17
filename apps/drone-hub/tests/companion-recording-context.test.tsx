@@ -180,7 +180,7 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     const cancellations = cancelledRuns.length;
     const resultCount = proposalResults.length;
     companion.handleShortcut({ phase: 'down' });
-    companion.handleShortcut({ phase: 'up', heldMs: 1600 });
+    companion.handleShortcut({ phase: 'up', heldMs: 2600 });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(voice.status).toBe('idle');
     expect(cancelledRuns).toHaveLength(cancellations + 1);

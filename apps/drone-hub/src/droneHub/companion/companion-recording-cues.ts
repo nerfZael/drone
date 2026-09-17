@@ -1,9 +1,14 @@
-type Cue = 'start' | 'send' | 'cancel' | 'reset';
+import type { CompanionHoldAction } from './companion-shortcut';
+
+type Cue = 'start' | 'send' | CompanionHoldAction;
 
 const notes: Record<Cue, number[]> = {
   start: [520, 780],
   send: [980],
+  pause: [440, 440],
+  resume: [440, 660],
   cancel: [520, 330],
+  close: [660, 440, 220],
   reset: [660, 880, 660],
 };
 

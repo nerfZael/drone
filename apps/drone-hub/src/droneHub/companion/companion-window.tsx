@@ -1,4 +1,5 @@
 import React from 'react';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { createPortal } from 'react-dom';
 import { observeCompanionWindowSize } from './helpers/observe-companion-window-size';
 import { prepareCompanionWindow } from './helpers/prepare-companion-window';
@@ -29,7 +30,9 @@ export function useCompanionWindowHost(visible: boolean) {
   const floatingRef = React.useRef<Window | null>(null);
   const cleanupRef = React.useRef<(() => void) | null>(null);
   const [error, setError] = React.useState('');
-  const attach = React.useCallback(() => {
+  const restoreAttempted = React.useRef(false);
+  const attach = React.useCallback((savePreference = true) => {
+    if (savePreference) useDroneHubUiStore.getState().setCompanionWindowDetached(false);
     if (host) document.body.append(host);
     cleanupRef.current?.();
     cleanupRef.current = null;
@@ -47,11 +50,12 @@ export function useCompanionWindowHost(visible: boolean) {
       cleanupRef.current?.();
       cleanupRef.current = null;
       floatingRef.current = null;
+      restoreAttempted.current = false;
       bridge?.control('close');
       host.remove();
     };
   }, [host, bridge]);
-  React.useEffect(() => bridge?.onClose(attach), [bridge, attach]);
+  React.useEffect(() => bridge?.onClose(() => attach()), [bridge, attach]);
   React.useEffect(() => {
     if (!floating || !bridge || !host) return;
     const stopSizing = observeCompanionWindowSize(host, floating, height => bridge.control('resize', { height }));
@@ -59,10 +63,10 @@ export function useCompanionWindowHost(visible: boolean) {
     return stopSizing;
   }, [bridge, floating, host, visible]);
 
-  const toggle = React.useCallback(() => {
+  const detach = React.useCallback(() => {
     if (!bridge || !host) return;
     setError('');
-    if (floatingRef.current) { attach(); return; }
+    if (floatingRef.current) return;
     let child: Window | null = null;
     try {
       child = window.open('about:blank', 'drone-hub-companion');
@@ -71,11 +75,24 @@ export function useCompanionWindowHost(visible: boolean) {
       child.document.body.append(host);
       floatingRef.current = child;
       setFloating(child);
+      useDroneHubUiStore.getState().setCompanionWindowDetached(true);
     } catch (cause) {
-      attach();
+      attach(false);
       setError(`Could not detach Companion. ${cause instanceof Error ? cause.message : 'Try again.'}`);
     }
   }, [attach, bridge, host]);
+
+  React.useEffect(() => {
+    // Restore only when Companion is opened, without activating it on app startup.
+    if (!visible || !bridge || !host || restoreAttempted.current) return;
+    restoreAttempted.current = true;
+    if (useDroneHubUiStore.getState().companionWindowDetached) detach();
+  }, [visible, bridge, host, detach]);
+
+  const toggle = React.useCallback(() => {
+    if (floatingRef.current) attach();
+    else detach();
+  }, [attach, detach]);
 
   const state: CompanionWindowState = {
     supported: Boolean(bridge), detached: Boolean(floating), error, toggle,

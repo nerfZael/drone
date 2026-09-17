@@ -138,7 +138,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleCompanion',
     label: 'Toggle Companion recording',
-    description: 'With Live voice off: tap to start, or stop and send. Hold 0.6s then release to stop and discard; hold 1.5s then release to stop recording and the agent and clear context.',
+    description: 'With Live voice off: tap to start or send; short hold pauses/resumes; middle hold cancels a recording or closes the stopped companion; long hold stops and resets. Durations are configurable in Companion settings.',
   },
   {
     id: 'applyCompanionProposal',

@@ -1,4 +1,5 @@
 import { CompanionScreen } from '@drone/assistant-chat';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { desktopCompanionSessionStore } from './companion-session-store';
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
@@ -28,6 +29,8 @@ import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
 import {
   shouldCancelCompanionRecordingWithEscape,
   CompanionShortcutPress,
+  companionHoldAction,
+  type CompanionHoldAction,
   isCompanionShortcutDoubleTap,
   type CompanionShortcutEvent,
 } from './companion-shortcut';
@@ -59,7 +62,9 @@ type CompanionContextValue = {
   status: CompanionStatus;
   recordingPaused: boolean;
   pendingTranscriptions: number;
-  shortcutHint: 'cancel' | 'reset' | null;
+  shortcutHint: CompanionHoldAction | null;
+  panelVisibility: 'auto' | 'open' | 'closed';
+  dismiss(): Promise<void>;
   handleShortcut(event?: CompanionShortcutEvent): void;
   resetContext(): Promise<void>;
   error: string;
@@ -151,7 +156,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const voiceSubmissionQueueRef = React.useRef(Promise.resolve());
   const resettingRef = React.useRef(false);
   const [shortcutPress] = React.useState(() => new CompanionShortcutPress());
-  const [shortcutHint, setShortcutHint] = React.useState<'cancel' | 'reset' | null>(null);
+  const [shortcutHint, setShortcutHint] = React.useState<CompanionHoldAction | null>(null);
+  const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');
   const lastLiveShortcutAtRef = React.useRef(0);
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
   const textSubmissionGenerationRef = React.useRef(0);
@@ -175,6 +181,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     shortcutPress.cancel();
     setShortcutHint(null);
     live.reset();
+    setPanelVisibility('closed');
     voiceSubmissionQueueRef.current = Promise.resolve();
     voiceSubmissionGenerationRef.current += 1;
     textSubmissionGenerationRef.current += 1;
@@ -187,6 +194,23 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalDroneNames({});
     await Promise.all([controller.close(), voice.discardRecording()]);
   }, [controller, voice.discardRecording, live.reset]);
+
+  const dismiss = React.useCallback(async () => {
+    shortcutPress.cancel();
+    setShortcutHint(null);
+    setPanelVisibility('closed');
+    live.reset();
+    voiceSubmissionGenerationRef.current += 1;
+    textSubmissionGenerationRef.current += 1;
+    recordingWorkspaceRef.current = null;
+    proposalStore.clear();
+    setProposalExecutionProgress(null);
+    setProposalActionError('');
+    screen.clear();
+    const stopping = Promise.all([controller.cancel(), voice.discardRecording()]).then(() => {});
+    voiceSubmissionQueueRef.current = stopping.catch(() => {});
+    await stopping;
+  }, [controller, live.reset, proposalStore, screen, shortcutPress, voice.discardRecording]);
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
@@ -205,6 +229,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     shortcutPress.cancel();
     setShortcutHint(null);
     recordingWorkspaceRef.current = null;
+    setPanelVisibility('open');
     await voice.discardRecording({ preserveTranscriptions: true });
     controller.resetIfNoSession();
   }, [controller, shortcutPress, voice.discardRecording]);
@@ -392,6 +417,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       controller.reportVoiceError('Could not load the voice preference. Retry the Live voice setting before starting the microphone.');
       return;
     }
+    setPanelVisibility('open');
     if (live.enabled && (voice.status === 'idle' || voice.status === 'transcribing')) {
       if (live.status === 'connecting' || live.status === 'listening') { live.stop(); return; }
       await startLiveVoice();
@@ -448,8 +474,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [close]);
 
   // Keep the callbacks fresh while a key is held, even if recording causes a render.
-  const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext });
-  shortcutActionsRef.current = { toggle, discardRecording, resetContext };
+  const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext, dismiss, voice });
+  shortcutActionsRef.current = { toggle, discardRecording, resetContext, dismiss, voice };
   const handleShortcut = React.useCallback((event?: CompanionShortcutEvent) => {
     if (event?.phase === 'cancel') {
       shortcutPress.cancel();
@@ -475,18 +501,28 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
     if (!event) { void toggle(); return; }
     prepareCompanionRecordingCues();
-    let previewed: 'cancel' | 'reset' | null = null;
+    // The action is chosen from the state at keydown, not after a preview or
+    // asynchronous recorder event. A cancel hold can never become close.
+    const statusAtPress = shortcutActionsRef.current.voice.status;
+    let previewed: CompanionHoldAction | null = null;
     shortcutPress.down(gesture => {
       const actions = shortcutActionsRef.current;
       if (gesture === 'tap') { void actions.toggle(); return; }
-      if (previewed !== gesture) playCompanionRecordingCue(gesture);
-      if (gesture === 'cancel') void actions.discardRecording();
-      else void actions.resetContext();
+      const action = companionHoldAction(gesture, statusAtPress);
+      if (!action) return;
+      if (previewed !== action) playCompanionRecordingCue(action);
+      if (action === 'cancel') void actions.discardRecording();
+      else if (action === 'close') void actions.dismiss();
+      else if (action === 'reset') void actions.resetContext();
+      else if ((action === 'pause' && actions.voice.status === 'recording') ||
+        (action === 'resume' && actions.voice.status === 'paused')) actions.voice.toggleRecordingPause();
     }, gesture => {
-      previewed = gesture;
-      setShortcutHint(gesture);
-      playCompanionRecordingCue(gesture);
-    });
+      const action = companionHoldAction(gesture, statusAtPress);
+      if (!action) return;
+      previewed = action;
+      setShortcutHint(action);
+      playCompanionRecordingCue(action);
+    }, useDroneHubUiStore.getState().companionShortcutDurations);
   }, [close, live.enabled, shortcutPress, toggle]);
 
   React.useEffect(() => {
@@ -501,6 +537,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     shortcutPress.cancel();
     setShortcutHint(null);
     switchingVoiceRef.current = true;
+    setPanelVisibility('open');
     setSwitchingVoice(true);
     const generation = voiceSubmissionGenerationRef.current;
     try {
@@ -538,9 +575,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: 'Companion is already working.' };
       }
       live.stop();
-      if (status === 'cancelled' || status === 'error') {
-        await close();
-      }
+      setPanelVisibility('open');
       await run(text, capturedWorkspace);
       const next = controller.getSnapshot();
       if (next.status === 'error') {
@@ -593,6 +628,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       recordingPaused: voice.status === 'paused',
       pendingTranscriptions: voice.pendingTranscriptions ?? 0,
       shortcutHint,
+      panelVisibility,
+      dismiss,
       handleShortcut,
       resetContext,
       durationMillis: voice.durationMillis,
@@ -633,7 +670,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       proposalStore, proposalStoreVersion, proposalActionError,
-      shortcutHint, handleShortcut, resetContext, voice.pendingTranscriptions,
+      shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, voice.pendingTranscriptions,
       close,
       live,
       autoApproveSettings.error,

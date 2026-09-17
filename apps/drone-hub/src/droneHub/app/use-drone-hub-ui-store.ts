@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeCompanionShortcutDurations, type CompanionShortcutDurations } from '../companion/companion-shortcut';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppView, DraftChatState, DroneErrorModalState } from './app-types';
@@ -144,6 +145,10 @@ type DroneHubUiState = {
   customAgentError: string | null;
   nameSuggestToast: NameSuggestToast;
   shortcutBindings: ShortcutBindingMap;
+  companionWindowDetached: boolean;
+  setCompanionWindowDetached(value: boolean): void;
+  companionShortcutDurations: CompanionShortcutDurations;
+  setCompanionShortcutDurations: (value: CompanionShortcutDurations) => void;
   terminalMenuOpen: boolean;
   agentMenuOpen: boolean;
   setThemeId: (next: Updater<DesktopThemeId>) => void;
@@ -377,6 +382,8 @@ type DroneHubUiPersistedState = Pick<
   | 'repoCreateRemoteBranch'
   | 'customAgents'
   | 'shortcutBindings'
+  | 'companionWindowDetached'
+  | 'companionShortcutDurations'
 >;
 
 export function normalizeLastChatSelectionByRepoPath(
@@ -1006,6 +1013,10 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       customAgentError: null,
       nameSuggestToast: null,
       shortcutBindings: cloneDefaultShortcutBindings(),
+      companionWindowDetached: false,
+      setCompanionWindowDetached: value => set({ companionWindowDetached: value }),
+      companionShortcutDurations: normalizeCompanionShortcutDurations(undefined),
+      setCompanionShortcutDurations: value => set({ companionShortcutDurations: normalizeCompanionShortcutDurations(value) }),
       terminalMenuOpen: false,
       agentMenuOpen: false,
       setThemeId: (next) =>
@@ -1507,6 +1518,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         repoCreateRemoteBranch: state.repoCreateRemoteBranch,
         customAgents: state.customAgents,
         shortcutBindings: state.shortcutBindings,
+        companionWindowDetached: state.companionWindowDetached,
+        companionShortcutDurations: state.companionShortcutDurations,
       }),
       merge: (persistedState, currentState) => {
         const persisted = migrateDroneHubUiPersistedState(persistedState);
@@ -1633,6 +1646,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.repoCreateRemoteBranch ?? currentState.repoCreateRemoteBranch,
           ),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
+          companionWindowDetached: persisted.companionWindowDetached === true,
+          companionShortcutDurations: normalizeCompanionShortcutDurations(persisted.companionShortcutDurations),
           shortcutBindings: sanitizeShortcutBindings(
             migratedShortcutBindings ?? currentState.shortcutBindings,
           ),

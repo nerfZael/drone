@@ -6,6 +6,7 @@ import * as voiceModule from '../src/droneHub/chat/use-chat-voice-recorder';
 import * as liveModule from '../src/droneHub/companion/use-companion-live';
 import * as transportModule from '../src/droneHub/companion/companion-websocket-transport';
 import * as cuesModule from '../src/droneHub/companion/companion-recording-cues';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { CompanionProvider, useCompanion } from '../src/droneHub/companion/CompanionContext';
 
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
@@ -89,7 +90,7 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     await tap(); // Third request is already committed, still transcribing.
     await tap(); // Fourth recording will be canceled.
     press();
-    await release(700);
+    await release(900);
     expect(voice.status).toBe('idle');
     expect(discards.at(-1)).toBe(true);
     expect(cues.at(-1)).toBe('cancel');
@@ -105,7 +106,7 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     await tap();
     const startsBeforeReset = starts;
     press();
-    await release(1600);
+    await release(1400);
     expect(voice.status).toBe('idle');
     expect(starts).toBe(startsBeforeReset);
     expect(cancelledRuns).toEqual([prompts[0].runId]);
@@ -124,7 +125,7 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
 
     const startsWhileIdle = starts;
     press();
-    await release(1600);
+    await release(1400);
     expect(voice.status).toBe('idle');
     expect(starts).toBe(startsWhileIdle);
     expect(pending).toHaveLength(5);
@@ -199,10 +200,60 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     expect(prompts.at(-1)?.prompt).toBe('request after startup reset');
 
     await tap();
+    const clipsBeforePause = pending.length;
+    press();
+    await release(700);
+    expect(voice.status).toBe('paused');
+    expect(cues.at(-1)).toBe('pause');
+    press();
+    await release(700);
+    expect(voice.status).toBe('recording');
+    expect(cues.at(-1)).toBe('resume');
+    expect(pending).toHaveLength(clipsBeforePause);
+    press();
+    await release(700);
+    await tap(); // A tap sends the retained paused clip.
+    expect(pending).toHaveLength(clipsBeforePause + 1);
+    pending.at(-1)!('paused clip');
+    await flush();
+    expect(prompts.at(-1)?.prompt).toBe('paused clip');
+
+    await tap();
+    press();
+    voice.status = 'idle'; // State changes during hold cannot turn cancel into close.
+    const closesBeforeCancel = closes;
+    await release(900);
+    expect(cues.at(-1)).toBe('cancel');
+    expect(closes).toBe(closesBeforeCancel);
+    const previousRun = prompts.at(-1)!.runId;
+    press();
+    await release(900); // Starting stopped selects close.
+    expect(cues.at(-1)).toBe('close');
+    expect(cancelledRuns.at(-1)).toBe(previousRun);
+    await tap();
+    await tap();
+    pending.at(-1)!('after reopening');
+    await flush();
+    expect(prompts.at(-1)?.runId).toBe(previousRun);
+
+    const defaults = useDroneHubUiStore.getState().companionShortcutDurations;
+    try {
+      useDroneHubUiStore.setState({ companionShortcutDurations: { pauseMs: 200, cancelMs: 400, resetMs: 600 } });
+      await tap();
+      press();
+      await release(250);
+      expect(voice.status).toBe('paused');
+      press();
+      await release(450);
+      expect(voice.status).toBe('idle');
+      expect(cues.at(-1)).toBe('cancel');
+    } finally { useDroneHubUiStore.setState({ companionShortcutDurations: defaults }); }
+
+    await tap();
     voice.toggleRecordingPause();
     const startsBeforePausedReset = starts;
     press();
-    await release(1600);
+    await release(1400);
     expect(voice.status).toBe('idle');
     expect(starts).toBe(startsBeforePausedReset);
     expect(cancelledRuns.at(-1)).toBe(prompts.at(-1)?.runId);

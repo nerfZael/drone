@@ -28,9 +28,9 @@ import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
 function companionStatusLabel(status: CompanionStatus, recordingPaused: boolean): string {
-  if (recordingPaused) return 'Listening paused';
+  if (recordingPaused) return 'Paused';
   if (status === 'starting') return 'Starting microphone';
-  if (status === 'recording') return 'Listening';
+  if (status === 'recording') return 'Recording';
   if (status === 'transcribing') return 'Transcribing';
   if (status === 'working') return 'Working';
   if (status === 'completed') return 'Completed';
@@ -47,9 +47,15 @@ function CompanionStatusIndicator({
   recordingPaused: boolean;
 }) {
   const label = companionStatusLabel(status, recordingPaused);
-  const tone = recordingPaused
-    ? 'bg-[var(--yellow)]'
-    : status === 'recording' || status === 'error'
+  if (recordingPaused) return (
+    <span title={label} aria-label={`Companion status: ${label}`} role="status" className="flex h-3 w-3 shrink-0 items-center justify-center text-[var(--yellow)]">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <rect x="2" y="1" width="3" height="10" rx="0.5" />
+        <rect x="7" y="1" width="3" height="10" rx="0.5" />
+      </svg>
+    </span>
+  );
+  const tone = status === 'recording' || status === 'error'
       ? 'bg-[var(--red)]'
       : status === 'completed'
         ? 'bg-[var(--green)]'
@@ -143,7 +149,8 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
   }, [companion?.proposalHistory.length]);
-  const visible = Boolean(companion && (companion.status !== 'idle' || companion.live?.hasStarted || companion.shortcutHint || panelOpen));
+  const visible = Boolean(companion && (companion.shortcutHint || (companion.panelVisibility !== 'closed' &&
+    (companion.panelVisibility === 'open' || companion.status !== 'idle' || companion.live?.hasStarted || panelOpen))));
   const companionWindow = useCompanionWindowHost(visible);
   const popoverFocus = useCrossWindowFocus(companionWindow.portalContainer);
   React.useEffect(() => {
@@ -167,7 +174,7 @@ export function CompanionOverlay() {
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
   return companionWindow.render(
-    <div data-companion-surface="true" data-companion-window-panel="true" style={companionWindow.detached ? { position: 'absolute', top: 'auto', bottom: 0, right: 0, width: '100%', maxHeight: 'var(--companion-max-height)', overflowY: 'auto', padding: 8, alignItems: 'stretch', flexDirection: 'column' } : recorderHeight > 0 ? {
+    <div data-companion-surface="true" data-companion-window-panel="true" style={companionWindow.detached ? { position: 'absolute', top: 'auto', bottom: 0, right: 0, width: '100%', maxHeight: 'var(--companion-max-height)', overflowY: 'auto', padding: 8, alignItems: 'flex-end', flexDirection: 'column' } : recorderHeight > 0 ? {
       zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
@@ -202,7 +209,7 @@ export function CompanionOverlay() {
           onDiscard={() => companion.discardProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
         />
       ) : null}
-      <div className={`flex min-h-0 w-full flex-col gap-3 ${companionWindow.detached ? '' : panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
+      <div className={`flex min-h-0 flex-col gap-3 ${companionWindow.detached ? 'w-fit max-w-full' : 'w-full'} ${companionWindow.detached ? '' : panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
@@ -228,9 +235,6 @@ export function CompanionOverlay() {
       >
       {/* Header doubles as the user's message once a transcript exists. */}
       <div data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
-        {companionWindow.detached ? <span title="Drag Companion" className="flex h-7 w-2 shrink-0 cursor-move items-center text-[var(--muted-dim)]" aria-label="Drag Companion">
-          <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" aria-hidden="true"><circle cx="2" cy="3" r="1" /><circle cx="6" cy="3" r="1" /><circle cx="2" cy="7" r="1" /><circle cx="6" cy="7" r="1" /><circle cx="2" cy="11" r="1" /><circle cx="6" cy="11" r="1" /></svg>
-        </span> : null}
         <Popover.Root open={expanded} onOpenChange={setExpanded}>
           <Popover.Trigger asChild>
             <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}
@@ -324,21 +328,35 @@ export function CompanionOverlay() {
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           {companion.shortcutHint ? (
             <span role="status" className="text-xs text-[var(--fg)]">
-              {companion.shortcutHint === 'reset' ? 'Release to stop Companion and clear context' : 'Release to stop and discard recording · keep holding to reset'}
+              {{ pause: 'Release to pause recording', resume: 'Release to resume recording',
+                cancel: 'Release to stop and discard recording', close: 'Release to close Companion · keep context',
+                reset: 'Release to stop Companion and clear context' }[companion.shortcutHint]}
             </span>
           ) : companion.transcript ? (
+            <div className="flex min-w-0 w-full items-start gap-1">
+            {companionWindow.detached ? (
+              <span data-companion-drag-handle="true" title={companion.transcript}
+                className={`min-w-0 flex-1 cursor-move select-none text-xs leading-relaxed text-[var(--fg-secondary)] ${transcriptExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'}`}>
+                {companion.transcript}
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => setTranscriptExpanded((value) => !value)}
               aria-expanded={transcriptExpanded}
               aria-label={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
               title={transcriptExpanded ? undefined : companion.transcript}
-              className={`w-full rounded-sm text-left text-xs leading-relaxed text-[var(--fg-secondary)] outline-none hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
+              className={`${companionWindow.detached ? 'shrink-0 px-1' : 'w-full'} rounded-sm text-left text-xs leading-relaxed text-[var(--fg-secondary)] outline-none hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
                 transcriptExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'
               }`}
             >
-              {companion.transcript}
+              {companionWindow.detached ? (
+                <svg width="14" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <path d={transcriptExpanded ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'} />
+                </svg>
+              ) : companion.transcript}
             </button>
+            </div>
           ) : (
             <div className="flex min-w-0 items-center gap-2 text-xs font-[var(--weight-semibold)] text-[var(--fg)]">
               <span className="truncate">
@@ -411,10 +429,10 @@ export function CompanionOverlay() {
           </Popover.Root>
           <button
             type="button"
-            onClick={() => void companion.close()}
+            onClick={() => void companion.dismiss()}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-lg text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             aria-label="Close Companion"
-            title="Close Companion"
+            title="Close Companion and keep conversation context"
           >
             ×
           </button>
@@ -432,7 +450,8 @@ export function CompanionOverlay() {
             </div>
           ) : null}
           {companion.reply ? (
-            <div className="px-3 pb-2 pt-0.5">
+            <div data-companion-drag-handle={companionWindow.detached || undefined}
+              className={`px-3 pb-2 pt-0.5 ${companionWindow.detached ? 'cursor-move select-none' : ''}`}>
               <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
             </div>
           ) : null}

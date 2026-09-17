@@ -23,7 +23,7 @@ export function prepareCompanionWindow(source: Document, target: Document): () =
     html, body { background: transparent !important; }
     [data-companion-window-panel] aside { max-height: min(36rem, calc(var(--companion-max-height) - 16px)); }
     [data-companion-drag-handle] { -webkit-app-region: drag; }
-    [data-companion-drag-handle] button { -webkit-app-region: no-drag; }
+    [data-companion-drag-handle] :is(button, a, input, textarea, select, summary, [role="button"]) { -webkit-app-region: no-drag; }
   `;
   target.head.append(style);
   const theme = new MutationObserver(copyTheme);

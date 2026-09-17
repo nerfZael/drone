@@ -118,3 +118,40 @@ test('content sizing grows upward, shrinks, clamps to the work area, and rejects
   expect(child.bounds).toEqual({ x: 600, y: 200, width: 464, height: 160 });
   owner.destroy();
 });
+
+test('floating position survives restart, clamps to the display, and hiding resets the corner', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'companion-position-'));
+  const positionPath = path.join(directory, 'position.json');
+  const open = (owner: Window) => owner.webContents.handler({ url: 'about:blank', frameName: 'drone-hub-companion' }).overrideBrowserWindowOptions;
+  const setup = () => {
+    const owner = new Window();
+    const ipcMain = new EventEmitter();
+    installCompanionWindow({ owner, ipcMain, screen, positionPath, shell: { openExternal: async () => {} }, isQuitting: () => false });
+    return { owner, ipcMain };
+  };
+  try {
+    const first = setup();
+    const child = new Window();
+    first.owner.webContents.emit('did-create-window', child, { frameName: 'drone-hub-companion' });
+    child.bounds = { x: 600, y: 300, width: 464, height: 160 };
+    child.emit('move');
+    first.owner.destroy();
+    const second = setup();
+    expect(open(second.owner)).toMatchObject({ x: 600, y: 396, width: 464, height: 64 });
+    const restored = new Window();
+    restored.bounds = { x: 600, y: 396, width: 464, height: 64 };
+    second.owner.webContents.emit('did-create-window', restored, { frameName: 'drone-hub-companion' });
+    const event = { sender: second.owner.webContents, senderFrame: second.owner.webContents.mainFrame };
+    second.ipcMain.emit('drone-hub:companion-window', event, 'hide');
+    second.ipcMain.emit('drone-hub:companion-window', event, 'show');
+    expect(restored.bounds).toEqual({ x: 1540, y: 1010, width: 464, height: 64 });
+    second.owner.destroy();
+    fs.writeFileSync(positionPath, JSON.stringify({ right: 99999, bottom: -500 }));
+    const third = setup();
+    expect(open(third.owner)).toMatchObject({ x: 1540, y: 66 });
+    third.owner.destroy();
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

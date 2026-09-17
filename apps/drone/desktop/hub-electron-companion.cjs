@@ -1,12 +1,25 @@
+const fs = require('node:fs');
 const WINDOW_NAME = 'drone-hub-companion';
 const CONTROL_CHANNEL = 'drone-hub:companion-window';
 const CLOSE_CHANNEL = 'drone-hub:companion-window-close';
 
 // A same-origin blank window lets React move its existing portal without starting
 // a second Companion controller, microphone, or websocket connection.
-function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, openOtherWindow }) {
+function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, openOtherWindow, positionPath }) {
   let floating = null;
+  let saveTimer;
+  const savePosition = () => {
+    clearTimeout(saveTimer);
+    if (!positionPath || !floating || floating.isDestroyed()) return;
+    const bounds = floating.getBounds();
+    try { fs.writeFileSync(positionPath, JSON.stringify({ right: bounds.x + bounds.width, bottom: bounds.y + bounds.height }), { mode: 0o600 }); } catch {}
+  };
+  const position = (area, width, height, saved) => ({
+    x: Math.max(area.x + 16, Math.min((saved?.right ?? area.x + area.width - 16) - width, area.x + area.width - width - 16)),
+    y: Math.max(area.y + 16, Math.min((saved?.bottom ?? area.y + area.height - 16) - height, area.y + area.height - height - 16)),
+  });
   const destroy = () => {
+    savePosition();
     const child = floating;
     floating = null;
     if (child && !child.isDestroyed()) child.destroy();
@@ -22,7 +35,13 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
       return { action: 'deny' };
     }
     if (floating && !floating.isDestroyed()) return { action: 'deny' };
-    const area = screen.getPrimaryDisplay().workArea;
+    let saved;
+    try {
+      const value = JSON.parse(fs.readFileSync(positionPath, 'utf8'));
+      if (Number.isFinite(value.right) && Number.isFinite(value.bottom)) saved = value;
+    } catch {}
+    const area = saved ? screen.getDisplayMatching({ x: Math.round(saved.right - 1), y: Math.round(saved.bottom - 1), width: 1, height: 1 }).workArea
+      : screen.getPrimaryDisplay().workArea;
     const width = Math.min(464, area.width - 32);
     const height = Math.min(64, area.height - 32);
     return {
@@ -30,7 +49,7 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
       outlivesOpener: false,
       overrideBrowserWindowOptions: {
         title: 'Companion — Drone Hub',
-        x: area.x + area.width - width - 16, y: area.y + area.height - height - 16,
+        ...position(area, width, height, saved),
         width, height,
         show: false, frame: false, titleBarStyle: 'default', titleBarOverlay: false, alwaysOnTop: true,
         transparent: true, backgroundColor: '#00000000', hasShadow: false,
@@ -43,8 +62,12 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
     if (frameName !== WINDOW_NAME) return;
     floating = child;
     child.setMenu(null);
+    child.on('move', () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(savePosition, 200);
+    });
     child.on('close', (event) => {
-      if (isQuitting() || owner.isDestroyed()) return;
+      if (isQuitting() || owner.isDestroyed()) { savePosition(); return; }
       // The renderer must rescue the DOM before the child document is destroyed.
       event.preventDefault();
       owner.webContents.send(CLOSE_CHANNEL);
@@ -78,7 +101,13 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
       }
     }
     else if (action === 'show') floating.show();
-    else if (action === 'hide') floating.hide();
+    else if (action === 'hide') {
+      floating.hide();
+      const bounds = floating.getBounds();
+      const area = screen.getPrimaryDisplay().workArea;
+      floating.setBounds({ ...bounds, ...position(area, bounds.width, bounds.height) });
+      savePosition();
+    }
   };
   ipcMain.on(CONTROL_CHANNEL, control);
   owner.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {

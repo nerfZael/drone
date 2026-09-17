@@ -1,10 +1,13 @@
 import React, { act } from 'react';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { createRoot } from 'react-dom/client';
 import { useCompanionWindowHost, useCompanionWindow } from '../src/droneHub/companion/companion-window';
 
 test('moving Companion retains component state and DOM, follows theme, hides when idle, and docks on native close', async () => {
+  const previousDetached = useDroneHubUiStore.getState().companionWindowDetached;
+  useDroneHubUiStore.setState({ companionWindowDetached: false });
   const source = new Window({ url: 'http://localhost:5173' });
   const child = new Window({ url: 'about:blank' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -75,13 +78,29 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     expect(source.document.getElementById('count')!.textContent).toBe('2');
     expect(source.document.getElementById('toggle')!.textContent).toBe('false');
     expect(controls.at(-1)).toBe('attach');
+    expect(useDroneHubUiStore.getState().companionWindowDetached).toBe(false);
     expect(mounts).toBe(1);
     Object.assign(source, { open: () => null });
     await click(source.document, 'toggle');
     expect(source.document.querySelector('[role="alert"]')!.textContent).toContain('Could not detach Companion');
     expect(source.document.querySelector('textarea')).toBe(editor);
+    Object.assign(source, { open: () => child });
+    await click(source.document, 'toggle');
+    expect(useDroneHubUiStore.getState().companionWindowDetached).toBe(true);
+    await act(async () => root.render(null)); // App shutdown must not save docked.
+    expect(useDroneHubUiStore.getState().companionWindowDetached).toBe(true);
+    await act(async () => root.render(<Host visible={false} />));
+    expect(source.document.getElementById('toggle')!.textContent).toBe('false');
+    await act(async () => root.render(<Host />));
+    expect(child.document.getElementById('toggle')!.textContent).toBe('true');
+    await click(child.document, 'toggle');
+    expect(useDroneHubUiStore.getState().companionWindowDetached).toBe(false);
+    await act(async () => root.render(null));
+    await act(async () => root.render(<Host />));
+    expect(source.document.getElementById('toggle')!.textContent).toBe('false');
   } finally {
     await act(async () => root.unmount());
+    useDroneHubUiStore.setState({ companionWindowDetached: previousDetached });
     expect(mounts).toBe(0);
     expect(onClose).toBeUndefined();
     for (const [name, descriptor] of originals) {
