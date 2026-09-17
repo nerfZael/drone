@@ -21,6 +21,10 @@ interface Window {
     showNotification?(input: { title: string; body: string; silent: boolean; name?: string; kind?: string; durationSeconds?: number; target?: { droneId: string; chatName: string } }): Promise<void>;
     onNotificationClick?(callback: (target: { droneId: string; chatName: string }) => void): () => void;
     onNotificationError?(callback: (error: string) => void): () => void;
+    companionWindow?: {
+      control(action: 'show' | 'hide' | 'close' | 'attach'): void;
+      onClose(callback: () => void): () => void;
+    };
     reportDiagnostic?(record: Record<string, unknown>): void;
     onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;
   };

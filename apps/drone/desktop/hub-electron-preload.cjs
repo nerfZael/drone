@@ -78,6 +78,17 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
     ipcRenderer.on('drone-hub:notification-error', listener);
     return () => ipcRenderer.removeListener('drone-hub:notification-error', listener);
   },
+  companionWindow: {
+    control(action) {
+      if (['show', 'hide', 'close', 'attach'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action);
+    },
+    onClose(callback) {
+      if (typeof callback !== 'function') return () => {};
+      const listener = () => callback();
+      ipcRenderer.on('drone-hub:companion-window-close', listener);
+      return () => ipcRenderer.removeListener('drone-hub:companion-window-close', listener);
+    },
+  },
   reportDiagnostic(record) {
     ipcRenderer.send('drone-hub:diagnostic', record);
   },
