@@ -1,4 +1,6 @@
 import React from 'react';
+import { useCrossWindowFocus } from '../../ui/use-cross-window-focus';
+import { useCompanionWindow } from './companion-window';
 import { Popover } from 'radix-ui';
 import {
   chatSubscriptionResourceLabel,
@@ -9,6 +11,8 @@ import {
 } from '../app/chat-resource-subscriptions';
 
 export function CompanionSubscriptions({ subscriptions }: { subscriptions: ChatResourceSubscription[] }) {
+  const companionWindow = useCompanionWindow();
+  const popoverFocus = useCrossWindowFocus(companionWindow.portalContainer);
   const [open, setOpen] = React.useState(false);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -22,8 +26,8 @@ export function CompanionSubscriptions({ subscriptions }: { subscriptions: ChatR
           <span className="text-[10px] tabular-nums">{subscriptions.length}</span>
         </button>
       </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content side="top" align="end" sideOffset={8} aria-label="Companion subscriptions" data-companion-surface="true"
+      <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
+        <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side="top" align="end" sideOffset={8} aria-label="Companion subscriptions" data-companion-surface="true"
           className="z-[110] max-h-[var(--radix-popover-content-available-height)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--shadow-dialog)]">
           <div className="border-b border-[var(--border-subtle)] px-3 py-2.5 text-xs font-semibold text-[var(--fg)]">Companion subscriptions</div>
           {subscriptions.length === 0 ? <p className="p-3 text-xs text-[var(--muted)]">Companion has no active subscriptions.</p> : null}

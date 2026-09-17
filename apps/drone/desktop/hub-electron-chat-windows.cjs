@@ -6,7 +6,7 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
   const openExternal = (url) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => {});
   };
-  mainWindow.webContents.setWindowOpenHandler(({ url, frameName }) => {
+  const handleWindowOpen = ({ url, frameName }) => {
     if (url === 'about:blank' && frameName.startsWith(CHAT_WINDOW_PREFIX)) {
       return { action: 'allow', overrideBrowserWindowOptions: {
         width: 640, height: 800, minWidth: 320, minHeight: 280,
@@ -16,8 +16,10 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
     }
     openExternal(url);
     return { action: 'deny' };
-  });
+  };
+  mainWindow.webContents.setWindowOpenHandler(handleWindowOpen);
   mainWindow.webContents.on('did-create-window', (child, { frameName }) => {
+    if (!frameName.startsWith(CHAT_WINDOW_PREFIX)) return;
     windows.set(frameName, child);
     child.setMenu(null);
     child.webContents.setWindowOpenHandler(({ url }) => {
@@ -43,5 +45,6 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
     for (const child of windows.values()) if (!child.isDestroyed()) child.destroy();
     windows.clear();
   });
+  return handleWindowOpen;
 }
 module.exports = { installChatWindows, CHAT_WINDOW_PREFIX, CHAT_WINDOW_PIN_CHANNEL };

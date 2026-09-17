@@ -1,3 +1,6 @@
+import { useCrossWindowFocus } from '../../ui/use-cross-window-focus';
+import { shouldCancelCompanionRecordingWithEscape } from './companion-shortcut';
+import { useCompanionWindowHost } from './companion-window';
 import { CompanionScreenPanel } from './CompanionScreenPanel';
 import { AssistantContextUsageIndicator } from '../assistant/AssistantContextStatus';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
@@ -134,15 +137,31 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
   }, [companion?.proposalHistory.length]);
-  if (!companion || (companion.status === 'idle' && !companion.live?.hasStarted && !companion.shortcutHint && !panelOpen)) return null;
+  const visible = Boolean(companion && (companion.status !== 'idle' || companion.live?.hasStarted || companion.shortcutHint || panelOpen));
+  const companionWindow = useCompanionWindowHost(visible);
+  const popoverFocus = useCrossWindowFocus(companionWindow.portalContainer);
+  React.useEffect(() => {
+    if (!companionWindow.detached || !companionWindow.ownerWindow || companion?.switchingVoice ||
+        companion?.live?.status === 'connecting' || companion?.live?.status === 'listening') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!shouldCancelCompanionRecordingWithEscape({ key: event.key, repeat: event.repeat,
+        isComposing: event.isComposing, voiceStatus: companion?.status ?? 'idle' })) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void companion?.discardRecording();
+    };
+    companionWindow.ownerWindow.addEventListener('keydown', onKeyDown, true);
+    return () => companionWindow.ownerWindow?.removeEventListener('keydown', onKeyDown, true);
+  }, [companionWindow.detached, companionWindow.ownerWindow, companion?.status, companion?.live?.status, companion?.switchingVoice, companion?.discardRecording]);
+  if (!companion || !visible) return companionWindow.render(null);
   const active = companion.status === 'working';
   const liveActive = companion.live?.status === 'connecting' || companion.live?.status === 'listening';
   const duration = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
-  return (
-    <div data-companion-surface="true" style={recorderHeight > 0 ? {
+  return companionWindow.render(
+    <div data-companion-surface="true" style={companionWindow.detached ? { position: 'relative', inset: 'auto', width: '100%', maxHeight: 'none', padding: 12, alignItems: 'stretch', flexDirection: 'column' } : recorderHeight > 0 ? {
       zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
@@ -177,7 +196,7 @@ export function CompanionOverlay() {
           onDiscard={() => companion.discardProposal(companion.selectedProposalId ?? undefined, companion.proposals.find(item => item.targetId === companion.selectedProposalId)?.revision)}
         />
       ) : null}
-      <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
+      <div className={`flex min-h-0 w-full flex-col gap-3 ${companionWindow.detached ? '' : panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
@@ -185,7 +204,7 @@ export function CompanionOverlay() {
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
       {/* The proposal strip docks onto the window's top edge so it works even when the window is a single row. */}
-      <div className="flex min-h-0 w-full flex-col min-[860px]:max-w-[28rem] min-[860px]:self-end">
+      <div className={`flex min-h-0 w-full flex-col ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}>
       <CompanionProposalStrip
         proposals={companion.proposals}
         selectedId={companion.selectedProposalId}
@@ -213,8 +232,8 @@ export function CompanionOverlay() {
               </svg> : <CompanionStatusIndicator status={companion.status} recordingPaused={companion.recordingPaused} />}
             </button>
           </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content side="top" align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
+          <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
+            <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side="top" align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
               className="z-[110] w-[min(24rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--shadow-dialog)]">
               <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 text-xs text-[var(--muted)]">
                 <span className="flex-1">{active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)} · {companion.activity.length} tool calls</span>
@@ -363,8 +382,8 @@ export function CompanionOverlay() {
                 </svg>
               </button>
             </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content side="top" align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
+            <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
+              <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side="top" align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
                 className="z-[110] w-[min(21rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-[var(--shadow-dialog)]">
                 <CompanionOptionsMenu
                   historyOpen={historyOpen}
@@ -393,6 +412,7 @@ export function CompanionOverlay() {
         </div>
       </div>
 
+      {companionWindow.error ? <p role="alert" className="px-3 py-2 text-xs text-[var(--red)]">{companionWindow.error}</p> : null}
       {/* Body: the reply is what the user came for. */}
       {companion.error || companion.reply ? (
         <div className="min-h-0 overflow-y-auto">

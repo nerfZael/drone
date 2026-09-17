@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCompanionWindow } from './companion-window';
 import { ChatComposerEditor } from '../chat/ChatComposerEditor';
 
 export function CompanionTextEditor({ id, title, description, content, maxChars, loading, saving, error, dirty, conflict, onChange, save, load, onClose }: {
@@ -17,6 +18,7 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
   load(): Promise<void>;
   onClose(): void;
 }) {
+  const { supported } = useCompanionWindow();
   const [notice, setNotice] = React.useState(false);
   const panelRef = React.useRef<HTMLElement>(null);
   React.useEffect(() => { panelRef.current?.focus(); }, []);
@@ -49,9 +51,9 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
             const buttons = panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea, [tabindex="0"]');
             const first = buttons?.[0];
             const last = buttons?.[buttons.length - 1];
-            if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+            if (event.shiftKey && (panelRef.current?.ownerDocument.activeElement === first || panelRef.current?.ownerDocument.activeElement === panelRef.current)) {
               event.preventDefault(); last?.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
+            } else if (!event.shiftKey && panelRef.current?.ownerDocument.activeElement === last) {
               event.preventDefault(); first?.focus();
             }
           }
@@ -63,6 +65,7 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
         <div className="min-h-0 overflow-y-auto">
           {loading ? <p className="p-3 text-xs text-[var(--muted)]">Loading…</p> : content !== undefined ? (
             <ChatComposerEditor
+              portable={supported}
               value={content}
               disabled={saving || loading}
               autoFocus

@@ -27,14 +27,15 @@ export class CompanionScreen {
     };
   }
 
-  resize(width: number, height: number, typography = '') {
+  resize(width: number, height: number, typography = '', options?: { preserveContent?: boolean }) {
     const next = { width: Math.max(0, Math.floor(Number.isFinite(width) ? width : 0)), height: Math.max(0, Math.floor(Number.isFinite(height) ? height : 0)) };
     if (next.width === this.bounds.width && next.height === this.bounds.height && typography === this.typography) return;
     this.typography = typography;
     this.bounds = next;
     this.finish({ displayed: false, error: 'SCREEN_CHANGED', constraints: this.constraints(), retry: 'Inspect or submit again using the new dimensions.' });
-    // Never keep stale content that might be clipped after rotation or resizing.
-    this.update({ markdown: '', candidate: null });
+    // Scrollable desktop hosts retain the accepted display while moving windows.
+    // Other clients still discard content that could be clipped after resizing.
+    this.update({ markdown: options?.preserveContent ? this.snapshot.markdown : '', candidate: null });
   }
   execute(args: Record<string, unknown>): Promise<unknown> | unknown {
     const action = args.action ?? 'show';
