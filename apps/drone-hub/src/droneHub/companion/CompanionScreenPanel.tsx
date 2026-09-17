@@ -19,7 +19,7 @@ export function CompanionScreenPanel({ screen }: { screen: CompanionScreen }) {
       const rect = parent.getBoundingClientRect();
       const viewport = view.visualViewport;
       const width = Math.floor(Math.max(0, Math.min(480, rect.width - 26, (viewport?.width ?? view.innerWidth) - 58)));
-      const height = Math.floor(Math.max(0, Math.min(420, detached ? view.innerHeight - 120 : rect.top - (viewport?.offsetTop ?? 0) - 80)));
+      const height = Math.floor(Math.max(0, Math.min(420, detached ? (view.screen.availHeight || 900) - 120 : rect.top - (viewport?.offsetTop ?? 0) - 80)));
       setBounds({ width, height, bottom: view.innerHeight - rect.top + 12, right: Math.max(16, view.innerWidth - rect.right) });
       screen.resize(width, height, 'body:14px/22px; headings:22px/28px,19px/25px,16px/22px', { preserveContent: true });
     };

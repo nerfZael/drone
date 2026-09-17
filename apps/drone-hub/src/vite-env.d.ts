@@ -22,7 +22,7 @@ interface Window {
     onNotificationClick?(callback: (target: { droneId: string; chatName: string }) => void): () => void;
     onNotificationError?(callback: (error: string) => void): () => void;
     companionWindow?: {
-      control(action: 'show' | 'hide' | 'close' | 'attach'): void;
+      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize', size?: { height: number }): void;
       onClose(callback: () => void): () => void;
     };
     reportDiagnostic?(record: Record<string, unknown>): void;

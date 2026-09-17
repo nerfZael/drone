@@ -12,11 +12,20 @@ export function prepareCompanionWindow(source: Document, target: Document): () =
       if (value === null) target.documentElement.removeAttribute(name);
       else target.documentElement.setAttribute(name, value);
     }
+    target.documentElement.style.setProperty('--companion-max-height', `${Math.max(48, (target.defaultView?.screen.availHeight || 900) - 32)}px`);
     target.body.className = source.body.className;
-    target.body.style.cssText = 'margin:0; overflow:auto; background:var(--app-bg, #11161e)';
+    target.body.style.cssText = 'margin:0; overflow:hidden; background:transparent';
   };
   const stopStyles = syncDocumentStyles(source, target.head);
   copyTheme();
+  const style = target.createElement('style');
+  style.textContent = `
+    html, body { background: transparent !important; }
+    [data-companion-window-panel] aside { max-height: min(36rem, calc(var(--companion-max-height) - 16px)); }
+    [data-companion-drag-handle] { -webkit-app-region: drag; }
+    [data-companion-drag-handle] button { -webkit-app-region: no-drag; }
+  `;
+  target.head.append(style);
   const theme = new MutationObserver(copyTheme);
   theme.observe(source.documentElement, { attributes: true });
   theme.observe(source.body, { attributes: true, attributeFilter: ['class'] });
