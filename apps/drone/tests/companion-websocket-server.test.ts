@@ -410,3 +410,25 @@ test('durable desktop sessions resume the same identity and reject simultaneous 
   expect(detached).toHaveLength(2);
   expect(deleted).toEqual([]);
 });
+
+test('socket validates image attachments before starting and preserves image bytes through session delivery', async () => {
+  const runs: any[] = [];
+  const runtime = { run: async (input: any) => { runs.push(input); return 'Seen'; }, deleteSession: async () => {}, steer: () => false };
+  const webSocketServer = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => webSocketServer.handleUpgrade(request, socket, head, client => webSocketServer.emit('connection', client, request)));
+  await new Promise<void>(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address() as { port: number };
+  const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  try {
+    await new Promise<void>(resolve => client.once('open', resolve));
+    const rejected = nextMessage(client);
+    client.send(JSON.stringify({ type: 'start_run', runId: 'capture', prompt: 'Look', attachments: [{ mime: 'image/png', dataBase64: '' }] }));
+    expect(await rejected).toMatchObject({ type: 'error' });
+    expect(runs).toHaveLength(0);
+    const attachment = { name: 'shot.png', mime: 'image/png', dataBase64: 'cG5n', size: 3 };
+    client.send(JSON.stringify({ type: 'start_run', runId: 'capture', messageId: 'shot', prompt: 'Look', attachments: [attachment] }));
+    await waitFor(() => runs.length === 1);
+    expect(runs[0]).toMatchObject({ prompt: 'Look', messageId: 'shot', attachments: [attachment] });
+  } finally { await closeTestServer(client, webSocketServer, httpServer); }
+});

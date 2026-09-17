@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import { normalizeChatImageAttachments } from '../chat-attachments';
 import crypto from 'node:crypto';
 import {
   validateCompanionProposalResultInput,
@@ -11,7 +12,7 @@ import { CompanionRunSession } from './companion-run-session';
 import type { CompanionRuntime } from './companion-runtime';
 import { CompanionLiveSocket } from './CompanionLiveSocket';
 
-const MAX_CLIENT_PAYLOAD_BYTES = 4 * 1024 * 1024;
+const MAX_CLIENT_PAYLOAD_BYTES = 30 * 1024 * 1024;
 
 function messageText(data: RawData): string {
   if (typeof data === 'string') return data;
@@ -106,6 +107,12 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         return;
       }
       const { runId, prompt, messageId, telemetry } = validation;
+      let attachments;
+      try { attachments = normalizeChatImageAttachments(message.attachments); }
+      catch (error) {
+        send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
+        return;
+      }
       if (session && runId !== session.clientRunId) {
         send({
           type: 'error',
@@ -147,7 +154,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         }
       }
       const activeSession = session;
-      void activeSession.submit({ prompt, messageId, telemetry }).catch((error) => {
+      void activeSession.submit({ prompt, messageId, telemetry, attachments }).catch((error) => {
         if (session !== activeSession) return;
         send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
         void activeSession.close('Companion delivery failed').catch(() => undefined);

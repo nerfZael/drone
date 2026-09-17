@@ -24,10 +24,11 @@ export function CompanionShortcutSettings() {
     <section aria-label="Companion shortcut hold durations" className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
       <h3 className="text-sm font-semibold text-[var(--fg)]">Shortcut hold durations</h3>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        With Live voice off, tap to start recording or send the current clip, including a paused clip.
+        In Normal mode, tap to start recording or send the current clip, including a paused clip.
         Short hold: pause or resume. Middle hold: discard an active recording and keep the panel open;
         if recording was already stopped when you pressed the key, close the panel and stop the Companion agent without forgetting the conversation.
         Long hold: stop recording and the agent, discard pending audio, and clear context.
+        Jev uses the same holds: pause/resume listening and decisions; stop listening while retaining the transcript (tap to restart); or stop and clear context.
         Release to act; holding longer never performs the shorter actions first.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">

@@ -384,3 +384,10 @@ test('interrupted executions preserve confirmed successes and their created dron
     activeOperationId: null, operations: successful,
   })).toEqual({ ok: true, operations: successful });
 });
+
+test('message proposals preserve and present reusable image paths', () => {
+  const proposal = parseCompanionProposalText(JSON.stringify({ version: 1, title: 'Share capture', operations: [{ id: 'send', type: 'send_message', droneId: 'drone', message: 'Review this', attachmentPaths: ['/captures/screenshot.png'] }] }));
+  expect(proposal.operations[0]).toMatchObject({ attachmentPaths: ['/captures/screenshot.png'] });
+  expect(parseCompanionProposalText(serializeCompanionProposal(proposal))).toEqual(proposal);
+  expect(() => parseCompanionProposalText(JSON.stringify({ ...proposal, operations: [{ ...proposal.operations[0], attachmentPaths: Array(9).fill('/capture.png') }] }))).toThrow('at most 8');
+});

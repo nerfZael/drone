@@ -6,7 +6,7 @@ type Dependencies = {
   timing?: HubLiveTiming;
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
-  enabled(): Promise<{ enabled: boolean; systemPrompt?: string }>;
+  enabled(): Promise<{ enabled: boolean; mode?: 'live' | 'jev'; systemPrompt?: string }>;
   backend(): Promise<{ model: string; provider: string }>;
 };
 
@@ -97,6 +97,7 @@ export class CompanionPcmLiveSocket {
     this.deps.timing?.mark('hub_setup_completed');
     if (this.closed) return;
     if (!setting.enabled) throw new Error('Enable Live voice before starting a conversation.');
+    if (setting.mode === 'jev') throw new Error('Jev voice uses desktop continuous transcription. Select Live voice to use this connection.');
     if (!credential.apiKey) throw new Error('Configure an OpenAI API key in Settings to use Live voice.');
     this.deps.timing?.mark('provider_connect_started');
     const upstream = this.deps.connect('wss://api.openai.com/v1/live/sessions', credential.apiKey);

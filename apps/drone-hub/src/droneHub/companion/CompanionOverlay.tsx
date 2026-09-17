@@ -24,6 +24,7 @@ import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { CompanionProposalStrip } from './CompanionProposalStrip';
 import { CompanionOptionsMenu } from './CompanionOptionsMenu';
+import { CompanionTranscriptDialog, useCompanionTranscriptDialog } from './CompanionTranscriptDialog';
 import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
@@ -117,6 +118,7 @@ export function CompanionOverlay() {
   const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
+  const transcriptDialog = useCompanionTranscriptDialog();
   const [workspacePickerOpen, setWorkspacePickerOpen] = React.useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
   const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
@@ -131,7 +133,7 @@ export function CompanionOverlay() {
     && proposalVisibility?.autoApprove === companion?.autoApprove
     ? proposalVisibility.hidden : Boolean(companion?.autoApprove);
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen;
+  const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen || transcriptDialog.open;
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -184,6 +186,13 @@ export function CompanionOverlay() {
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
       overflowY: 'auto',
     } : { zIndex: panelOpen ? 100 : 80 }} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
+      {Boolean(companion.attachments?.length) && <div aria-label="Pending Companion attachments" className="flex max-w-sm flex-wrap gap-2 rounded-lg bg-[var(--panel)] p-2">
+        {companion.attachments.map(image => <div key={image.id} className="flex items-center gap-2">
+          <img src={`data:${image.mime};base64,${image.dataBase64}`} alt={image.name} className="h-16 w-24 rounded object-contain" />
+          <button type="button" aria-label={`Remove ${image.name}`} onClick={() => companion.removeAttachment(image.id)}>Remove</button>
+        </div>)}
+        <span className="text-xs">Attached to your next instruction</span>
+      </div>}
       {companion.screen ? <CompanionScreenPanel screen={companion.screen} /> : null}
       {historyOpen ? (
         <CompanionProposalHistory
@@ -217,6 +226,9 @@ export function CompanionOverlay() {
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
+      {transcriptDialog.open ? <CompanionTranscriptDialog captions={companion.live?.captions ?? ''}
+        requests={companion.live?.mode === 'jev' ? companion.live.jevRequests : undefined}
+        onClose={transcriptDialog.close} portalContainer={companionWindow.portalContainer} /> : null}
       {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
@@ -333,8 +345,8 @@ export function CompanionOverlay() {
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           {companion.shortcutHint ? (
             <span role="status" className="text-xs text-[var(--fg)]">
-              {{ pause: 'Release to pause recording', resume: 'Release to resume recording',
-                cancel: 'Release to stop and discard recording', close: 'Release to close Companion · keep context',
+              {{ pause: companion.live?.mode === 'jev' ? 'Release to pause listening and decisions' : 'Release to pause recording', resume: companion.live?.mode === 'jev' ? 'Release to resume listening and decisions' : 'Release to resume recording',
+                cancel: companion.live?.mode === 'jev' ? 'Release to stop listening · keep transcript' : 'Release to stop and discard recording', close: 'Release to close Companion · keep context',
                 reset: 'Release to stop Companion and clear context' }[companion.shortcutHint]}
             </span>
           ) : companion.transcript ? (
@@ -416,7 +428,9 @@ export function CompanionOverlay() {
               </button>
             </Popover.Trigger>
             <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
-              <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={popoverFocus.onCloseAutoFocus} onKeyDown={popoverFocus.onKeyDown} side={popoverSide} align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
+              <Popover.Content onOpenAutoFocus={popoverFocus.onOpenAutoFocus} onCloseAutoFocus={event => {
+                if (!transcriptDialog.onMenuCloseAutoFocus(event)) popoverFocus.onCloseAutoFocus(event);
+              }} onKeyDown={popoverFocus.onKeyDown} side={popoverSide} align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
                 className="z-[110] w-[min(21rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-[var(--shadow-dialog)]">
                 <CompanionOptionsMenu
                   historyOpen={historyOpen}
@@ -424,6 +438,7 @@ export function CompanionOverlay() {
                   onOpenWorkspaces={() => setWorkspacePickerOpen(true)}
                   onOpenPrompt={() => setPromptEditorOpen(true)}
                   onOpenInstructions={() => setInstructionsEditorOpen(true)}
+                  onOpenTranscript={transcriptDialog.requestOpen}
                   workspacePickerOpen={workspacePickerOpen}
                   promptEditorOpen={promptEditorOpen}
                   instructionsEditorOpen={instructionsEditorOpen}

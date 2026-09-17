@@ -5,7 +5,7 @@ import { CompanionLiveTiming, CompanionClientController, type CompanionServerMes
 import { waitForCompanionReply } from '../src/droneHub/companion/waitForCompanionReply';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(delayed = false, delayedRelease = false, timing?: CompanionLiveTiming) {
+function harness(delayed = false, delayedRelease = false, timing?: CompanionLiveTiming, mode?: 'live' | 'jev') {
   const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let socket: FakeSocket | undefined;
@@ -31,7 +31,7 @@ function harness(delayed = false, delayedRelease = false, timing?: CompanionLive
       released++;
       if (delayedRelease) await new Promise<void>(resolve => { finishRelease = resolve; });
     } };
-  const connection = new CompanionLiveConnection({ timing, onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
+  const connection = new CompanionLiveConnection({ timing, mode, onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
     onError: (error) => errors.push(error), onPlaybackBlocked() {}, openAudio: async (callbacks) => {
       capture = callbacks;
       capture.onAudio('AQI='); // Capture may begin before native/browser setup resolves.
@@ -198,5 +198,18 @@ test('desktop persists startup and final events and correlates append acknowledg
     expect(events.find(e => e.stage === 'append_acknowledged').eventId).toBe(sent.event_id);
     expect(h.socket().sent.at(-1).type).toBe('live_close');
     expect(JSON.stringify(events)).not.toContain('private result');
+  } finally { await h.cleanup(); }
+});
+
+
+test('Jev connection selects transcription mode and forwards partial text immediately', async () => {
+  const h = harness(false, false, undefined, 'jev');
+  try {
+    await h.connection.start(); h.socket().open();
+    expect(h.socket().sent[0]).toMatchObject({ type: 'live_start', mode: 'jev', transport: 'pcm' });
+    h.socket().message({ type: 'live_ready', transport: 'pcm', backendModel: 'typesafe-ai/jev' });
+    h.socket().message({ type: 'live_event', event: { type: 'conversation.item.input_audio_transcription.delta', item_id: '1', delta: 'Open' } });
+    expect(h.events).toEqual([{ type: 'conversation.item.input_audio_transcription.delta', item_id: '1', delta: 'Open' }]);
+    expect(h.played).toEqual([]);
   } finally { await h.cleanup(); }
 });

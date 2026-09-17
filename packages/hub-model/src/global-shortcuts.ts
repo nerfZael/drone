@@ -22,6 +22,8 @@ export const DRONE_HUB_SHORTCUT_ACTION_IDS = [
   'clearChatComposer',
   'toggleContinuousDictation',
   'toggleFileDictation',
+  'snipCompanion',
+  'captureCompanionScreen',
   'toggleCompanion',
   'applyCompanionProposal',
   'toggleVoiceClipboardRecording',

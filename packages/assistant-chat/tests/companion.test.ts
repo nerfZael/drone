@@ -886,3 +886,15 @@ test('Live correlation metadata survives validation only with bounded IDs and a 
     expect(validateCompanionRunInput({ ...input, telemetry: { ...input.telemetry, ...patch } })).not.toHaveProperty('telemetry');
   }
 });
+
+test('Companion forwards images with the intended instruction and leaves subsequent prompts text-only', async () => {
+  const transport = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'image-test' });
+  const attachment = { name: 'screenshot.png', mime: 'image/png', size: 3, dataBase64: 'cG5n' };
+  const input = { createTransport: () => transport.transport, executeTool: async () => ({}) };
+  await controller.submitPrompt({ ...input, prompt: 'Explain this', attachments: [attachment] });
+  await controller.submitPrompt({ ...input, prompt: 'Next instruction' });
+  expect(transport.prompts[0]).toMatchObject({ prompt: 'Explain this', attachments: [attachment] });
+  expect((transport.prompts[1] as any).attachments).toBeUndefined();
+  await controller.close();
+});

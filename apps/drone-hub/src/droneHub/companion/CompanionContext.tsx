@@ -1,3 +1,4 @@
+import { validateChatAttachments, type CompanionImageAttachment } from '@drone/assistant-chat';
 import { CompanionScreen } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { desktopCompanionSessionStore } from './companion-session-store';
@@ -56,6 +57,8 @@ export type CompanionProposalHistoryEntry = {
 type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
 type CompanionContextValue = {
+  attachments: Array<CompanionImageAttachment & { id: string }>;
+  removeAttachment(id: string): void;
   screen: CompanionScreen;
   sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
@@ -130,6 +133,25 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     controller.getSnapshot,
   );
   const [proposalActionError, setProposalActionError] = React.useState('');
+  const [attachments, setAttachments] = React.useState<Array<CompanionImageAttachment & { id: string }>>([]);
+  const attachmentsRef = React.useRef(attachments);
+  const submittedAttachments = React.useRef<typeof attachments>([]);
+  const captureGeneration = React.useRef(0);
+  const captureBusy = React.useRef(false);
+  const updateAttachments = React.useCallback((items: typeof attachments) => {
+    attachmentsRef.current = items;
+    setAttachments(items);
+  }, []);
+  React.useEffect(() => controller.subscribe(() => {
+    const status = controller.getSnapshot().status;
+    if (status === 'error' || status === 'cancelled') {
+      if (submittedAttachments.current.length) updateAttachments([...submittedAttachments.current, ...attachmentsRef.current]);
+      submittedAttachments.current = [];
+    } else if (status === 'completed') submittedAttachments.current = [];
+  }), [controller, updateAttachments]);
+  const removeAttachment = React.useCallback((id: string) => {
+    updateAttachments(attachmentsRef.current.filter(item => item.id !== id));
+  }, [updateAttachments]);
   const [proposalStore] = React.useState(() => new CompanionProposalStore<CompanionProposalExecutionContext>(newId));
   const proposalStoreVersion = React.useSyncExternalStore(proposalStore.subscribe, proposalStore.getSnapshot, proposalStore.getSnapshot);
   const selectedProposal = proposalStore.selected;
@@ -162,6 +184,31 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
   const textSubmissionGenerationRef = React.useRef(0);
   const captureWorkspace = React.useCallback(() => workspace?.capture() ?? null, [workspace]);
+  React.useEffect(() => {
+    const capture = async (event: Event) => {
+      const mode = (event as CustomEvent).detail;
+      if ((mode !== 'region' && mode !== 'screen') || captureBusy.current) return;
+      captureBusy.current = true;
+      const generation = captureGeneration.current;
+      try {
+        if (!window.droneHubDesktop?.captureCompanion) throw new Error('Screen capture requires the Drone Hub desktop app.');
+        const image = await window.droneHubDesktop.captureCompanion(mode);
+        if (!image || generation !== captureGeneration.current) return;
+        const next = [...attachmentsRef.current, { ...image, id: newId() }];
+        const validation = validateChatAttachments(next);
+        if (!validation.ok) throw new Error('Attachment limit reached. Send or remove pending images before capturing more.');
+        updateAttachments(next);
+        setProposalActionError('');
+        setPanelVisibility('open');
+      } catch (error) {
+        if (generation !== captureGeneration.current) return;
+        setProposalActionError(error instanceof Error ? error.message : String(error));
+        setPanelVisibility('open');
+      } finally { captureBusy.current = false; }
+    };
+    window.addEventListener('companion-capture', capture);
+    return () => { captureGeneration.current++; window.removeEventListener('companion-capture', capture); };
+  }, [updateAttachments]);
 
   const onVoiceError = React.useCallback(
     (message: string) => controller.reportVoiceError(message),
@@ -178,6 +225,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const close = React.useCallback(async (stopApplyingProposal = false) => {
     screen.clear();
     if (proposalExecutingRef.current && !stopApplyingProposal) return;
+    captureGeneration.current++;
+    submittedAttachments.current = [];
+    updateAttachments([]);
     shortcutPress.cancel();
     setShortcutHint(null);
     live.reset();
@@ -199,7 +249,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     shortcutPress.cancel();
     setShortcutHint(null);
     setPanelVisibility('closed');
-    live.reset();
+    if (live.mode === 'jev') live.stop(); else live.reset();
     voiceSubmissionGenerationRef.current += 1;
     textSubmissionGenerationRef.current += 1;
     recordingWorkspaceRef.current = null;
@@ -210,7 +260,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     const stopping = Promise.all([controller.cancel(), voice.discardRecording()]).then(() => {});
     voiceSubmissionQueueRef.current = stopping.catch(() => {});
     await stopping;
-  }, [controller, live.reset, proposalStore, screen, shortcutPress, voice.discardRecording]);
+  }, [controller, live.reset, live.stop, live.mode, proposalStore, screen, shortcutPress, voice.discardRecording]);
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
@@ -387,8 +437,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       telemetry?: CompanionClientTelemetry,
       requestedMessageId?: string,
     ) => {
+      const sending = attachmentsRef.current;
+      // Reserve this batch before awaiting transport startup so concurrent voice
+      // instructions cannot send it twice. New captures belong to the next turn.
+      updateAttachments([]);
+      submittedAttachments.current.push(...sending);
       await controller.submitPrompt({
         prompt,
+        attachments: sending.map(({ id: _id, ...image }) => image),
         telemetry,
         messageId: requestedMessageId,
         createTransport: () =>
@@ -396,7 +452,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         executeTool: (tool, args) => executeBrowserTool(capturedWorkspace, tool, args),
       });
     },
-    [controller, executeBrowserTool],
+    [controller, executeBrowserTool, updateAttachments],
   );
 
   const startLiveVoice = React.useCallback(async () => {
@@ -474,8 +530,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, [close]);
 
   // Keep the callbacks fresh while a key is held, even if recording causes a render.
-  const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext, dismiss, voice });
-  shortcutActionsRef.current = { toggle, discardRecording, resetContext, dismiss, voice };
+  const shortcutActionsRef = React.useRef({ toggle, discardRecording, resetContext, dismiss, voice, live });
+  shortcutActionsRef.current = { toggle, discardRecording, resetContext, dismiss, voice, live };
   const handleShortcut = React.useCallback((event?: CompanionShortcutEvent) => {
     if (event?.phase === 'cancel') {
       shortcutPress.cancel();
@@ -487,7 +543,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setShortcutHint(null);
       return;
     }
-    if (live.enabled) {
+    if (live.enabled && live.mode !== 'jev') {
       // Live voice retains its existing press / double-press behavior.
       const now = Date.now();
       if (isCompanionShortcutDoubleTap(lastLiveShortcutAtRef.current, now)) {
@@ -503,7 +559,16 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     prepareCompanionRecordingCues();
     // The action is chosen from the state at keydown, not after a preview or
     // asynchronous recorder event. A cancel hold can never become close.
-    const statusAtPress = shortcutActionsRef.current.voice.status;
+    const jevAtPress = live.enabled && live.mode === 'jev';
+    const gestureStatus = () => {
+      const current = shortcutActionsRef.current;
+      if (!jevAtPress) return current.voice.status;
+      if (current.live.status === 'connecting') return 'starting';
+      if (current.live.status === 'listening') return current.live.muted ? 'paused' : 'recording';
+      if (current.live.status === 'error' && current.live.capturing) return 'paused';
+      return 'idle';
+    };
+    const statusAtPress = gestureStatus();
     let previewed: CompanionHoldAction | null = null;
     shortcutPress.down(gesture => {
       const actions = shortcutActionsRef.current;
@@ -511,11 +576,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const action = companionHoldAction(gesture, statusAtPress);
       if (!action) return;
       if (previewed !== action) playCompanionRecordingCue(action);
-      if (action === 'cancel') void actions.discardRecording();
+      if (action === 'cancel') { if (jevAtPress) actions.live.stop(); else void actions.discardRecording(); }
       else if (action === 'close') void actions.dismiss();
       else if (action === 'reset') void actions.resetContext();
-      else if ((action === 'pause' && actions.voice.status === 'recording') ||
-        (action === 'resume' && actions.voice.status === 'paused')) actions.voice.toggleRecordingPause();
+      else if ((action === 'pause' && gestureStatus() === 'recording') ||
+        (action === 'resume' && gestureStatus() === 'paused')) {
+        if (jevAtPress) actions.live.toggleMute(); else actions.voice.toggleRecordingPause();
+      }
     }, gesture => {
       const action = companionHoldAction(gesture, statusAtPress);
       if (!action) return;
@@ -523,13 +590,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setShortcutHint(action);
       playCompanionRecordingCue(action);
     }, useDroneHubUiStore.getState().companionShortcutDurations);
-  }, [close, live.enabled, shortcutPress, toggle]);
+  }, [close, live.enabled, live.mode, shortcutPress, toggle]);
 
   React.useEffect(() => {
     shortcutPress.cancel();
     setShortcutHint(null);
     return () => shortcutPress.cancel();
-  }, [live.enabled, shortcutPress]);
+  }, [live.enabled, live.mode, shortcutPress]);
 
   const toggleLiveVoice = React.useCallback(async () => {
     if (resettingRef.current || switchingVoiceRef.current || live.loading || live.saving ||
@@ -620,12 +687,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       screen,
+      attachments, removeAttachment,
       sessionId: controller.getSessionId(),
       error: proposalActionError || state.error || autoApproveSettings.error,
       live,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
-      recordingPaused: voice.status === 'paused',
+      recordingPaused: live.enabled && live.mode === 'jev' ? live.muted : voice.status === 'paused',
       pendingTranscriptions: voice.pendingTranscriptions ?? 0,
       shortcutHint,
       panelVisibility,
@@ -669,6 +737,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleAutoApprove,
     }),
     [
+      attachments, removeAttachment,
       proposalStore, proposalStoreVersion, proposalActionError,
       shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, voice.pendingTranscriptions,
       close,

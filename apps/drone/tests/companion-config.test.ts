@@ -50,6 +50,7 @@ describe('Companion settings', () => {
       'get_chat_tree',
       'read_chat',
       'search_chat_messages',
+      'speak',
     ]);
     expect(
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_composer_patch')?.requires,
@@ -279,4 +280,14 @@ test('enables screen display for legacy navigation profiles and respects current
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 12, enabledTools: ['open_drone_chat'] }).enabledTools).toContain('show_on_screen');
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['open_drone_chat'] }).enabledTools).not.toContain('show_on_screen');
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 12, enabledTools: [] }).enabledTools).toEqual([]);
+});
+
+
+test('Companion speak is enabled by default, migrates existing presentation tools, and preserves explicit opt-out', () => {
+  expect(COMPANION_TOOL_SUMMARIES.find(tool => tool.name === 'speak')).toMatchObject({ execution: 'mcp', category: 'actions', requires: null });
+  expect(DEFAULT_COMPANION_SETTINGS.enabledTools).toContain('speak');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 13, enabledTools: ['show_on_screen'] }).enabledTools).toContain('speak');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['show_on_screen'] }).enabledTools).not.toContain('speak');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 13, enabledTools: [] }).enabledTools).toEqual([]);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['speak'] }).enabledTools).toEqual(['speak']);
 });

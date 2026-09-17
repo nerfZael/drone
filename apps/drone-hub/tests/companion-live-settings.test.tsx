@@ -13,6 +13,9 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
   };
   let saved = false;
   let prompt = 'Speak calmly.';
+  let mode = 'live';
+  let interval = 250;
+  let jevPrompt = 'Send clear requests.';
   let failSave = false;
   let failLoad = false;
   const writes: unknown[] = [];
@@ -28,9 +31,12 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
       writes.push(body);
       if (typeof body.enabled === 'boolean') saved = body.enabled;
       if (typeof body.systemPrompt === 'string') prompt = body.systemPrompt;
+      if (typeof body.mode === 'string') mode = body.mode;
+      if (typeof body.jevDecisionIntervalMs === 'number') interval = body.jevDecisionIntervalMs;
+      if (typeof body.jevSystemPrompt === 'string') jevPrompt = body.jevSystemPrompt;
     }
     if (failLoad && init?.method !== 'PUT') return new Response('', { status: 503 });
-    return Response.json({ ok: true, enabled: saved, systemPrompt: prompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 });
+    return Response.json({ ok: true, enabled: saved, mode, jevDecisionIntervalMs: interval, jevSystemPrompt: jevPrompt, defaultJevSystemPrompt: 'Send clear requests.', systemPrompt: prompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 });
   });
   const element = dom.document.createElement('div');
   dom.document.body.append(element);
@@ -70,6 +76,18 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     await act(async () => { await live.load(); });
     expect(live.resolved).toBe(true);
     expect(live.settingsError).toBe('');
+    await act(async () => { await live.saveVoiceMode('jev'); });
+    expect(live.mode).toBe('jev');
+    await act(async () => { expect(await live.saveJevDecisionInterval(500)).toBe(true); });
+    expect(live.jevDecisionIntervalMs).toBe(500);
+    expect(writes.at(-1)).toEqual({ jevDecisionIntervalMs: 500 });
+    expect(live.enabled).toBe(true);
+    expect(live.status).toBe('idle');
+    await act(async () => { await live.saveJevSystemPrompt('Delegate only when I ask directly.'); });
+    expect(live.jevSystemPrompt).toBe('Delegate only when I ask directly.');
+    expect(live.systemPrompt).toBe('Speak brightly.');
+    await act(async () => { await live.saveVoiceMode('normal'); });
+    expect(live.enabled).toBe(false);
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of original) {

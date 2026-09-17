@@ -125,6 +125,7 @@ export type CompanionProposalOperation =
     })
   | (CompanionProposalOperationBase & {
       type: 'send_message';
+      attachmentPaths?: string[];
       droneId: string;
       chatName?: string;
       message: string;
@@ -253,7 +254,7 @@ export const COMPANION_PROPOSAL_FORMAT = [
   'Provider is openai, codex, gemini, openrouter, or cerebras and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
   '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',
-  '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue" }',
+  '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue", attachmentPaths?: string[] (absolute Companion attachment paths) }',
   'A later operation may target a drone created or cloned earlier in the document with droneId "$<operation id>".',
   'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default" where it is optional.',
   'Any Apply attempt is terminal for this proposal. Create a separate correction proposal containing only unfinished work after a failure. Completed operations must never be replayed. Use discard_proposal to dismiss obsolete drafts or failures; other proposals remain usable.',
@@ -440,7 +441,7 @@ export function companionProposalOperationDetails(
     case 'move_chats':
       return [{ label: 'Chats', value: operation.chats.join(', ') }, { label: 'Destination group', value: operation.targetGroup || 'Root' }];
     case 'send_message':
-      return [{ label: 'Message', value: operation.message }];
+      return [{ label: 'Message', value: operation.message }, ...(operation.attachmentPaths?.length ? [{ label: 'Attachments', value: operation.attachmentPaths.join('\n') }] : [])];
     case 'delete_drone':
     case 'rename_drone':
     case 'delete_chat':
@@ -707,7 +708,12 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
     return { id, type, droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256), chats, targetGroup: groupPath(operation.targetGroup, `${path}.targetGroup`, true) };
   }
   if (type === 'send_message') {
-    exactKeys(operation, ['id', 'type', 'droneId', 'chatName', 'message', 'delivery'], path);
+    exactKeys(operation, ['id', 'type', 'droneId', 'chatName', 'message', 'delivery', 'attachmentPaths'], path);
+    let attachmentPaths: string[] | undefined;
+    if (operation.attachmentPaths !== undefined) {
+      if (!Array.isArray(operation.attachmentPaths) || operation.attachmentPaths.length > 8) throw new Error(`${path}.attachmentPaths must contain at most 8 paths`);
+      attachmentPaths = operation.attachmentPaths.map((value, index) => requiredSingleLineText(value, `${path}.attachmentPaths[${index}]`, 4096));
+    }
     const delivery = optionalText(operation.delivery, `${path}.delivery`, 16);
     if (delivery !== undefined && delivery !== 'asap' && delivery !== 'queue') {
       throw new Error(`${path}.delivery must be "asap" or "queue"`);
@@ -718,6 +724,7 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
       droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256),
       ...optionalNonEmptyField(operation, 'chatName', path, 160),
       message: requiredText(operation.message, `${path}.message`, 100_000),
+      ...(attachmentPaths === undefined ? {} : { attachmentPaths }),
       ...(delivery === undefined ? {} : { delivery }),
     };
   }

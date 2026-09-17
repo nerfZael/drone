@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { upsertNamingProvider } from '../hub-settings';
+import { upsertNamingProvider, resolveAiGatewayApiKeySettings, aiGatewayKeySettingsResponse } from '../hub-settings';
 import { loadOpenRouterCatalog, refreshOpenRouterCatalog } from '../openrouter-model-catalog';
 
 import type { HubRouter } from '../hub-router';
@@ -161,7 +161,9 @@ export function registerSettingsRoutes(
   } = deps;
   type ProviderSettingsRouteId = StoredApiKeyProviderId | 'codex';
   const resolveProviderSettings = async (provider: ProviderSettingsRouteId) =>
-    provider === 'groq'
+    provider === 'ai-gateway'
+      ? await resolveAiGatewayApiKeySettings()
+      : provider === 'groq'
       ? await resolveGroqApiKeySettings()
       : provider === 'exa'
         ? await resolveExaApiKeySettings()
@@ -178,11 +180,12 @@ export function registerSettingsRoutes(
     { path: '/api/settings/cerebras', provider: 'cerebras' },
     { path: '/api/settings/groq', provider: 'groq' },
     { path: '/api/settings/exa', provider: 'exa' },
+    { path: '/api/settings/ai-gateway', provider: 'ai-gateway' },
   ];
   for (const { path: providerPath, provider } of providerSettingsRoutes) {
     apiRouter.get(providerPath, async ({ url, method, json: respond }) => {
       const resolved = await resolveProviderSettings(provider);
-      if (!resolved.apiKey && provider !== 'groq' && provider !== 'exa') {
+      if (!resolved.apiKey && provider !== 'ai-gateway' && provider !== 'groq' && provider !== 'exa') {
         await logProviderApiKeyResolution(
           'warn',
           'settings provider lookup resolved without API key',
@@ -192,9 +195,9 @@ export function registerSettingsRoutes(
       }
       respond(200, {
         ok: true,
-        ...providerKeySettingsResponse(resolved, {
+        ...(provider === 'ai-gateway' ? aiGatewayKeySettingsResponse(resolved) : providerKeySettingsResponse(resolved, {
           includeApiKey: provider !== 'codex' && url.searchParams.get('reveal') === '1',
-        }),
+        })),
       });
     });
 
@@ -211,7 +214,9 @@ export function registerSettingsRoutes(
       await upsertStoredProviderApiKey(provider, apiKey);
       respond(200, {
         ok: true,
-        ...providerKeySettingsResponse(await resolveProviderSettings(provider)),
+        ...(provider === 'ai-gateway'
+          ? aiGatewayKeySettingsResponse(await resolveAiGatewayApiKeySettings())
+          : providerKeySettingsResponse(await resolveProviderSettings(provider))),
       });
     });
 
@@ -225,7 +230,9 @@ export function registerSettingsRoutes(
       await clearStoredProviderApiKey(provider);
       respond(200, {
         ok: true,
-        ...providerKeySettingsResponse(await resolveProviderSettings(provider)),
+        ...(provider === 'ai-gateway'
+          ? aiGatewayKeySettingsResponse(await resolveAiGatewayApiKeySettings())
+          : providerKeySettingsResponse(await resolveProviderSettings(provider))),
       });
     });
   }

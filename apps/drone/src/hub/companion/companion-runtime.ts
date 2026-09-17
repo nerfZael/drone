@@ -1,3 +1,4 @@
+import { prepareCompanionAttachments, companionAttachmentsRoot } from './companion-attachments';
 import { runCompanionPrompt } from './companion-run-outcome';
 import { droneRootPath } from '../../host/paths';
 import { resolveNativeModel } from '../assistant/resolve-native-model';
@@ -191,6 +192,7 @@ export class CompanionRuntime {
     runId: string;
     messageId: string;
     prompt: string;
+    attachments?: import('@drone/assistant-chat').CompanionImageAttachment[];
     proposalResult?: CompanionProposalApplyResult;
     transport: CompanionTelemetryTransport;
     queueWaitMs?: number;
@@ -304,6 +306,7 @@ export class CompanionRuntime {
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       telemetry?.markAgentRunStarted();
+      const promptInput = await prepareCompanionAttachments(input.prompt, input.attachments, companionAttachmentsRoot(runId));
       const prompt = () => runCompanionPrompt(settings.provider, onEvent => input.proposalResult
         ? this.host.promptThreadWithToolResult(threadId, {
             toolName: 'execute_proposal',
@@ -312,7 +315,7 @@ export class CompanionRuntime {
             details: input.proposalResult,
             isError: !input.proposalResult.execution.ok,
           }, onEvent)
-        : this.host.promptThread(threadId, input.prompt, onEvent), input.onEvent);
+        : this.host.promptThread(threadId, promptInput, onEvent), input.onEvent);
       if (telemetry) {
         await telemetry.measure('agentRunMs', prompt);
         return await telemetry.measure('replyReadMs', () =>
@@ -435,7 +438,7 @@ export class CompanionRuntime {
       if (this.closing || this.cancelledRunIds.has(context.runId) || !this.activeRunIds.has(context.runId)) {
         throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
       }
-    }) ?? [];
+    }, companionAttachmentsRoot(context.runId)) ?? [];
     const createMcpClient = () =>
       createInProcessDroneHubMcpClient({
         correlationId: threadId,

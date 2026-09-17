@@ -250,3 +250,21 @@ test('quiet progress retains its model-response owner when a correction arrives 
     h.finish[0]('Done'); await tick();
   } finally { await h.session.close('test complete'); }
 });
+
+test('image follow-ups queue intact and block later text from overtaking them', async () => {
+  const h = harness();
+  const attachments = [{ name: 'screenshot.png', mime: 'image/png', size: 3, dataBase64: 'cG5n' }];
+  try {
+    await h.session.submit({ prompt: 'initial', messageId: 'a' });
+    h.ready = true;
+    await h.session.submit({ prompt: 'look at this', messageId: 'b', attachments });
+    await h.session.submit({ prompt: 'then this', messageId: 'c' });
+    h.runs[0].onEvent({ type: 'turn_started' });
+    expect(h.steered).toEqual([]);
+    h.finish[0]('First reply'); await tick();
+    expect(h.runs[1]).toMatchObject({ prompt: 'look at this', attachments });
+    h.finish[1]('Image reply'); await tick();
+    if (h.finish[2]) h.finish[2]('Last reply');
+    await tick();
+  } finally { await h.session.close('test complete'); }
+});

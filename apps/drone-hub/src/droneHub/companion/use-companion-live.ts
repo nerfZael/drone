@@ -1,3 +1,4 @@
+import { useCompanionJev } from './use-companion-jev';
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
 import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
@@ -22,6 +23,10 @@ type LiveState = {
 };
 type LiveSettings = {
   enabled: boolean;
+  mode?: 'live' | 'jev';
+  jevSystemPrompt?: string;
+  jevDecisionIntervalMs?: number;
+  defaultJevSystemPrompt?: string;
   systemPrompt: string;
   defaultSystemPrompt: string;
   maxSystemPromptChars: number;
@@ -30,6 +35,17 @@ type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal, telemetry?
 type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
+  const [jevDecisionIntervalMs, setJevDecisionIntervalMs] = React.useState(250);
+  const jev = useCompanionJev(jevDecisionIntervalMs);
+  const [mode, setMode] = React.useState<'live' | 'jev'>('live');
+  const modeRef = React.useRef(mode);
+  const [jevSystemPrompt, setJevSystemPrompt] = React.useState('');
+  const [defaultJevSystemPrompt, setDefaultJevSystemPrompt] = React.useState('');
+  const acceptMode = (result: LiveSettings) => {
+    setJevDecisionIntervalMs(result.jevDecisionIntervalMs ?? 250);
+    modeRef.current = result.mode ?? 'live'; setMode(modeRef.current);
+    setJevSystemPrompt(result.jevSystemPrompt ?? ''); setDefaultJevSystemPrompt(result.defaultJevSystemPrompt ?? '');
+  };
   const [enabled, setEnabled] = React.useState(false);
   const [resolved, setResolved] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -59,6 +75,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, []);
 
   const stop = React.useCallback(() => {
+    jev.stop();
     desiredTarget.current = null;
     desiredMuted.current = false;
     cancelReconnect();
@@ -70,12 +87,13 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     session?.conversation.stop();
     if (session) pendingCleanup.current = Promise.all([pendingCleanup.current, session.connection.close()]).then(() => undefined);
     if (mounted.current) setState((previous) => ({ ...previous, announcing: false, status: 'idle', capturing: false, error: '', muted: false, queued: 0, playbackBlocked: false }));
-  }, [cancelReconnect]);
+  }, [cancelReconnect, jev.stop]);
 
   const reset = React.useCallback(() => {
     stop();
+    jev.reset();
     if (mounted.current) setState(EMPTY_STATE);
-  }, [stop]);
+  }, [stop, jev.reset]);
 
   const load = React.useCallback(async () => {
     if (writing.current) return;
@@ -83,6 +101,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     try {
       const result = await settingsRequest();
       if (!mounted.current || writing.current || generation !== settingsGeneration.current) return;
+      if ((result.mode ?? 'live') !== modeRef.current) stop();
+      acceptMode(result);
       enabledRef.current = result.enabled;
       setEnabled(result.enabled);
       setSystemPrompt(result.systemPrompt);
@@ -123,6 +143,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     try {
       const result = await settingsRequest({ enabled: !enabledRef.current });
       if (!mounted.current) return;
+      if ((result.mode ?? 'live') !== modeRef.current) stop();
+      acceptMode(result);
       enabledRef.current = result.enabled;
       setEnabled(result.enabled);
       setSystemPrompt(result.systemPrompt);
@@ -148,6 +170,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     try {
       const result = await settingsRequest({ systemPrompt: nextSystemPrompt });
       if (!mounted.current || generation !== settingsGeneration.current) return false;
+      if ((result.mode ?? 'live') !== modeRef.current) stop();
+      acceptMode(result);
       enabledRef.current = result.enabled;
       setEnabled(result.enabled);
       setSystemPrompt(result.systemPrompt);
@@ -188,7 +212,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, [reconnectSchedule]);
 
   startAttempt.current = async (target, reconnecting) => {
-    if (active.current || desiredTarget.current !== target || !enabledRef.current || !pageActive.current) return;
+    if (active.current || desiredTarget.current !== target || modeRef.current === 'jev' || !enabledRef.current || !pageActive.current) return;
     if (reconnecting) {
       setState((previous) => ({ ...previous, status: 'connecting', capturing: false, error: '', queued: 0, playbackBlocked: false }));
     } else {
@@ -277,7 +301,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       const next = controller.getSnapshot();
       const completed = next.status === 'completed' && previous.status !== 'completed';
       previous = next;
-      if (!completed || next.trigger !== 'subscription' || !next.reply.trim() || !enabledRef.current || !mounted.current || !pageActive.current) return;
+      if (!completed || next.trigger !== 'subscription' || !next.reply.trim() || !enabledRef.current || modeRef.current === 'jev' || !mounted.current || !pageActive.current) return;
       if (active.current?.announcement) { active.current.announcement.deliver(next.reply); return; }
       // Active conversations and reconnects already own their reply delivery.
       if (active.current || desiredTarget.current) return;
@@ -292,6 +316,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, [controller]);
 
   const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string) => {
+    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend); return; }
     if (active.current?.announcement) stop();
     if (active.current || !enabledRef.current || !pageActive.current) return;
     cancelReconnect();
@@ -299,7 +324,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     const target = { runBackend, workspaceLabel };
     desiredTarget.current = target;
     await startAttempt.current(target, false);
-  }, [cancelReconnect, stop]);
+  }, [cancelReconnect, stop, jev.start]);
 
   const toggleMute = React.useCallback(() => {
     const session = active.current;
@@ -315,8 +340,45 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     stop();
   }, [stop]);
 
+  const saveVoiceMode = async (next: 'normal' | 'live' | 'jev') => {
+    if (writing.current || loading) return;
+    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    stop();
+    try {
+      const result = await settingsRequest({ enabled: next !== 'normal', mode: next === 'jev' ? 'jev' : 'live' });
+      if (!mounted.current) return;
+      acceptMode(result); enabledRef.current = result.enabled; setEnabled(result.enabled);
+    } catch { setSettingsError('Could not save voice mode.'); }
+    finally { writing.current = false; if (mounted.current) setSaving(false); }
+  };
+  const saveJevSystemPrompt = async (prompt: string) => {
+    if (writing.current) return false;
+    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    try {
+      const result = await settingsRequest({ jevSystemPrompt: prompt });
+      if (!mounted.current) return false;
+      acceptMode(result); return true;
+    } catch { setSettingsError('Could not save Jev instructions.'); return false; }
+    finally { writing.current = false; if (mounted.current) setSaving(false); }
+  };
+
+  const saveJevDecisionInterval = async (intervalMs: number) => {
+    if (writing.current) return false;
+    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    try {
+      const result = await settingsRequest({ jevDecisionIntervalMs: intervalMs });
+      if (!mounted.current) return false;
+      acceptMode(result); return true;
+    } catch { setSettingsError('Could not save Jev decision interval. Use 50–10000 milliseconds.'); return false; }
+    finally { writing.current = false; if (mounted.current) setSaving(false); }
+  };
+
   return {
     ...state,
+    jevRequests: jev.requests,
+    ...(mode === 'jev' ? { captions: jev.captions, error: jev.error, status: jev.status, hasStarted: jev.hasStarted, capturing: jev.capturing, queued: jev.queued, muted: jev.muted, announcing: false, playbackBlocked: false } : {}),
+    jevDecisionIntervalMs, saveJevDecisionInterval,
+    mode, jevSystemPrompt, defaultJevSystemPrompt, saveVoiceMode, saveJevSystemPrompt,
     enabled,
     resolved,
     loading,
@@ -331,7 +393,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     start,
     stop,
     reset,
-    toggleMute,
+    toggleMute: mode === 'jev' ? jev.toggleMute : toggleMute,
     play,
     cancelPending,
   };
@@ -342,7 +404,7 @@ const EMPTY_STATE: LiveState = {
   hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
 
-async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt'>>): Promise<LiveSettings> {
+async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt' | 'mode' | 'jevSystemPrompt' | 'jevDecisionIntervalMs'>>): Promise<LiveSettings> {
   const url = '/api/settings/companion/live-voice';
   const init: RequestInit = {
     signal: AbortSignal.timeout(10_000),

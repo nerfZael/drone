@@ -206,7 +206,7 @@ export class CompanionWorkspaceService {
     return operation;
   }
 
-  async tools(runId: string, assertActive: () => void): Promise<AgentTool<any>[]> {
+  async tools(runId: string, assertActive: () => void, attachmentsRoot?: string): Promise<AgentTool<any>[]> {
     const [blip, catalog] = await Promise.all([loadBlipTools(), this.catalog()]);
     const access = catalog.access;
     const targets: WorkspaceTarget[] = [];
@@ -357,6 +357,10 @@ export class CompanionWorkspaceService {
         },
       });
     }
+    if (attachmentsRoot) targets.push(new blip.LocalWorkspaceTarget({
+      id: 'companion-attachments', label: 'Companion screenshots', workspaceRoot: attachmentsRoot,
+      permissionMode: 'read-only', profile: 'read-only',
+    }));
     if (!targets.length) return [];
     const targetCatalog = new blip.WorkspaceTargetCatalog(
       targets,

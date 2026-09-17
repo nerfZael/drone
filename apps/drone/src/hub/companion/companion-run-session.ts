@@ -15,6 +15,7 @@ import {
 
 type CompanionPromptInput = {
   prompt: string;
+  attachments?: import('@drone/assistant-chat').CompanionImageAttachment[];
   messageId?: string;
   telemetry?: CompanionClientTelemetry;
   subscriptionDeliveryMode?: 'queue' | 'asap';
@@ -223,6 +224,7 @@ export class CompanionRunSession {
                 runId: this.options.runtimeRunId,
                 messageId,
                 prompt: queued.prompt,
+                attachments: queued.attachments,
                 transport: this.options.transport,
                 queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
                 receivedAtEpochMs: queued.receivedAtEpochMs,
@@ -282,7 +284,7 @@ export class CompanionRunSession {
     // keeps follow-ups buffered; ASAP flushes them once the agent can accept steering.
     for (let index = 0; index < this.workQueue.length;) {
       const next = this.workQueue[index];
-      if (next.kind !== 'prompt') {
+      if (next.kind !== 'prompt' || next.attachments?.length) {
         // Host action results preserve arrival order and must reach the model
         // before any later user prompt is steered into the active request.
         break;

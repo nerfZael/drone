@@ -64,7 +64,7 @@ export function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?:
 }
 
 export type LlmProviderId = 'openai' | 'gemini' | 'codex' | 'openrouter' | 'cerebras';
-export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'openrouter' | 'cerebras' | 'groq' | 'exa';
+export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'openrouter' | 'cerebras' | 'groq' | 'exa' | 'ai-gateway';
 export type ApiKeySettingsSource = 'settings' | 'environment' | 'codex-cli' | null;
 export type EffectiveProviderApiKeySettings = {
   apiKey: string | null;
@@ -207,7 +207,7 @@ export const DEFAULT_VOICE_INPUT_SETTINGS: VoiceInputSettings = {
 export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MIN = 250;
 export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MAX = 10_000;
 export const LLM_PROVIDER_IDS = ['openai', 'gemini', 'codex', 'openrouter', 'cerebras'] as const satisfies readonly LlmProviderId[];
-export const STORED_API_KEY_PROVIDER_IDS = ['openai', 'gemini', 'openrouter', 'cerebras', 'groq', 'exa'] as const satisfies readonly StoredApiKeyProviderId[];
+export const STORED_API_KEY_PROVIDER_IDS = ['openai', 'gemini', 'openrouter', 'cerebras', 'groq', 'exa', 'ai-gateway'] as const satisfies readonly StoredApiKeyProviderId[];
 
 export const VOICE_INPUT_SILENCE_MILLIS_BY_PRESET: Record<
   Exclude<VoiceInputEndThoughtPreset, 'custom'>,
@@ -531,8 +531,8 @@ export function providerDisplayName(provider: LlmProviderId): string {
 }
 
 async function getStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
-  // Cerebras has no legacy registry entry to migrate.
-  const record = provider === 'cerebras'
+  // These providers have no legacy registry entry to migrate.
+  const record = provider === 'cerebras' || provider === 'ai-gateway'
     ? (await getHubSettingsRepository()).get<{ apiKey: string }>(SETTING_KEYS.providerApiKey(provider))
     : await getCanonicalSetting<{ apiKey: string }>(SETTING_KEYS.providerApiKey(provider), (reg) => {
     const block = provider === 'openai'
@@ -733,6 +733,17 @@ export async function resolveBlipProviderApiKey(provider: string): Promise<strin
   const normalized = parseLlmProvider(provider);
   if (!normalized) return undefined;
   return (await resolveEffectiveProviderApiKeySettings(normalized)).apiKey ?? undefined;
+}
+
+export async function resolveAiGatewayApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {
+  const stored = await getStoredProviderApiKey('ai-gateway');
+  if (stored) return { apiKey: stored.apiKey, source: 'settings', updatedAt: stored.updatedAt };
+  const apiKey = normalizeApiKey(process.env.AI_GATEWAY_API_KEY);
+  return { apiKey: apiKey || null, source: apiKey ? 'environment' : null, updatedAt: null };
+}
+
+export function aiGatewayKeySettingsResponse(settings: EffectiveProviderApiKeySettings) {
+  return { hasKey: Boolean(settings.apiKey), source: settings.source, updatedAt: settings.updatedAt, keyHint: null };
 }
 
 export async function resolveGroqApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {

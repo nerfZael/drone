@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>Snip for Companion</title>
+<style>
+* { box-sizing: border-box; } body { margin: 0; overflow: hidden; font: 14px system-ui; cursor: crosshair; user-select: none; }
+#screen { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#selection { position: fixed; border: 2px solid #70b8ff; box-shadow: 0 0 0 99999px #0006; pointer-events: none; }
+nav { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; padding: 12px; color: white; background: #182132; border-radius: 10px; cursor: default; }
+button { padding: 8px 12px; cursor: pointer; } button:focus-visible { outline: 3px solid #70b8ff; }
+</style></head><body><img id="screen" alt="Screen to capture"><div id="selection" hidden></div>
+<nav aria-label="Capture controls"><span>Drag to select an area</span><button id="region" disabled>Capture selection</button><button id="all">Capture full screen</button><button id="cancel">Cancel (Esc)</button></nav>
+<script>
+const box = document.getElementById('selection');
+const region = document.getElementById('region');
+let start = null, rect = null;
+window.snipping.onImage(data => { document.getElementById('screen').src = data; });
+const point = event => ({ x: Math.max(0, Math.min(innerWidth, event.clientX)), y: Math.max(0, Math.min(innerHeight, event.clientY)) });
+addEventListener('pointerdown', event => {
+  if (event.button !== 0 || event.target.closest('nav')) return;
+  start = point(event); rect = null; region.disabled = true; box.hidden = true;
+  document.body.setPointerCapture(event.pointerId);
+});
+addEventListener('pointermove', event => {
+  if (!start) return;
+  const end = point(event);
+  rect = { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+  box.hidden = false;
+  Object.assign(box.style, { left: rect.x + 'px', top: rect.y + 'px', width: rect.width + 'px', height: rect.height + 'px' });
+});
+addEventListener('pointerup', () => { start = null; region.disabled = !rect || rect.width < 1 || rect.height < 1; });
+addEventListener('keydown', event => {
+  if (event.key === 'Escape') window.snipping.select(null);
+  if (event.key === 'Enter' && !region.disabled && event.target === document.body) window.snipping.select(rect);
+});
+region.onclick = () => window.snipping.select(rect);
+document.getElementById('all').onclick = () => window.snipping.select('screen');
+document.getElementById('cancel').onclick = () => window.snipping.select(null);
+</script></body></html>

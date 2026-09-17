@@ -5,6 +5,7 @@ import { openBrowserLivePcmAudio } from './browser-live-pcm-audio';
 import type { AnnouncementPlayback } from './CompanionLiveAnnouncement';
 
 type Options = {
+  mode?: 'live' | 'jev';
   timing?: CompanionLiveTiming;
   onEvent(event: Record<string, unknown>): void;
   onReady(model: string): void;
@@ -65,7 +66,7 @@ export class CompanionLiveConnection {
       this.socket = socket;
       socket.onopen = () => {
         if (this.closed) { socket.close(); return; }
-        if (!this.sendMessage({ type: 'live_start', transport: 'pcm', timingSessionId: this.options.timing?.sessionId })) return;
+        if (!this.sendMessage({ type: 'live_start', transport: 'pcm', ...(this.options.mode === 'jev' ? { mode: 'jev' } : {}), timingSessionId: this.options.timing?.sessionId })) return;
         this.options.timing?.setSink(events => {
           if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'live_ping', timingEvents: events }));
         });

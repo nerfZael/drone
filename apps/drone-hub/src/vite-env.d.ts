@@ -31,6 +31,7 @@ interface Window {
     readonly directApiToken?: string;
   };
   readonly droneHubDesktop?: {
+    captureCompanion?(mode: 'region' | 'screen'): Promise<import('@drone/assistant-chat').CompanionImageAttachment | null>;
     setChatWindowAlwaysOnTop?(name: string, enabled: boolean): Promise<boolean>;
     clearNotifications?(): Promise<void>;
     notificationsSupported?(): Promise<boolean>;

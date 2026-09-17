@@ -1,3 +1,5 @@
+import { readCompanionAttachments } from './companion-attachments';
+import { evaluateCompanionSpeechDetailed, parseJevInput, parseJevReplay, replayJevEvaluation } from './companion-jev';
 import type { CompanionRuntime } from './companion-runtime';
 import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from './companion-auto-approve-settings';
 import { measureHubRequestPhase } from '../hub-performance-diagnostics';
@@ -19,6 +21,26 @@ export function registerCompanionRoutes(
   organization?: { services: HubServices; sidebar: SidebarCommandService },
   runtime?: CompanionRuntime,
 ): void {
+  router.post('/api/companion/attachments/read', async ({ readJson, json, fail }) => {
+    try {
+      const body = await readJson();
+      json(200, { ok: true, attachments: await readCompanionAttachments(body.paths) });
+    } catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
+  router.post('/api/companion/jev/evaluate', async ({ readJson, json, fail }) => {
+    let input: ReturnType<typeof parseJevInput>;
+    try { input = parseJevInput(await readJson()); }
+    catch { return fail(400, 'Invalid Jev transcript or context.'); }
+    try { json(200, { ok: true, ...await evaluateCompanionSpeechDetailed(input) }); }
+    catch (error) { fail(503, error instanceof Error ? error.message : 'Jev evaluation failed.'); }
+  });
+  router.post('/api/companion/jev/replay', async ({ readJson, json, fail }) => {
+    let request: ReturnType<typeof parseJevReplay>;
+    try { request = parseJevReplay(await readJson()); }
+    catch { return fail(400, 'Invalid Jev replay state, instructions, or criteria.'); }
+    try { json(200, { ok: true, ...await replayJevEvaluation(request) }); }
+    catch (error) { fail(503, error instanceof Error ? error.message : 'Jev replay failed.'); }
+  });
   router.get('/api/settings/companion/live-voice', async ({ req, json }) => {
     const settings = await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings());
     json(200, { ok: true, ...companionLiveSettingsResponse(settings) });

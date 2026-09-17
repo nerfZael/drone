@@ -3349,6 +3349,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             };
           },
           sendMessage: async (operation) => {
+            const attachments = operation.attachmentPaths?.length
+              ? (await requestJson<{ attachments: import('@drone/assistant-chat').CompanionImageAttachment[] }>('/api/companion/attachments/read', {
+                  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths: operation.attachmentPaths }),
+                })).attachments : [];
             const userTimeZone = clientTimeZone();
             const response = await requestJson<{
               ok: true;
@@ -3361,7 +3365,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                   prompt: operation.message,
-                  attachments: [],
+                  attachments,
                   deliveryMode: operation.delivery ?? 'queue',
                   submittedAt: new Date().toISOString(),
                   submissionSource: 'assistant-tool',

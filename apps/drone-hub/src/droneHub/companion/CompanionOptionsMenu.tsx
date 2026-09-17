@@ -84,6 +84,7 @@ export function CompanionOptionsMenu({
   onOpenWorkspaces,
   onOpenPrompt,
   onOpenInstructions,
+  onOpenTranscript,
   workspacePickerOpen,
   promptEditorOpen,
   instructionsEditorOpen,
@@ -94,6 +95,7 @@ export function CompanionOptionsMenu({
   onOpenWorkspaces(): void;
   onOpenPrompt(): void;
   onOpenInstructions(): void;
+  onOpenTranscript(): void;
   workspacePickerOpen: boolean;
   promptEditorOpen: boolean;
   instructionsEditorOpen: boolean;
@@ -196,7 +198,7 @@ export function CompanionOptionsMenu({
           <CompanionMenuSection label="Voice">
             <CompanionMenuItem
               icon={<svg {...iconProps}><path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" /></svg>}
-              label="Live voice"
+              label={live.mode === 'jev' ? 'Jev voice' : 'Live voice'}
               description={live.loading ? 'Loading Live voice setting' : live.saving ? 'Saving Live voice setting'
                 : `Live voice ${live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
               meta={live.loading ? 'Loading…' : live.saving ? 'Saving…' : undefined}
@@ -204,7 +206,16 @@ export function CompanionOptionsMenu({
               disabled={live.loading || live.saving || companion.switchingVoice || ['starting', 'transcribing'].includes(companion.status)}
               onSelect={() => void companion.toggleLiveVoice()}
             />
-            <CompanionLivePanel />
+            <div role="group" aria-label="Voice mode" className="flex gap-1 px-2.5 py-2">
+              {(['normal', 'live', 'jev'] as const).map(mode => <button key={mode} type="button"
+                aria-pressed={(!live.enabled ? 'normal' : live.mode ?? 'live') === mode}
+                disabled={live.loading || live.saving || companion.switchingVoice || live.status !== 'idle' || ['starting', 'recording', 'transcribing'].includes(companion.status)}
+                onClick={() => void live.saveVoiceMode(mode)}
+                className="rounded border border-[var(--border)] px-2 py-1 text-xs aria-pressed:bg-[var(--accent-subtle)] disabled:opacity-40">
+                {{ normal: 'Normal', live: 'Live voice', jev: 'Jev voice' }[mode]}
+              </button>)}
+            </div>
+            <CompanionLivePanel onOpenTranscript={pick(onOpenTranscript)} />
           </CompanionMenuSection>
         </>
       ) : null}

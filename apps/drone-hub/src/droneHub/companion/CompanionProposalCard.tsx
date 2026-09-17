@@ -414,7 +414,7 @@ function ProposalOperationList({
           : isMessage
             ? historyDetails
               ? companionProposalOperationDetails(operation, defaultRepoPath)
-              : []
+              : companionProposalOperationDetails(operation, defaultRepoPath).filter(detail => detail.label !== 'Message')
             : companionProposalOperationDetails(operation, defaultRepoPath);
         const createLocation = isCreateDrone
           ? proposalLocation(operation, defaultRepoPath)

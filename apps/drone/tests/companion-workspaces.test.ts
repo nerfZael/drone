@@ -479,3 +479,22 @@ test('records workspace and authorization phases on successful and denied editor
   expect(phases).toContain('companion_authorize');
   expect(phases).toContain('companion_editor_stat');
 });
+
+test('Companion captures are a readable transfer source, never an implicit writable workspace', async () => {
+  const fs = await import('node:fs/promises');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'companion-capture-source-'));
+  try {
+    await fs.writeFile(path.join(root, 'shot.png'), Buffer.from('capture'));
+    const { service } = fixture();
+    const catalog = await service.catalog();
+    const destination = catalog.workspaces[0]!;
+    await service.save({ targets: [{ ...destination, write: true }], defaultTargetId: destination.id }, catalog.revision);
+    const tools = await service.tools('capture-test', () => {}, root);
+    const transfer = tools.find(tool => tool.name === 'transfer_files')!;
+    expect((transfer.parameters as any).properties.sourceTarget.enum).toContain('companion-attachments');
+    expect((transfer.parameters as any).properties.destinationTarget.enum).not.toContain('companion-attachments');
+    await expect(call(tools, 'write_file', { target: 'companion-attachments', path: 'shot.png', content: 'changed' })).rejects.toThrow();
+    await expect(call(tools, 'read_file', { target: 'companion-attachments', path: '../outside' })).rejects.toThrow();
+    expect(await fs.readFile(path.join(root, 'shot.png'), 'utf8')).toBe('capture');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

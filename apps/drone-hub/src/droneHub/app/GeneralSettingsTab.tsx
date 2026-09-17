@@ -1,3 +1,4 @@
+import { AiGatewayKeySettings } from './AiGatewayKeySettings';
 import { CerebrasKeySettings } from './CerebrasKeySettings';
 import React from 'react';
 import { UiButton, UiMenuSelect, UiSegmentedControl, UiSlider, UiSwitch } from '../../ui/components';
@@ -570,6 +571,7 @@ export function GeneralSettingsTab({
         />
 
         <CerebrasKeySettings />
+        <AiGatewayKeySettings />
 
         <ApiKeySettingsCard
           title="OpenRouter API key"

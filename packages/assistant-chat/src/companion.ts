@@ -226,6 +226,8 @@ export type CompanionRunEvent =
   | { type: 'status'; status: 'working' | 'completed' | 'cancelled' }
   | { type: 'error'; error: string };
 
+export type CompanionImageAttachment = { name: string; mime: string; size: number; dataBase64: string };
+
 export type CompanionClientMessage =
   | {
       type: 'start_run';
@@ -234,6 +236,7 @@ export type CompanionClientMessage =
       runId: string;
       messageId?: string;
       prompt: string;
+      attachments?: CompanionImageAttachment[];
       telemetry?: CompanionClientTelemetry;
     }
   | { type: 'cancel_run'; runId: string }
@@ -342,6 +345,7 @@ export type CompanionRunInputValidation =
       runId: string;
       messageId?: string;
       prompt: string;
+      attachments?: CompanionImageAttachment[];
       telemetry?: CompanionClientTelemetry;
     }
   | { ok: false; runId: string; error: string };

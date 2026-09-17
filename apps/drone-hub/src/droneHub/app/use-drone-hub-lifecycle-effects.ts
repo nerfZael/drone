@@ -475,6 +475,8 @@ export function useDroneHubLifecycleEffects({
         void toggleFileDictation();
         return true;
       },
+      snipCompanion: () => { window.dispatchEvent(new CustomEvent('companion-capture', { detail: 'region' })); return true; },
+      captureCompanionScreen: () => { window.dispatchEvent(new CustomEvent('companion-capture', { detail: 'screen' })); return true; },
       toggleCompanion: () => {
         return runCompanionShortcut();
       },

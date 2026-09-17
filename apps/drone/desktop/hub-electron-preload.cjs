@@ -62,6 +62,18 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  async captureCompanion(mode) {
+    try {
+      return await ipcRenderer.invoke('drone-hub:companion-capture', mode);
+    } catch (error) {
+      // A renderer reload reads the rebuilt preload, while the existing main
+      // process keeps its old handlers until the desktop app is relaunched.
+      if (String(error?.message || error).includes("No handler registered for 'drone-hub:companion-capture'")) {
+        throw new Error('Screen capture needs the updated desktop app. Fully quit and reopen Drone Hub, then try again. Reloading the UI or restarting only the Hub server is not enough.');
+      }
+      throw error;
+    }
+  },
   setChatWindowAlwaysOnTop(name, enabled) {
     return ipcRenderer.invoke('drone-hub:chat-window-pin', name, enabled);
   },

@@ -4,12 +4,11 @@ import { CompanionMenuItem } from './CompanionOptionsMenu';
 
 const iconProps = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
 
-export function CompanionLivePanel() {
+export function CompanionLivePanel({ onOpenTranscript }: { onOpenTranscript(): void }) {
   const companion = useCompanion();
   const live = companion?.live;
-  const [transcriptOpen, setTranscriptOpen] = React.useState(false);
   if (!live || (!live.enabled && !live.settingsError && !live.captions)) return null;
-  const active = live.status === 'connecting' || live.status === 'listening';
+  const active = live.status === 'connecting' || live.status === 'listening' || (live.mode === 'jev' && live.status === 'error');
   return (
     <>
       {live.settingsError ? <div role="alert" className="px-2.5 py-1.5 text-xs text-[var(--red)]">
@@ -19,7 +18,7 @@ export function CompanionLivePanel() {
       {active ? <>
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 11a7 7 0 0 1-14 0M12 18v3" /></svg>}
-          label="Microphone"
+          label={live.mode === 'jev' && live.status === 'error' ? 'Retry pending decision' : 'Microphone'}
           description={live.announcing ? 'Muted while announcing a subscription update' : live.muted ? 'Unmute microphone' : 'Mute microphone'}
           meta={live.muted ? 'Muted' : 'Live'}
           checked={!live.muted}
@@ -40,13 +39,10 @@ export function CompanionLivePanel() {
       <CompanionMenuItem
         icon={<svg {...iconProps}><path d="M4 5h16M4 10h16M4 15h10M4 20h7" /></svg>}
         label="Voice transcript"
-        expanded={transcriptOpen}
-        controls="companion-voice-transcript"
-        onSelect={() => setTranscriptOpen((value) => !value)}
+        description="Open live voice transcript dialog"
+        expanded={false}
+        onSelect={onOpenTranscript}
       />
-      {transcriptOpen ? <div id="companion-voice-transcript" className="dh-agent-activity-scrollbar mx-1 mb-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-[5px] bg-[var(--surface-inset-faint)] px-2.5 py-2 text-xs text-[var(--fg-secondary)]" aria-label="Live voice captions">
-        {live.captions || 'No voice transcript yet.'}
-      </div> : null}
     </>
   );
 }

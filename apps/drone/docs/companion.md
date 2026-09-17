@@ -488,3 +488,104 @@ Android assistant; verify the old content survives rejection, retry succeeds,
 Dismiss works, and End/Mute/Pause stay reachable. Rotate the phone, resize the
 browser, open the keyboard, expand Companion, and test large system text. Confirm
 new dimensions are returned and no content is clipped or shown under controls.
+
+## Jev voice on desktop
+
+Settings → Companion offers Normal, Live voice, and Jev voice. Jev voice streams
+24 kHz microphone audio through the Hub to OpenAI's `gpt-live-transcribe`, with
+minimal transcription delay. It consumes transcript deltas while speech is still
+arriving. It does not run GPT-Live or produce spoken replies.
+
+Configure an OpenAI API key for transcription and a Vercel AI Gateway key for Jev
+in Settings. The Gateway password field is available in Companion and General
+settings. The Hub stores it in its existing settings repository; the settings API
+returns only configuration status, never the key or a key hint. A saved key takes
+precedence over `AI_GATEWAY_API_KEY` in the Hub process environment.
+
+Each new transcript update schedules a `typesafe-ai/jev` decision, with a minimum interval
+between request starts and at most one evaluation in flight. The interval is
+configurable in Settings → Companion → Jev decision interval, from 50 to 10,000 ms
+(default 250 ms). Saving reschedules pending decisions in the active session. Updates
+arriving during evaluation are combined for the next request. There is no fixed
+silence requirement for delegation. The transcriber disables server VAD because
+`gpt-live-transcribe` rejects it and commits every ten seconds of audio to bound
+provider audio items. Jev sees partial text before those commits; they do not
+delay delegation or clear transcript history. General
+settings → Voice input → End thought after (Balanced: 2.5 seconds) controls other
+continuous dictation features and does not control Jev voice.
+
+While unsent speech remains, decisions continue at the configured interval even
+without new words. Each request replaces `timing.silenceMs` with milliseconds since
+the last new or revised transcript text. An identical final transcript does not
+reset it. This estimates silence from transcription arrivals, not acoustic activity.
+Instructions can use different thresholds, such as 1000 ms normally and 5000 ms
+for sensitive subjects. Polling stops when nothing remains unsent, on pause/stop,
+or after an unrecovered error. Only one decision runs at a time.
+
+The Voice transcript menu item opens a large live dialog. The visible transcript
+inserts the decision's frozen `[Silence: 1.25 s]` value immediately before
+`[Sent to backend agent]` at each delegation point, and also shows a single updating
+silence counter in seconds with two decimals. The dialog follows new text until
+you scroll up to read earlier speech. These
+display annotations never enter model transcript text or backend requests; Jev
+receives timing only in its separate metadata field.
+
+The dialog's **Jev requests** tab defaults to send decisions and can show all
+decisions or errors. Successful evaluations include the exact state, effective
+instructions (including the app's timing preamble), send/wait criteria, model,
+probabilities when provided, and elapsed request time. It distinguishes a model
+send decision from actual delegation, since pause or newer speech can invalidate
+a decision. Requests are collected after this version is loaded, in browser
+memory only: up to 50 sends and 50 other results, with a combined two-million-
+character cap. Reset/reload clears the debugger history, independently of its
+separate transcript retention rules. Failed evaluations show attempted inputs
+and a safe error; an unavailable server prompt snapshot is explicitly marked.
+
+Select a successful request to edit its state, effective instructions, or choice
+criteria, then **Replay without delegating**. Replay uses the saved Gateway key
+and can incur model usage, but never starts a backend turn, advances a transcript
+cursor, or changes saved prompts. The original record remains unchanged. The
+authenticated replay endpoint only accepts Jev with bounded state/instructions
+and send/wait criteria; client credentials or provider URLs are not accepted.
+
+Jev chooses **send** or **wait**. Every decision includes the complete unsent
+transcript plus up to five previous delegated transcripts (up to 16,000 characters
+of prior context). Waiting retains every word. Sending submits the reviewed unsent
+text and advances a cursor; later-arriving words remain pending. The complete
+transcript remains visible in Voice transcript, including text already sent.
+Stopping and restarting Jev voice retains it in the open Companion; explicitly
+resetting/closing Companion or reloading the app clears this in-memory history.
+Final transcription wording is reconciled without resending previously delivered
+prefixes. Backend replies appear in Companion and use its existing delivery policy.
+
+Jev uses the same configured shortcut hold durations as Normal mode. Tap starts
+or stops listening. A short hold pauses/resumes the microphone and decisions;
+a middle hold stops listening but retains transcripts, with the next tap restarting.
+When already stopped, the middle hold closes the panel without clearing transcript
+history. The longest hold stops Companion and clears context. Actions occur only
+on release, based on the state at keydown; longer holds do not first execute the
+shorter actions. Default hold thresholds are 300, 800, and 1300 ms and remain
+configurable under Shortcut hold durations in the Companion tab.
+
+Editable Jev delegation instructions apply to the next evaluation. Retryable Gateway
+failures get up to two retries with backoff and provider retry delays, bounded by
+the same 15-second request deadline. Speech continues accumulating during retries;
+only a successful decision can delegate it. Remaining evaluation
+failures pause decisions while retaining speech; use **Retry pending decision**
+to resume. Ending voice cancels pending evaluations, retains transcripts, and does
+not cancel work already submitted to the backend. The full unsent transcript has
+a 120,000-character request limit: reaching it pauses decisions and retains the
+text for review. Earlier retained text is never automatically deleted.
+
+The Hub retains AI SDK 6 for its existing integrations and uses the `ai-evaluation`
+alias for SDK 7's experimental evaluation API. To run the standalone text example,
+enter `AI_GATEWAY_API_KEY` locally in the ignored root `.env.local`, then run
+`bun index.ts` from the repository root. It uses `openai/gpt-5.5`; Jev itself is an
+evaluation model and cannot generate the holiday story. Never commit credentials.
+
+
+### Spoken messages
+
+Companion can call `speak` to queue a brief spoken message in the open desktop Hub, independently of Live voice. It uses the existing Speech settings (enabled, voice, volume and mute) and requires a configured GROQ key. Each call accepts up to 200 characters and an optional voice override. The result reports `queued` or `muted`; it does not confirm that playback was heard. Companion should avoid repeating replies that Live voice will already speak.
+
+The tool appears in Companion’s tool settings. It is enabled for new default profiles and migrated profiles with `show_on_screen`; an explicit disabled choice in the current settings version remains disabled. Disabling Speech globally hides it from newly loaded tool catalogs.
