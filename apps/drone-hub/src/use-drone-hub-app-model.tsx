@@ -1,3 +1,4 @@
+import { COMPANION_HOME_CHANGED_EVENT } from './droneHub/companion/companion-home-files';
 import { useDesktopNotifications } from './droneHub/app/use-desktop-notifications';
 import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
@@ -2049,6 +2050,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           String(action.message ?? '').trim() || 'GROQ could not synthesize the requested speech.',
           'Speech synthesis failed',
         );
+        return;
+      }
+      if (action.type === 'companion_home_changed') {
+        window.dispatchEvent(new CustomEvent(COMPANION_HOME_CHANGED_EVENT));
         return;
       }
       if (action.type === 'speech_settings_changed') {

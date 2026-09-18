@@ -1,3 +1,4 @@
+import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion/companion-attachments';
 import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
@@ -5602,7 +5603,9 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
+  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime,
+    // Reaches every open Hub UI over the event stream it already holds.
+    () => { assistantService.emitExternalUiAction({ type: 'companion_home_changed', at: nowIso() }); });
   registerReflexRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
@@ -5961,7 +5964,14 @@ async function startDroneHubApiServerWithLifecycle(
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
-    resolveDroneOrRespond,
+    // Companion home is not a drone, but the explorer and editor can browse it like a host drone's folder.
+    resolveDroneOrRespond: async (res: http.ServerResponse, droneRef: string) =>
+      String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
+        ? {
+            id: COMPANION_HOME_TARGET_ID,
+            drone: { id: COMPANION_HOME_TARGET_ID, name: 'Companion home', runtime: 'host', cwd: await ensureCompanionHome(), repoPath: '', gitIgnoreMetadata: false },
+          }
+        : resolveDroneOrRespond(res, droneRef),
     runHostCommand,
     withLockedDroneContainer,
     withReadonlyDroneContainer,

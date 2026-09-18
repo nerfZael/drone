@@ -1,4 +1,6 @@
-import { validateChatAttachments, type CompanionImageAttachment } from '@drone/assistant-chat';
+import type { CompanionImageAttachment } from '@drone/assistant-chat';
+import { requestJson } from '../http';
+import { setCompanionClipboard } from './companion-clipboard';
 import { CompanionScreen, type CompanionSenseSources } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { desktopCompanionSessionStore } from './companion-session-store';
@@ -56,9 +58,16 @@ export type CompanionProposalHistoryEntry = {
 
 type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
+export type PendingCompanionAttachment = CompanionImageAttachment & { id: string; path: string };
+
 type CompanionContextValue = {
-  attachments: Array<CompanionImageAttachment & { id: string }>;
+  /** Pending captures and pasted text. Each is already saved in Companion home; the bytes stay here for previews only. */
+  attachments: PendingCompanionAttachment[];
   removeAttachment(id: string): void;
+  /** Queue clipboard text for the next instruction, like a capture. */
+  addTextAttachment(text: string): void;
+  /** Queue an image (for example one pasted from the clipboard) for the next instruction. */
+  addAttachment(file: CompanionImageAttachment): Promise<void>;
   screen: CompanionScreen;
   sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
@@ -133,7 +142,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     controller.getSnapshot,
   );
   const [proposalActionError, setProposalActionError] = React.useState('');
-  const [attachments, setAttachments] = React.useState<Array<CompanionImageAttachment & { id: string }>>([]);
+  const [attachments, setAttachments] = React.useState<PendingCompanionAttachment[]>([]);
   const attachmentsRef = React.useRef(attachments);
   const submittedAttachments = React.useRef<typeof attachments>([]);
   const captureGeneration = React.useRef(0);
@@ -150,7 +159,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     } else if (status === 'completed') submittedAttachments.current = [];
   }), [controller, updateAttachments]);
   const removeAttachment = React.useCallback((id: string) => {
+    const removed = attachmentsRef.current.find(item => item.id === id);
     updateAttachments(attachmentsRef.current.filter(item => item.id !== id));
+    // It was never sent, so its upload is of no use to anyone.
+    if (removed) void requestJson('/api/companion/home/uploads/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: removed.path }) }).catch(() => {});
   }, [updateAttachments]);
   const [proposalStore] = React.useState(() => new CompanionProposalStore<CompanionProposalExecutionContext>(newId));
   const proposalStoreVersion = React.useSyncExternalStore(proposalStore.subscribe, proposalStore.getSnapshot, proposalStore.getSnapshot);
@@ -182,6 +194,30 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');
   const lastLiveShortcutAtRef = React.useRef(0);
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
+  // Every attachment is saved to Companion home as it is taken, so an instruction only names files
+  // and neither their number nor their combined size can make it fail.
+  const addAttachment = React.useCallback(async (file: CompanionImageAttachment) => {
+    const generation = captureGeneration.current;
+    try {
+      const { attachment } = await requestJson<{ attachment: { name: string; path: string; size: number } }>('/api/companion/home/uploads', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(file),
+      });
+      if (generation !== captureGeneration.current) return;
+      updateAttachments([...attachmentsRef.current, { ...file, name: attachment.name, size: attachment.size, path: attachment.path, id: newId() }]);
+      setProposalActionError('');
+    } catch (error) {
+      if (generation !== captureGeneration.current) return;
+      setProposalActionError(error instanceof Error ? error.message : String(error));
+    }
+    setPanelVisibility('open');
+  }, [updateAttachments]);
+  const addTextAttachment = React.useCallback((text: string) => {
+    if (!text.trim()) return;
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    void addAttachment({ name: `pasted-text-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`, mime: 'text/plain', size: bytes.length, dataBase64: btoa(binary) });
+  }, [addAttachment]);
   const textSubmissionGenerationRef = React.useRef(0);
   const captureWorkspace = React.useCallback(() => workspace?.capture() ?? null, [workspace]);
   React.useEffect(() => {
@@ -194,12 +230,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         if (!window.droneHubDesktop?.captureCompanion) throw new Error('Screen capture requires the Drone Hub desktop app.');
         const image = await window.droneHubDesktop.captureCompanion(mode);
         if (!image || generation !== captureGeneration.current) return;
-        const next = [...attachmentsRef.current, { ...image, id: newId() }];
-        const validation = validateChatAttachments(next);
-        if (!validation.ok) throw new Error('Attachment limit reached. Send or remove pending images before capturing more.');
-        updateAttachments(next);
-        setProposalActionError('');
-        setPanelVisibility('open');
+        await addAttachment(image);
       } catch (error) {
         if (generation !== captureGeneration.current) return;
         setProposalActionError(error instanceof Error ? error.message : String(error));
@@ -208,7 +239,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('companion-capture', capture);
     return () => { captureGeneration.current++; window.removeEventListener('companion-capture', capture); };
-  }, [updateAttachments]);
+  }, [addAttachment]);
 
   const onVoiceError = React.useCallback(
     (message: string) => controller.reportVoiceError(message),
@@ -399,6 +430,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         );
       }
       if (tool === 'show_on_screen') return await screen.execute(args);
+      if (tool === 'set_clipboard') return await setCompanionClipboard(args.text);
       if (tool === 'list_proposals') return { proposals: proposalStore.list() };
       if (tool === 'create_proposal') return proposalStore.create(proposalContext(capturedWorkspace), controller.getSessionId(), typeof args.title === 'string' ? args.title : undefined);
       if (tool === 'read_proposal') return readProposal(typeof args.targetId === 'string' ? args.targetId : undefined);
@@ -444,7 +476,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       submittedAttachments.current.push(...sending);
       await controller.submitPrompt({
         prompt,
-        attachments: sending.map(({ id: _id, ...image }) => image),
+        attachments: sending.map(({ name, mime, size, path }) => ({ name, mime, size, path })),
         telemetry,
         messageId: requestedMessageId,
         createTransport: () =>
@@ -706,7 +738,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       screen,
-      attachments, removeAttachment,
+      attachments, removeAttachment, addTextAttachment, addAttachment,
       sessionId: controller.getSessionId(),
       error: proposalActionError || state.error || autoApproveSettings.error,
       live,
@@ -756,7 +788,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleAutoApprove,
     }),
     [
-      attachments, removeAttachment,
+      attachments, removeAttachment, addTextAttachment, addAttachment,
       proposalStore, proposalStoreVersion, proposalActionError,
       shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, voice.pendingTranscriptions,
       close,

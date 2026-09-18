@@ -1,6 +1,13 @@
 import React from 'react';
 import { useCompanionWindow } from './companion-window';
 import { contextMenuItemBaseClass, contextMenuSeparatorClass } from '../../ui/dropdown';
+import { UiSlider } from '../../ui/components/FormControls';
+import { COMPANION_VOLUME_MAX, setCompanionVolume, useCompanionVolume } from './companion-volume';
+import { playCompanionRecordingCue } from './companion-recording-cues';
+import { openCompanionHomeFiles } from './companion-home-files';
+import { canSnipForCompanion, snipForCompanion } from './companion-snip';
+import { formatShortcutBinding } from '../app/shortcuts';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { useCompanion } from './CompanionContext';
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { CompanionLivePanel } from './CompanionLivePanel';
@@ -78,6 +85,25 @@ export function CompanionMenuItem({
   );
 }
 
+/** Companion's own volume for its voice and cue sounds, independent of the system volume. */
+function CompanionVolumeRow() {
+  const volume = useCompanionVolume();
+  const percent = Math.round(volume * 100);
+  return (
+    <label className="flex items-center gap-2 px-2.5 py-1 text-[var(--fg-secondary)]" title="Companion volume for its voice and cue sounds; above 100% amplifies">
+      <span className="flex w-4 shrink-0 items-center justify-center text-[var(--muted)]">
+        <svg {...iconProps}><path d="M4 9v6h4l5 4V5L8 9Z" />{percent === 0 ? <path d="m17 9 5 6M22 9l-5 6" /> : <><path d="M16.5 8.5a5 5 0 0 1 0 7" />{percent > 100 ? <path d="M19.5 5.5a9 9 0 0 1 0 13" /> : null}</>}</svg>
+      </span>
+      <span className="sr-only">Companion volume</span>
+      <UiSlider min={0} max={COMPANION_VOLUME_MAX * 100} step={5} value={percent} aria-valuetext={`${percent}%`}
+        onChange={event => setCompanionVolume(Number(event.currentTarget.value) / 100)}
+        // Let the new level be heard once the adjustment ends, as the voice may be silent right now.
+        onPointerUp={() => playCompanionRecordingCue('send')} onKeyUp={() => playCompanionRecordingCue('send')} />
+      <span className="dh-type-menu-meta w-9 shrink-0 text-right tabular-nums">{percent}%</span>
+    </label>
+  );
+}
+
 export function CompanionOptionsMenu({
   historyOpen,
   onToggleHistory,
@@ -103,6 +129,10 @@ export function CompanionOptionsMenu({
 }) {
   const companion = useCompanion();
   const companionWindow = useCompanionWindow();
+  const snipBinding = useDroneHubUiStore(state => state.shortcutBindings.snipCompanion);
+  const screenBinding = useDroneHubUiStore(state => state.shortcutBindings.captureCompanionScreen);
+  const snipShortcut = snipBinding ? formatShortcutBinding(snipBinding) : '';
+  const screenShortcut = screenBinding ? formatShortcutBinding(screenBinding) : '';
   if (!companion) return null;
   const live = companion.live;
   const liveConversation = live?.status === 'listening' || live?.status === 'connecting';
@@ -144,7 +174,28 @@ export function CompanionOptionsMenu({
         </>
       ) : null}
 
+      {canSnipForCompanion() ? (
+        <>
+          <CompanionMenuSection label="Attach">
+            <CompanionMenuItem
+              icon={<svg {...iconProps}><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><circle cx="12" cy="12" r="3" /></svg>}
+              label="Snip part of the screen"
+              description="Select an area on any monitor and attach it to your next message. A shortcut can be set in Settings → Shortcuts"
+              meta={snipShortcut || 'No shortcut'}
+              onSelect={pick(() => snipForCompanion('region'))} />
+            <CompanionMenuItem
+              icon={<svg {...iconProps}><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M9 21h6M12 17v4" /></svg>}
+              label="Capture this screen"
+              description="Attach the whole monitor under the cursor to your next message. A shortcut can be set in Settings → Shortcuts"
+              meta={screenShortcut || 'No shortcut'}
+              onSelect={pick(() => snipForCompanion('screen'))} />
+            <div className="px-2.5 pb-1 pt-0.5 text-[10px] leading-snug text-[var(--muted-dim)]">Or paste text or an image with Ctrl+V while Companion is focused.</div>
+          </CompanionMenuSection>
+          <CompanionMenuSeparator />
+        </>
+      ) : null}
       <CompanionMenuSection label="Companion">
+        <CompanionVolumeRow />
         {companionWindow.supported ? <CompanionMenuItem
           icon={<svg {...iconProps}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M14 3h7v7M21 3l-9 9" /></svg>}
           label="Floating window"
@@ -165,6 +216,12 @@ export function CompanionOptionsMenu({
           expanded={historyOpen}
           controls="companion-proposal-history"
           onSelect={pick(onToggleHistory)}
+        />
+        <CompanionMenuItem
+          icon={<svg {...iconProps}><path d="M3 11 12 4l9 7" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></svg>}
+          label="Home files"
+          description="Browse and edit Companion home: its own files and everything you attached, in the main window"
+          onSelect={pick(openCompanionHomeFiles)}
         />
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z" /></svg>}

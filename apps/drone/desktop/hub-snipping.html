@@ -1,37 +1,161 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>Snip for Companion</title>
 <style>
-* { box-sizing: border-box; } body { margin: 0; overflow: hidden; font: 14px system-ui; cursor: crosshair; user-select: none; }
-#screen { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-#selection { position: fixed; border: 2px solid #70b8ff; box-shadow: 0 0 0 99999px #0006; pointer-events: none; }
-nav { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; padding: 12px; color: white; background: #182132; border-radius: 10px; cursor: default; }
-button { padding: 8px 12px; cursor: pointer; } button:focus-visible { outline: 3px solid #70b8ff; }
-</style></head><body><img id="screen" alt="Screen to capture"><div id="selection" hidden></div>
-<nav aria-label="Capture controls"><span>Drag to select an area</span><button id="region" disabled>Capture selection</button><button id="all">Capture full screen</button><button id="cancel">Cancel (Esc)</button></nav>
+* { box-sizing: border-box; } html, body { background: transparent; }
+body { margin: 0; overflow: hidden; font: 13px system-ui, sans-serif; cursor: crosshair; user-select: none; }
+body:not(.live) > * { visibility: hidden; }
+#screens img { position: fixed; pointer-events: none; }
+#picked { position: fixed; border: 2px solid #fff; box-shadow: 0 0 0 99999px #00000080; pointer-events: none; display: none; }
+body.screen #picked { display: block; } body.screen { cursor: default; }
+#selection { position: fixed; border: 2px solid #fff; box-shadow: 0 0 0 99999px #00000080; cursor: move; }
+#selection i { position: absolute; }
+#selection .n, #selection .s { left: 12px; right: 12px; height: 12px; cursor: ns-resize; } #selection .n { top: -7px; } #selection .s { bottom: -7px; }
+#selection .e, #selection .w { top: 12px; bottom: 12px; width: 12px; cursor: ew-resize; } #selection .e { right: -7px; } #selection .w { left: -7px; }
+#selection .corner { width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px 2px #0003; }
+#selection .nw { left: -13px; top: -13px; cursor: nwse-resize; } #selection .se { right: -13px; bottom: -13px; cursor: nwse-resize; }
+#selection .ne { right: -13px; top: -13px; cursor: nesw-resize; } #selection .sw { left: -13px; bottom: -13px; cursor: nesw-resize; }
+body.screen #selection { display: none; }
+#panel { position: fixed; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px; color: #fff; background: #303030; border-radius: 28px; box-shadow: 0 4px 16px #0006; cursor: default; transition: opacity .15s; }
+body.dragging #panel { opacity: .25; pointer-events: none; }
+#modes { display: flex; gap: 8px; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; } button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#modes button { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 96px; padding: 12px 8px; border-radius: 14px; }
+#modes button:hover { background: #ffffff14; } #modes button[aria-pressed="true"] { background: #ffffff29; }
+#modes svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#capture { width: 52px; height: 52px; padding: 5px; border-radius: 50%; border: 3px solid #fff; }
+#capture::before { content: ''; display: block; width: 100%; height: 100%; border-radius: 50%; background: #fff; transition: transform .1s; }
+#capture:hover::before { transform: scale(.92); } #capture:active::before { transform: scale(.82); }
+#cancel { position: absolute; top: -10px; right: -10px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: #4a4a4a; box-shadow: 0 1px 4px #0006; font-size: 15px; line-height: 28px; }
+#cancel:hover { background: #5c5c5c; }
+</style></head><body><div id="screens"></div><div id="picked"></div>
+<div id="selection"><i class="n"></i><i class="e"></i><i class="s"></i><i class="w"></i><i class="corner nw"></i><i class="corner ne"></i><i class="corner se"></i><i class="corner sw"></i></div>
+<div id="panel" role="toolbar" aria-label="Capture controls">
+  <button id="cancel" title="Close (Esc)" aria-label="Close">✕</button>
+  <div id="modes">
+    <button id="mode-region" title="Selection (S)"><svg viewBox="0 0 28 28"><path d="M4 9V6a2 2 0 0 1 2-2h3M19 4h3a2 2 0 0 1 2 2v3M24 19v3a2 2 0 0 1-2 2h-3M9 24H6a2 2 0 0 1-2-2v-3"/><path d="M13 4h2M13 24h2M4 13v2M24 13v2"/></svg>Selection</button>
+    <button id="mode-screen" title="Screen (C)"><svg viewBox="0 0 28 28"><rect x="3" y="5" width="22" height="14" rx="2"/><path d="M10 24h8M14 19v5"/></svg>Screen</button>
+  </div>
+  <button id="capture" title="Capture (Enter)" aria-label="Capture"></button>
+</div>
 <script>
+const MIN = 8;
+const screens = document.getElementById('screens');
+const picked = document.getElementById('picked');
+const panel = document.getElementById('panel');
 const box = document.getElementById('selection');
-const region = document.getElementById('region');
-let start = null, rect = null;
-window.snipping.onImage(data => { document.getElementById('screen').src = data; });
-const point = event => ({ x: Math.max(0, Math.min(innerWidth, event.clientX)), y: Math.max(0, Math.min(innerHeight, event.clientY)) });
+const modes = { region: document.getElementById('mode-region'), screen: document.getElementById('mode-screen') };
+let mode = 'region', rect = null, drag = null, displays = [], chosen = null;
+
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+const point = event => ({ x: clamp(event.clientX, 0, innerWidth), y: clamp(event.clientY, 0, innerHeight) });
+// Without a remembered selection, start in the middle of the display the snip was started on.
+const defaultRect = () => ({ x: Math.round(chosen.x + chosen.width * 3 / 8), y: Math.round(chosen.y + chosen.height * 3 / 8), width: Math.round(chosen.width / 4), height: Math.round(chosen.height / 4) });
+// The window covers every display it was given, so a rectangle may sit on, or span, any of them.
+function fit(value) {
+  if (!value || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(value[key]))) return defaultRect();
+  const width = clamp(value.width, MIN, innerWidth), height = clamp(value.height, MIN, innerHeight);
+  return { x: clamp(value.x, 0, innerWidth - width), y: clamp(value.y, 0, innerHeight - height), width, height };
+}
+function paint() { Object.assign(box.style, { left: rect.x + 'px', top: rect.y + 'px', width: rect.width + 'px', height: rect.height + 'px' }); }
+function setMode(next) {
+  mode = next;
+  document.body.classList.toggle('screen', mode === 'screen');
+  for (const [name, button] of Object.entries(modes)) button.setAttribute('aria-pressed', String(name === mode));
+}
+function choose(display) { chosen = display; Object.assign(picked.style, { left: display.x + 'px', top: display.y + 'px', width: display.width + 'px', height: display.height + 'px' }); }
+function capture() { window.snipping.select(mode === 'screen' ? { screen: chosen.id } : rect); }
+
+// The window is transparent and its content stays hidden until the frozen frame is decoded and the
+// window covers the whole display. Until then the live desktop shows through, so the frozen frame
+// replaces identical pixels and the overlay appears without a flash or a visible resize.
+let session = 0, reveal = null;
+async function freeze(display, image) {
+  const frame = Object.assign(document.createElement('img'), { alt: '', src: image });
+  Object.assign(frame.style, { left: display.x + 'px', top: display.y + 'px', width: display.width + 'px', height: display.height + 'px' });
+  try { await frame.decode(); } catch {}
+  return frame;
+}
+window.snipping.onStart(async ({ image, selection, size, displays: layout, active }) => {
+  const current = ++session;
+  document.body.classList.remove('live', 'dragging');
+  drag = null;
+  displays = layout;
+  choose(displays.find(display => display.id === active));
+  Object.assign(panel.style, { left: chosen.x + chosen.width / 2 + 'px', bottom: size.height - chosen.y - chosen.height + 56 + 'px' });
+  screens.replaceChildren();
+  const frame = await freeze(chosen, image);
+  if (current !== session) return;
+  screens.prepend(frame);
+  let timer;
+  const show = () => {
+    clearTimeout(timer); reveal = null;
+    rect = fit(selection);
+    paint(); setMode('region');
+    document.body.classList.add('live');
+  };
+  reveal = () => { if (innerWidth === size.width && innerHeight === size.height) show(); };
+  // A window manager that refuses the requested size must not leave the overlay invisible.
+  timer = setTimeout(() => { if (current === session && reveal) show(); }, 500);
+  window.snipping.ready();
+  reveal();
+});
+addEventListener('resize', () => reveal?.());
+// The other displays freeze as their frames arrive; until then their live desktop shows through.
+window.snipping.onImage(async ({ id, image }) => {
+  const current = session, display = displays.find(item => item.id === id);
+  if (!display) return;
+  const frame = await freeze(display, image);
+  if (current === session) screens.append(frame);
+});
+window.snipping.onReset(() => { session++; reveal = null; document.body.classList.remove('live'); screens.replaceChildren(); });
+
 addEventListener('pointerdown', event => {
-  if (event.button !== 0 || event.target.closest('nav')) return;
-  start = point(event); rect = null; region.disabled = true; box.hidden = true;
+  if (event.button !== 0 || event.target.closest('#panel')) return;
+  if (mode === 'screen') {
+    const display = displays.find(item => event.clientX >= item.x && event.clientX < item.x + item.width && event.clientY >= item.y && event.clientY < item.y + item.height);
+    if (display) choose(display);
+    return;
+  }
+  const start = point(event);
+  const edges = event.target.parentElement === box ? event.target.className.replace('corner ', '') : event.target === box ? 'move' : 'new';
+  drag = { start, edges, from: rect, previous: rect };
+  // A new rectangle is a zero-size one whose bottom-right corner is being dragged.
+  if (edges === 'new') { rect = { ...start, width: 0, height: 0 }; Object.assign(drag, { from: rect, edges: 'se' }); paint(); }
+  document.body.classList.add('dragging');
   document.body.setPointerCapture(event.pointerId);
 });
 addEventListener('pointermove', event => {
-  if (!start) return;
-  const end = point(event);
-  rect = { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
-  box.hidden = false;
-  Object.assign(box.style, { left: rect.x + 'px', top: rect.y + 'px', width: rect.width + 'px', height: rect.height + 'px' });
+  if (!drag) return;
+  const now = point(event), { from, edges, start } = drag;
+  const dx = now.x - start.x, dy = now.y - start.y;
+  if (edges === 'move') {
+    rect = { ...from, x: clamp(from.x + dx, 0, innerWidth - from.width), y: clamp(from.y + dy, 0, innerHeight - from.height) };
+  } else {
+    // Dragging an edge past its opposite flips the rectangle instead of stopping.
+    let left = from.x, right = from.x + from.width, top = from.y, bottom = from.y + from.height;
+    if (edges.includes('w')) left = clamp(left + dx, 0, innerWidth); if (edges.includes('e')) right = clamp(right + dx, 0, innerWidth);
+    if (edges.includes('n')) top = clamp(top + dy, 0, innerHeight); if (edges.includes('s')) bottom = clamp(bottom + dy, 0, innerHeight);
+    rect = { x: Math.min(left, right), y: Math.min(top, bottom), width: Math.abs(right - left), height: Math.abs(bottom - top) };
+  }
+  paint();
 });
-addEventListener('pointerup', () => { start = null; region.disabled = !rect || rect.width < 1 || rect.height < 1; });
+const endDrag = () => {
+  if (!drag) return;
+  // A plain click outside the rectangle is not a selection; keep the previous one.
+  if (rect.width < MIN || rect.height < MIN) rect = drag.previous;
+  drag = null; paint();
+  document.body.classList.remove('dragging');
+};
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
 addEventListener('keydown', event => {
   if (event.key === 'Escape') window.snipping.select(null);
-  if (event.key === 'Enter' && !region.disabled && event.target === document.body) window.snipping.select(rect);
+  else if (event.key === 'Enter' || (event.key === ' ' && event.target === document.body) || (event.ctrlKey && event.key === 'c')) { event.preventDefault(); capture(); }
+  else if (event.key === 's') setMode('region');
+  else if (event.key === 'c') setMode('screen');
 });
-region.onclick = () => window.snipping.select(rect);
-document.getElementById('all').onclick = () => window.snipping.select('screen');
+modes.region.onclick = () => setMode('region');
+modes.screen.onclick = () => setMode('screen');
+document.getElementById('capture').onclick = capture;
 document.getElementById('cancel').onclick = () => window.snipping.select(null);
 </script></body></html>

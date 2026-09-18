@@ -90,9 +90,10 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
     ipcRenderer.on('drone-hub:notification-error', listener);
     return () => ipcRenderer.removeListener('drone-hub:notification-error', listener);
   },
+  writeClipboardText: (text) => ipcRenderer.invoke('drone-hub:clipboard-write-text', text),
   companionWindow: {
     control(action, size) {
-      if (['show', 'hide', 'close', 'attach', 'resize'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);
+      if (['show', 'hide', 'close', 'attach', 'resize', 'focus-owner'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);
     },
     onClose(callback) {
       if (typeof callback !== 'function') return () => {};

@@ -371,7 +371,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         if (runtime === 'host') {
           try {
             const parsed = await listHostFsDirectory(targetPath);
-            const entries = await measure('fs_git_ignore', () => addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries));
+            // A folder that merely sits inside an ignored directory of some repository is not itself "ignored".
+            const entries = drone?.gitIgnoreMetadata === false ? parsed.entries : await measure('fs_git_ignore', () => addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries));
             json(res, 200, {
               ok: true,
               id: droneId,

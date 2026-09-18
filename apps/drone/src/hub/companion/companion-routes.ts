@@ -1,4 +1,4 @@
-import { readCompanionAttachments } from './companion-attachments';
+import { companionHomeRevision, readCompanionAttachments, removeCompanionUpload, storeCompanionUpload, watchCompanionHome } from './companion-attachments';
 import type { CompanionRuntime } from './companion-runtime';
 import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from './companion-auto-approve-settings';
 import { measureHubRequestPhase } from '../hub-performance-diagnostics';
@@ -19,12 +19,31 @@ export function registerCompanionRoutes(
   workspaces?: CompanionWorkspaceService,
   organization?: { services: HubServices; sidebar: SidebarCommandService },
   runtime?: CompanionRuntime,
+  /** Called, debounced, whenever a file in Companion home changes while a files window wants to know. */
+  onHomeChanged?: () => void,
 ): void {
+  let homeWatcher: ReturnType<typeof watchCompanionHome> | null = null;
   router.post('/api/companion/attachments/read', async ({ readJson, json, fail }) => {
     try {
       const body = await readJson();
       json(200, { ok: true, attachments: await readCompanionAttachments(body.paths) });
     } catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
+  // A files window asks for this when it opens and after each change notice. Asking also arms the
+  // watcher behind those notices, so nothing watches the folder until someone is looking at it.
+  router.get('/api/companion/home/revision', async ({ json }) => {
+    const revision = await companionHomeRevision();
+    if (onHomeChanged && !homeWatcher?.active) homeWatcher = watchCompanionHome(onHomeChanged);
+    json(200, { ok: true, live: Boolean(homeWatcher?.active), ...revision });
+  });
+  // Captures and pasted text are saved as they are taken; the instruction then only names them.
+  router.post('/api/companion/home/uploads', async ({ readJson, json, fail }) => {
+    try { json(200, { ok: true, attachment: await storeCompanionUpload(await readJson()) }); }
+    catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
+  router.post('/api/companion/home/uploads/remove', async ({ readJson, json, fail }) => {
+    try { await removeCompanionUpload((await readJson())?.path); json(200, { ok: true }); }
+    catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });
   router.get('/api/settings/companion/live-voice', async ({ req, json }) => {
     const settings = await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings());

@@ -1,5 +1,5 @@
 import type http from 'node:http';
-import { normalizeChatImageAttachments } from '../chat-attachments';
+import { validateCompanionAttachments } from './companion-attachments';
 import crypto from 'node:crypto';
 import {
   validateCompanionProposalResultInput,
@@ -108,7 +108,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       }
       const { runId, prompt, messageId, telemetry } = validation;
       let attachments;
-      try { attachments = normalizeChatImageAttachments(message.attachments); }
+      try { attachments = validateCompanionAttachments(message.attachments); }
       catch (error) {
         send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
         return;

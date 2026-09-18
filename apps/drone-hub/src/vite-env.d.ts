@@ -38,8 +38,10 @@ interface Window {
     showNotification?(input: { title: string; body: string; silent: boolean; name?: string; kind?: string; durationSeconds?: number; target?: { droneId: string; chatName: string } }): Promise<void>;
     onNotificationClick?(callback: (target: { droneId: string; chatName: string }) => void): () => void;
     onNotificationError?(callback: (error: string) => void): () => void;
+    /** Write-only; works while the Hub window is unfocused, unlike the web clipboard API. */
+    writeClipboardText?(text: string): Promise<boolean>;
     companionWindow?: {
-      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize', size?: CompanionWindowSize): void;
+      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize' | 'focus-owner', size?: CompanionWindowSize): void;
       onClose(callback: () => void): () => void;
       onPlacement?(callback: (placement: CompanionWindowPlacement) => void): () => void;
     };

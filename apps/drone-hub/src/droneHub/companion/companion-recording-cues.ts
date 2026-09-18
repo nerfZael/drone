@@ -1,4 +1,5 @@
 import type { CompanionHoldAction } from './companion-shortcut';
+import { getCompanionVolume } from './companion-volume';
 
 type Cue = 'start' | 'send' | CompanionHoldAction;
 
@@ -11,6 +12,9 @@ const notes: Record<Cue, number[]> = {
   close: [660, 440, 220],
   reset: [660, 880, 660],
 };
+
+// Peak level at 100% Companion volume; the slider scales it up to twice that.
+const CUE_LEVEL = 0.3;
 
 let context: AudioContext | null = null;
 
@@ -27,6 +31,8 @@ export function prepareCompanionRecordingCues(): void {
 export function playCompanionRecordingCue(cue: Cue): void {
   prepareCompanionRecordingCues();
   if (!context || context.state !== 'running') return;
+  const level = CUE_LEVEL * getCompanionVolume();
+  if (level <= 0) return;
   try {
     const audio = context;
     notes[cue].forEach((frequency, index) => {
@@ -35,7 +41,7 @@ export function playCompanionRecordingCue(cue: Cue): void {
       const gain = audio.createGain();
       oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.12, start + 0.008);
+      gain.gain.linearRampToValueAtTime(level, start + 0.008);
       gain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
       oscillator.connect(gain);
       gain.connect(audio.destination);

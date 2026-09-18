@@ -1,5 +1,6 @@
 import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
 import type { AnnouncementPlayback } from './CompanionLiveAnnouncement';
+import { connectCompanionVolume } from './companion-volume';
 
 // Keep a small playout reserve for network/JS scheduling jitter. Rebuild it only
 // after the queue drains; adding it to every chunk would accumulate latency.
@@ -13,6 +14,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
     throw new Error('Live voice needs microphone access and Web Audio in a secure browser.');
   }
   const context = new AudioContext({ sampleRate: 24_000 });
+  let output: ReturnType<typeof connectCompanionVolume> | undefined;
   let microphone: MediaStream | undefined;
   let source: MediaStreamAudioSourceNode | undefined;
   let processor: ScriptProcessorNode | undefined;
@@ -32,6 +34,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
     source?.disconnect();
     playing.forEach((node) => { node.onended = null; node.stop(); });
     playing.clear();
+    output?.release();
     releasePromise = context.close();
     return releasePromise;
   };
@@ -77,6 +80,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
     };
     source.connect(processor);
     processor.connect(context.destination);
+    const speech = output = connectCompanionVolume(context);
     return {
       mute(muted) { microphone?.getTracks().forEach((track) => { track.enabled = !muted; }); },
       async resume() { await context.resume(); onPlaybackBlocked(context.state !== 'running'); },
@@ -103,7 +107,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           }
           const node = context.createBufferSource();
           node.buffer = buffer;
-          node.connect(context.destination);
+          node.connect(speech.input);
           playing.add(node);
           node.onended = () => {
             playing.delete(node); node.disconnect();

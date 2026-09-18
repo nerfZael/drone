@@ -283,6 +283,21 @@ test('enables screen display for legacy navigation profiles and respects current
 });
 
 
+test('Companion view_images runs on the server, is on by default, and migrates with the presentation tools', () => {
+  expect(COMPANION_TOOL_SUMMARIES.find(tool => tool.name === 'view_images')).toMatchObject({ execution: 'server', requires: null });
+  expect(DEFAULT_COMPANION_SETTINGS.enabledTools).toContain('view_images');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 15, enabledTools: ['show_on_screen'] }).enabledTools).toContain('view_images');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['show_on_screen'] }).enabledTools).not.toContain('view_images');
+});
+
+test('Companion set_clipboard runs in the browser, is on by default, migrates with the presentation tools, and respects opt-out', () => {
+  expect(COMPANION_TOOL_SUMMARIES.find(tool => tool.name === 'set_clipboard')).toMatchObject({ execution: 'browser', category: 'actions', requires: null });
+  expect(DEFAULT_COMPANION_SETTINGS.enabledTools).toContain('set_clipboard');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 14, enabledTools: ['show_on_screen'] }).enabledTools).toContain('set_clipboard');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['show_on_screen'] }).enabledTools).not.toContain('set_clipboard');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 14, enabledTools: ['list_chats'] }).enabledTools).not.toContain('set_clipboard');
+});
+
 test('Companion speak is enabled by default, migrates existing presentation tools, and preserves explicit opt-out', () => {
   expect(COMPANION_TOOL_SUMMARIES.find(tool => tool.name === 'speak')).toMatchObject({ execution: 'mcp', category: 'actions', requires: null });
   expect(DEFAULT_COMPANION_SETTINGS.enabledTools).toContain('speak');

@@ -24,6 +24,11 @@ import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { CompanionProposalStrip } from './CompanionProposalStrip';
 import { CompanionOptionsMenu } from './CompanionOptionsMenu';
+import { CompanionAttachmentDialog, companionAttachmentText, isCompanionTextAttachment } from './CompanionAttachmentDialog';
+import { openCompanionHomeFiles } from './companion-home-files';
+import { canSnipForCompanion, snipForCompanion } from './companion-snip';
+import { formatShortcutBinding } from '../app/shortcuts';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { CompanionTranscriptDialog, useCompanionTranscriptDialog } from './CompanionTranscriptDialog';
 import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
@@ -56,7 +61,18 @@ function CompanionStatusIndicator({
       </svg>
     </span>
   );
-  const tone = status === 'recording' || status === 'error'
+  // Listening is the state worth noticing at a glance: a microphone with sound waves, not another dot.
+  if (status === 'recording') return (
+    <span title={label} aria-label={`Companion status: ${label}`} role="status" className="flex h-4 w-4 shrink-0 items-center justify-center text-[var(--red)]">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" stroke="none" />
+        <path d="M6 11a6 6 0 0 0 12 0M12 17v4" />
+        <path d="M3.5 8.5a9 9 0 0 0 0 5" className="animate-pulse motion-reduce:animate-none" />
+        <path d="M20.5 8.5a9 9 0 0 1 0 5" className="animate-pulse motion-reduce:animate-none" style={{ animationDelay: '0.4s' }} />
+      </svg>
+    </span>
+  );
+  const tone = status === 'error'
       ? 'bg-[var(--red)]'
       : status === 'completed'
         ? 'bg-[var(--green)]'
@@ -73,6 +89,18 @@ function CompanionStatusIndicator({
     />
   );
 }
+
+/** Clipboard images are all called image.png; give each a name that says what and when it was. */
+async function pastedImageAttachment(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+  const generic = !file.name || /^image\.[a-z]+$/i.test(file.name);
+  return { name: generic ? `pasted-image-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}` : file.name, mime: file.type, size: bytes.length, dataBase64: btoa(binary) };
+}
+
+const REPLY_COLLAPSED_KEY = 'drone-hub:companion-reply-collapsed';
 
 function CompanionHeaderButton({
   label,
@@ -123,6 +151,16 @@ export function CompanionOverlay() {
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
   const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [viewedAttachmentId, setViewedAttachmentId] = React.useState<string | null>(null);
+  // A lasting preference, not a per-reply state: collapsed keeps every reply folded away behind the
+  // header; expanded shows a reply whenever there is one, and nothing while Companion is still working.
+  const [replyCollapsed, setReplyCollapsedState] = React.useState(() => {
+    try { return window.localStorage.getItem(REPLY_COLLAPSED_KEY) === '1'; } catch { return false; }
+  });
+  const setReplyCollapsed = (collapsed: boolean) => {
+    setReplyCollapsedState(collapsed);
+    try { window.localStorage.setItem(REPLY_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* Still applies to this session. */ }
+  };
   // Default each new selection to closed in auto-approve mode, without a frame
   // flashing open before an effect runs. Explicit number clicks override the default.
   const [proposalVisibility, setProposalVisibility] = React.useState<{
@@ -133,7 +171,11 @@ export function CompanionOverlay() {
     && proposalVisibility?.autoApprove === companion?.autoApprove
     ? proposalVisibility.hidden : Boolean(companion?.autoApprove);
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen || transcriptDialog.open;
+  // Sending the batch removes the attachment, which also closes its viewer.
+  const viewedAttachment = companion?.attachments?.find(item => item.id === viewedAttachmentId);
+  const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen || transcriptDialog.open || Boolean(viewedAttachment);
+  const snipBinding = useDroneHubUiStore(state => state.shortcutBindings.snipCompanion);
+  const snipShortcut = snipBinding ? formatShortcutBinding(snipBinding) : '';
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -168,8 +210,35 @@ export function CompanionOverlay() {
     companionWindow.ownerWindow.addEventListener('keydown', onKeyDown, true);
     return () => companionWindow.ownerWindow?.removeEventListener('keydown', onKeyDown, true);
   }, [companionWindow.detached, companionWindow.ownerWindow, companion?.status, companion?.live?.status, companion?.switchingVoice, companion?.discardRecording]);
+  // Ctrl+V while Companion has focus queues the clipboard text like a capture. The floating window is
+  // all Companion; in the main window only its own surfaces count, and editable fields keep their paste.
+  const addTextAttachment = companion?.addTextAttachment;
+  const addAttachment = companion?.addAttachment;
+  React.useEffect(() => {
+    const view = companionWindow.ownerWindow;
+    if (!view || !visible || !addTextAttachment) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target as Element | null;
+      if (!companionWindow.detached && !target?.closest?.('[data-companion-surface]')) return;
+      if (target?.closest?.('input, textarea, [contenteditable="true"], [data-portable-editor], .monaco-editor')) return;
+      // A copied screenshot or image wins over any text that came along with it.
+      const images = Array.from(event.clipboardData?.files ?? []).filter(file => file.type.startsWith('image/'));
+      if (images.length && addAttachment) {
+        event.preventDefault();
+        for (const file of images) void pastedImageAttachment(file).then(addAttachment).catch(() => {});
+        return;
+      }
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (!text.trim()) return;
+      event.preventDefault();
+      addTextAttachment(text);
+    };
+    view.document.addEventListener('paste', onPaste);
+    return () => view.document.removeEventListener('paste', onPaste);
+  }, [companionWindow.ownerWindow, companionWindow.detached, visible, addTextAttachment, addAttachment]);
   if (!companion || !visible) return companionWindow.render(null);
   const active = companion.status === 'working';
+  const canSnip = canSnipForCompanion();
   const liveActive = companion.live?.status === 'connecting' || companion.live?.status === 'listening';
   const duration = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
@@ -186,13 +255,6 @@ export function CompanionOverlay() {
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
       overflowY: 'auto',
     } : { zIndex: panelOpen ? 100 : 80 }} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
-      {Boolean(companion.attachments?.length) && <div aria-label="Pending Companion attachments" className="flex max-w-sm flex-wrap gap-2 rounded-lg bg-[var(--panel)] p-2">
-        {companion.attachments.map(image => <div key={image.id} className="flex items-center gap-2">
-          <img src={`data:${image.mime};base64,${image.dataBase64}`} alt={image.name} className="h-16 w-24 rounded object-contain" />
-          <button type="button" aria-label={`Remove ${image.name}`} onClick={() => companion.removeAttachment(image.id)}>Remove</button>
-        </div>)}
-        <span className="text-xs">Attached to your next instruction</span>
-      </div>}
       {companion.screen ? <CompanionScreenPanel screen={companion.screen} /> : null}
       {historyOpen ? (
         <CompanionProposalHistory
@@ -233,11 +295,33 @@ export function CompanionOverlay() {
         status={companion.live?.status}
         onResetTable={companion.live?.mode === 'jev' ? companion.live.resetJevTable : undefined}
         onClose={transcriptDialog.close} portalContainer={companionWindow.portalContainer} /> : null}
+      {viewedAttachment ? <CompanionAttachmentDialog attachment={viewedAttachment} onClose={() => setViewedAttachmentId(null)} portalContainer={companionWindow.portalContainer} /> : null}
       {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
       {/* The proposal strip docks onto the window's outer edge so it works even when the window is a single row. */}
       <div className={`flex min-h-0 w-full ${flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}>
+      {/* Pending captures sit just outside the card, on the side content flows to, like papers clipped to
+          its edge: the card itself stays one clean bar. They leave once the next instruction takes them. */}
+      {companion.attachments?.length ? (
+        <div aria-label="Pending Companion attachments"
+          className={`flex shrink-0 items-center gap-1.5 overflow-x-auto px-0.5 ${flowsDown ? 'pb-0.5 pt-1.5' : 'pb-1.5 pt-0.5'} [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}>
+          {companion.attachments.map(item => (
+            <div key={item.id} className="group relative shrink-0">
+              <button type="button" aria-label={`View ${item.name}`} title={item.name} onClick={() => setViewedAttachmentId(item.id)}
+                className="block h-11 w-16 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),0_2px_8px_var(--shadow-color)] hover:border-[var(--accent-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                {isCompanionTextAttachment(item)
+                  ? <span aria-hidden="true" className="block h-full whitespace-pre-wrap break-all p-1 text-left font-mono text-[5px] leading-[6px] text-[var(--fg-secondary)]">{companionAttachmentText(item).slice(0, 260)}</span>
+                  : <img src={`data:${item.mime};base64,${item.dataBase64}`} alt="" className="h-full w-full object-cover" />}
+              </button>
+              <button type="button" aria-label={`Remove ${item.name}`} title="Remove" onClick={() => companion.removeAttachment(item.id)}
+                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[11px] leading-none text-[var(--muted)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100">
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <CompanionProposalStrip
         proposals={companion.proposals}
         selectedId={companion.selectedProposalId}
@@ -250,8 +334,8 @@ export function CompanionOverlay() {
           setHistoryOpen(false);
         }}
       />
-      <aside
-        className={`flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
+      <aside tabIndex={-1}
+        className={`outline-none flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
         aria-label="Companion"
       >
       {/* Header doubles as the user's message once a transcript exists. In the floating window it is the bar that stays put. */}
@@ -401,6 +485,21 @@ export function CompanionOverlay() {
           </span>
         ) : null}
         <div className="flex items-center gap-1.5">
+          {companion.reply ? <CompanionHeaderButton
+            label={replyCollapsed ? 'Show reply; stays shown for later replies' : 'Hide reply and keep only this bar; stays hidden for later replies'}
+            tone={replyCollapsed ? 'accent' : 'neutral'}
+            pressed={!replyCollapsed}
+            onClick={() => setReplyCollapsed(!replyCollapsed)}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 5h16" />{replyCollapsed ? <path d="m8 12 4 4 4-4" /> : <><path d="M4 11h16M4 17h10" /></>}
+            </svg>
+          </CompanionHeaderButton> : null}
+          {canSnip ? <CompanionHeaderButton label={`Snip part of the screen for your next message${snipShortcut ? ` (${snipShortcut})` : ''}`} onClick={() => snipForCompanion('region')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><circle cx="12" cy="12" r="3" />
+            </svg>
+          </CompanionHeaderButton> : null}
           <CompanionSubscriptions subscriptions={companion.subscriptions ?? []} />
           <CompanionHeaderButton
             label={`Auto-approve proposals ${companion.autoApprove ? 'on' : 'off'}; double-tap Caps Lock to toggle`}
@@ -466,17 +565,22 @@ export function CompanionOverlay() {
 
       {companionWindow.error ? <p role="alert" className="px-3 py-2 text-xs text-[var(--red)]">{companionWindow.error}</p> : null}
       {/* Body: the reply is what the user came for. */}
-      {companion.error || companion.reply ? (
+      {companion.error || (companion.reply && !replyCollapsed) ? (
         <div className="min-h-0 overflow-y-auto">
           {companion.error ? (
             <div className="mx-3 mt-2.5 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-xs text-[var(--red)]">
               {companion.error}
             </div>
           ) : null}
-          {companion.reply ? (
+          {companion.reply && !replyCollapsed ? (
+            // The margin around the reply still drags the floating window; the text itself can be selected and copied.
             <div data-companion-drag-handle={companionWindow.detached || undefined}
-              className={`px-3 ${companionWindow.detached && !flowsDown ? 'pb-0.5 pt-2' : 'pb-2 pt-0.5'} ${companionWindow.detached ? 'cursor-move select-none' : ''}`}>
-              <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
+              className={`px-3 ${companionWindow.detached && !flowsDown ? 'pb-0.5 pt-2' : 'pb-2 pt-0.5'} ${companionWindow.detached ? 'cursor-move' : ''}`}>
+              <div data-companion-selectable="true" className="cursor-auto select-text">
+                <ChatMessageBody role="assistant" text={companion.reply} autoExpand
+                  // Paths in a reply refer to Companion home: open the file there, or select the folder.
+                  onOpenFileReference={reference => openCompanionHomeFiles({ path: reference.path, line: reference.line, column: reference.column })} />
+              </div>
             </div>
           ) : null}
         </div>

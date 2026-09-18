@@ -26,6 +26,8 @@ export function prepareCompanionWindow(source: Document, target: Document): () =
     [data-companion-window-panel] aside { max-height: min(36rem, calc(var(--companion-max-height) - 16px)); }
     [data-companion-drag-handle] { -webkit-app-region: drag; }
     [data-companion-drag-handle] :is(button, a, input, textarea, select, summary, [role="button"]) { -webkit-app-region: no-drag; }
+    /* A drag region swallows every pointer event, so text the user should be able to select and copy opts out. */
+    [data-companion-selectable], [data-companion-selectable] * { -webkit-app-region: no-drag; }
     /* Drag regions are geometric, not stacked: anything portalled over a drag handle (menus, dialogs,
        tooltips) must opt out or its overlapping part swallows clicks and drags the window instead. */
     [data-radix-popper-content-wrapper], [data-radix-popper-content-wrapper] *, [role="dialog"], [role="dialog"] *, [role="menu"], [role="listbox"], [role="tooltip"] { -webkit-app-region: no-drag; }

@@ -230,3 +230,21 @@ test('floating position survives restart, hiding, and clamps to the display', ()
     third.owner.destroy();
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('the clipboard bridge only writes text, only for the owner main frame, and is removed with the window', () => {
+  const { installCompanionClipboard } = require('../desktop/hub-electron-companion.cjs');
+  const handlers = new Map<string, (event: any, text: unknown) => unknown>();
+  const ipcMain = { handle: (channel: string, fn: any) => { handlers.set(channel, fn); }, removeHandler: (channel: string) => { handlers.delete(channel); } };
+  const owner = Object.assign(new EventEmitter(), { webContents: { mainFrame: {} }, isDestroyed: () => false });
+  const written: string[] = [];
+  installCompanionClipboard({ owner, ipcMain, clipboard: { writeText: (text: string) => { written.push(text); }, readText: () => { throw new Error('never read'); } } });
+  const write = handlers.get('drone-hub:clipboard-write-text')!;
+  const trusted = { sender: owner.webContents, senderFrame: owner.webContents.mainFrame };
+  expect(write(trusted, 'git status')).toBe(true);
+  expect(() => write({ sender: owner.webContents, senderFrame: {} }, 'x')).toThrow('only available');
+  expect(() => write({ sender: {}, senderFrame: {} }, 'x')).toThrow('only available');
+  for (const bad of ['', 42, 'x'.repeat(100_001)]) expect(() => write(trusted, bad)).toThrow('Invalid clipboard text');
+  expect(written).toEqual(['git status']);
+  owner.emit('closed');
+  expect(handlers.size).toBe(0);
+});

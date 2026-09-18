@@ -526,7 +526,8 @@ export function OpenedDroneFilePanel({
       lineNumbersMinChars: 3,
       renderLineHighlight: 'all',
       cursorBlinking: 'smooth',
-      cursorSmoothCaretAnimation: 'on',
+      // The caret jumps to where you click, as in VS Code; gliding there reads as lag.
+      cursorSmoothCaretAnimation: 'off',
       smoothScrolling: true,
       minimap: { enabled: false },
       scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,

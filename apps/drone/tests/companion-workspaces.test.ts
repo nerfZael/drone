@@ -480,21 +480,28 @@ test('records workspace and authorization phases on successful and denied editor
   expect(phases).toContain('companion_editor_stat');
 });
 
-test('Companion captures are a readable transfer source, never an implicit writable workspace', async () => {
+test('Companion home is always readable and writable without a grant, never executable, and the default when none is chosen', async () => {
   const fs = await import('node:fs/promises');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'companion-capture-source-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'companion-home-'));
   try {
-    await fs.writeFile(path.join(root, 'shot.png'), Buffer.from('capture'));
     const { service } = fixture();
+    const tools = await service.tools('home-test', () => {}, root);
+    expect(tools.some(tool => tool.name === 'bash')).toBe(false);
+    expect((await fs.stat(path.join(root, 'uploads'))).isDirectory()).toBe(true);
+    // No target named: home is the default until the user picks one.
+    await call(tools, 'create_directory', { path: 'notes' });
+    await call(tools, 'write_file', { path: 'notes/today.md', content: 'remember this' });
+    expect(await fs.readFile(path.join(root, 'notes', 'today.md'), 'utf8')).toBe('remember this');
+    await fs.writeFile(path.join(root, 'uploads', 'shot.png'), Buffer.from('capture'));
+    await call(tools, 'read_file', { target: 'companion-home', path: 'uploads/shot.png' });
+    await expect(call(tools, 'read_file', { target: 'companion-home', path: '../outside' })).rejects.toThrow();
+    await expect(call(tools, 'write_file', { target: 'companion-home', path: '../outside.txt', content: 'x' })).rejects.toThrow();
+    // Beside a granted workspace, home is both a transfer source and destination, and the user's default wins.
     const catalog = await service.catalog();
-    const destination = catalog.workspaces[0]!;
-    await service.save({ targets: [{ ...destination, write: true }], defaultTargetId: destination.id }, catalog.revision);
-    const tools = await service.tools('capture-test', () => {}, root);
-    const transfer = tools.find(tool => tool.name === 'transfer_files')!;
-    expect((transfer.parameters as any).properties.sourceTarget.enum).toContain('companion-attachments');
-    expect((transfer.parameters as any).properties.destinationTarget.enum).not.toContain('companion-attachments');
-    await expect(call(tools, 'write_file', { target: 'companion-attachments', path: 'shot.png', content: 'changed' })).rejects.toThrow();
-    await expect(call(tools, 'read_file', { target: 'companion-attachments', path: '../outside' })).rejects.toThrow();
-    expect(await fs.readFile(path.join(root, 'shot.png'), 'utf8')).toBe('capture');
+    const granted = catalog.workspaces[0]!;
+    await service.save({ targets: [{ ...granted, write: true }], defaultTargetId: granted.id }, catalog.revision);
+    const transfer = (await service.tools('home-test', () => {}, root)).find(tool => tool.name === 'transfer_files')!;
+    expect((transfer.parameters as any).properties.sourceTarget.enum).toContain('companion-home');
+    expect((transfer.parameters as any).properties.destinationTarget.enum).toContain('companion-home');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

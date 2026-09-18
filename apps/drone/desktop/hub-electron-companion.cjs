@@ -3,6 +3,7 @@ const WINDOW_NAME = 'drone-hub-companion';
 const CONTROL_CHANNEL = 'drone-hub:companion-window';
 const CLOSE_CHANNEL = 'drone-hub:companion-window-close';
 const PLACEMENT_CHANNEL = 'drone-hub:companion-window-placement';
+const CLIPBOARD_CHANNEL = 'drone-hub:clipboard-write-text';
 const MARGIN = 16;
 const MIN_HEIGHT = 48;
 const MAX_WIDTH = 464;
@@ -151,6 +152,13 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
   });
   const control = (event, action, size) => {
     if (owner.isDestroyed() || event.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) return;
+    // Something the floating Companion pointed at opens in the main window.
+    if (action === 'focus-owner') {
+      if (owner.isMinimized()) owner.restore();
+      owner.show();
+      owner.focus();
+      return;
+    }
     if (!floating || floating.isDestroyed()) return;
     if (action === 'close' || action === 'attach') {
       destroy();
@@ -192,4 +200,17 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
   });
 }
 
-module.exports = { installCompanionWindow };
+// Companion usually floats over another application, and the web clipboard API refuses a document
+// that is not focused. Writing is all the renderer may do; the clipboard is never read.
+function installCompanionClipboard({ owner, ipcMain, clipboard }) {
+  ipcMain.removeHandler(CLIPBOARD_CHANNEL);
+  ipcMain.handle(CLIPBOARD_CHANNEL, (event, text) => {
+    if (owner.isDestroyed() || event.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) throw new Error('Clipboard is only available to Drone Hub.');
+    if (typeof text !== 'string' || !text || text.length > 100_000) throw new Error('Invalid clipboard text.');
+    clipboard.writeText(text);
+    return true;
+  });
+  owner.once('closed', () => ipcMain.removeHandler(CLIPBOARD_CHANNEL));
+}
+
+module.exports = { installCompanionWindow, installCompanionClipboard };

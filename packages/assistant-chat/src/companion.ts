@@ -24,6 +24,7 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'open_drone_chat',
   'highlight_drones',
   'show_on_screen',
+  'set_clipboard',
   'open_workspace_files',
   'set_editor_file_presentation',
   'get_workspace_window_layout',
@@ -227,6 +228,9 @@ export type CompanionRunEvent =
   | { type: 'error'; error: string };
 
 export type CompanionImageAttachment = { name: string; mime: string; size: number; dataBase64: string };
+/** A file already uploaded to Companion home; the instruction carries its path instead of its bytes. */
+export type CompanionStoredAttachment = { name: string; mime: string; size: number; path: string };
+export type CompanionAttachment = CompanionImageAttachment | CompanionStoredAttachment;
 
 export type CompanionClientMessage =
   | {
@@ -236,7 +240,7 @@ export type CompanionClientMessage =
       runId: string;
       messageId?: string;
       prompt: string;
-      attachments?: CompanionImageAttachment[];
+      attachments?: CompanionAttachment[];
       telemetry?: CompanionClientTelemetry;
     }
   | { type: 'cancel_run'; runId: string }
@@ -345,7 +349,7 @@ export type CompanionRunInputValidation =
       runId: string;
       messageId?: string;
       prompt: string;
-      attachments?: CompanionImageAttachment[];
+      attachments?: CompanionAttachment[];
       telemetry?: CompanionClientTelemetry;
     }
   | { ok: false; runId: string; error: string };

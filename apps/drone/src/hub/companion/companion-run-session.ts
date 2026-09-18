@@ -15,7 +15,7 @@ import {
 
 type CompanionPromptInput = {
   prompt: string;
-  attachments?: import('@drone/assistant-chat').CompanionImageAttachment[];
+  attachments?: import('@drone/assistant-chat').CompanionAttachment[];
   messageId?: string;
   telemetry?: CompanionClientTelemetry;
   subscriptionDeliveryMode?: 'queue' | 'asap';

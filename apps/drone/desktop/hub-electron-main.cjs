@@ -1,5 +1,5 @@
 const { installChatWindows } = require('./hub-electron-chat-windows.cjs');
-const { app, BrowserWindow, desktopCapturer, Menu, screen, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, clipboard, desktopCapturer, nativeImage, Menu, screen, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,7 +15,7 @@ const {
   resolveHubApiTokenPath,
   startDesktopStaticUiServer,
 } = require('./hub-electron-static-server.cjs');
-const { installCompanionWindow } = require('./hub-electron-companion.cjs');
+const { installCompanionWindow, installCompanionClipboard } = require('./hub-electron-companion.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 const { connectDesktopGlobalShortcuts } = require('./hub-electron-global-shortcuts.cjs');
 const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
@@ -420,7 +420,8 @@ function createWindow() {
     mainWindow.webContents.send(NAVIGATION_ZOOM_CHANNEL, { action });
   });
   const openOtherWindow = installChatWindows({ mainWindow, ipcMain, shell });
-  require('./hub-electron-snipping.cjs').installSnipping({ owner: mainWindow, ipcMain, BrowserWindow, desktopCapturer, screen });
+  require('./hub-electron-snipping.cjs').installSnipping({ owner: mainWindow, ipcMain, BrowserWindow, desktopCapturer, screen, nativeImage, selectionPath: path.join(app.getPath('userData'), 'snipping-selection.json') });
+  installCompanionClipboard({ owner: mainWindow, ipcMain, clipboard });
   installCompanionWindow({ owner: mainWindow, ipcMain, shell, screen, positionPath: path.join(app.getPath('userData'), 'companion-position.json'), isQuitting: () => isQuitting, openOtherWindow });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) return;

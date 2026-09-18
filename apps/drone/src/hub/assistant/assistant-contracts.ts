@@ -104,6 +104,7 @@ export type AssistantUiAction =
   | { type: 'play_audio'; jobId: string; data: string; mimeType: 'audio/wav'; volume: number; at: string }
   | { type: 'speech_error'; jobId: string; message: string; at: string }
   | { type: 'speech_settings_changed'; enabled: boolean; muted: boolean; volume: number; at: string }
+  | { type: 'companion_home_changed'; at: string }
   | { type: 'reload_ui_preferences'; at: string }
   | { type: 'reload_pinned_drones'; at: string };
 

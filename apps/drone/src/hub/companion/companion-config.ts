@@ -19,7 +19,7 @@ import {
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type CompanionSettings = {
-  schemaVersion: 14;
+  schemaVersion: 16;
   promptDeliveryMode: 'asap' | 'queue';
   provider: LlmProviderId;
   model: string;
@@ -392,6 +392,14 @@ export const COMPANION_TOOL_SUMMARIES = [
     description: 'Display Markdown text above Companion, or in the Android assistant screen. Use action inspect to read current dimensions, show with markdown to replace content, or clear to dismiss. Wait for displayed:true before claiming success. Overflow returns measured dimensions and constraints; shorten and retry. No HTML, images, tables or fenced code. Content stays until replaced, dismissed, resized or Companion closes.',
   },
   {
+    name: 'view_images', label: 'View images', category: 'actions', execution: 'server', requires: null,
+    description: 'Look at 1–8 image files from your Companion home workspace in one call: earlier screenshots, attachments listed by path instead of shown inline, or images you stored there. Pass paths relative to Companion home (for example uploads/screenshot.png) or absolute paths inside it. Returns the images themselves, in order, each preceded by its path. PNG, JPEG, GIF and WebP, up to 6 MB each. To look at an image from another workspace, copy it into Companion home with transfer_files first.',
+  },
+  {
+    name: 'set_clipboard', label: 'Set clipboard', category: 'actions', execution: 'browser', requires: null,
+    description: "Replace the text on the user's system clipboard so they can paste it anywhere: a command, a snippet, a link, a drafted message. Acts immediately without a proposal and overwrites whatever was copied before, so use it when the user asks for something to be copied or when handing over text they are clearly about to paste, and say what you copied. Plain text only, up to 100,000 characters. Wait for copied:true before claiming success; the clipboard cannot be read back.",
+  },
+  {
     name: 'open_drone_chat',
     label: 'Open drone chat',
     category: 'actions',
@@ -447,12 +455,12 @@ export type CompanionToolName = CompanionToolCatalogEntry['name'];
 export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
-const COMPANION_SETTINGS_SCHEMA_VERSION = 14;
+const COMPANION_SETTINGS_SCHEMA_VERSION = 16;
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
 const LEGACY_PROPOSAL_TOOL_NAME = 'prepare_drone_draft';
 const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['speak', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['speak', 'set_clipboard', 'view_images', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) =>
     name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'read_recorder' &&
@@ -465,12 +473,12 @@ const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   );
 const SCHEMA_V3_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['speak', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['speak', 'set_clipboard', 'view_images', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) => name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'list_agent_models' && name !== 'read_recorder' && name !== 'apply_recorder_patch');
 const SCHEMA_V4_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => !['speak', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
+  .filter((name) => !['speak', 'set_clipboard', 'view_images', 'show_on_screen', 'execute_proposal', 'create_proposal', 'list_proposals', 'discard_proposal'].includes(name))
   .filter((name) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(name))
   .filter((name) => name !== 'open_workspace_files' && name !== 'set_editor_file_presentation' && name !== 'get_workspace_window_layout' && name !== 'arrange_workspace_windows' && name !== 'get_chat_window_layout' && name !== 'arrange_chat_windows' && name !== 'get_chat_tree' && name !== 'read_recorder' && name !== 'apply_recorder_patch');
 const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
@@ -536,6 +544,8 @@ function normalizeEnabledTools(value: unknown, storedSchemaVersion: number): Com
   }
   if (storedSchemaVersion < 13 && enabled.has('open_drone_chat')) enabled.add('show_on_screen');
   if (storedSchemaVersion < 14 && enabled.has('show_on_screen')) enabled.add('speak');
+  if (storedSchemaVersion < 15 && enabled.has('show_on_screen')) enabled.add('set_clipboard');
+  if (storedSchemaVersion < 16 && enabled.has('show_on_screen')) enabled.add('view_images');
   for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
   }

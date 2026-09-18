@@ -42,7 +42,7 @@ export type CompanionClientTransport = {
     runId: string;
     messageId: string;
     prompt: string;
-    attachments?: import('./companion.js').CompanionImageAttachment[];
+    attachments?: import('./companion.js').CompanionAttachment[];
     telemetry?: CompanionClientTelemetry;
   }): Promise<void> | void;
   sendToolResult(input: {
@@ -193,7 +193,7 @@ export class CompanionClientController {
 
   async submitPrompt(input: {
     prompt: string;
-    attachments?: import('./companion.js').CompanionImageAttachment[];
+    attachments?: import('./companion.js').CompanionAttachment[];
     telemetry?: CompanionClientTelemetry;
     messageId?: string;
     createTransport(): CompanionClientTransport;

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { openBrowserLivePcmAudio } from '../src/droneHub/companion/browser-live-pcm-audio';
 import type { AnnouncementPlayback } from '../src/droneHub/companion/CompanionLiveAnnouncement';
+import { getCompanionVolume, setCompanionVolume } from '../src/droneHub/companion/companion-volume';
 
 function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pendingPermission?: boolean } = {}) {
   const originals = new Map(['AudioContext', 'navigator'].map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -12,6 +13,7 @@ function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pen
   let now = 0; let nodesStopped = 0;
   const starts: number[] = [];
   const nodes: Array<{ onended: (() => void) | null }> = [];
+  const gains: Array<{ gain: { value: number } }> = []; const targets: unknown[] = []; let gainsReleased = 0;
   const announcements: AnnouncementPlayback[] = [];
   const blocked: boolean[] = [];
   const track = { enabled: true, onended: null, stop() { stopped++; } };
@@ -25,8 +27,10 @@ function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pen
     createBuffer(_channels: number, samples: number) {
       return { duration: samples / 24_000, getChannelData: () => new Float32Array(samples) };
     }
+    createGain() { const node = { gain: { value: 1 }, connect() {}, disconnect() { gainsReleased++; } }; gains.push(node); return node; }
+    createDynamicsCompressor() { const param = () => ({ value: 0 }); return { threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), connect() {}, disconnect() {} }; }
     createBufferSource() {
-      const node = { buffer: null, onended: null, connect() {}, disconnect() {}, stop() { nodesStopped++; }, start(when: number) { scheduled++; starts.push(when); } };
+      const node = { buffer: null, onended: null, connect(target: unknown) { targets.push(target); }, disconnect() {}, stop() { nodesStopped++; }, start(when: number) { scheduled++; starts.push(when); } };
       nodes.push(node);
       return node;
     }
@@ -36,7 +40,7 @@ function harness(options: { pendingClose?: boolean; pendingResume?: boolean; pen
     getUserMedia: () => options.pendingPermission ? new Promise((resolve) => { allowMicrophone = () => resolve(microphone); }) : Promise.resolve(microphone),
   } } });
   const abort = new AbortController();
-  return { abort, errors, starts, playback, announcements, blocked, track, ended: (index: number) => nodes[index].onended?.(),
+  return { gains, targets, gainsReleased: () => gainsReleased, abort, errors, starts, playback, announcements, blocked, track, ended: (index: number) => nodes[index].onended?.(),
     at: (time: number) => { now = time; }, nodesStopped: () => nodesStopped,
     open: (announcement = false) => openBrowserLivePcmAudio({ signal: abort.signal, onAudio() {}, onPlayback: event => playback.push(event), onError: (error) => errors.push(error) }, value => blocked.push(value),
       announcement ? { muted: true, onAnnouncementPlayback: event => announcements.push(event) } : {}),
@@ -176,4 +180,24 @@ test('automatic announcement exposes blocked playback without hanging startup on
     await audio.release();
     expect(h.closed()).toBe(1);
   } finally { h.restore(); }
+});
+
+test('live voice plays through the Companion volume, follows the slider while speaking, and lets go on release', async () => {
+  const h = harness();
+  try {
+    setCompanionVolume(1.5);
+    const audio = await h.open();
+    expect(h.gains).toHaveLength(1);
+    expect(h.gains[0].gain.value).toBe(1.5);
+    audio.play(Buffer.alloc(4_800).toString('base64'));
+    expect(h.targets).toEqual([h.gains[0]]);
+    setCompanionVolume(0.4);
+    expect(h.gains[0].gain.value).toBe(0.4);
+    setCompanionVolume(9);
+    expect(getCompanionVolume()).toBe(2);
+    await audio.release();
+    expect(h.gainsReleased()).toBe(1);
+    setCompanionVolume(1);
+    expect(h.gains[0].gain.value).toBe(2);
+  } finally { setCompanionVolume(1); h.restore(); }
 });

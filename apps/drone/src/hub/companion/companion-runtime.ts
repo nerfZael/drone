@@ -1,4 +1,4 @@
-import { prepareCompanionAttachments, companionAttachmentsRoot } from './companion-attachments';
+import { prepareCompanionAttachments, companionHomeRoot, readCompanionHomeImages } from './companion-attachments';
 import { runCompanionPrompt } from './companion-run-outcome';
 import { droneRootPath } from '../../host/paths';
 import { resolveNativeModel } from '../assistant/resolve-native-model';
@@ -192,7 +192,7 @@ export class CompanionRuntime {
     runId: string;
     messageId: string;
     prompt: string;
-    attachments?: import('@drone/assistant-chat').CompanionImageAttachment[];
+    attachments?: import('@drone/assistant-chat').CompanionAttachment[];
     proposalResult?: CompanionProposalApplyResult;
     transport: CompanionTelemetryTransport;
     queueWaitMs?: number;
@@ -306,7 +306,7 @@ export class CompanionRuntime {
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       telemetry?.markAgentRunStarted();
-      const promptInput = await prepareCompanionAttachments(input.prompt, input.attachments, companionAttachmentsRoot(runId));
+      const promptInput = await prepareCompanionAttachments(input.prompt, input.attachments);
       const prompt = () => runCompanionPrompt(settings.provider, onEvent => input.proposalResult
         ? this.host.promptThreadWithToolResult(threadId, {
             toolName: 'execute_proposal',
@@ -438,7 +438,7 @@ export class CompanionRuntime {
       if (this.closing || this.cancelledRunIds.has(context.runId) || !this.activeRunIds.has(context.runId)) {
         throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
       }
-    }, companionAttachmentsRoot(context.runId)) ?? [];
+    }, companionHomeRoot()) ?? [];
     const createMcpClient = () =>
       createInProcessDroneHubMcpClient({
         correlationId: threadId,
@@ -698,6 +698,29 @@ export class CompanionRuntime {
         markdown: { type: 'string', description: 'Markdown text to display for action show. Fit limits are returned by the client.' },
       }, ['action']),
       execute: async (_callId, args, signal) => result(await context.callBrowser('show_on_screen', args as Record<string, unknown>, signal)),
+    });
+
+    add('view_images', {
+      parameters: objectParameters({
+        paths: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: 'Image paths relative to Companion home, or absolute inside it.' },
+      }, ['paths']),
+      execute: async (_callId, args) => {
+        const images = await readCompanionHomeImages((args as { paths?: unknown }).paths);
+        return {
+          content: images.flatMap(image => [
+            { type: 'text' as const, text: image.relativePath },
+            { type: 'image' as const, data: image.data, mimeType: image.mime },
+          ]),
+          details: { images: images.map(({ relativePath, mime, size }) => ({ path: relativePath, mime, size })) },
+        };
+      },
+    });
+
+    add('set_clipboard', {
+      parameters: objectParameters({
+        text: { type: 'string', description: 'Exact plain text to place on the clipboard.' },
+      }, ['text']),
+      execute: async (_callId, args, signal) => result(await context.callBrowser('set_clipboard', args as Record<string, unknown>, signal)),
     });
 
     add('open_drone_chat', {
