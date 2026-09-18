@@ -1,5 +1,5 @@
 import { validateChatAttachments, type CompanionImageAttachment } from '@drone/assistant-chat';
-import { CompanionScreen } from '@drone/assistant-chat';
+import { CompanionScreen, type CompanionSenseSources } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { desktopCompanionSessionStore } from './companion-session-store';
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
@@ -459,12 +459,31 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const capturedWorkspace = captureWorkspace();
       const context = capturedWorkspace?.getAppContext();
       const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
+      // Senses for the reflex agent: backend progress from the controller snapshot, app context from the capture, and notes on screen.
+      let activityMark = ''; let lastActivityAt: number | null = null;
+      const senses: CompanionSenseSources = {
+        observe: () => {
+          const snapshot = controller.getSnapshot();
+          const activity = snapshot.activity.slice(-5).map(item => `${item.tool}${item.status === 'failed' ? ' (failed)' : item.status === 'running' ? ' (running)' : ''}`);
+          const mark = `${snapshot.activity.length}:${snapshot.activity[snapshot.activity.length - 1]?.status ?? ''}`;
+          if (mark !== activityMark) { activityMark = mark; lastActivityAt = Date.now(); }
+          const app = context ? Object.fromEntries(Object.entries({ selectedDrone: context.selectedDrone, selectedChat: context.selectedChat, repoPath: context.activeRepoPath })
+            .filter(([, value]) => typeof value === 'string' && value)) as Record<string, string> : undefined;
+          return {
+            backend: { status: snapshot.status === 'working' ? 'working' : 'idle', startedAt: snapshot.startedAt, lastActivityAt, activity,
+              ...(snapshot.reply ? { lastReply: snapshot.reply, lastReplyAt: snapshot.endedAt } : {}), ...(snapshot.error ? { error: snapshot.error } : {}) },
+            ...(app && Object.keys(app).length ? { app } : {}),
+            ...(snapshot.trigger === 'subscription' && snapshot.reply && snapshot.endedAt && Date.now() - snapshot.endedAt < 60_000 ? { events: [snapshot.reply.slice(0, 500)] } : {}),
+          };
+        },
+        notify: text => { void screen.execute({ action: 'show', markdown: text }); },
+      };
       await live.start(async (prompt, signal, telemetry) => {
         if (signal.aborted) throw new Error('Voice conversation ended.');
         if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
         return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace, telemetry), signal);
-      }, workspaceLabel);
-  }, [captureWorkspace, controller, live.start, run]);
+      }, workspaceLabel, () => controller.cancel(), senses);
+  }, [captureWorkspace, controller, live.start, run, screen]);
 
   const toggle = React.useCallback(async (finishForModeSwitch = false) => {
     if (live.loading || live.saving || (switchingVoiceRef.current && !finishForModeSwitch)) return;

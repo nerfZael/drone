@@ -228,6 +228,10 @@ export function CompanionOverlay() {
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
       {transcriptDialog.open ? <CompanionTranscriptDialog captions={companion.live?.captions ?? ''}
         requests={companion.live?.mode === 'jev' ? companion.live.jevRequests : undefined}
+        table={companion.live?.mode === 'jev' ? companion.live.jevTable : undefined}
+        insight={companion.live?.mode === 'jev' ? companion.live.jevInsight : undefined}
+        status={companion.live?.status}
+        onResetTable={companion.live?.mode === 'jev' ? companion.live.resetJevTable : undefined}
         onClose={transcriptDialog.close} portalContainer={companionWindow.portalContainer} /> : null}
       {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />

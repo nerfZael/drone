@@ -548,26 +548,22 @@ cursor, or changes saved prompts. The original record remains unchanged. The
 authenticated replay endpoint only accepts Jev with bounded state/instructions
 and send/wait criteria; client credentials or provider URLs are not accepted.
 
-Jev chooses **send** or **wait**. Every decision includes the complete unsent
-transcript plus up to five previous delegated transcripts (up to 16,000 characters
-of prior context). Waiting retains every word. Sending submits the reviewed unsent
-text and advances a cursor; later-arriving words remain pending. The complete
-transcript remains visible in Voice transcript, including text already sent.
-Stopping and restarting Jev voice retains it in the open Companion; explicitly
-resetting/closing Companion or reloading the app clears this in-memory history.
-Final transcription wording is reconciled without resending previously delivered
-prefixes. Backend replies appear in Companion and use its existing delivery policy.
+Decisions come from a reflex table evaluated by Jev, with code-owned actions: **send**
+delegates the unsent transcript and advances a cursor; **skip** consumes speech that is
+confidently not for Companion, only after two seconds of silence; **cancel** stops the
+running backend request; **wait** retains every word. Every decision includes the
+complete unsent transcript, up to five previous delegated transcripts (up to 16,000
+characters), the silence estimate, and the backend status. A brain (the Companion helper
+model) rewrites the table when the loop is unsure or surprised. See
+[reflex-agent.md](reflex-agent.md) for the architecture, the default table, and the live
+user-story eval. The complete transcript remains visible in Voice transcript, including
+text already sent, skipped, or cancelled. Stopping and restarting Jev voice retains it
+and any brain revision in the open Companion; explicitly resetting/closing Companion or
+reloading the app clears this in-memory history. Final transcription wording is
+reconciled without resending previously delivered prefixes. Backend replies appear in
+Companion and use its existing delivery policy.
 
-Jev uses the same configured shortcut hold durations as Normal mode. Tap starts
-or stops listening. A short hold pauses/resumes the microphone and decisions;
-a middle hold stops listening but retains transcripts, with the next tap restarting.
-When already stopped, the middle hold closes the panel without clearing transcript
-history. The longest hold stops Companion and clears context. Actions occur only
-on release, based on the state at keydown; longer holds do not first execute the
-shorter actions. Default hold thresholds are 300, 800, and 1300 ms and remain
-configurable under Shortcut hold durations in the Companion tab.
-
-Editable Jev delegation instructions apply to the next evaluation. Retryable Gateway
+Editable Jev delegation instructions seed the table's delegation question and guide the brain; they apply to the next evaluation. The default is four lines that only judge whether the unsent speech is actionable yet. The Voice transcript dialog's Agent tab shows the loop's live state, senses, latest answers, and the current reflex table. Settings → Companion → Reflex agent autonomy (Off, Observe, Act) and the Brain toggle gate the autonomous behaviour described in [reflex-agent.md](reflex-agent.md); both default off, which is the speech-only behaviour. Retryable Gateway
 failures get up to two retries with backoff and provider retry delays, bounded by
 the same 15-second request deadline. Speech continues accumulating during retries;
 only a successful decision can delegate it. Remaining evaluation

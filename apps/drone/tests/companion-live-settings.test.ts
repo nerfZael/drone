@@ -4,6 +4,7 @@ import {
   COMPANION_LIVE_SYSTEM_PROMPT_MAX_CHARS,
   DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT,
   DEFAULT_COMPANION_JEV_SYSTEM_PROMPT,
+  PREVIOUS_COMPANION_JEV_SYSTEM_PROMPTS,
   readCompanionLiveSettings,
   writeCompanionLiveSettings,
 } from '../src/hub/companion/companion-live-settings';
@@ -17,7 +18,7 @@ test('Live prompt migrates legacy settings and partial writes preserve independe
     await repository.put('companion', backend);
     await repository.put('companion-live-voice', { enabled: true });
 
-    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT,
+    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', autonomy: 'off', brain: false, jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT,
       enabled: true,
       systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT,
     });
@@ -25,20 +26,20 @@ test('Live prompt migrates legacy settings and partial writes preserve independe
     await writeCompanionLiveSettings({ enabled: false });
     resetHubSettingsRepositoryForTests();
 
-    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: false, systemPrompt: 'Speak like a patient teacher.' });
+    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', autonomy: 'off', brain: false, jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: false, systemPrompt: 'Speak like a patient teacher.' });
     expect((await getHubSettingsRepository()).get('companion')?.value).toEqual(backend);
     await Promise.all([
       writeCompanionLiveSettings({ enabled: true }),
       writeCompanionLiveSettings({ systemPrompt: 'Speak with a measured pace.' }),
     ]);
-    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: true, systemPrompt: 'Speak with a measured pace.' });
+    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', autonomy: 'off', brain: false, jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: true, systemPrompt: 'Speak with a measured pace.' });
     await expect(writeCompanionLiveSettings({ enabled: 'false' })).rejects.toThrow('boolean');
     await expect(writeCompanionLiveSettings({
       systemPrompt: 'x'.repeat(COMPANION_LIVE_SYSTEM_PROMPT_MAX_CHARS + 1),
     })).rejects.toThrow('cannot exceed');
     await writeCompanionLiveSettings({ systemPrompt: '' });
     resetHubSettingsRepositoryForTests();
-    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: true, systemPrompt: '' });
+    expect(await readCompanionLiveSettings()).toEqual({ jevDecisionIntervalMs: 250, mode: 'live', autonomy: 'off', brain: false, jevSystemPrompt: DEFAULT_COMPANION_JEV_SYSTEM_PROMPT, enabled: true, systemPrompt: '' });
   });
 });
 
@@ -66,5 +67,14 @@ test('Jev decision interval validates bounds, persists, and preserves other voic
     await writeCompanionLiveSettings({ jevDecisionIntervalMs: 50 });
     await writeCompanionLiveSettings({ jevDecisionIntervalMs: 10000 });
     expect((await readCompanionLiveSettings()).jevDecisionIntervalMs).toBe(10000);
+  });
+});
+
+test('a saved copy of an earlier default Jev prompt follows the current default; customized text is kept', async () => {
+  await withTempDroneDataDir('jev-prompt-migration-', async () => {
+    await writeCompanionLiveSettings({ jevSystemPrompt: PREVIOUS_COMPANION_JEV_SYSTEM_PROMPTS[1] });
+    expect((await readCompanionLiveSettings()).jevSystemPrompt).toBe(DEFAULT_COMPANION_JEV_SYSTEM_PROMPT);
+    await writeCompanionLiveSettings({ jevSystemPrompt: 'Send only explicit requests.' });
+    expect((await readCompanionLiveSettings()).jevSystemPrompt).toBe('Send only explicit requests.');
   });
 });

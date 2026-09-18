@@ -1,7 +1,7 @@
 import { useCompanionJev } from './use-companion-jev';
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
-import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
+import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionAutonomy, type CompanionClientController, type CompanionSenseSources } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
 import { CompanionLiveAnnouncement } from './CompanionLiveAnnouncement';
@@ -26,6 +26,8 @@ type LiveSettings = {
   mode?: 'live' | 'jev';
   jevSystemPrompt?: string;
   jevDecisionIntervalMs?: number;
+  autonomy?: CompanionAutonomy;
+  brain?: boolean;
   defaultJevSystemPrompt?: string;
   systemPrompt: string;
   defaultSystemPrompt: string;
@@ -36,13 +38,16 @@ type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
   const [jevDecisionIntervalMs, setJevDecisionIntervalMs] = React.useState(250);
-  const jev = useCompanionJev(jevDecisionIntervalMs);
   const [mode, setMode] = React.useState<'live' | 'jev'>('live');
   const modeRef = React.useRef(mode);
   const [jevSystemPrompt, setJevSystemPrompt] = React.useState('');
   const [defaultJevSystemPrompt, setDefaultJevSystemPrompt] = React.useState('');
+  const [autonomy, setAutonomy] = React.useState<CompanionAutonomy>('off');
+  const [brain, setBrain] = React.useState(false);
+  const jev = useCompanionJev(jevDecisionIntervalMs, jevSystemPrompt || defaultJevSystemPrompt, { autonomy, brain });
   const acceptMode = (result: LiveSettings) => {
     setJevDecisionIntervalMs(result.jevDecisionIntervalMs ?? 250);
+    setAutonomy(result.autonomy ?? 'off'); setBrain(result.brain === true);
     modeRef.current = result.mode ?? 'live'; setMode(modeRef.current);
     setJevSystemPrompt(result.jevSystemPrompt ?? ''); setDefaultJevSystemPrompt(result.defaultJevSystemPrompt ?? '');
   };
@@ -315,8 +320,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     });
   }, [controller]);
 
-  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string) => {
-    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend); return; }
+  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string, cancelBackend?: () => Promise<void>, senses?: CompanionSenseSources) => {
+    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend, cancelBackend, senses); return; }
     if (active.current?.announcement) stop();
     if (active.current || !enabledRef.current || !pageActive.current) return;
     cancelReconnect();
@@ -373,9 +378,35 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     finally { writing.current = false; if (mounted.current) setSaving(false); }
   };
 
+  const saveAutonomy = async (next: CompanionAutonomy) => {
+    if (writing.current) return false;
+    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    try {
+      const result = await settingsRequest({ autonomy: next });
+      if (!mounted.current) return false;
+      acceptMode(result); return true;
+    } catch { setSettingsError('Could not save the autonomy level.'); return false; }
+    finally { writing.current = false; if (mounted.current) setSaving(false); }
+  };
+  const saveBrain = async (next: boolean) => {
+    if (writing.current) return false;
+    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    try {
+      const result = await settingsRequest({ brain: next });
+      if (!mounted.current) return false;
+      acceptMode(result); return true;
+    } catch { setSettingsError('Could not save the brain setting.'); return false; }
+    finally { writing.current = false; if (mounted.current) setSaving(false); }
+  };
+
   return {
     ...state,
+    autonomy, brain, saveAutonomy, saveBrain,
     jevRequests: jev.requests,
+    jevTable: jev.table,
+    jevInsight: jev.insight,
+    resetJevTable: jev.resetTable,
+    jevCompiling: jev.compiling,
     ...(mode === 'jev' ? { captions: jev.captions, error: jev.error, status: jev.status, hasStarted: jev.hasStarted, capturing: jev.capturing, queued: jev.queued, muted: jev.muted, announcing: false, playbackBlocked: false } : {}),
     jevDecisionIntervalMs, saveJevDecisionInterval,
     mode, jevSystemPrompt, defaultJevSystemPrompt, saveVoiceMode, saveJevSystemPrompt,
@@ -404,7 +435,7 @@ const EMPTY_STATE: LiveState = {
   hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
 
-async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt' | 'mode' | 'jevSystemPrompt' | 'jevDecisionIntervalMs'>>): Promise<LiveSettings> {
+async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt' | 'mode' | 'jevSystemPrompt' | 'jevDecisionIntervalMs' | 'autonomy' | 'brain'>>): Promise<LiveSettings> {
   const url = '/api/settings/companion/live-voice';
   const init: RequestInit = {
     signal: AbortSignal.timeout(10_000),

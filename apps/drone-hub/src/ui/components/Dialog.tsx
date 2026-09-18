@@ -29,6 +29,8 @@ export type UiDialogProps = {
   open: boolean;
   onClose: () => void;
   title: React.ReactNode;
+  /** Keep the title for assistive technology only and render no header bar; the caller supplies its own close control. */
+  hideHeader?: boolean;
   description?: React.ReactNode;
   eyebrow?: React.ReactNode;
   icon?: React.ReactNode;
@@ -48,6 +50,7 @@ export function UiDialog({
   open,
   onClose,
   title,
+  hideHeader = false,
   description,
   eyebrow,
   icon,
@@ -71,6 +74,7 @@ export function UiDialog({
   );
   const panelContents = (
     <>
+      {hideHeader ? <Dialog.Title asChild><h2 className="sr-only">{title}</h2></Dialog.Title> : (
       <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] bg-[linear-gradient(180deg,var(--surface-softest),transparent)] px-5 py-4">
           {icon ? (
             <div className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-large)] border', iconToneClassName[tone])}>
@@ -103,6 +107,7 @@ export function UiDialog({
             </Dialog.Close>
           ) : null}
       </div>
+      )}
       {children ? <div className={cn('px-5 py-4', bodyClassName)}>{children}</div> : null}
       {footer ? (
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] px-5 py-3.5">

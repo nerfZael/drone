@@ -1,0 +1,5 @@
+export { CompanionReflexTranscript, createCompanionTranscriptHistory, type CompanionTranscriptHistory, type CompanionTranscriptItem, type CompanionTranscriptMarker, type CompanionTranscriptMarkerKind, type CompanionTranscriptSnapshot } from './transcript';
+export { COMPANION_REFLEX_ACTIONS, COMPANION_REFLEX_PURPOSE, COMPANION_REFLEX_SKIP_SILENCE_MS, COMPANION_REFLEX_STATE_DESCRIPTION, companionReflexTable } from './table';
+export { CompanionReflexSession, silenceRepollMs, type CompanionBackendStatus, type CompanionReflexDecision, type CompanionReflexInsight, type CompanionReflexSessionOptions, type CompanionReflexWake } from './session';
+export { COMPANION_AUTONOMOUS_STORIES, COMPANION_REFLEX_STORIES, runCompanionStory, type CompanionStory, type CompanionStoryEvent, type CompanionStoryRun, type CompanionStoryRunOptions } from './stories';
+export { COMPANION_FACT_DESCRIPTIONS, COMPANION_SENSE_THRESHOLDS, COMPANION_SPEECH_FACTS, computeCompanionFacts, computeCompanionSpeechFacts, observationKey, serializeCompanionObservation, type CompanionAutonomy, type CompanionFacts, type CompanionObservation, type CompanionSenseSources } from './senses';

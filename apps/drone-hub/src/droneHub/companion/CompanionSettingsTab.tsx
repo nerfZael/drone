@@ -100,6 +100,20 @@ export function CompanionSettingsTab({ settings }: {
           <button type="button" onClick={() => setJevPromptDraft(live.defaultJevSystemPrompt)} className="mr-3 text-xs underline">Restore default Jev instructions</button>
           <button type="button" disabled={live.saving || !jevPromptDraft.trim() || jevPromptDraft === live.jevSystemPrompt}
             onClick={() => void live.saveJevSystemPrompt(jevPromptDraft)} className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs disabled:opacity-40">Save Jev instructions</button>
+          <fieldset className="space-y-2 rounded border border-[var(--border)] p-3">
+            <legend className="px-1 text-xs font-semibold">Reflex agent autonomy</legend>
+            {([['off', 'Off', 'Speech-only reflexes: decide only whether to send, hold, skip, or cancel what you said. This is the previous behaviour.'],
+              ['observe', 'Observe', 'Also watch the backend, the app, events, and time, and run the autonomous rules, but only record what they would do. Review it in the Agent tab.'],
+              ['act', 'Act', 'Execute autonomous actions: nudge a stalled backend and show notes when work drifts. Switch back to Off at any time.']] as const).map(([value, label, description]) =>
+              <label key={value} className="flex items-start gap-2 text-xs">
+                <input type="radio" name="companion-autonomy" value={value} checked={live.autonomy === value} disabled={live.saving} onChange={() => void live.saveAutonomy(value)} aria-label={`Autonomy ${label}`} className="mt-0.5" />
+                <span><strong>{label}.</strong> {description}</span>
+              </label>)}
+            <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" checked={live.brain} disabled={live.saving} onChange={event => void live.saveBrain(event.target.checked)} aria-label="Let the brain rewrite the reflex table" className="mt-0.5" />
+              <span><strong>Brain.</strong> Let the Companion helper model rewrite the reflex table when decisions stay uncertain or a cancel fires. Revisions live only in the open Companion; Reset to default in the Agent tab discards them.</span>
+            </label>
+          </fieldset>
         </div>
         {live.settingsError ? <p role="alert" className="mt-2 text-xs text-[var(--red)]">
           {live.settingsError} <button type="button" className="underline" onClick={() => void live.load()}>Retry</button>

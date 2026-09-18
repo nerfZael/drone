@@ -315,6 +315,7 @@ import {
 import { CompanionRuntime } from './companion/companion-runtime';
 import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerCompanionRoutes } from './companion/companion-routes';
+import { registerReflexRoutes } from './reflex/reflex-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
@@ -5602,6 +5603,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   const apiRouter = new HubRouter(json, readJsonBody);
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
+  registerReflexRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();

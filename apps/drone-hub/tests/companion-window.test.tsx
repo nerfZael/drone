@@ -65,6 +65,10 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     expect(source.document.querySelector('textarea')).toBeNull();
     expect(child.document.querySelector('base')!.href).toBe(source.document.baseURI);
     expect(child.document.querySelector('[data-drone-hub-desktop-title-bar]')).toBeNull();
+    // Drag regions are geometric in Electron: portalled menus and dialogs must opt out or the part
+    // overlapping the reply card (itself a drag handle) swallows clicks.
+    const dragRules = [...child.document.querySelectorAll('style')].map(el => el.textContent ?? '').join('\n');
+    expect(dragRules).toMatch(/\[data-radix-popper-content-wrapper\][^{]*\[role="dialog"\][^{]*\{ -webkit-app-region: no-drag; \}/);
     expect(controls).toContain('show');
     expect(sizes.at(-1)).toMatchObject({ flow: 'up', bar: { inset: 0 } });
     expect(child.document.getElementById('flow')!.textContent).toBe('up');

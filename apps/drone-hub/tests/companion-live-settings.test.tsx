@@ -16,6 +16,8 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
   let mode = 'live';
   let interval = 250;
   let jevPrompt = 'Send clear requests.';
+  let autonomy = 'off';
+  let brain = false;
   let failSave = false;
   let failLoad = false;
   const writes: unknown[] = [];
@@ -34,9 +36,11 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
       if (typeof body.mode === 'string') mode = body.mode;
       if (typeof body.jevDecisionIntervalMs === 'number') interval = body.jevDecisionIntervalMs;
       if (typeof body.jevSystemPrompt === 'string') jevPrompt = body.jevSystemPrompt;
+      if (typeof body.autonomy === 'string') autonomy = body.autonomy;
+      if (typeof body.brain === 'boolean') brain = body.brain;
     }
     if (failLoad && init?.method !== 'PUT') return new Response('', { status: 503 });
-    return Response.json({ ok: true, enabled: saved, mode, jevDecisionIntervalMs: interval, jevSystemPrompt: jevPrompt, defaultJevSystemPrompt: 'Send clear requests.', systemPrompt: prompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 });
+    return Response.json({ ok: true, enabled: saved, mode, jevDecisionIntervalMs: interval, jevSystemPrompt: jevPrompt, autonomy, brain, defaultJevSystemPrompt: 'Send clear requests.', systemPrompt: prompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 });
   });
   const element = dom.document.createElement('div');
   dom.document.body.append(element);

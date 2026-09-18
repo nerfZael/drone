@@ -30,6 +30,7 @@
         "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
         "@drone/hub-model": "workspace:*",
+        "@drone/reflex": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
         "@modelcontextprotocol/sdk": "1.29.0",
@@ -80,6 +81,7 @@
         "@drone/device-protocol": "workspace:*",
         "@drone/file-icons": "workspace:*",
         "@drone/hub-model": "workspace:*",
+        "@drone/reflex": "workspace:*",
         "@excalidraw/excalidraw": "^0.18.1",
         "@fontsource/chakra-petch": "^5.3.0",
         "@fontsource/ibm-plex-sans": "^5.3.0",
@@ -377,6 +379,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@blip/protocol": "workspace:*",
+        "@drone/reflex": "workspace:*",
       },
       "devDependencies": {
         "typescript": "^5.6.3",
@@ -440,6 +443,13 @@
     "packages/markdown-table-sort": {
       "name": "@drone/markdown-table-sort",
       "version": "0.1.0",
+    },
+    "packages/reflex": {
+      "name": "@drone/reflex",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
     },
   },
   "trustedDependencies": [
@@ -767,6 +777,8 @@
     "@drone/hub-model": ["@drone/hub-model@workspace:packages/hub-model"],
 
     "@drone/markdown-table-sort": ["@drone/markdown-table-sort@workspace:packages/markdown-table-sort"],
+
+    "@drone/reflex": ["@drone/reflex@workspace:packages/reflex"],
 
     "@egjs/hammerjs": ["@egjs/hammerjs@2.0.17", "", { "dependencies": { "@types/hammerjs": "^2.0.36" } }, "sha512-XQsZgjm2EcVUiZQf11UBJQfmZeEmOW8DpI1gsFeln6w0ae0ii4dMQEQ0kjl6DspdWX1aGY1/loyXnP0JS06e/A=="],
 

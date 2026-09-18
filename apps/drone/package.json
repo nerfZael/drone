@@ -42,6 +42,7 @@
     "@drone/assistant-chat": "workspace:*",
     "@drone/device-protocol": "workspace:*",
     "@drone/hub-model": "workspace:*",
+    "@drone/reflex": "workspace:*",
     "@mariozechner/pi-agent-core": "workspace:*",
     "@mariozechner/pi-ai": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
