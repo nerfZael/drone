@@ -10,6 +10,7 @@ import { ASSISTANT_OPEN_DRONE_CHAT_EVENT } from '../src/droneHub/assistant/open-
 import { ChatContextActionsContext, type ChatContextTarget } from '../src/droneHub/app/ChatContextActions';
 import { OPEN_SIDE_CHAT_EVENT } from '../src/droneHub/app/side-chat-events';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
+import { setSideChatBusy } from '../src/droneHub/app/side-chat-busy-store';
 
 function DesktopViews() {
   const windows = useDesktopChatRequests(state => state.windows);
@@ -53,6 +54,7 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
   const originalBindings = useDroneHubUiStore.getState().shortcutBindings;
   useDroneHubUiStore.setState({ shortcutBindings: { ...originalBindings,
     cloneDroneChat: { key: 'k', mod: true, ctrl: false, meta: false, alt: false, shift: true },
+    createSideChat: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   } });
   try {
     await act(async () => { root.render(<ChatContextActionsContext.Provider value={{
@@ -123,8 +125,24 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     child.document.querySelector('.dh-floating-chat')!.appendChild(checkpoint);
     await rightClick(checkpoint);
     expect(findAction('Fork into side chat').disabled).toBe(false);
+    await act(async () => setSideChatBusy('drone', true));
+    expect(findAction('Fork into side chat').disabled).toBe(true);
+    expect(findAction('Fork into side chat').textContent).toContain('already in progress');
+    await act(async () => setSideChatBusy('drone', false));
+    expect(findAction('Fork into side chat').disabled).toBe(false);
     await act(async () => { findAction('Fork into side chat').click(); });
     expect(forks).toEqual([{ droneId: 'drone', target: { sourceChatName: 'chat', checkpointId: 'desktop-answer' } }]);
+    await act(async () => { child.document.body.dispatchEvent(new child.KeyboardEvent('keydown', {
+      key: 'f', bubbles: true, cancelable: true,
+    })); });
+    expect(forks).toHaveLength(2);
+    expect(forks[1]).toEqual(forks[0]);
+    await act(async () => setSideChatBusy('drone', true));
+    await act(async () => { child.document.body.dispatchEvent(new child.KeyboardEvent('keydown', {
+      key: 'f', bubbles: true, cancelable: true,
+    })); });
+    expect(forks).toHaveLength(2);
+    await act(async () => setSideChatBusy('drone', false));
     checkpoint.remove();
     await rightClick(child.document.querySelector('.dh-floating-chat')!);
     await act(async () => { (child.document.querySelector('[role="menuitemcheckbox"]') as unknown as HTMLButtonElement).click(); });

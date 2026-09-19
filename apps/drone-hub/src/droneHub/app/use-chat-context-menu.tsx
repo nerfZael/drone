@@ -3,6 +3,10 @@ import { SidebarContextMenu, type SidebarContextMenuItem } from './SidebarContex
 import { ChatContextActionsContext, chatActionMenuItems, type ChatContextTarget } from './ChatContextActions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { isShortcutMatch } from './shortcuts';
+import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
+import { markCurrentChatComposerEditorModeTarget, toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
+import { useContinuousDictation } from '../chat/ContinuousDictationContext';
+import { useSideChatBusyStore } from './side-chat-busy-store';
 
 const NATIVE_MENU_TARGETS =
   'a[href], input, textarea, select, [contenteditable="true"], img, video, canvas, .monaco-editor, [role="menu"]';
@@ -28,9 +32,12 @@ export function keepsNativeContextMenu(target: EventTarget | null): boolean {
  */
 export function useChatContextMenu(label: string, getItems: () => SidebarContextMenuItem[], target?: ChatContextTarget) {
   const actions = React.useContext(ChatContextActionsContext);
+  const composer = useOptionalActiveComposer();
+  const dictation = useContinuousDictation();
+  useSideChatBusyStore(state => Boolean(target && state.busy[target.droneId]));
   const actionScopeRef = React.useRef({ actions, target });
   actionScopeRef.current = { actions, target };
-  const [open, setOpen] = React.useState<{ x: number; y: number; view: Window; items: SidebarContextMenuItem[] } | null>(null);
+  const [open, setOpen] = React.useState<{ x: number; y: number; view: Window; scope: HTMLElement; target?: ChatContextTarget; items: SidebarContextMenuItem[] } | null>(null);
   const getItemsRef = React.useRef(getItems);
   getItemsRef.current = getItems;
   const onContextMenu = React.useCallback((event: React.MouseEvent) => {
@@ -47,24 +54,57 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
     const view = (event.target as Element).ownerDocument.defaultView;
     if (items.length === 0 || !view) return;
     event.preventDefault();
-    setOpen({ x: event.clientX, y: event.clientY, view, items });
+    setOpen({ x: event.clientX, y: event.clientY, view, items, scope: event.currentTarget as HTMLElement, target });
   }, []);
   const close = React.useCallback(() => setOpen(null), []);
   // Desktop portals have their own document, outside the Hub's key listener.
   const onDesktopKeyDown = (event: KeyboardEvent, scope: HTMLElement) => {
     const element = event.target as HTMLElement;
     if (event.defaultPrevented || event.repeat || event.isComposing || !actions || !target || !element?.closest) return;
-    if ((!scope.contains(element) && element !== scope.ownerDocument.body) || element.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [data-shortcut-capture="true"]')) return;
+    if ((!scope.contains(element) && element !== scope.ownerDocument.body) || element.closest('[role="menu"], [data-shortcut-capture="true"]')) return;
     if (element.ownerDocument.querySelector('[role="dialog"][aria-modal="true"]')) return;
     const bindings = useDroneHubUiStore.getState().shortcutBindings;
-    const action = (['createDroneChat', 'cloneDroneChat'] as const).find(id => isShortcutMatch(bindings[id], event));
-    if (!action) return;
-    event.preventDefault();
-    if (action === 'createDroneChat') actions.createChat(target);
-    else actions.cloneChat(target);
+    const action = (['createDroneChat', 'cloneDroneChat', 'createSideChat', 'focusPrimaryChatInput',
+      'sendActiveChatComposer', 'toggleChatComposerEditorMode', 'toggleChatVoiceRecording',
+      'toggleChatVoiceRecordingPause', 'discardChatVoiceRecording', 'clearChatComposer', 'toggleContinuousDictation'] as const)
+      .find(id => isShortcutMatch(bindings[id], event));
+    const editable = Boolean(element.closest('input, textarea, select, [contenteditable="true"]'));
+    if (editable && action !== 'toggleChatComposerEditorMode') return;
+    if (event.key === 'Enter' && element.closest('button, a[href], [role="button"]')) return;
+    const localComposer = scope.querySelector<HTMLElement>('[data-active-composer-id]');
+    const composerId = localComposer?.dataset.activeComposerId;
+    if (composerId) {
+      composer?.focusComposer(composerId);
+      markCurrentChatComposerEditorModeTarget(composerId);
+    }
+    const localComposerReady = Boolean(composerId && composer?.ensureTargetId() === composerId);
+    let handled = false;
+    if (!action && event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      handled = Boolean(localComposerReady && composer?.sendMessage('asap'));
+    } else if (action === 'createDroneChat') { actions.createChat(target); handled = true; }
+    else if (action === 'cloneDroneChat') { actions.cloneChat(target); handled = true; }
+    else if (action === 'createSideChat') {
+      const fork = chatActionMenuItems(target, scope, actions, bindings).find(item => item.id === 'fork-side-chat');
+      if (fork && !fork.disabled) { fork.onSelect(); handled = true; }
+    } else if (action === 'focusPrimaryChatInput') {
+      const input = scope.querySelector<HTMLElement>('[data-chat-input-focus-id]');
+      if (input) { input.focus(); handled = true; }
+    } else if (localComposerReady && composer) {
+      if (action === 'sendActiveChatComposer') handled = composer.sendMessage();
+      else if (action === 'toggleChatComposerEditorMode') handled = toggleCurrentChatComposerEditorMode();
+      else if (action === 'toggleChatVoiceRecording') handled = composer.toggleVoiceRecording();
+      else if (action === 'toggleChatVoiceRecordingPause') handled = composer.toggleVoiceRecordingPause();
+      else if (action === 'discardChatVoiceRecording') handled = composer.discardVoiceRecording();
+      else if (action === 'clearChatComposer') handled = composer.clearComposer();
+      else if (action === 'toggleContinuousDictation' && dictation) { void dictation.toggle(); handled = true; }
+    }
+    if (handled) event.preventDefault();
   };
+  const currentChatItems = open?.target && actions
+    ? chatActionMenuItems(open.target, open.scope, actions, useDroneHubUiStore.getState().shortcutBindings) : [];
   const menu = open
-    ? <SidebarContextMenu x={open.x} y={open.y} view={open.view} label={label} items={open.items} onClose={close} />
+    ? <SidebarContextMenu x={open.x} y={open.y} view={open.view} label={label}
+        items={open.items.map(item => currentChatItems.find(current => current.id === item.id) ?? item)} onClose={close} />
     : null;
   return { onContextMenu, onDesktopKeyDown, menu };
 }

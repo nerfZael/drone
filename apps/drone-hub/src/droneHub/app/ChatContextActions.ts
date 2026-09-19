@@ -2,6 +2,7 @@ import React from 'react';
 import type { SidebarContextMenuItem } from './SidebarContextMenu';
 import { requestSideChat } from './side-chat-events';
 import { formatShortcutBinding, type ShortcutBindingMap } from './shortcuts';
+import { useSideChatBusyStore } from './side-chat-busy-store';
 
 export type ChatContextTarget = { droneId: string; chatName: string };
 export type ChatContextActions = {
@@ -11,11 +12,11 @@ export type ChatContextActions = {
 
 export const ChatContextActionsContext = React.createContext<ChatContextActions | null>(null);
 
-function forkDisabledReason(scope: HTMLElement, checkpointId?: string): string | undefined {
+function forkDisabledReason(scope: HTMLElement, checkpointId: string | undefined, droneId: string): string | undefined {
   const availability = scope.querySelector<HTMLElement>('[data-chat-fork-supported]')
     ?? scope.parentElement?.querySelector<HTMLElement>(':scope > [data-chat-fork-supported]');
   if (availability?.dataset.chatForkSupported === 'false') return 'Forking is not supported for this agent.';
-  if (availability?.dataset.chatForkBusy === 'true') return 'A side chat operation is already in progress.';
+  if (useSideChatBusyStore.getState().busy[droneId] ?? (availability?.dataset.chatForkBusy === 'true')) return 'A side chat operation is already in progress.';
   if (!checkpointId) return 'Wait for a completed assistant answer.';
 }
 
@@ -29,7 +30,7 @@ export function chatActionMenuItems(
     ? scope
     : scope.querySelector<HTMLElement>('[data-side-chat-checkpoint-id]');
   const checkpointId = checkpoint?.dataset.sideChatCheckpointId;
-  const disabledReason = forkDisabledReason(scope, checkpointId);
+  const disabledReason = forkDisabledReason(scope, checkpointId, target.droneId);
   const shortcut = (id: 'createDroneChat' | 'cloneDroneChat' | 'createSideChat' | 'toggleSideChatMain') =>
     bindings[id] ? formatShortcutBinding(bindings[id]) : undefined;
   const items: SidebarContextMenuItem[] = [
@@ -39,7 +40,7 @@ export function chatActionMenuItems(
       id: 'fork-side-chat', label: 'Fork into side chat', shortcut: shortcut('createSideChat'),
       disabled: Boolean(disabledReason), disabledReason,
       onSelect: () => {
-        if (!forkDisabledReason(scope, checkpointId) && checkpointId) requestSideChat(target.droneId, { sourceChatName: target.chatName, checkpointId });
+        if (!forkDisabledReason(scope, checkpointId, target.droneId) && checkpointId) requestSideChat(target.droneId, { sourceChatName: target.chatName, checkpointId });
       },
     },
   ];

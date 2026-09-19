@@ -1,5 +1,6 @@
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
+import { useWindowChatModelControls } from './use-window-chat-model-controls';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { latestExternalCheckpointId } from './side-chat-checkpoint-model';
 import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
@@ -252,8 +253,9 @@ export function GroupMultiChatColumn({
     setDroneHubPermissionsOpen(false);
   }, [chatName, drone.id]);
 
+  const modelControls = useWindowChatModelControls(drone, chatName, transcripts);
   const composerControls: ChatComposerControlsConfig = {
-    controls: [],
+    controls: modelControls.controls?.controls ?? [],
     menuActions: [
       {
         id: 'drone-hub-permissions',
@@ -1287,7 +1289,7 @@ export function GroupMultiChatColumn({
         resetKey={`group:${drone.id}:${chatName}`}
         draftPersistenceKey={draftKey}
         droneName={drone.name}
-        promptError={promptError}
+        promptError={modelControls.error || promptError}
         waiting={onPublish ? false : waitingForAgent}
         disabled={isDroneStartingOrSeeding(drone.hubPhase)}
         autoFocus={false}

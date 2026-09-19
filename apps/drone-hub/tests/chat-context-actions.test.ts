@@ -14,7 +14,7 @@ function harness() {
   scope.append(marker);
   group.append(scope);
   dom.document.body.append(group);
-  const items = () => chatActionMenuItems({ droneId: 'drone', chatName: 'fork-A' }, scope as unknown as HTMLElement,
+  const items = () => chatActionMenuItems({ droneId: 'context-actions-test', chatName: 'fork-A' }, scope as unknown as HTMLElement,
     { createChat() {}, cloneChat() {} }, cloneDefaultShortcutBindings());
   return { dom, group, scope, marker, items };
 }

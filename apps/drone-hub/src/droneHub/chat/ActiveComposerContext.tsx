@@ -322,3 +322,7 @@ export function useActiveComposer(): ActiveComposerContextValue {
   if (!value) throw new Error('useActiveComposer must be used inside ActiveComposerProvider');
   return value;
 }
+
+export function useOptionalActiveComposer(): ActiveComposerContextValue | null {
+  return React.useContext(ActiveComposerContext);
+}

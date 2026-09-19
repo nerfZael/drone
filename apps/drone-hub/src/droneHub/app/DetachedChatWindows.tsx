@@ -2,6 +2,7 @@ import { useDesktopChatRequests } from './desktop-chat-requests';
 import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
 import { SideChatForkProvider } from '../chat/SideChatForkContext';
+import { useSideChatBusyStore } from './side-chat-busy-store';
 import React from 'react';
 import { DockviewReact, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
@@ -37,6 +38,7 @@ const WindowContext = React.createContext<DetachedChatWindowsProps | null>(null)
 const nativeAdapter = adaptNativeAgentChatSurface();
 
 export function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean }) {
+  const forkBusy = useSideChatBusyStore(state => Boolean(state.busy[drone.id]));
   const [agent, setAgent] = React.useState<{ kind: string; id?: string } | null>(null);
   const [error, setError] = React.useState('');
   const [retry, setRetry] = React.useState(0);
@@ -101,7 +103,7 @@ export function DetachedChatContent({ chat, drone, context, desktop = false }: {
     onAutoRenameChatFromFirstPrompt={context.onAutoRenameChatFromFirstPrompt}
     onPublish={draft ? publish : undefined} publishing={publishing}
     onOpenDrone={() => dispatchAssistantOpenDroneChat(drone.id, chat.chatName)} onDeleteDrone={() => {}} focusedNewChatActionId="" columnWidthPx={320} />;
-  return <SideChatForkProvider value={{ droneId: drone.id, chatName: chat.chatName, busy: false, supported: !draft && (agent.kind === 'native' || ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) }}>
+  return <SideChatForkProvider value={{ droneId: drone.id, chatName: chat.chatName, busy: forkBusy, supported: !draft && (agent.kind === 'native' || ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) }}>
     {publishError && <div role="alert" className="shrink-0 px-3 py-2 text-[var(--red)]">{publishError}</div>}
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
   </SideChatForkProvider>;

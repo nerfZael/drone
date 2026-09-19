@@ -2,13 +2,16 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { OPEN_SIDE_CHAT_EVENT, type OpenSideChatDetail } from '../src/droneHub/app/side-chat-events';
+import { setSideChatBusy, useSideChatBusyStore } from '../src/droneHub/app/side-chat-busy-store';
 
 test('returning to a drone does not revive a previous visit’s request or clear a newer operation', async () => {
   const harness = sideChatHarness();
   try {
     harness.render('A');
     harness.open('A');
+    expect(useSideChatBusyStore.getState().busy.A).toBe(true);
     harness.render('B');
+    expect(useSideChatBusyStore.getState().busy.A).toBe(false);
     harness.render('A');
     harness.open('A');
     harness.requests[0].resolve({
@@ -158,6 +161,7 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, do
   new Function('require', 'exports', 'window', 'document', compiled)(
     (name: string) => {
       if (name === 'react') return React;
+      if (name === './side-chat-busy-store') return { setSideChatBusy };
       if (name === '../../ui/AppConfirmDialog') return { useAppConfirmDialog: () => confirm };
       if (name === './side-chat-events') return {
         OPEN_SIDE_CHAT_EVENT,

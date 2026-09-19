@@ -69,18 +69,19 @@ export function useDropdownDismiss(
     const onDown = (event: MouseEvent) => {
       const el = menuRef.current;
       if (!el) return;
-      if (event.target instanceof Node && !el.contains(event.target)) setOpen(false);
+      if (event.target && !el.contains(event.target as Node)) setOpen(false);
     };
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
 
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    const doc = menuRef.current?.ownerDocument ?? document;
+    doc.addEventListener('mousedown', onDown);
+    doc.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      doc.removeEventListener('mousedown', onDown);
+      doc.removeEventListener('keydown', onKey);
     };
   }, [menuRef, open, setOpen]);
 }

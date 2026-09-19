@@ -23,6 +23,7 @@ import {
 } from './chat-runtime-cache';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
+const CHAT_MODEL_SETTINGS_CHANGED = 'drone-hub:chat-model-settings-changed';
 
 type UseChatConfigStateArgs = {
   selectedDrone: string | null;
@@ -352,6 +353,18 @@ export function useChatConfigState({
     [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
+  // A chat may be visible in the main pane and several windows at once.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ droneId: string; chatName: string; settings: { model?: string | null; reasoning?: string | null } }>).detail;
+      if (detail.droneId !== selectedDrone || detail.chatName !== selectedChat) return;
+      setChatInfo(previous => previous ? { ...previous, ...detail.settings } : previous);
+    };
+    window.addEventListener(CHAT_MODEL_SETTINGS_CHANGED, onChange);
+    return () => window.removeEventListener(CHAT_MODEL_SETTINGS_CHANGED, onChange);
+  }, [selectedDrone, selectedChat, setChatInfo]);
+
   const setChatModelSettings = React.useCallback(
     async (settings: { model?: string | null; reasoning?: string | null }) => {
       if (!selectedDrone) return;
@@ -395,6 +408,9 @@ export function useChatConfigState({
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
       setChatInfoError(null);
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CHAT_MODEL_SETTINGS_CHANGED, {
+        detail: { droneId: selectedDrone, chatName: chat, settings: body },
+      }));
     },
     [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );

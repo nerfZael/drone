@@ -1,4 +1,5 @@
 import React from 'react';
+import { setSideChatBusy } from './side-chat-busy-store';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
@@ -27,8 +28,10 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
     setBusy(null);
     setFocusRequest(null);
     busyRef.current = false;
+    setSideChatBusy(drone.id, false);
     return () => {
       workspace.active = false;
+      setSideChatBusy(drone.id, false);
     };
   }, [drone.id, workspace]);
   React.useEffect(() => {
@@ -78,6 +81,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
       // A unique name avoids retries that could accidentally move the checkpoint.
       const name = `side-${crypto.randomUUID().slice(0, 8)}`;
       busyRef.current = true;
+      setSideChatBusy(drone.id, true);
       setBusy('create');
       // No in-flow progress banner: it shifted the main chat down and back
       // again. The fork buttons spin and the new window appears instead.
@@ -117,6 +121,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         .finally(() => {
           if (workspace.active) {
             busyRef.current = false;
+            setSideChatBusy(drone.id, false);
             setBusy(null);
           }
         });
@@ -131,6 +136,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
     async (chatName: string, keep: boolean) => {
       if (!workspace.active || busyRef.current) return;
       busyRef.current = true;
+      setSideChatBusy(drone.id, true);
       setBusy(chatName);
       try {
         if (
@@ -163,6 +169,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
       } finally {
         if (workspace.active) {
           busyRef.current = false;
+          setSideChatBusy(drone.id, false);
           setBusy(null);
         }
       }
