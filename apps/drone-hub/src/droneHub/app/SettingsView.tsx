@@ -89,7 +89,7 @@ export function SettingsView({
   const skillLibrary = useSkillLibrary(requestJson, activeTab === 'skills');
   const mcpServers = useMcpServers(requestJson, activeTab === 'mcp');
   const filesystem = useFilesystemSettings(requestJson, generalEnabled);
-  const speech = useSpeechSettings(requestJson, generalEnabled);
+  const speech = useSpeechSettings(requestJson, generalEnabled || activeTab === 'companion');
   const voiceInput = useVoiceInputSettings(requestJson, generalEnabled);
   const syncSets = useSyncSets(requestJson, activeTab === 'sync');
   const profile = useProfileSettings(requestJson, activeTab === 'profiles');
@@ -241,7 +241,7 @@ export function SettingsView({
       );
     }
     if (activeTab === 'notifications') return <NotificationsSettingsTab />;
-    if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} />;
+    if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} speech={speech} />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;

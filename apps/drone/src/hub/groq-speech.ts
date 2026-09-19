@@ -59,6 +59,7 @@ function groqErrorMessage(status: number, statusText: string, raw: string): stri
 export function normalizeGroqSpeechRequest(input: {
   text?: unknown;
   voice?: unknown;
+  model?: unknown;
 }): GroqSpeechRequest {
   const text = String(input.text ?? '').trim();
   if (!text) throw new Error('Speech text is required.');
@@ -71,16 +72,20 @@ export function normalizeGroqSpeechRequest(input: {
   const voiceRaw = String(input.voice ?? '')
     .trim()
     .toLowerCase();
-  const voice = (voiceRaw || 'troy') as GroqSpeechVoice;
+  const requestedModel = String(input.model ?? '').trim();
+  const defaultVoice = requestedModel === GROQ_ARABIC_SPEECH_MODEL ? 'abdullah' : 'troy';
+  const voice = (voiceRaw || defaultVoice) as GroqSpeechVoice;
   if (!(GROQ_SPEECH_VOICES as readonly string[]).includes(voice)) {
     throw new Error(`Unsupported GROQ speech voice: ${voiceRaw}.`);
   }
 
-  return {
-    text,
-    voice,
-    model: ARABIC_VOICES.has(voice) ? GROQ_ARABIC_SPEECH_MODEL : GROQ_ENGLISH_SPEECH_MODEL,
-  };
+  const inferredModel = ARABIC_VOICES.has(voice) ? GROQ_ARABIC_SPEECH_MODEL : GROQ_ENGLISH_SPEECH_MODEL;
+  const model = requestedModel || inferredModel;
+  if (model !== GROQ_ENGLISH_SPEECH_MODEL && model !== GROQ_ARABIC_SPEECH_MODEL) {
+    throw new Error(`Unsupported GROQ speech model: ${model}.`);
+  }
+  if (model !== inferredModel) throw new Error(`Voice ${voice} is not supported by ${model}.`);
+  return { text, voice, model };
 }
 
 export async function synthesizeSpeechWithGroq(opts: {

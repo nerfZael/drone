@@ -2056,7 +2056,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       if (action.type === 'speech_error') {
         showShortcutToast(
-          String(action.message ?? '').trim() || 'GROQ could not synthesize the requested speech.',
+          String(action.message ?? '').trim() || 'The speech provider could not synthesize the requested audio.',
           'Speech synthesis failed',
         );
         return;

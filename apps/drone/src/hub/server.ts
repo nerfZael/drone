@@ -5869,6 +5869,7 @@ async function startDroneHubApiServerWithLifecycle(
     resolveDroneOrPendingForReadRef,
     readChatIdleStatus: readIdleStatus,
     resolveGroqApiKeySettings,
+    resolveOpenAiApiKeySettings: () => resolveEffectiveProviderApiKeySettings('openai'),
     resolveSpeechSettings: resolveEffectiveSpeechSettings,
     emitAssistantUiAction: (uiAction, threadId) =>
       assistantService.emitExternalUiAction(uiAction, threadId),

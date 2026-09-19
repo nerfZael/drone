@@ -211,11 +211,9 @@ export function GeneralSettingsTab({
     enabledDraft: speechEnabledDraft,
     mutedDraft: speechMutedDraft,
     volumeDraft: speechVolumeDraft,
-    voiceDraft: speechVoiceDraft,
     setEnabledDraft: setSpeechEnabledDraft,
     setMutedDraft: setSpeechMutedDraft,
     setVolumeDraft: setSpeechVolumeDraft,
-    setVoiceDraft: setSpeechVoiceDraft,
     saveSpeechSettings,
   } = speech;
   const currentDefaultModel = llmDefaultModelSettings?.defaultModel;
@@ -235,8 +233,7 @@ export function GeneralSettingsTab({
     speechSettings &&
       (speechEnabledDraft !== speechSettings.speech.enabled ||
         speechMutedDraft !== speechSettings.speech.muted ||
-        speechVolumeDraft !== Math.round(speechSettings.speech.volume * 100) ||
-        speechVoiceDraft !== speechSettings.speech.voice),
+        speechVolumeDraft !== Math.round(speechSettings.speech.volume * 100)),
   );
   const filesystemMinMiB =
     filesystemSettings != null ? bytesToMinMiB(filesystemSettings.filesystem.minUploadMaxBytes) : 1;
@@ -750,7 +747,7 @@ export function GeneralSettingsTab({
         <div>
           <div className="dh-type-heading">Speech</div>
           <div className="mt-1 dh-type-supporting">
-            Configure the GROQ voice used by speak. External MCP clients receive the tool automatically when enabled; Built-in chats still use their normal per-chat tool selection.
+            Control availability and playback for speak. Choose the synthesis model and voice in Companion settings. External MCP clients receive the tool automatically when enabled; Built-in chats still use their normal per-chat tool selection.
           </div>
         </div>
         {speechSettingsError ? (
@@ -784,19 +781,6 @@ export function GeneralSettingsTab({
               />
             </div>
             <div className="flex flex-col gap-4">
-              <label className="flex flex-col gap-1.5">
-                <span className="dh-type-label">Default voice</span>
-                <UiMenuSelect
-                  value={speechVoiceDraft}
-                  onValueChange={setSpeechVoiceDraft}
-                  disabled={speechSettingsLoading || speechSettingsSaving}
-                  entries={(speechSettings?.speech.voices ?? [speechVoiceDraft]).map((voice) => ({
-                    value: voice,
-                    label: voice.charAt(0).toUpperCase() + voice.slice(1),
-                  }))}
-                  header="GROQ voice"
-                />
-              </label>
               <label className="flex flex-col gap-1.5">
                 <span className="flex items-center justify-between gap-3 dh-type-label">
                   <span>Volume</span>

@@ -78,8 +78,16 @@ export type SpeechSettingsResponse = {
     enabled: boolean;
     muted: boolean;
     volume: number;
+    model: string;
     voice: string;
-    voices: readonly string[];
+    models: ReadonlyArray<{
+      id: string;
+      label: string;
+      provider: 'openai' | 'groq';
+      maxCharacters: number;
+      defaultVoice: string;
+      voices: readonly string[];
+    }>;
   };
 };
 

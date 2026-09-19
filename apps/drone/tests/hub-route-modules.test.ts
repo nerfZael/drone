@@ -605,6 +605,37 @@ describe('extracted Hub route modules', () => {
     }
   });
 
+  test('uses OpenAI TTS-1 when selected in speech settings', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestUrl = '';
+    let requestBody: any = null;
+    globalThis.fetch = (async (input, init) => {
+      requestUrl = String(input);
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([1]), { status: 200 });
+    }) as typeof fetch;
+    const { router, request, responses } = routeHarness({ text: 'OpenAI speech.' });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      readChatIdleStatus: async () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: null }),
+      resolveOpenAiApiKeySettings: async () => ({ apiKey: 'openai-secret' }),
+      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 1, model: 'tts-1', voice: 'alloy' }),
+      emitAssistantUiAction: () => {},
+      hubLog: () => {},
+    });
+
+    try {
+      expect(await request('POST', '/api/audio/speech')).toBe(true);
+      expect(responses[0]).toMatchObject({ status: 202, body: { model: 'tts-1', voice: 'alloy' } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requestUrl).toBe('https://api.openai.com/v1/audio/speech');
+      expect(requestBody).toEqual({ model: 'tts-1', input: 'OpenAI speech.', voice: 'alloy', response_format: 'wav' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('returns muted speech without requiring a GROQ API key', async () => {
     let groqSettingsLookups = 0;
     const { router, request, responses } = routeHarness({ text: 'Muted speech.' });
@@ -968,7 +999,8 @@ describe('extracted Hub route modules', () => {
       enabled: false,
       muted: true,
       volume: 0.4,
-      voice: 'hannah',
+      model: 'tts-1',
+      voice: 'alloy',
     };
     const { router, request, responses } = routeHarness(requested);
     let stored: any = null;
@@ -979,7 +1011,7 @@ describe('extracted Hub route modules', () => {
       },
       resolveSpeechSettingsResponse: async () => ({
         ok: true,
-        speech: { ...requested, voices: ['hannah', 'troy'] },
+        speech: { ...requested, models: [{ id: 'tts-1', voices: ['alloy'] }] },
       }),
       notifySpeechSettingsChanged: (speech: unknown) => {
         notified = speech;
@@ -988,11 +1020,11 @@ describe('extracted Hub route modules', () => {
 
     expect(await request('POST', '/api/settings/speech')).toBe(true);
     expect(stored).toEqual(requested);
-    expect(notified).toEqual({ ...requested, voices: ['hannah', 'troy'] });
+    expect(notified).toEqual({ ...requested, models: [{ id: 'tts-1', voices: ['alloy'] }] });
     expect(responses).toEqual([
       {
         status: 200,
-        body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
+        body: { ok: true, speech: { ...requested, models: [{ id: 'tts-1', voices: ['alloy'] }] } },
       },
     ]);
   });

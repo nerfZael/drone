@@ -17,13 +17,15 @@ export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
   const [enabledDraft, setEnabledDraft] = React.useState(true);
   const [mutedDraft, setMutedDraft] = React.useState(false);
   const [volumeDraft, setVolumeDraft] = React.useState(100);
-  const [voiceDraft, setVoiceDraft] = React.useState('troy');
+  const [modelDraft, setModelDraft] = React.useState('tts-1');
+  const [voiceDraft, setVoiceDraft] = React.useState('alloy');
 
   const applySettings = React.useCallback((data: SpeechSettingsResponse) => {
     applySpeechPlaybackSettings(data.speech);
     setEnabledDraft(data.speech.enabled);
     setMutedDraft(data.speech.muted);
     setVolumeDraft(Math.round(data.speech.volume * 100));
+    setModelDraft(data.speech.model);
     setVoiceDraft(data.speech.voice);
   }, []);
 
@@ -39,7 +41,7 @@ export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
 
   const saveMutation = useSettingsPostMutation<
     SpeechSettingsResponse,
-    Pick<SpeechSettingsResponse['speech'], 'enabled' | 'muted' | 'volume' | 'voice'>
+    Partial<Pick<SpeechSettingsResponse['speech'], 'enabled' | 'muted' | 'volume' | 'model' | 'voice'>>
   >(
     requestJson,
     '/api/settings/speech',
@@ -53,6 +55,7 @@ export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
         enabled: enabledDraft,
         muted: mutedDraft,
         volume: volumeDraft / 100,
+        model: modelDraft,
         voice: voiceDraft,
       });
       queryClient.setQueryData(queryKey, data);
@@ -61,7 +64,20 @@ export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
     } catch (error) {
       setSpeechSettingsError(settingsErrorMessage(error));
     }
-  }, [applySettings, enabledDraft, mutedDraft, queryClient, queryKey, saveMutation, voiceDraft, volumeDraft]);
+  }, [applySettings, enabledDraft, modelDraft, mutedDraft, queryClient, queryKey, saveMutation, voiceDraft, volumeDraft]);
+
+  const saveSpeechOutputSettings = React.useCallback(async () => {
+    setSpeechSettingsError(null);
+    setSpeechSettingsNotice(null);
+    try {
+      const data = await saveMutation.mutateAsync({ model: modelDraft, voice: voiceDraft });
+      queryClient.setQueryData(queryKey, data);
+      applySettings(data);
+      setSpeechSettingsNotice('Saved spoken output settings.');
+    } catch (error) {
+      setSpeechSettingsError(settingsErrorMessage(error));
+    }
+  }, [applySettings, modelDraft, queryClient, queryKey, saveMutation, voiceDraft]);
 
   return {
     speechSettings: query.data ?? null,
@@ -72,12 +88,15 @@ export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
     enabledDraft,
     mutedDraft,
     volumeDraft,
+    modelDraft,
     voiceDraft,
     setEnabledDraft,
     setMutedDraft,
     setVolumeDraft,
+    setModelDraft,
     setVoiceDraft,
     loadSpeechSettings,
     saveSpeechSettings,
+    saveSpeechOutputSettings,
   };
 }
