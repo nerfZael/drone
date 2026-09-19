@@ -77,6 +77,7 @@ function registerDesktopNotifications({ ipcMain, BrowserWindow, screen, shell, g
       }
     }
   }
+  ipcMain.handle('drone-hub:notification-display', (event) => trusted(event) ? 'cards' : null);
   ipcMain.handle('drone-hub:notification-supported', (event) => Boolean(trusted(event)));
   ipcMain.handle('drone-hub:notification-clear', (event) => {
     if (!trusted(event)) throw new Error('Untrusted notification sender');

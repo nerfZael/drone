@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
   setChatWindowAlwaysOnTop(name, enabled) {
     return ipcRenderer.invoke('drone-hub:chat-window-pin', name, enabled);
   },
+  notificationDisplay: () => ipcRenderer.invoke('drone-hub:notification-display'),
   clearNotifications: () => ipcRenderer.invoke('drone-hub:notification-clear'),
   notificationsSupported: () => ipcRenderer.invoke('drone-hub:notification-supported'),
   showNotification: (input) => ipcRenderer.invoke('drone-hub:notification-show', input),

@@ -1,3 +1,4 @@
+import { desktopNotificationSupport } from './desktop-notification-support';
 import React from 'react';
 import { UiToolbarButton } from '../../ui/components';
 import { useDesktopNotificationSettings } from './desktop-notification-settings';
@@ -5,23 +6,20 @@ import { SettingsSection } from './SettingsSurface';
 
 export function NotificationsSettingsTab() {
   const settings = useDesktopNotificationSettings();
-  const [supported, setSupported] = React.useState<boolean | null>(null);
+  const [supported, setSupported] = React.useState<'cards' | 'outdated' | 'browser' | null>(null);
   const [testing, setTesting] = React.useState(false);
   const [tested, setTested] = React.useState(false);
   React.useEffect(() => {
     let disposed = false;
-    const desktop = window.droneHubDesktop;
-    void (desktop?.notificationsSupported?.() ?? Promise.resolve(false)).then(
-      (value) => { if (!disposed) setSupported(value); },
-      (error) => { if (!disposed) { setSupported(false); settings.setError(String(error?.message || error)); } },
-    );
+    void desktopNotificationSupport().then((value) => { if (!disposed) setSupported(value); });
     return () => { disposed = true; };
   }, [settings.setError]);
-  const disabled = supported !== true;
+  const disabled = supported !== 'cards';
   return (
     <SettingsSection title="Desktop notifications" description="Show notifications outside Drone Hub, including while minimized. Preferences apply to this app and profile. Drone Hub must remain running and connected; past events are not replayed on startup or reconnect.">
       {supported === null && <p role="status">Checking desktop notification support…</p>}
-      {supported === false && <p role="status">Desktop notifications require the Drone Hub desktop app.</p>}
+      {supported === 'browser' && <p role="status">Desktop notifications require the Drone Hub desktop app.</p>}
+      {supported === 'outdated' && <p role="alert">This desktop process cannot show the new notification cards. Update Drone Hub, then fully quit and reopen the desktop app. Reloading the page or restarting only the Hub server is not enough. Notifications are paused to prevent the old OS alerts.</p>}
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" disabled={disabled} checked={settings.enabled} onChange={(e) => settings.update({ enabled: e.target.checked })} />
         Enable desktop notifications
