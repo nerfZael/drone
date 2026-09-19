@@ -45,7 +45,7 @@ import {
   profileDroneRootDir,
   readActiveProfileNameSync,
 } from '../host/profiles';
-import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
+import { SPEECH_MODELS, SPEECH_VOICES } from './speech-models';
 import { droneSummary } from './mcp-summaries';
 import { normalizeMcpChatList, type McpChatListEntry } from './chat-catalog';
 import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
@@ -2093,13 +2093,29 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Speak',
       description:
-        'Queue text-to-speech with GROQ and play it in the open Drone Hub UI. Returns immediately while synthesis and playback continue in the background.',
+        'Queue text-to-speech with the model and default voice selected in Drone Hub settings, then play it in the open UI. Returns muted without requesting synthesis when speech is muted; otherwise returns immediately while synthesis and playback continue in the background.',
       inputSchema: {
-        text: z.string().min(1).max(GROQ_SPEECH_MAX_CHARS),
-        voice: z.enum(GROQ_SPEECH_VOICES).optional(),
+        text: z.string().min(1).max(Math.max(...SPEECH_MODELS.map((model) => model.maxCharacters))),
+        voice: z.string().refine(
+          (voice) => (SPEECH_VOICES as readonly string[]).includes(voice),
+          'Unsupported speech voice',
+        ).optional(),
       },
     },
     async (args) => {
+      try {
+        const settings = await requestJson('/api/settings/speech', { method: 'GET' });
+        if (settings?.speech?.muted === true) {
+          return toolResult({
+            ok: true,
+            status: 'muted',
+            model: settings.speech.model,
+            voice: args.voice ?? settings.speech.voice,
+          });
+        }
+      } catch {
+        // Older or temporarily unavailable settings routes still get the endpoint's mute guard.
+      }
       const response = await requestJson('/api/audio/speech', {
         method: 'POST',
         body: JSON.stringify({

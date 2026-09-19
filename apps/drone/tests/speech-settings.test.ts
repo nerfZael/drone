@@ -4,6 +4,7 @@ import {
   resolveEffectiveSpeechSettings,
   upsertStoredSpeechSettings,
 } from '../src/hub/hub-settings';
+import { getHubSettingsRepository } from '../src/host/hub-settings-repository';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('speech settings', () => {
@@ -13,20 +14,23 @@ describe('speech settings', () => {
         enabled: true,
         muted: false,
         volume: 1,
-        voice: 'troy',
+        model: 'tts-1',
+        voice: 'alloy',
       });
 
       await upsertStoredSpeechSettings({
         enabled: false,
         muted: true,
         volume: 0.35,
-        voice: 'hannah',
+        model: 'tts-1-hd',
+        voice: 'nova',
       });
       expect(await resolveEffectiveSpeechSettings()).toEqual({
         enabled: false,
         muted: true,
         volume: 0.35,
-        voice: 'hannah',
+        model: 'tts-1-hd',
+        voice: 'nova',
       });
     });
   });
@@ -37,6 +41,27 @@ describe('speech settings', () => {
       await expect(upsertStoredSpeechSettings({ voice: 'unknown' as any })).rejects.toThrow(
         'not supported',
       );
+      await expect(upsertStoredSpeechSettings({ model: 'unknown' as any })).rejects.toThrow(
+        'model is not supported',
+      );
+      await expect(upsertStoredSpeechSettings({ model: 'tts-1', voice: 'troy' })).rejects.toThrow(
+        'voice troy is not supported by tts-1',
+      );
+    });
+  });
+
+  test('keeps legacy Groq voice selections on their matching model', async () => {
+    await withTempDroneDataDir('drone-speech-settings-legacy-', async () => {
+      await (await getHubSettingsRepository()).put('speech', {
+        enabled: true,
+        muted: false,
+        volume: 1,
+        voice: 'hannah',
+      });
+      expect(await resolveEffectiveSpeechSettings()).toMatchObject({
+        model: 'canopylabs/orpheus-v1-english',
+        voice: 'hannah',
+      });
     });
   });
 });

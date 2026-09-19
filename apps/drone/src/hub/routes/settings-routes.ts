@@ -358,6 +358,7 @@ export function registerSettingsRoutes(
         enabled: body?.enabled,
         muted: body?.muted,
         volume: body?.volume,
+        model: body?.model,
         voice: body?.voice,
       });
       const settings = await resolveSpeechSettingsResponse();
