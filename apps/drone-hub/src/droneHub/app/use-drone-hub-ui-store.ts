@@ -33,6 +33,7 @@ import {
   normalizeDesktopThemeId,
   type DesktopThemeId,
 } from '../../theme';
+import { resolveManualSidebarToggle } from './resolve-manual-sidebar-toggle';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -195,6 +196,7 @@ type DroneHubUiState = {
   setChatInputEditorMode: (draftKey: string, next: boolean) => void;
   setDraftChat: (next: Updater<DraftChatState | null>) => void;
   setSidebarCollapsed: (next: Updater<boolean>) => void;
+  toggleSidebarCollapsedManually: () => void;
   setReposModalOpen: (next: Updater<boolean>) => void;
   setDroneErrorModal: (next: Updater<DroneErrorModalState | null>) => void;
   setClearingDroneError: (next: Updater<boolean>) => void;
@@ -1238,6 +1240,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setDraftChat: (next) => set((s) => ({ draftChat: resolveNext(s.draftChat, next) })),
       setSidebarCollapsed: (next) =>
         set((s) => ({ sidebarCollapsed: resolveNext(s.sidebarCollapsed, next) })),
+      toggleSidebarCollapsedManually: () =>
+        set((s) => resolveManualSidebarToggle(s)),
       setReposModalOpen: (next) =>
         set((s) => ({ reposModalOpen: resolveNext(s.reposModalOpen, next) })),
       setDroneErrorModal: (next) =>
@@ -1736,6 +1740,7 @@ export function useDroneHubAppModelUiState() {
       rememberRepoChatSelection: s.rememberRepoChatSelection,
       setDraftChat: s.setDraftChat,
       setSidebarCollapsed: s.setSidebarCollapsed,
+      toggleSidebarCollapsedManually: s.toggleSidebarCollapsedManually,
       setReposModalOpen: s.setReposModalOpen,
       setDroneErrorModal: s.setDroneErrorModal,
       setClearingDroneError: s.setClearingDroneError,
