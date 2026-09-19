@@ -12,6 +12,7 @@ import { useCompanion } from './CompanionContext';
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { CompanionLivePanel } from './CompanionLivePanel';
 import { CompanionModelPicker } from './CompanionModelPicker';
+import type { CompanionProposalDisplayMode } from './CompanionProposalStrip';
 
 const iconProps = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
 
@@ -107,6 +108,8 @@ function CompanionVolumeRow() {
 export function CompanionOptionsMenu({
   historyOpen,
   onToggleHistory,
+  proposalDisplayMode,
+  onSetProposalDisplayMode,
   onOpenWorkspaces,
   onOpenPrompt,
   onOpenInstructions,
@@ -118,6 +121,8 @@ export function CompanionOptionsMenu({
 }: {
   historyOpen: boolean;
   onToggleHistory(): void;
+  proposalDisplayMode: CompanionProposalDisplayMode;
+  onSetProposalDisplayMode(mode: CompanionProposalDisplayMode): void;
   onOpenWorkspaces(): void;
   onOpenPrompt(): void;
   onOpenInstructions(): void;
@@ -217,6 +222,13 @@ export function CompanionOptionsMenu({
           controls="companion-proposal-history"
           onSelect={pick(onToggleHistory)}
         />
+        {companion.proposals.length > 1 ? <CompanionMenuItem
+          icon={<svg {...iconProps}><path d="M5 6h2M10 6h9M5 12h2M10 12h9M5 18h2M10 18h9" /></svg>}
+          label="Proposal summaries"
+          description="Show pending proposals as stacked one-line summaries; turn off for numbered tabs"
+          checked={proposalDisplayMode === 'summaries'}
+          onSelect={() => onSetProposalDisplayMode(proposalDisplayMode === 'summaries' ? 'numbers' : 'summaries')}
+        /> : null}
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M3 11 12 4l9 7" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></svg>}
           label="Home files"

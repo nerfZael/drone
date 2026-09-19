@@ -45,7 +45,7 @@ export class CompanionProposalStore<C extends CompanionProposalExecutionContext>
   }
   /** Every document Companion can address, including empty drafts it has just created. */
   list(): ProposalSummary[] { return [...this.entries.values()].filter(e => e.visible).map(e => this.summarize(e)); }
-  /** Review-card order: the numbered strip and the selection fall back to the first entry here. */
+  /** Review-card order: the proposal list and the selection fall back to the first entry here. */
   listPending(): ProposalSummary[] { return this.pending.map(e => this.summarize(e)); }
   select(id: string) {
     const entry = this.get(id);

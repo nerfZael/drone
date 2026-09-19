@@ -13,7 +13,7 @@ describe('Companion overlay presentation', () => {
     expect(source).not.toContain("open={item.status === 'running'}");
   });
 
-  test('supports hiding manual reviews and exposes session execution history', () => {
+  test('supports hiding manual reviews, compact summaries, and session execution history', () => {
     const source = readFileSync(
       new URL('../src/droneHub/companion/CompanionOverlay.tsx', import.meta.url),
       'utf8',
@@ -24,9 +24,13 @@ describe('Companion overlay presentation', () => {
     );
 
     expect(source).toContain('<CompanionProposalStrip');
-    expect(source).toContain('if (targetId === companion.selectedProposalId) setProposalHidden((hidden) => !hidden);');
-    expect(source).toContain('React.useEffect(() => { setProposalHidden(false); }, [companion?.selectedProposalId]);');
+    expect(source).toContain('setProposalVisibility({ targetId, autoApprove: companion.autoApprove,');
+    expect(source).toContain('displayMode={proposalDisplayMode}');
+    expect(source).toContain("return window.localStorage.getItem(PROPOSAL_DISPLAY_KEY) === 'numbers' ? 'numbers' : 'summaries'");
     expect(source).not.toContain('companion.proposals?.length > 1');
+    expect(menu).toContain('label="Proposal summaries"');
+    expect(menu).toContain("checked={proposalDisplayMode === 'summaries'}");
+    expect(menu).toContain("turn off for numbered tabs");
     expect(menu).toContain('latest execution failed');
     expect(source).toContain('pressed={companion.autoApprove}');
     expect(menu).toContain('expanded={historyOpen}');
@@ -47,7 +51,7 @@ describe('Companion overlay presentation', () => {
       'utf8',
     );
     expect(source).not.toContain('toggleLiveVoice');
-    expect(menu).toContain('label="Live voice"');
+    expect(menu).toContain("label={live.mode === 'jev' ? 'Jev voice' : 'Live voice'}");
     expect(menu).toContain('checked={live.enabled}');
     expect(menu).toContain('onSelect={() => void companion.toggleLiveVoice()}');
   });

@@ -22,7 +22,7 @@ import { CompanionPromptEditor } from './CompanionPromptEditor';
 import { CompanionInstructionsEditor } from './CompanionInstructionsEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
-import { CompanionProposalStrip } from './CompanionProposalStrip';
+import { CompanionProposalStrip, type CompanionProposalDisplayMode } from './CompanionProposalStrip';
 import { CompanionOptionsMenu } from './CompanionOptionsMenu';
 import { CompanionAttachmentDialog, companionAttachmentText, isCompanionTextAttachment } from './CompanionAttachmentDialog';
 import { openCompanionHomeFiles } from './companion-home-files';
@@ -90,6 +90,7 @@ function CompanionStatusIndicator({
 }
 
 const REPLY_COLLAPSED_KEY = 'drone-hub:companion-reply-collapsed';
+const PROPOSAL_DISPLAY_KEY = 'drone-hub:companion-proposal-display';
 
 function CompanionHeaderButton({
   label,
@@ -153,8 +154,15 @@ export function CompanionOverlay() {
     setReplyCollapsedState(collapsed);
     try { window.localStorage.setItem(REPLY_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* Still applies to this session. */ }
   };
+  const [proposalDisplayMode, setProposalDisplayModeState] = React.useState<CompanionProposalDisplayMode>(() => {
+    try { return window.localStorage.getItem(PROPOSAL_DISPLAY_KEY) === 'numbers' ? 'numbers' : 'summaries'; } catch { return 'summaries'; }
+  });
+  const setProposalDisplayMode = (mode: CompanionProposalDisplayMode) => {
+    setProposalDisplayModeState(mode);
+    try { window.localStorage.setItem(PROPOSAL_DISPLAY_KEY, mode); } catch { /* Still applies to this session. */ }
+  };
   // Default each new selection to closed in auto-approve mode, without a frame
-  // flashing open before an effect runs. Explicit number clicks override the default.
+  // flashing open before an effect runs. Explicit proposal-row clicks override the default.
   const [proposalVisibility, setProposalVisibility] = React.useState<{
     targetId: string | null; autoApprove: boolean; hidden: boolean;
   } | null>(null);
@@ -382,6 +390,7 @@ export function CompanionOverlay() {
         selectedId={companion.selectedProposalId}
         selectedOpen={!proposalHidden}
         edge={flowsDown ? 'bottom' : 'top'}
+        displayMode={proposalDisplayMode}
         onSelect={(targetId) => {
           setProposalVisibility({ targetId, autoApprove: companion.autoApprove,
             hidden: targetId === companion.selectedProposalId ? !proposalHidden : false });
@@ -391,7 +400,7 @@ export function CompanionOverlay() {
       />
       <aside tabIndex={-1}
         data-companion-drop-active={dropActive || undefined}
-        className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
+        className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? proposalDisplayMode === 'summaries' ? flowsDown ? 'rounded-b-none' : 'rounded-t-none' : flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
         aria-label="Companion"
       >
       {/* A soft veil says what will happen; it never takes the pointer, so the drop lands on the page beneath. */}
@@ -605,6 +614,8 @@ export function CompanionOverlay() {
                 <CompanionOptionsMenu
                   historyOpen={historyOpen}
                   onToggleHistory={() => setHistoryOpen((open) => !open)}
+                  proposalDisplayMode={proposalDisplayMode}
+                  onSetProposalDisplayMode={setProposalDisplayMode}
                   onOpenWorkspaces={() => setWorkspacePickerOpen(true)}
                   onOpenPrompt={() => setPromptEditorOpen(true)}
                   onOpenInstructions={() => setInstructionsEditorOpen(true)}

@@ -43,6 +43,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
     let companion!: NonNullable<ReturnType<typeof useCompanion>>;
     const element = dom.document.createElement('div');
     dom.document.body.append(element);
+    const surface = dom.document.body;
     const root = createRoot(element as unknown as HTMLElement);
     const hiddenCommits: string[] = [];
     let inspectingProposal = false;
@@ -62,7 +63,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       });
       // Inspect every committed frame, not just the DOM after async execution finishes.
       React.useLayoutEffect(() => {
-        if ((settings.enabled || settings.loading) && !inspectingProposal) hiddenCommits.push(element.innerHTML);
+        if ((settings.enabled || settings.loading) && !inspectingProposal) hiddenCommits.push(surface.innerHTML);
       });
       return <CompanionOverlay />;
     }
@@ -75,8 +76,8 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       });
     };
     const expectReview = (visible: boolean) => {
-      expect(Boolean(element.querySelector('[aria-label="Pending proposals"]'))).toBe(companion.proposals.length > 0);
-      expect(element.textContent!.includes('Apply proposal')).toBe(visible);
+      expect(Boolean(surface.querySelector('[aria-label="Pending proposals"]'))).toBe(companion.proposals.length > 0);
+      expect(surface.textContent!.includes('Apply proposal')).toBe(visible);
     };
     try {
       await act(async () => { render(); });
@@ -95,11 +96,11 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
         settings = { ...settings, loading: false, enabled: mode === 'loading-auto', error: mode === 'load-error' ? 'Could not load auto-approve setting' : '' };
         await act(async () => { render(); });
         expectReview(!settings.enabled);
-        if (mode === 'load-error') expect(element.textContent).toContain(settings.error);
+        if (mode === 'load-error') expect(surface.textContent).toContain(settings.error);
       }
       const autoApproved = settings.enabled;
       if (!autoApproved) {
-        // Toggling auto-approve changes the default card visibility, keeping its number available.
+        // Toggling auto-approve changes the default card visibility, keeping its summary available.
         settings = { ...settings, enabled: true };
         await act(async () => { render(); });
         expectReview(false);
@@ -116,7 +117,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
         expectReview(true);
         await act(async () => { companion.selectProposal(discardId); });
         await act(async () => {
-          [...element.querySelectorAll('button')].find(button => button.textContent === 'Discard')!.click();
+          [...surface.querySelectorAll('button')].find(button => button.textContent === 'Discard')!.click();
         });
         expectReview(true);
         expect(companion.selectedProposalId).toBe(targetId);
@@ -124,11 +125,11 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       }
       const toggleProposal = async () => {
         await act(async () => {
-          element.querySelector<HTMLButtonElement>('[aria-label="Pending proposals"] button')!.click();
+          surface.querySelector<HTMLButtonElement>('[aria-label="Pending proposals"] button')!.click();
         });
       };
       if (autoApproved) {
-        expect(element.querySelector('[aria-label="Pending proposals"] button')?.textContent).toBe('1');
+        expect(surface.querySelector('[aria-label="Pending proposals"] button')?.textContent).toContain('Create group');
         inspectingProposal = true;
         await toggleProposal();
         expectReview(true);
@@ -143,7 +144,7 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
         expectReview(true);
         await act(async () => { receive({ type: 'status', messageId, status: 'completed' }); });
         await act(async () => {
-          const apply = [...element.querySelectorAll('button')].find(button => button.textContent?.includes('Apply proposal'))!;
+          const apply = [...surface.querySelectorAll('button')].find(button => button.textContent?.includes('Apply proposal'))!;
           apply.click();
         });
       } else {
@@ -154,10 +155,10 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
       if (autoApproved) {
         inspectingProposal = true;
         await toggleProposal();
-        expect(element.textContent).toContain('Applying');
+        expect(surface.textContent).toContain('Applying');
         await toggleProposal();
         inspectingProposal = false;
-      } else expect(element.textContent).toContain('Applying');
+      } else expect(surface.textContent).toContain('Applying');
       await act(async () => { finish.resolve(); });
       expectReview(false);
       expect(companion.proposalHistory).toHaveLength(1);
