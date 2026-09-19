@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { prepareCompanionAttachments, readCompanionAttachments, companionHomeRoot, storeCompanionUpload, removeCompanionUpload, validateCompanionAttachments, readCompanionHomeImages, companionHomeRevision, watchCompanionHome } from '../src/hub/companion/companion-attachments';
+import { prepareCompanionAttachments, readCompanionAttachments, companionHomeRoot, storeCompanionUpload, removeCompanionUpload, validateCompanionAttachments, readCompanionHomeImages } from '../src/hub/companion/companion-attachments';
 const image = { name: 'shot.png', mime: 'image/png', size: 3, dataBase64: 'cG5n' };
 
 test('images reach the model and land in the home workspace uploads folder with reusable proposal/transfer paths', async () => {
@@ -90,39 +90,6 @@ test('view_images reads several home images at once and nothing else; the home r
     await expect(readCompanionHomeImages(['../../etc/hostname'], root)).rejects.toThrow();
     await expect(readCompanionHomeImages([], root)).rejects.toThrow('1 to 8');
     await expect(readCompanionHomeImages(Array(9).fill('uploads/a.png'), root)).rejects.toThrow('1 to 8');
-    const before = await companionHomeRevision(root);
-    expect(Object.keys(before.files).some(file => file.endsWith('uploads/a.png'))).toBe(true);
-    expect((await companionHomeRevision(root)).revision).toBe(before.revision);
-    await fs.writeFile(path.join(root, 'notes.txt'), 'longer text');
-    const after = await companionHomeRevision(root);
-    expect(after.revision).not.toBe(before.revision);
-    expect(after.files[path.join(root, 'notes.txt')]).not.toBe(before.files[path.join(root, 'notes.txt')]);
-    await fs.rm(path.join(root, 'notes.txt'));
-    expect((await companionHomeRevision(root)).files[path.join(root, 'notes.txt')]).toBeUndefined();
-  } finally { await fs.rm(root, { recursive: true, force: true }); }
-});
-
-test('the home watcher reports nested changes once per burst and stops when closed', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'companion-attachments-test-'));
-  try {
-    await fs.mkdir(path.join(root, 'uploads'));
-    let notices = 0;
-    const watcher = watchCompanionHome(() => { notices++; }, root);
-    expect(watcher.active).toBe(true);
-    await fs.writeFile(path.join(root, 'uploads', 'a.png'), 'one');
-    await fs.writeFile(path.join(root, 'uploads', 'a.png'), 'two');
-    await fs.writeFile(path.join(root, 'note.md'), 'three');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    expect(notices).toBe(1);
-    await fs.rm(path.join(root, 'note.md'));
-    await new Promise(resolve => setTimeout(resolve, 500));
-    expect(notices).toBe(2);
-    watcher.close();
-    expect(watcher.active).toBe(false);
-    await fs.writeFile(path.join(root, 'later.md'), 'ignored');
-    await new Promise(resolve => setTimeout(resolve, 400));
-    expect(notices).toBe(2);
-    expect(watchCompanionHome(() => {}, path.join(root, 'missing')).active).toBe(false);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

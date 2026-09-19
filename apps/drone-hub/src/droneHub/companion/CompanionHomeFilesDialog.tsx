@@ -4,7 +4,7 @@ import { DroneEditorDock } from '../app/DroneEditorDock';
 import { useFileEditorState } from '../app/use-file-editor-state';
 import { DroneFilesDock } from '../files/DroneFilesDock';
 import { requestJson } from '../http';
-import { COMPANION_HOME_CHANGED_EVENT, type CompanionHomeTarget } from './companion-home-files';
+import type { CompanionHomeTarget } from './companion-home-files';
 import type { DroneOpenedFileState } from '../files/opened-file-types';
 import type { DroneFsEntry, DroneFsListPayload, DroneSummary } from '../types';
 
@@ -31,49 +31,8 @@ export default function CompanionHomeFilesDialog({ target, onClose }: { target: 
   }, [path]);
   React.useEffect(() => { void refresh(''); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const editor = useFileEditorState({ currentDrone: HOME, requestJson, onRefreshFsList: () => void refresh() });
-  // Companion edits these files while the window is open. The Hub watches the folder and says when
-  // something changed; the window then fetches the folder's fingerprint once, reloads the explorer
-  // (expanded folders included) and reloads open tabs whose file changed on disk. Tabs with unsaved
-  // edits are left alone, as are files this window just saved. Nothing is polled.
-  const [refreshSignal, setRefreshSignal] = React.useState(0);
-  const fingerprints = React.useRef<Record<string, string>>({});
-  const tabs = React.useRef(editor.openedFileTabs);
-  tabs.current = editor.openedFileTabs;
-  const refreshFileTab = React.useRef(editor.refreshFileTab);
-  refreshFileTab.current = editor.refreshFileTab;
-  const reloadChangedTabs = React.useCallback(() => {
-    for (const tab of tabs.current) {
-      const fingerprint = tab.path ? fingerprints.current[tab.path] : undefined;
-      if (!fingerprint || tab.dirty || tab.loading || tab.saving) continue;
-      const mtimeMs = Number(fingerprint.split(':')[1]);
-      if (Number.isFinite(mtimeMs) && tab.mtimeMs != null && mtimeMs !== tab.mtimeMs) refreshFileTab.current(tab.tabId);
-    }
-  }, []);
-  React.useEffect(() => {
-    let revision: string | null = null, stopped = false, running = false, again = false;
-    const check = async () => {
-      if (running) { again = true; return; }
-      running = true;
-      try {
-        // Asking also arms the Hub's watcher, including after a Hub restart.
-        const next = await requestJson<{ revision: string; files: Record<string, string> }>('/api/companion/home/revision');
-        if (stopped) return;
-        fingerprints.current = next.files;
-        if (revision !== null && next.revision !== revision) { setRefreshSignal(value => value + 1); reloadChangedTabs(); }
-        revision = next.revision;
-      } catch { /* The Hub may be restarting; the next notice or focus tries again. */ }
-      finally {
-        running = false;
-        if (again && !stopped) { again = false; void check(); }
-      }
-    };
-    void check();
-    const onChanged = () => void check();
-    window.addEventListener(COMPANION_HOME_CHANGED_EVENT, onChanged);
-    // Coming back to the window catches anything missed while the Hub or its watcher was away.
-    window.addEventListener('focus', onChanged);
-    return () => { stopped = true; window.removeEventListener(COMPANION_HOME_CHANGED_EVENT, onChanged); window.removeEventListener('focus', onChanged); };
-  }, [reloadChangedTabs]);
+  // Companion edits these files while the window is open. Open tabs and the explorer follow those
+  // changes over the same workspace events as any drone: Companion home is served as a host drone.
   const open = (file: { path: string; name: string; line?: number | null; column?: number | null }) => void editor.openEditorFile(file);
   // A path clicked in a Companion reply: a file opens and is selected in the explorer, a folder is only
   // selected. Its kind comes from the listing of its parent, and only paths inside Companion home count.
@@ -150,7 +109,7 @@ export default function CompanionHomeFilesDialog({ target, onClose }: { target: 
           path={path} homePath={path} entries={listing.entries} loading={listing.loading} error={listing.error}
           onOpenPath={next => void refresh(next)} onRefresh={() => void refresh()}
           onOpenFile={entry => { if (entry.kind === 'file') open(entry); }}
-          onRefreshOpenedFile={reloadChangedTabs} onCloseOpenedFile={editor.closeEditorFile} refreshSignal={refreshSignal}
+          onRefreshOpenedFile={editor.refreshOpenedFile} onCloseOpenedFile={editor.closeEditorFile}
           onConfirmCloseOpenedFilesForPaths={editor.confirmCloseOpenedFileTabsForPaths}
           onCloseOpenedFilesForPaths={editor.closeOpenedFileTabsForPaths}
           onRemapOpenedFilesForPathChange={editor.remapOpenedFileTabsForPathChange}

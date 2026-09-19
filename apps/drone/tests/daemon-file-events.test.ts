@@ -9,8 +9,8 @@ import { WebSocket } from 'ws';
 import { DRONE_DAEMON_CAPABILITIES } from '../src/daemon-capabilities';
 import { DaemonHttpError, handleDaemonWorkspaceRequest } from '../src/daemon-workspace';
 import { subscribeDaemonDirectoryEvents, subscribeDaemonFileEvents } from '../src/hub/daemon-file-events';
-import { createDirectoryEventsWebSocketServer } from '../src/hub/directory-events-websocket-server';
-import { createFilesystemRouteHandler } from '../src/hub/routes/filesystem-routes';
+import { createWorkspaceEventsWebSocketServer } from '../src/hub/workspace-events-websocket-server';
+import { createFileRevisionWatcher } from '../src/hub/file-revision-watch';
 
 let dir = '';
 let server: http.Server | null = null;
@@ -141,13 +141,11 @@ describe('container file events', () => {
     fs.writeFileSync(watchedPath, 'one');
     // What the container would answer for the file; the real file above only drives the daemon's watch.
     let containerContent = 'one';
-    const handler = createFilesystemRouteHandler({
+    const watchFileRevision = createFileRevisionWatcher({
       FS_EDITOR_MAX_BYTES: 1024 * 1024,
       droneRuntime: () => 'container',
-      normalizeFsPathForRuntime: (_drone: unknown, rawPath: string) => rawPath,
-      resolveDroneOrRespond: async () => ({ id: 'drone-a', drone: { name: 'Drone A' } }),
-      resolveDroneDaemonClientForEntry: async () => ({ client: { baseUrl, token: 'secret' } }),
-      withReadonlyDroneContainer: async (_input: unknown, run: (value: unknown) => unknown) =>
+      resolveDaemonClient: async () => ({ baseUrl, token: 'secret' }),
+      withReadonlyDroneContainer: async (_input: unknown, run: (value: unknown) => Promise<unknown>) =>
         await run({ containerName: 'container-a' }),
       dvmExec: async (_container: string, _command: string, args: string[]) => {
         const size = Buffer.byteLength(containerContent);
@@ -156,38 +154,26 @@ describe('container file events', () => {
           ? { code: 0, stdout: `__META__\t${size}\t1700000000\t${digest}\n`, stderr: '' }
           : { code: 0, stdout: `__META__\t${size}\t1700000000\n`, stderr: '' };
       },
-    } as any);
-    let written = '';
-    const closers: Array<() => void> = [];
-    const res = {
-      statusCode: 0, writableEnded: false, destroyed: false,
-      setHeader() {}, flushHeaders() {},
-      write(chunk: string) { written += chunk; return true; },
-      on(event: string, listener: () => void) { if (event === 'close') closers.push(listener); },
-      destroy() { this.destroyed = true; },
-    };
-    const req = {
-      headers: {}, socket: { setTimeout() {} },
-      on(event: string, listener: () => void) { if (event === 'close') closers.push(listener); },
-      once() {},
-    };
-    await handler({
-      req: req as any, res: res as any, method: 'GET',
-      url: new URL(`http://hub.test/api/drones/drone-a/fs/file-events?path=${encodeURIComponent(watchedPath)}`),
-      parts: ['api', 'drones', 'drone-a', 'fs', 'file-events'],
     });
+    const events: Array<{ event: string; revision?: unknown }> = [];
+    const stop = watchFileRevision(
+      { drone: { name: 'Drone A' }, droneId: 'drone-a', droneName: 'Drone A', targetPath: watchedPath },
+      (event, data) => events.push({ event, revision: data.revision }),
+    );
     try {
-      await until(() => written.includes('event: snapshot'), 'snapshot');
+      await until(() => events.length === 1, 'snapshot');
+      expect(events[0].event).toBe('snapshot');
       await until(() => streamsOpened === 1, 'daemon subscription');
-      // Same size and same whole-second modification time: the case the old timed check missed.
+      // Same size and same whole-second modification time: the case a timed stat check misses.
       containerContent = 'two';
       const startedAt = Date.now();
       fs.writeFileSync(watchedPath, 'two');
-      await until(() => written.includes('event: changed'), 'changed');
+      await until(() => events.some((entry) => entry.event === 'changed'), 'changed');
       expect(Date.now() - startedAt).toBeLessThan(1_500);
-      expect(written.split('event: changed').length - 1).toBe(1);
+      expect(events.filter((entry) => entry.event === 'changed').length).toBe(1);
+      expect(events[1].revision).not.toBe(events[0].revision);
     } finally {
-      for (const close of closers) close();
+      stop();
     }
   });
 
@@ -244,20 +230,28 @@ describe('container file events', () => {
   });
 });
 
-describe('explorer folder events socket', () => {
-  async function openExplorerSocket(deps: Parameters<typeof createDirectoryEventsWebSocketServer>[0]) {
-    const wss = createDirectoryEventsWebSocketServer(deps);
+describe('workspace events socket', () => {
+  async function openExplorerSocket(deps: Omit<Parameters<typeof createWorkspaceEventsWebSocketServer>[0], 'watchFileRevision'>) {
+    const watched: string[] = [];
+    const wss = createWorkspaceEventsWebSocketServer({
+      ...deps,
+      watchFileRevision: ({ targetPath }, publish) => {
+        watched.push(targetPath);
+        publish('snapshot', { revision: `sha256:${targetPath}` });
+        return () => { watched.splice(watched.indexOf(targetPath), 1); };
+      },
+    });
     const hub = http.createServer();
     hub.on('upgrade', (req, socket, head) => {
-      wss.handleUpgrade(req, socket, head, (webSocket) => wss.emit('connection', webSocket, req, { drone: { name: 'Drone A' } }));
+      wss.handleUpgrade(req, socket, head, (webSocket) => wss.emit('connection', webSocket, req, { id: 'drone-a', drone: { name: 'Drone A' } }));
     });
     await new Promise<void>((resolve) => hub.listen(0, '127.0.0.1', resolve));
     const client = new WebSocket(`ws://127.0.0.1:${(hub.address() as import('node:net').AddressInfo).port}`);
-    const messages: Array<{ type: string; path?: string }> = [];
+    const messages: Array<{ type: string; path?: string; event?: string; revision?: string }> = [];
     client.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => client.once('open', () => resolve()));
     return {
-      client, messages,
+      client, messages, watched,
       close: async () => {
         const connected = [client, ...wss.clients];
         const closed = connected.map((socket) => new Promise<void>((resolve) => {
@@ -284,14 +278,14 @@ describe('explorer folder events socket', () => {
     try {
       // The explorer names the root with a trailing slash; events must use that same name.
       const rootAsRequested = `${dir}/`;
-      explorer.client.send(JSON.stringify({ paths: [rootAsRequested] }));
+      explorer.client.send(JSON.stringify({ directories: [rootAsRequested] }));
       await new Promise((resolve) => setTimeout(resolve, 100));
       fs.writeFileSync(path.join(src, 'unwatched.ts'), '');
       fs.writeFileSync(path.join(dir, 'new.md'), 'new');
       await until(() => explorer.messages.length > 0, 'root change');
-      expect(explorer.messages).toEqual([{ type: 'changed', path: rootAsRequested }]);
+      expect(explorer.messages).toEqual([{ type: 'directory-changed', path: rootAsRequested }]);
 
-      explorer.client.send(JSON.stringify({ paths: [rootAsRequested, src] }));
+      explorer.client.send(JSON.stringify({ directories: [rootAsRequested, src] }));
       await new Promise((resolve) => setTimeout(resolve, 100));
       fs.writeFileSync(path.join(src, 'inner.ts'), 'inner');
       await until(() => explorer.messages.some((message) => message.path === src), 'expanded folder change');
@@ -309,9 +303,9 @@ describe('explorer folder events socket', () => {
       resolveDaemonClient: async () => ({ baseUrl, token: 'secret' }),
     });
     try {
-      explorer.client.send(JSON.stringify({ paths: [dir] }));
+      explorer.client.send(JSON.stringify({ directories: [dir] }));
       await until(() => streamsOpened === 1, 'daemon stream');
-      explorer.client.send(JSON.stringify({ paths: [dir, src] }));
+      explorer.client.send(JSON.stringify({ directories: [dir, src] }));
       await new Promise((resolve) => setTimeout(resolve, 150));
       fs.writeFileSync(path.join(src, 'inner.ts'), 'inner');
       await until(() => explorer.messages.some((message) => message.path === src), 'expanded folder change');
@@ -319,6 +313,37 @@ describe('explorer folder events socket', () => {
 
       for (const socket of sockets) socket.destroy();
       await until(() => explorer.messages.some((message) => message.type === 'resync'), 'resync after the daemon link dropped');
+    } finally {
+      await explorer.close();
+    }
+  });
+
+  test('open files are followed on the same socket, under the names the app used, until their tab closes', async () => {
+    const explorer = await openExplorerSocket({
+      droneRuntime: () => 'host',
+      normalizeFsPathForRuntime: (_drone, rawPath) => rawPath.replace(/\/+$/, ''),
+      resolveDaemonClient: async () => null,
+    });
+    try {
+      const first = path.join(dir, 'one.md');
+      const second = path.join(dir, 'two.md');
+      explorer.client.send(JSON.stringify({ directories: [dir], files: [first] }));
+      await until(() => explorer.messages.length === 1, 'first snapshot');
+      expect(explorer.messages[0]).toEqual({ type: 'file', event: 'snapshot', path: first, revision: `sha256:${first}` });
+
+      // Switching tabs: the first file is dropped, the second announced, the folder untouched.
+      explorer.client.send(JSON.stringify({ directories: [dir], files: [second] }));
+      await until(() => explorer.messages.length === 2, 'second snapshot');
+      expect(explorer.messages[1].path).toBe(second);
+      expect(explorer.watched).toEqual([second]);
+
+      // Repeating what is already watched starts nothing new.
+      explorer.client.send(JSON.stringify({ directories: [dir], files: [second] }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(explorer.messages.length).toBe(2);
+
+      explorer.client.close();
+      await until(() => explorer.watched.length === 0, 'watches released with the socket');
     } finally {
       await explorer.close();
     }

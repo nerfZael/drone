@@ -27,8 +27,8 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   allowedOrigins: Set<string>;
   webSocketServer: WebSocketServer;
   companionWebSocketServer?: WebSocketServer;
-  /** Explorer folder events; `resolveWorkspace` also knows places that are browsed like a drone but are not one. */
-  directoryEvents?: {
+  /** Explorer and editor events; `resolveWorkspace` also knows places that are browsed like a drone but are not one. */
+  workspaceEvents?: {
     webSocketServer: WebSocketServer;
     resolveWorkspace: (socket: Duplex, droneRef: string) => Promise<{ id: string; drone: any } | null>;
   };
@@ -70,22 +70,22 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
       }
       const parts = url.pathname.split('/').filter(Boolean);
       if (
-        opts.directoryEvents &&
+        opts.workspaceEvents &&
         parts.length === 5 &&
         parts[0] === 'api' &&
         parts[1] === 'drones' &&
         parts[3] === 'fs' &&
-        parts[4] === 'directory-events'
+        parts[4] === 'events'
       ) {
         if (!isHubApiAuthorizedForWebSocket(req, url, opts.apiToken)) {
           rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
           return;
         }
-        const workspace = await opts.directoryEvents.resolveWorkspace(socket, decodeURIComponent(parts[2]));
+        const workspace = await opts.workspaceEvents.resolveWorkspace(socket, decodeURIComponent(parts[2]));
         if (!workspace) return;
-        const directoryEvents = opts.directoryEvents.webSocketServer;
-        directoryEvents.handleUpgrade(req, socket, head, (webSocket: WebSocket) => {
-          directoryEvents.emit('connection', webSocket, req, { drone: workspace.drone });
+        const workspaceEvents = opts.workspaceEvents.webSocketServer;
+        workspaceEvents.handleUpgrade(req, socket, head, (webSocket: WebSocket) => {
+          workspaceEvents.emit('connection', webSocket, req, workspace);
         });
         return;
       }

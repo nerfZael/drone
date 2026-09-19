@@ -14,26 +14,12 @@ import {
   readHostMediaRange,
   type ResolvedByteRange,
 } from './filesystem-media-range';
-import { watchFileChanges } from '../daemon-file-events';
-import { subscribeDaemonFileEvents } from './daemon-file-events';
+import { hashHostFileWithSize } from './file-revision-watch';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
 import type { FilesystemRouteDependencies } from './routes/filesystem-routes';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
-
-const FILE_REVISION_BACKSTOP_MS = 30_000;
-
-export function writeFileSseFrame(res: ServerResponse, frame: string): boolean {
-  if (res.writableEnded || res.destroyed) return false;
-  try {
-    if (res.write(frame)) return true;
-  } catch {
-    // A failed write is handled like a backpressured client below.
-  }
-  res.destroy();
-  return false;
-}
 
 export class FilesystemService {
   readonly handle: LegacyRouteHandler;
@@ -75,7 +61,6 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
-    resolveDroneDaemonClientForEntry,
     resolveDroneOrRespond,
     runHostCommand,
     withLockedDroneContainer,
@@ -175,149 +160,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       isGitIgnored: ignoredPaths.has(path.resolve(entry.path)),
     }));
   };
-  const hashHostFileWithSize = async (
-    filePath: string,
-  ): Promise<{ revision: string; size: number }> =>
-    await new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256');
-      let size = 0;
-      const stream = createReadStream(filePath);
-      stream.on('data', (chunk) => {
-        hash.update(chunk);
-        size += Buffer.byteLength(chunk);
-      });
-      stream.on('error', reject);
-      stream.on('end', () => resolve({ revision: `sha256:${hash.digest('hex')}`, size }));
-    });
   const hashHostFile = async (filePath: string): Promise<string> =>
     (await hashHostFileWithSize(filePath)).revision;
-  const readFileRevision = async ({
-    drone,
-    droneName,
-    targetPath,
-  }: {
-    drone: any;
-    droneName: string;
-    targetPath: string;
-  }): Promise<{ path: string; size: number; mtimeMs: number | null; revision: string }> => {
-    if (droneRuntime(drone) === 'host') {
-      const resolvedPath = path.resolve(targetPath);
-      const stat = await fs.stat(resolvedPath);
-      if (!stat.isFile()) {
-        const error = new Error(`file not found: ${resolvedPath}`) as Error & { code?: string };
-        error.code = 'ENOENT';
-        throw error;
-      }
-      const scanned = await hashHostFileWithSize(resolvedPath);
-      if (scanned.size !== stat.size) {
-        throw Object.assign(new Error('file changed while it was being read'), {
-          statusCode: 409,
-          code: 'FILE_CHANGED_DURING_READ',
-        });
-      }
-      return {
-        path: resolvedPath,
-        size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
-        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
-        revision: scanned.revision,
-      };
-    }
-    return await withReadonlyDroneContainer(
-      { requestedDroneName: droneName, droneEntry: drone },
-      async ({ containerName }: any) => {
-        const script = [
-          'set -euo pipefail',
-          `target=${bashQuote(targetPath)}`,
-          'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
-          'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
-          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
-          'revision=$(sha256sum -- "$target" | cut -d " " -f 1)',
-          'size_after=$(stat -c %s -- "$target" 2>/dev/null || echo -1)',
-          'if [ "$size_after" != "$size" ]; then echo "__ERR__\tchanged"; exit 6; fi',
-          'printf "__META__\\t%s\\t%s\\t%s\\n" "$size" "$mtime" "$revision"',
-        ].join('\n');
-        const result = await dvmExec(containerName, 'bash', ['-lc', script]);
-        const line = String(result.stdout ?? '').trim();
-        if (result.code !== 0 || !line.startsWith('__META__\t')) {
-          throw new Error(
-            /__ERR__\s+not-file\b/i.test(`${result.stdout}\n${result.stderr}`)
-              ? `file not found: ${targetPath}`
-              : (result.stderr || result.stdout || 'failed reading file revision').trim(),
-          );
-        }
-        const parts = line.split('\t');
-        const size = Number(parts[1] ?? 0);
-        const mtime = Number(parts[2] ?? 0);
-        const digest = String(parts[3] ?? '').trim();
-        if (!/^[a-f0-9]{64}$/i.test(digest)) throw new Error('file revision response malformed');
-        return {
-          path: targetPath,
-          size: Number.isFinite(size) ? Math.max(0, Math.floor(size)) : 0,
-          mtimeMs: Number.isFinite(mtime) ? Math.max(0, Math.floor(mtime * 1000)) : null,
-          revision: `sha256:${digest.toLowerCase()}`,
-        };
-      },
-    );
-  };
-  const readFileFingerprint = async ({
-    drone,
-    droneName,
-    targetPath,
-  }: {
-    drone: any;
-    droneName: string;
-    targetPath: string;
-  }): Promise<{ path: string; size: number; mtimeMs: number | null }> => {
-    if (droneRuntime(drone) === 'host') {
-      const resolvedPath = path.resolve(targetPath);
-      const stat = await fs.stat(resolvedPath);
-      if (!stat.isFile()) {
-        const error = new Error(`file not found: ${resolvedPath}`) as Error & { code?: string };
-        error.code = 'ENOENT';
-        throw error;
-      }
-      return {
-        path: resolvedPath,
-        size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
-        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
-      };
-    }
-    return await withReadonlyDroneContainer(
-      { requestedDroneName: droneName, droneEntry: drone },
-      async ({ containerName }: any) => {
-        const script = [
-          'set -euo pipefail',
-          `target=${bashQuote(targetPath)}`,
-          'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
-          'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
-          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
-          'printf "__META__\\t%s\\t%s\\n" "$size" "$mtime"',
-        ].join('\n');
-        const result = await dvmExec(containerName, 'bash', ['-lc', script]);
-        const line = String(result.stdout ?? '').trim();
-        if (result.code !== 0 || !line.startsWith('__META__\t')) {
-          throw new Error(
-            /__ERR__\s+not-file\b/i.test(`${result.stdout}\n${result.stderr}`)
-              ? `file not found: ${targetPath}`
-              : (result.stderr || result.stdout || 'failed reading file metadata').trim(),
-          );
-        }
-        const parts = line.split('\t');
-        const size = Number(parts[1] ?? 0);
-        const mtime = Number(parts[2] ?? 0);
-        return {
-          path: targetPath,
-          size: Number.isFinite(size) ? Math.max(0, Math.floor(size)) : 0,
-          mtimeMs: Number.isFinite(mtime) ? Math.max(0, Math.floor(mtime * 1000)) : null,
-        };
-      },
-    );
-  };
-  const writeFileSseEvent = (res: ServerResponse, event: string, data: unknown): boolean => {
-    return writeFileSseFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
   return async ({ req, res, url: u, method, parts }) => {
-    const traced = method === 'GET' && parts[3] === 'fs' && parts[4] !== 'file-events';
+    const traced = method === 'GET' && parts[3] === 'fs';
     if (traced) markHubChatRouteEntry(req);
     const measure = <T,>(name: string, run: () => Promise<T>) =>
       traced ? measureHubRequestPhase(req, name, run) : run();
@@ -789,157 +635,6 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         }
       }
 
-      // GET /api/drones/:id/fs/file?path=/...
-      // Reads file data for editor/preview usage (UTF-8 text content or binary metadata).
-      if (
-        method === 'GET' &&
-        parts.length === 5 &&
-        parts[0] === 'api' &&
-        parts[1] === 'drones' &&
-        parts[3] === 'fs' &&
-        parts[4] === 'file-events'
-      ) {
-        const droneRef = decodeURIComponent(parts[2]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
-        const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const targetPath = normalizeFsPathForRuntime(
-          resolved.drone,
-          u.searchParams.get('path') ?? '',
-          { fallbackToHome: false },
-        );
-        if (!targetPath || targetPath === '/') {
-          json(res, 400, { ok: false, error: 'missing file path' });
-          return;
-        }
-
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-        res.setHeader('cache-control', 'no-cache, no-transform');
-        res.setHeader('connection', 'keep-alive');
-        req.socket.setTimeout(0);
-        (res as any).flushHeaders?.();
-
-        let closed = false;
-        let cleanup: () => void = () => undefined;
-        const publish = (event: string, data: unknown) => {
-          const written = writeFileSseEvent(res, event, data);
-          if (!written) cleanup();
-          return written;
-        };
-        let busy = false;
-        let changedWhileBusy = false;
-        let lastRevision: string | null = null;
-        let lastMissing = false;
-        // Compares the file with the last revision sent and reports a difference.
-        const checkRevision = async () => {
-          if (closed) return;
-          if (busy) {
-            changedWhileBusy = true;
-            return;
-          }
-          busy = true;
-          try {
-            const fingerprint = await readFileFingerprint({
-              drone: resolved.drone,
-              droneName,
-              targetPath,
-            });
-            if (fingerprint.size > FS_EDITOR_MAX_BYTES) {
-              const metadataRevision = `metadata:${fingerprint.size}:${fingerprint.mtimeMs ?? 'unknown'}`;
-              const event =
-                lastRevision == null
-                  ? 'snapshot'
-                  : metadataRevision !== lastRevision
-                    ? 'changed'
-                    : null;
-              lastRevision = metadataRevision;
-              lastMissing = false;
-              if (event) {
-                publish(event, {
-                  ok: true,
-                  id: droneId,
-                  ...fingerprint,
-                  revision: metadataRevision,
-                });
-              }
-              return;
-            }
-            const current = await readFileRevision({
-              drone: resolved.drone,
-              droneName,
-              targetPath,
-            });
-            const event =
-              lastRevision == null
-                ? 'snapshot'
-                : current.revision !== lastRevision
-                  ? 'changed'
-                  : null;
-            lastRevision = current.revision;
-            lastMissing = false;
-            if (event) publish(event, { ok: true, id: droneId, ...current });
-          } catch (error: any) {
-            const message = String(error?.message ?? error);
-            const missing = /not found|not-file|ENOENT/i.test(message);
-            if (missing && !lastMissing) {
-              lastMissing = true;
-              lastRevision = null;
-              publish('deleted', { ok: false, id: droneId, path: targetPath });
-            } else if (!missing) {
-              publish('stream-error', {
-                ok: false,
-                id: droneId,
-                path: targetPath,
-                error: message,
-              });
-            }
-          } finally {
-            busy = false;
-            if (changedWhileBusy && !closed) {
-              changedWhileBusy = false;
-              void checkRevision();
-            }
-          }
-        };
-        const hostRuntime = droneRuntime(resolved.drone) === 'host';
-        const stopHostWatch = hostRuntime
-          ? watchFileChanges(path.resolve(targetPath), () => void checkRevision())
-          : null;
-        // A container's files are watched by its own daemon, which reports each change.
-        const stopDaemonEvents = hostRuntime
-          ? null
-          : subscribeDaemonFileEvents(
-              {
-                resolveClient: async () =>
-                  (await resolveDroneDaemonClientForEntry(resolved.drone))?.client ?? null,
-              },
-              targetPath,
-              () => void checkRevision(),
-            );
-        // Watch events can be lost (a mount edited from outside the container, an
-        // overflowing kernel queue, a dead watcher), so the contents are still
-        // compared now and then. This bounds how stale an open file can get.
-        const timer = setInterval(() => void checkRevision(), FILE_REVISION_BACKSTOP_MS);
-        timer.unref?.();
-        const heartbeat = setInterval(() => {
-          if (!closed && !writeFileSseFrame(res, ': keepalive\n\n')) cleanup();
-        }, 15_000);
-        heartbeat.unref?.();
-        cleanup = () => {
-          if (closed) return;
-          closed = true;
-          clearInterval(timer);
-          clearInterval(heartbeat);
-          stopHostWatch?.();
-          stopDaemonEvents?.();
-        };
-        req.on('close', cleanup);
-        res.on('close', cleanup);
-        void checkRevision();
-        return;
-      }
 
       if (
         method === 'GET' &&

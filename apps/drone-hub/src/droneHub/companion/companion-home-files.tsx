@@ -1,8 +1,6 @@
 import React from 'react';
 
 const OPEN_EVENT = 'drone-hub:companion-home-files';
-/** Dispatched when the Hub reports that something in Companion home changed on disk. */
-export const COMPANION_HOME_CHANGED_EVENT = 'drone-hub:companion-home-changed';
 // The explorer and editor are heavy; load them only when the window is first opened.
 const CompanionHomeFilesDialog = React.lazy(() => import('./CompanionHomeFilesDialog'));
 

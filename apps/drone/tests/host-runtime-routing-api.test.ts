@@ -587,59 +587,6 @@ describeSocketSuite('host runtime routing api', () => {
     }
   });
 
-  test('streams hash revision changes for an open host file', async () => {
-    const droneId = 'host-file-events';
-    const droneRoot = path.join(tempRoot, 'host-file-events');
-    const notePath = path.join(droneRoot, 'live.md');
-    fs.mkdirSync(droneRoot, { recursive: true });
-    fs.writeFileSync(notePath, '# First\n');
-    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
-
-    const controller = new AbortController();
-    const response = await fetch(
-      `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/fs/file-events?path=${encodeURIComponent(notePath)}`,
-      {
-        headers: { authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      },
-    );
-    expect(response.status).toBe(200);
-    const reader = response.body?.getReader();
-    expect(reader).toBeTruthy();
-    const decoder = new TextDecoder();
-    let buffered = '';
-    const readEvent = async (eventName: string) => {
-      const deadline = Date.now() + 4_000;
-      while (!buffered.includes(`event: ${eventName}\n`)) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) throw new Error(`timed out waiting for ${eventName}`);
-        const result = await Promise.race([
-          reader!.read(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`timed out waiting for ${eventName}`)), remaining),
-          ),
-        ]);
-        if (result.done) throw new Error(`file event stream closed before ${eventName}`);
-        buffered += decoder.decode(result.value, { stream: true });
-      }
-      const marker = buffered.indexOf('\n\n');
-      const event = marker >= 0 ? buffered.slice(0, marker) : buffered;
-      if (marker >= 0) buffered = buffered.slice(marker + 2);
-      return event;
-    };
-
-    try {
-      const snapshot = await readEvent('snapshot');
-      expect(snapshot).toMatch(/"revision":"sha256:[a-f0-9]{64}"/);
-      fs.writeFileSync(notePath, '# Second\n');
-      const changed = await readEvent('changed');
-      expect(changed).toMatch(/"revision":"sha256:[a-f0-9]{64}"/);
-    } finally {
-      controller.abort();
-      await reader?.cancel().catch(() => undefined);
-    }
-  });
-
   test('supports repo routes for host runtime drone', async () => {
     const droneId = 'host-repo';
     const repoRoot = path.join(tempRoot, 'host-repo-root');

@@ -53,7 +53,7 @@ import {
   type FilesystemMutationRefreshPlan,
 } from './filesystem-mutation-refresh';
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
-import { createDirectoryRefreshThrottle, subscribeDirectoryEvents } from './directory-events';
+import { createDirectoryRefreshThrottle, subscribeDirectoryEvents } from './workspace-events';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 
@@ -174,7 +174,6 @@ export function DroneFilesDock({
   reveal,
   readOnly = false,
   zoom = 1,
-  refreshSignal,
 }: {
   droneId: string;
   droneName: string;
@@ -198,8 +197,6 @@ export function DroneFilesDock({
   reveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
   readOnly?: boolean;
   zoom?: number;
-  /** Change it to reload the root and every expanded folder, as the refresh button does. */
-  refreshSignal?: number;
 }) {
   const explorerZoom = clampWorkspaceExplorerZoom(Number.isFinite(zoom) ? zoom : 1);
   const explorerRowHeightPx = Math.round(24 * explorerZoom);
@@ -558,14 +555,6 @@ export function DroneFilesDock({
     }
   }, [droneId, expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
 
-  const refreshExplorerRef = React.useRef(refreshExplorer);
-  refreshExplorerRef.current = refreshExplorer;
-  const appliedRefreshSignal = React.useRef(refreshSignal);
-  React.useEffect(() => {
-    if (appliedRefreshSignal.current === refreshSignal) return;
-    appliedRefreshSignal.current = refreshSignal;
-    refreshExplorerRef.current();
-  }, [refreshSignal]);
 
   const pathContainsActiveFile = React.useCallback(
     (entry: DroneFsEntry) => isPathInsideOrEqual(entry.path, activeOpenedFilePath),

@@ -1,5 +1,3 @@
-import crypto from 'node:crypto';
-import { watch as watchFs } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { droneRootPath } from '../../host/paths';
@@ -111,48 +109,6 @@ export async function readCompanionHomeImages(paths: unknown, root = companionHo
     images.push({ relativePath: path.relative(await fs.realpath(root), resolved), mime, size: stat.size, data: (await fs.readFile(resolved)).toString('base64') });
   }
   return images;
-}
-
-/** A cheap fingerprint of everything in Companion home, so an open files window can notice changes made by Companion. */
-export async function companionHomeRevision(root = companionHomeRoot()): Promise<{ revision: string; files: Record<string, string> }> {
-  const files: Record<string, string> = {};
-  const walk = async (directory: string): Promise<void> => {
-    for (const entry of await fs.readdir(directory, { withFileTypes: true }).catch(() => [])) {
-      if (Object.keys(files).length >= 5000) return;
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) { files[`${entryPath}/`] = 'directory'; await walk(entryPath); }
-      else if (entry.isFile()) {
-        const stat = await fs.stat(entryPath).catch(() => null);
-        if (stat) files[entryPath] = `${stat.size}:${Math.floor(stat.mtimeMs)}`;
-      }
-    }
-  };
-  await walk(await ensureCompanionHome(root));
-  const digest = crypto.createHash('sha1');
-  for (const key of Object.keys(files).sort()) digest.update(`${key}\0${files[key]}\n`);
-  return { revision: digest.digest('hex'), files };
-}
-
-/**
- * Tell a listener when anything in Companion home changes, so an open files window can follow what
- * Companion does without polling. One recursive watcher, debounced; if the platform cannot watch
- * recursively it reports false and the window falls back to refreshing when it regains focus.
- */
-export function watchCompanionHome(onChange: () => void, root = companionHomeRoot()): { active: boolean; close(): void } {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const watcher = watchFs(root, { recursive: true, persistent: false }, () => {
-      clearTimeout(timer);
-      timer = setTimeout(onChange, 150);
-      timer.unref?.();
-    });
-    const handle = { active: true, close() { handle.active = false; clearTimeout(timer); watcher.close(); } };
-    // A watcher that fails (for example when the folder is deleted) is simply re-armed by the next window.
-    watcher.on('error', () => handle.close());
-    return handle;
-  } catch {
-    return { active: false, close() {} };
-  }
 }
 
 /** Save one capture or pasted text as soon as it is taken, so an instruction only has to name it. */

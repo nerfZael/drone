@@ -49,6 +49,7 @@ import {
 import { appendFileDictationLine } from '../files/file-dictation-text';
 import type { InitialFileRead } from '../files/prepare-workspace-file-open';
 import { readDesktopFile } from '../files/read-desktop-file';
+import { subscribeFileEvents, type WorkspaceFileEvent } from '../files/workspace-events';
 import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
 
 type RequestJson = typeof requestJsonFn;
@@ -775,17 +776,8 @@ export function useFileEditorState({
 
   const openTabWatch = React.useCallback((watchedTab: OpenedFileTab): (() => void) => {
     const tabId = watchedTab.tabId;
-    const source = new window.EventSource(
-      `/api/drones/${encodeURIComponent(watchedTab.droneId)}/fs/file-events?path=${encodeURIComponent(watchedTab.path)}`,
-    );
     let retryTimer: number | null = null;
-    const onRevision = (event: MessageEvent) => {
-      let payload: any = null;
-      try {
-        payload = JSON.parse(String(event.data ?? ''));
-      } catch {
-        return;
-      }
+    const onRevision = (payload: WorkspaceFileEvent) => {
       const nextRevision =
         typeof payload?.revision === 'string' && payload.revision.trim()
           ? payload.revision.trim()
@@ -867,7 +859,7 @@ export function useFileEditorState({
           if (retryTimer != null) return;
           retryTimer = window.setTimeout(() => {
             retryTimer = null;
-            onRevision(event);
+            onRevision(payload);
           }, 2_000);
         });
     };
@@ -888,12 +880,14 @@ export function useFileEditorState({
         ),
       );
     };
-    source.addEventListener('snapshot', onRevision as EventListener);
-    source.addEventListener('changed', onRevision as EventListener);
-    source.addEventListener('deleted', onDeleted);
+    // The workspace's shared connection to the Hub; the explorer's folder events use it too.
+    const stopWatching = subscribeFileEvents(watchedTab.droneId, watchedTab.path, (event) => {
+      if (event.event === 'snapshot' || event.event === 'changed') onRevision(event);
+      else if (event.event === 'deleted') onDeleted();
+    });
     return () => {
       if (retryTimer != null) window.clearTimeout(retryTimer);
-      source.close();
+      stopWatching();
     };
   }, [requestJson, updateTabs]);
 
@@ -903,7 +897,7 @@ export function useFileEditorState({
     .join('\u0000');
   const watchSessionsRef = React.useRef(new Map<string, { key: string; dispose: () => void }>());
   React.useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
+    if (typeof window === 'undefined' || typeof window.WebSocket === 'undefined') return;
     const wanted = new Map(
       (watchKey ? watchKey.split('\u0000') : []).map((entry) => [entry.split('\u0001')[0], entry] as const),
     );

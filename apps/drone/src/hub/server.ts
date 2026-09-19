@@ -318,7 +318,8 @@ import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { registerReflexRoutes } from './reflex/reflex-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
-import { createDirectoryEventsWebSocketServer } from './directory-events-websocket-server';
+import { createFileRevisionWatcher } from './file-revision-watch';
+import { createWorkspaceEventsWebSocketServer } from './workspace-events-websocket-server';
 import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
@@ -5604,9 +5605,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime,
-    // Reaches every open Hub UI over the event stream it already holds.
-    () => { assistantService.emitExternalUiAction({ type: 'companion_home_changed', at: nowIso() }); });
+  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
   registerReflexRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
@@ -5965,7 +5964,6 @@ async function startDroneHubApiServerWithLifecycle(
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
-    resolveDroneDaemonClientForEntry,
     // Companion home is not a drone, but the explorer and editor can browse it like a host drone's folder.
     resolveDroneOrRespond: async (res: http.ServerResponse, droneRef: string) =>
       String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
@@ -6362,18 +6360,27 @@ async function startDroneHubApiServerWithLifecycle(
       handleHubRequestFailure({ req, res, error, log: hubLog, respond: json });
     }
   };
-  const directoryEventsWss = createDirectoryEventsWebSocketServer({
+  const resolveDaemonClient = async (drone: any) =>
+    (await resolveDroneDaemonClientForEntry(drone))?.client ?? null;
+  const workspaceEventsWss = createWorkspaceEventsWebSocketServer({
     droneRuntime,
     normalizeFsPathForRuntime,
-    resolveDaemonClient: async (drone) => (await resolveDroneDaemonClientForEntry(drone))?.client ?? null,
+    resolveDaemonClient,
+    watchFileRevision: createFileRevisionWatcher({
+      FS_EDITOR_MAX_BYTES,
+      droneRuntime,
+      withReadonlyDroneContainer,
+      dvmExec,
+      resolveDaemonClient,
+    }),
   });
   const handleHubUpgrade = createTerminalWebSocketUpgradeHandler({
     apiToken,
     allowedOrigins,
     webSocketServer: wss,
     companionWebSocketServer: companionWss,
-    directoryEvents: {
-      webSocketServer: directoryEventsWss,
+    workspaceEvents: {
+      webSocketServer: workspaceEventsWss,
       // Companion home is browsed like a host drone's folder, as in the filesystem routes.
       resolveWorkspace: async (socket, droneRef) =>
         String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
@@ -6414,7 +6421,7 @@ async function startDroneHubApiServerWithLifecycle(
     requestListener: handleHubHttpRequest,
     upgradeListener: handleHubUpgrade,
     webSocketServer: wss,
-    additionalWebSocketServers: [companionWss, directoryEventsWss],
+    additionalWebSocketServers: [companionWss, workspaceEventsWss],
     ...(mcpToken && containerMcpHost && containerMcpPort > 0
       ? {
           containerMcp: {
