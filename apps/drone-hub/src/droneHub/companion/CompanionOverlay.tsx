@@ -26,9 +26,8 @@ import { CompanionProposalStrip } from './CompanionProposalStrip';
 import { CompanionOptionsMenu } from './CompanionOptionsMenu';
 import { CompanionAttachmentDialog, companionAttachmentText, isCompanionTextAttachment } from './CompanionAttachmentDialog';
 import { openCompanionHomeFiles } from './companion-home-files';
-import { canSnipForCompanion, snipForCompanion } from './companion-snip';
-import { formatShortcutBinding } from '../app/shortcuts';
-import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { useCompanionSpeechMute } from './use-companion-speech-mute';
+import { companionAttachmentFromFile, isCompanionPreviewable } from './companion-attachment-files';
 import { CompanionTranscriptDialog, useCompanionTranscriptDialog } from './CompanionTranscriptDialog';
 import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
@@ -90,16 +89,6 @@ function CompanionStatusIndicator({
   );
 }
 
-/** Clipboard images are all called image.png; give each a name that says what and when it was. */
-async function pastedImageAttachment(file: File) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
-  const generic = !file.name || /^image\.[a-z]+$/i.test(file.name);
-  return { name: generic ? `pasted-image-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}` : file.name, mime: file.type, size: bytes.length, dataBase64: btoa(binary) };
-}
-
 const REPLY_COLLAPSED_KEY = 'drone-hub:companion-reply-collapsed';
 
 function CompanionHeaderButton({
@@ -152,6 +141,9 @@ export function CompanionOverlay() {
   const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [viewedAttachmentId, setViewedAttachmentId] = React.useState<string | null>(null);
+  // Files dragged onto Companion become attachments, like pasting.
+  const [dropActive, setDropActive] = React.useState(false);
+  const dropzone = React.useRef<HTMLDivElement>(null);
   // A lasting preference, not a per-reply state: collapsed keeps every reply folded away behind the
   // header; expanded shows a reply whenever there is one, and nothing while Companion is still working.
   const [replyCollapsed, setReplyCollapsedState] = React.useState(() => {
@@ -174,8 +166,6 @@ export function CompanionOverlay() {
   // Sending the batch removes the attachment, which also closes its viewer.
   const viewedAttachment = companion?.attachments?.find(item => item.id === viewedAttachmentId);
   const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen || transcriptDialog.open || Boolean(viewedAttachment);
-  const snipBinding = useDroneHubUiStore(state => state.shortcutBindings.snipCompanion);
-  const snipShortcut = snipBinding ? formatShortcutBinding(snipBinding) : '';
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -196,6 +186,7 @@ export function CompanionOverlay() {
   const visible = Boolean(companion && (companion.shortcutHint || (companion.panelVisibility !== 'closed' &&
     (companion.panelVisibility === 'open' || companion.status !== 'idle' || companion.live?.hasStarted || panelOpen))));
   const companionWindow = useCompanionWindowHost(visible);
+  const speech = useCompanionSpeechMute(visible);
   const popoverFocus = useCrossWindowFocus(companionWindow.portalContainer);
   React.useEffect(() => {
     if (!companionWindow.detached || !companionWindow.ownerWindow || companion?.switchingVoice ||
@@ -214,6 +205,7 @@ export function CompanionOverlay() {
   // all Companion; in the main window only its own surfaces count, and editable fields keep their paste.
   const addTextAttachment = companion?.addTextAttachment;
   const addAttachment = companion?.addAttachment;
+  const reportAttachmentError = companion?.reportAttachmentError ?? (() => {});
   React.useEffect(() => {
     const view = companionWindow.ownerWindow;
     if (!view || !visible || !addTextAttachment) return;
@@ -221,11 +213,11 @@ export function CompanionOverlay() {
       const target = event.target as Element | null;
       if (!companionWindow.detached && !target?.closest?.('[data-companion-surface]')) return;
       if (target?.closest?.('input, textarea, [contenteditable="true"], [data-portable-editor], .monaco-editor')) return;
-      // A copied screenshot or image wins over any text that came along with it.
-      const images = Array.from(event.clipboardData?.files ?? []).filter(file => file.type.startsWith('image/'));
+      // Copied files (a screenshot, or files copied in a file manager) win over any text that came along.
+      const images = Array.from(event.clipboardData?.files ?? []);
       if (images.length && addAttachment) {
         event.preventDefault();
-        for (const file of images) void pastedImageAttachment(file).then(addAttachment).catch(() => {});
+        for (const file of images) void companionAttachmentFromFile(file, 'paste').then(addAttachment).catch(reportAttachmentError);
         return;
       }
       const text = event.clipboardData?.getData('text/plain') ?? '';
@@ -236,9 +228,65 @@ export function CompanionOverlay() {
     view.document.addEventListener('paste', onPaste);
     return () => view.document.removeEventListener('paste', onPaste);
   }, [companionWindow.ownerWindow, companionWindow.detached, visible, addTextAttachment, addAttachment]);
+  // The dropzone is decided by where the pointer is, not by which child element it happens to cross:
+  // enter/leave pairs on nested elements drift and made the highlight miss. The floating window is all
+  // Companion, so anywhere in it counts; in the main window it is the card with its attachment row.
+  const reportAttachmentErrorRef = React.useRef(reportAttachmentError);
+  reportAttachmentErrorRef.current = reportAttachmentError;
+  React.useEffect(() => {
+    const view = companionWindow.ownerWindow;
+    if (!view || !visible || !addAttachment) return;
+    const page = view.document;
+    const detached = companionWindow.detached;
+    let idle: number | undefined;
+    const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    const inside = (event: DragEvent) => {
+      if (detached) return true;
+      const rect = dropzone.current?.getBoundingClientRect();
+      return Boolean(rect) && event.clientX >= rect!.left - 6 && event.clientX <= rect!.right + 6 && event.clientY >= rect!.top - 6 && event.clientY <= rect!.bottom + 6;
+    };
+    const end = () => {
+      view.clearTimeout(idle);
+      setDropActive(false);
+      page.documentElement.removeAttribute('data-companion-file-drag');
+    };
+    const onOver = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      const hit = inside(event);
+      setDropActive(hit);
+      if (hit) {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        // The bar is a window drag region, which would otherwise take the pointer from under the drag.
+        page.documentElement.setAttribute('data-companion-file-drag', 'true');
+      }
+      // dragover repeats while a drag is over the page; silence means it left without saying so.
+      view.clearTimeout(idle);
+      idle = view.setTimeout(end, 800);
+    };
+    const onLeave = (event: DragEvent) => { if (!event.relatedTarget) end(); };
+    const onDrop = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      const hit = inside(event);
+      end();
+      if (!hit) return;
+      event.preventDefault();
+      for (const file of Array.from(event.dataTransfer?.files ?? [])) void companionAttachmentFromFile(file, 'drop').then(addAttachment).catch(error => reportAttachmentErrorRef.current(error));
+    };
+    page.addEventListener('dragenter', onOver);
+    page.addEventListener('dragover', onOver);
+    page.addEventListener('dragleave', onLeave);
+    page.addEventListener('drop', onDrop);
+    return () => {
+      end();
+      page.removeEventListener('dragenter', onOver);
+      page.removeEventListener('dragover', onOver);
+      page.removeEventListener('dragleave', onLeave);
+      page.removeEventListener('drop', onDrop);
+    };
+  }, [companionWindow.ownerWindow, companionWindow.detached, visible, addAttachment]);
   if (!companion || !visible) return companionWindow.render(null);
   const active = companion.status === 'working';
-  const canSnip = canSnipForCompanion();
   const liveActive = companion.live?.status === 'connecting' || companion.live?.status === 'listening';
   const duration = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
@@ -300,7 +348,8 @@ export function CompanionOverlay() {
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
       {/* The proposal strip docks onto the window's outer edge so it works even when the window is a single row. */}
-      <div className={`flex min-h-0 w-full ${flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}>
+      <div className={`flex min-h-0 w-full ${flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companionWindow.detached ? '' : 'min-[860px]:max-w-[28rem] min-[860px]:self-end'}`}
+        ref={dropzone}>
       {/* Pending captures sit just outside the card, on the side content flows to, like papers clipped to
           its edge: the card itself stays one clean bar. They leave once the next instruction takes them. */}
       {companion.attachments?.length ? (
@@ -308,11 +357,17 @@ export function CompanionOverlay() {
           className={`flex shrink-0 items-center gap-1.5 overflow-x-auto px-0.5 ${flowsDown ? 'pb-0.5 pt-1.5' : 'pb-1.5 pt-0.5'} [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}>
           {companion.attachments.map(item => (
             <div key={item.id} className="group relative shrink-0">
-              <button type="button" aria-label={`View ${item.name}`} title={item.name} onClick={() => setViewedAttachmentId(item.id)}
+              <button type="button" aria-label={`View ${item.name}`} title={item.name}
+                // What cannot be previewed here opens where it lives, selected in Companion home.
+                onClick={() => isCompanionPreviewable(item) ? setViewedAttachmentId(item.id) : openCompanionHomeFiles({ path: item.path })}
                 className="block h-11 w-16 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),0_2px_8px_var(--shadow-color)] hover:border-[var(--accent-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
                 {isCompanionTextAttachment(item)
                   ? <span aria-hidden="true" className="block h-full whitespace-pre-wrap break-all p-1 text-left font-mono text-[5px] leading-[6px] text-[var(--fg-secondary)]">{companionAttachmentText(item).slice(0, 260)}</span>
-                  : <img src={`data:${item.mime};base64,${item.dataBase64}`} alt="" className="h-full w-full object-cover" />}
+                  : isCompanionPreviewable(item) ? <img src={`data:${item.mime};base64,${item.dataBase64}`} alt="" className="h-full w-full object-cover" />
+                  : <span aria-hidden="true" className="flex h-full flex-col items-center justify-center gap-0.5 px-1">
+                      <span className="rounded border border-[var(--border-subtle)] px-1 text-[9px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)]">{(/\.([a-z0-9]{1,5})$/i.exec(item.name)?.[1] ?? 'file')}</span>
+                      <span className="w-full truncate text-center text-[8px] text-[var(--muted)]">{item.name}</span>
+                    </span>}
               </button>
               <button type="button" aria-label={`Remove ${item.name}`} title="Remove" onClick={() => companion.removeAttachment(item.id)}
                 className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[11px] leading-none text-[var(--muted)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100">
@@ -335,9 +390,19 @@ export function CompanionOverlay() {
         }}
       />
       <aside tabIndex={-1}
-        className={`outline-none flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
+        data-companion-drop-active={dropActive || undefined}
+        className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
         aria-label="Companion"
       >
+      {/* A soft veil says what will happen; it never takes the pointer, so the drop lands on the page beneath. */}
+      {dropActive ? (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[var(--accent-subtle)] backdrop-blur-[1.5px]">
+          <span className="flex items-center gap-1.5 rounded-full border border-[var(--accent-border)] bg-[var(--panel-raised)] px-2.5 py-1 text-[11px] text-[var(--fg)] shadow-sm">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            Drop to attach
+          </span>
+        </div>
+      ) : null}
       {/* Header doubles as the user's message once a transcript exists. In the floating window it is the bar that stays put. */}
       <div data-companion-window-bar="true" data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
         <Popover.Root open={expanded} onOpenChange={setExpanded}>
@@ -495,11 +560,13 @@ export function CompanionOverlay() {
               <path d="M4 5h16" />{replyCollapsed ? <path d="m8 12 4 4 4-4" /> : <><path d="M4 11h16M4 17h10" /></>}
             </svg>
           </CompanionHeaderButton> : null}
-          {canSnip ? <CompanionHeaderButton label={`Snip part of the screen for your next message${snipShortcut ? ` (${snipShortcut})` : ''}`} onClick={() => snipForCompanion('region')}>
+          <CompanionHeaderButton
+            label={speech.muted ? 'Companion speech is muted; cue sounds still play. Click to unmute' : 'Mute Companion speech; cue sounds still play'}
+            tone={speech.muted ? 'danger' : 'neutral'} pressed={speech.muted} disabled={speech.busy} onClick={() => void speech.toggle()}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><circle cx="12" cy="12" r="3" />
+              <path d="M4 9v6h4l5 4V5L8 9Z" />{speech.muted ? <path d="m17 9 5 6M22 9l-5 6" /> : <><path d="M16.5 8.5a5 5 0 0 1 0 7" /><path d="M19.5 5.5a9 9 0 0 1 0 13" /></>}
             </svg>
-          </CompanionHeaderButton> : null}
+          </CompanionHeaderButton>
           <CompanionSubscriptions subscriptions={companion.subscriptions ?? []} />
           <CompanionHeaderButton
             label={`Auto-approve proposals ${companion.autoApprove ? 'on' : 'off'}; double-tap Caps Lock to toggle`}

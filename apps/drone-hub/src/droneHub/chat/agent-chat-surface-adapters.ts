@@ -15,7 +15,8 @@ export function adaptExternalAgentChatSurface(
   return {
     agentType: 'external',
     capabilities: {
-      attachments: capabilities.attachments ?? 'images',
+      // Any file: it is copied into the drone's workspace and the agent is given its path.
+      attachments: capabilities.attachments ?? 'files',
       sendWhileWaiting: capabilities.sendWhileWaiting ?? true,
       toolActivity: capabilities.toolActivity ?? 'hidden',
     },

@@ -8,6 +8,8 @@ import {
 } from '@drone/assistant-chat';
 import type { ChatImageAttachmentRef } from '../types';
 import type { MarkdownFileReference } from './MarkdownMessage';
+import { requestJson } from '../http';
+import { AttachmentViewerDialog, portalContainerOf, type ViewedAttachment } from '../media/AttachmentViewerDialog';
 
 function formatBytes(raw: number): string {
   const n = Number(raw);
@@ -97,6 +99,19 @@ export function isAttachmentOnlyPrompt(promptRaw: string, attachments: ChatImage
   return prompt.toLowerCase() === chatAttachmentPreviewLabel(attachments).toLowerCase();
 }
 
+/** A text attachment's content, from whichever of the drone's two home paths holds it. */
+async function readAttachmentText(droneId: string, paths: string[]): Promise<string> {
+  let failure: unknown = new Error('Attachment file not found.');
+  for (const path of paths.filter(Boolean)) {
+    try {
+      const data = await requestJson<{ kind?: string; content?: string }>(`/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(path)}`);
+      if (typeof data.content === 'string') return data.content;
+      failure = new Error('This attachment is not text.');
+    } catch (error) { failure = error; }
+  }
+  throw failure;
+}
+
 function toFileRef(pathRaw: string): MarkdownFileReference | null {
   const path = normalizePath(pathRaw);
   if (!path) return null;
@@ -115,6 +130,7 @@ export function ImageAttachmentChips({
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
 }) {
   const [thumbFailCountByKey, setThumbFailCountByKey] = React.useState<Record<string, number>>({});
+  const [viewed, setViewed] = React.useState<{ attachment: ViewedAttachment; container?: HTMLElement } | null>(null);
   if (attachments.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -145,6 +161,16 @@ export function ImageAttachmentChips({
         const targetPath = String(path || a.path || a.relativePath || '').trim();
         const fileRef = toFileRef(targetPath);
         const fileLabel = String(a.relativePath ?? path ?? a.path ?? '').trim();
+        // Full size comes from the file in the drone; the inline preview is only a stand-in when there is no path.
+        const fullSizeSrcs = [
+          ...(droneId && path ? [`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(path)}`] : []),
+          ...(droneId && altPath && altPath !== path ? [`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(altPath)}`] : []),
+          ...(hasPreviewDataUrl ? [previewDataUrlRaw] : []),
+        ];
+        const viewable: ViewedAttachment | null = isImage
+          ? fullSizeSrcs.length ? { kind: 'image', name: a.name, src: fullSizeSrcs[0]!, fallbackSrcs: fullSizeSrcs.slice(1) } : null
+          : typeLabel === 'Text' && droneId && path ? { kind: 'text', name: a.name, loadText: () => readAttachmentText(droneId, [path, altPath]) } : null;
+        const view = viewable ? (event: React.MouseEvent) => setViewed({ attachment: viewable, container: portalContainerOf(event.currentTarget) }) : undefined;
         return (
           <div
             key={key}
@@ -152,6 +178,10 @@ export function ImageAttachmentChips({
           >
             {showThumb ? (
               <img
+                onClick={view}
+                role={view ? 'button' : undefined}
+                title={view ? 'View full size' : undefined}
+                style={view ? { cursor: 'zoom-in' } : undefined}
                 src={thumbSrc}
                 alt={a.name}
                 loading="lazy"
@@ -172,7 +202,8 @@ export function ImageAttachmentChips({
                 {typeLabel}
               </span>
             )}
-            <span className="truncate max-w-[220px]">{a.name}</span>
+            {view ? <button type="button" onClick={view} title={isImage ? 'View full size' : 'View contents'} className="truncate max-w-[220px] text-left hover:underline focus-visible:outline-none focus-visible:underline">{a.name}</button>
+              : <span className="truncate max-w-[220px]">{a.name}</span>}
             <span className="text-[var(--muted-dim)]">{formatBytes(a.size)}</span>
             {fileRef && onOpenFileReference ? (
               <button
@@ -188,6 +219,7 @@ export function ImageAttachmentChips({
           </div>
         );
       })}
+      {viewed ? <AttachmentViewerDialog attachment={viewed.attachment} portalContainer={viewed.container} onClose={() => setViewed(null)} /> : null}
     </div>
   );
 }

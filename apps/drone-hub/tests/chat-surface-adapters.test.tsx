@@ -128,18 +128,19 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('disabled=""');
   });
 
-  test('external agents use image attachments without native tool activity', () => {
+  test('external agents take any file as an attachment, without native tool activity', () => {
     const adapter = adaptExternalAgentChatSurface();
     const html = renderComposer(adapter);
 
+    // The file is copied into the drone's workspace and the agent is told its path, so its type does not matter.
     expect(adapter.capabilities).toEqual({
-      attachments: 'images',
+      attachments: 'files',
       sendWhileWaiting: true,
       toolActivity: 'hidden',
     });
     expect(html).toContain('data-agent-type="external"');
     expect(html).toContain('data-tool-activity="hidden"');
-    expect(html).toContain('accept="image/*"');
+    expect(html).not.toContain('accept="image/*"');
     expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html).toContain('aria-label="Record voice message"');
     const microphoneButton = html.match(/<button[^>]*aria-label="Record voice message"[^>]*>/)?.[0];
@@ -397,11 +398,12 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('data-chat-composer-expanded="false"');
     expect(html).toContain('data-chat-composer-collapsed-action="true"');
-    expect(html).toContain('aria-label="Attach images"');
+    expect(html).toContain('aria-label="Attach files"');
     expect(html).toContain('aria-label="Open editor mode"');
     expect(html).toContain('aria-label="Record voice message"');
     expect(html).not.toContain('aria-label="Start continuous voice steering"');
-    expect(html.indexOf('aria-label="Attach images"')).toBeLessThan(
+    expect(html).toContain('aria-label="Attach files"');
+    expect(html.indexOf('aria-label="Attach files"')).toBeLessThan(
       html.indexOf('aria-label="Open editor mode"'),
     );
     expect(html).not.toContain('Model A');
@@ -438,7 +440,8 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('data-chat-composer-expanded="true"');
-    expect(html.indexOf('aria-label="Attach images"')).toBeLessThan(
+    expect(html).toContain('aria-label="Attach files"');
+    expect(html.indexOf('aria-label="Attach files"')).toBeLessThan(
       html.indexOf('aria-label="Open editor mode"'),
     );
     expect(html.indexOf('aria-label="Open editor mode"')).toBeLessThan(

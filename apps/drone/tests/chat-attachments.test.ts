@@ -151,3 +151,16 @@ describe('normalizeChatImageAttachments', () => {
     ).toThrow('too many attachments (max 8)');
   });
 });
+
+test('any file type is a chat attachment: stored under its own name and presented to the agent as a file to open', () => {
+  const pdf = { name: 'Quarterly report.pdf', mime: 'application/pdf', size: 5, dataBase64: Buffer.from('%PDF-').toString('base64') };
+  const unnamed = { name: '', mime: 'application/zip', size: 2, dataBase64: Buffer.from('PK').toString('base64') };
+  const [first, second] = normalizeChatImageAttachments([pdf, unnamed]);
+  expect(first).toMatchObject({ name: 'Quarterly report.pdf', mime: 'application/pdf', size: 5 });
+  expect(first.fileName.endsWith('.pdf')).toBe(true);
+  expect(second.fileName).toBe('file-2.bin');
+  const prompt = promptWithImageAttachments('Summarise this', [{ ...first, path: '/work/repo/.drone-hub/attachments/report.pdf' }]);
+  expect(prompt).toContain('Attachment:');
+  expect(prompt).toContain('/work/repo/.drone-hub/attachments/report.pdf');
+  expect(() => normalizeChatImageAttachments([{ ...pdf, mime: 'not a mime' }])).toThrow('not valid');
+});

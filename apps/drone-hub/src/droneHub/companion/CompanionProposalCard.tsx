@@ -250,11 +250,13 @@ function ProposalOperationHoverCard({
       <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
       <Tooltip.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
         <Tooltip.Content
-          side="left"
+          // Beside the card in the app. The floating window is only as wide as the card, so there the
+          // preview goes where the window grows: above a bar low on the screen, below a high one.
+          side={companionWindow.detached ? (companionWindow.flow === 'down' ? 'bottom' : 'top') : 'left'}
           align="center"
-          sideOffset={10}
-          collisionPadding={12}
-          className="z-[200] max-h-[min(32rem,calc(100vh-1.5rem))] w-[min(28rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] p-3 text-left shadow-[var(--edge-highlight),var(--shadow-menu)]"
+          sideOffset={companionWindow.detached ? 6 : 10}
+          collisionPadding={companionWindow.detached ? 8 : 12}
+          className="z-[200] max-h-[min(32rem,var(--radix-tooltip-content-available-height),calc(100vh-1.5rem))] w-[min(28rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] p-3 text-left shadow-[var(--edge-highlight),var(--shadow-menu)]"
         >
           <div className="text-xs font-[var(--weight-semibold)] text-[var(--fg)]">{title}</div>
           {createLocation ? (

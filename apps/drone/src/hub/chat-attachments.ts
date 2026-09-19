@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   CHAT_ATTACHMENT_POLICY,
   chatAttachmentKind,
+  isValidChatAttachmentMime,
   normalizeChatAttachmentMime,
   promptWithChatAttachmentContext,
   validateChatAttachments,
@@ -46,8 +47,11 @@ function isTextAttachmentMime(mimeRaw: string): boolean {
   return chatAttachmentKind({ mime: mimeRaw }) === 'text';
 }
 
+// Every attachment becomes a file in the drone's workspace that the agent is told about by path,
+// so its type only decides how it is presented: images and text inline where the agent supports
+// that, anything else as a file to open.
 function isSupportedAttachmentMime(mimeRaw: string): boolean {
-  return isImageAttachmentMime(mimeRaw) || isTextAttachmentMime(mimeRaw);
+  return isValidChatAttachmentMime(mimeRaw);
 }
 
 function normalizeAttachmentsStorageRoot(storageRootRaw: string | undefined, cwd: string): string {
@@ -103,7 +107,7 @@ function extForAttachmentMime(mimeRaw: string): string {
     case 'text/plain':
       return 'txt';
     default:
-      return isImageAttachmentMime(mime) ? 'png' : 'txt';
+      return isImageAttachmentMime(mime) ? 'png' : isTextAttachmentMime(mime) ? 'txt' : 'bin';
   }
 }
 
@@ -156,7 +160,7 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
 
     const mime = normalizeChatAttachmentMime(item.mime, item.name);
     if (!isSupportedAttachmentMime(mime))
-      throw new Error('only image and text attachments are supported');
+      throw new Error('attachment type is not valid');
 
     const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
     if (!dataBase64) throw new Error('attachment is missing dataBase64');
@@ -194,7 +198,7 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
         );
       }
       if (policy.issue.code === 'invalid_mime') {
-        throw new Error('only image and text attachments are supported');
+        throw new Error('attachment type is not valid');
       }
       throw new Error('attachment size is invalid');
     }
@@ -202,7 +206,7 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     const ext = extForAttachmentMime(mime);
     const fallbackBase = isImageAttachmentMime(mime)
       ? `image-${out.length + 1}`
-      : `text-${out.length + 1}`;
+      : isTextAttachmentMime(mime) ? `text-${out.length + 1}` : `file-${out.length + 1}`;
     const name = String(item.name ?? '').trim() || `${fallbackBase}.${ext}`;
     const fileName = uniqueAttachmentFileName(
       sanitizeAttachmentFileName(name, fallbackBase, ext),

@@ -1,3 +1,4 @@
+import { AttachmentViewerDialog, portalContainerOf, type ViewedAttachment } from '../media/AttachmentViewerDialog';
 import React from 'react';
 
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
@@ -154,6 +155,7 @@ export function ChatMessageBody({
   /** Rendered on the collapse toggle's row, after the message text. */
   footer?: React.ReactNode;
 }) {
+  const [viewed, setViewed] = React.useState<{ attachment: ViewedAttachment; container?: HTMLElement } | null>(null);
   const rawText = String(text ?? '');
   const renderedText =
     role === 'assistant' && renderedInlineMediaHrefs
@@ -194,18 +196,22 @@ export function ChatMessageBody({
       {images.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {images.map((image) => (
-            <img
-              key={image.key}
-              src={image.src}
-              alt={image.alt}
-              loading="lazy"
-              decoding="async"
-              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
-            />
+            <button key={image.key} type="button" aria-label={`View ${image.alt || 'image'}`} title="View full size"
+              onClick={(event) => setViewed({ attachment: { kind: 'image', name: image.alt || 'Image', src: image.src }, container: portalContainerOf(event.currentTarget) })}
+              className="cursor-zoom-in rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+              <img
+                src={image.src}
+                alt={image.alt}
+                loading="lazy"
+                decoding="async"
+                className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
+              />
+            </button>
           ))}
         </div>
       ) : null}
       {!hasText && footer ? <div className="dh-chat-message-footer">{footer}</div> : null}
+      {viewed ? <AttachmentViewerDialog attachment={viewed.attachment} portalContainer={viewed.container} onClose={() => setViewed(null)} /> : null}
     </div>
   );
 }

@@ -46,6 +46,8 @@ export type CompanionProposalOperation =
       type: 'create_drone';
       name?: string;
       prompt: string;
+      /** Files from Companion home that go to the new drone together with its first message. */
+      attachmentPaths?: string[];
       repoPath?: string;
       group?: string;
       draft?: boolean;
@@ -235,7 +237,7 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '- create_group: { id, type, name, repoPath? }',
   '- delete_group: { id, type, name, repoPath? }',
   '- rename_group: { id, type, name, newName, repoPath? }',
-  '- create_drone: { id, type, name?, prompt, repoPath?, group?, draft?, runtime?, persistVolume?, repoBranchSource?, remoteBranch?, agent?, provider?, model?, reasoning?, agentPermissionMode?, approvalPolicy? }',
+  '- create_drone: { id, type, name?, prompt, attachmentPaths?: string[] (absolute Companion home paths, sent with the first message), repoPath?, group?, draft?, runtime?, persistVolume?, repoBranchSource?, remoteBranch?, agent?, provider?, model?, reasoning?, agentPermissionMode?, approvalPolicy? }',
   '- clone_drone: { id, type, sourceDroneId, name, repoPath?, group?, cloneChats? } (container drones only)',
   '- delete_drone: { id, type, droneId }',
   '- rename_drone: { id, type, droneId, newName }',
@@ -254,7 +256,8 @@ export const COMPANION_PROPOSAL_FORMAT = [
   'Provider is openai, codex, gemini, openrouter, or cerebras and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
   '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',
-  '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue", attachmentPaths?: string[] (absolute Companion attachment paths) }',
+  '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue", attachmentPaths?: string[] (absolute Companion home paths) }',
+  'attachmentPaths take up to 8 images or text files from Companion home (uploads or files you wrote there), 6 MB each; they reach the agent as real chat attachments.',
   'A later operation may target a drone created or cloned earlier in the document with droneId "$<operation id>".',
   'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default" where it is optional.',
   'Any Apply attempt is terminal for this proposal. Create a separate correction proposal containing only unfinished work after a failure. Completed operations must never be replayed. Use discard_proposal to dismiss obsolete drafts or failures; other proposals remain usable.',
@@ -377,6 +380,7 @@ export function companionProposalOperationDetails(
       return [repo(operation.repoPath)];
     case 'create_drone':
       return [
+        ...(operation.attachmentPaths?.length ? [{ label: 'Attachments', value: operation.attachmentPaths.join('\n') }] : []),
         repo(operation.repoPath),
         { label: 'Group', value: operation.group || 'Ungrouped' },
         { label: 'Runtime', value: operation.runtime || 'Saved default' },
@@ -556,6 +560,12 @@ function resolveDroneReference(
   return { ...operation, droneId };
 }
 
+function attachmentPathsField(operation: Record<string, unknown>, path: string): { attachmentPaths?: string[] } {
+  if (operation.attachmentPaths === undefined) return {};
+  if (!Array.isArray(operation.attachmentPaths) || operation.attachmentPaths.length > 8) throw new Error(`${path}.attachmentPaths must contain at most 8 paths`);
+  return { attachmentPaths: operation.attachmentPaths.map((value, index) => requiredSingleLineText(value, `${path}.attachmentPaths[${index}]`, 4096)) };
+}
+
 function validateOperation(value: unknown, path: string): CompanionProposalOperation {
   const operation = record(value, path);
   const type = requiredSingleLineText(operation.type, `${path}.type`, 64);
@@ -581,7 +591,7 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
   }
   if (type === 'create_drone') {
     exactKeys(operation, [
-      'id', 'type', 'name', 'prompt', 'repoPath', 'group', 'draft', 'runtime',
+      'id', 'type', 'name', 'prompt', 'attachmentPaths', 'repoPath', 'group', 'draft', 'runtime',
       'persistVolume', 'repoBranchSource', 'remoteBranch', 'agent', 'provider', 'model',
       'reasoning', 'agentPermissionMode', 'approvalPolicy',
     ], path);
@@ -591,6 +601,7 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
       type,
       ...optionalNonEmptyField(operation, 'name', path, 80),
       prompt: requiredText(operation.prompt, `${path}.prompt`, 100_000),
+      ...attachmentPathsField(operation, path),
       ...optionalField(operation, 'repoPath', path, 4_096),
       ...optionalField(operation, 'group', path, 64),
       ...optionalBooleanField(operation, 'draft', path),
@@ -709,11 +720,6 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
   }
   if (type === 'send_message') {
     exactKeys(operation, ['id', 'type', 'droneId', 'chatName', 'message', 'delivery', 'attachmentPaths'], path);
-    let attachmentPaths: string[] | undefined;
-    if (operation.attachmentPaths !== undefined) {
-      if (!Array.isArray(operation.attachmentPaths) || operation.attachmentPaths.length > 8) throw new Error(`${path}.attachmentPaths must contain at most 8 paths`);
-      attachmentPaths = operation.attachmentPaths.map((value, index) => requiredSingleLineText(value, `${path}.attachmentPaths[${index}]`, 4096));
-    }
     const delivery = optionalText(operation.delivery, `${path}.delivery`, 16);
     if (delivery !== undefined && delivery !== 'asap' && delivery !== 'queue') {
       throw new Error(`${path}.delivery must be "asap" or "queue"`);
@@ -724,7 +730,7 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
       droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256),
       ...optionalNonEmptyField(operation, 'chatName', path, 160),
       message: requiredText(operation.message, `${path}.message`, 100_000),
-      ...(attachmentPaths === undefined ? {} : { attachmentPaths }),
+      ...attachmentPathsField(operation, path),
       ...(delivery === undefined ? {} : { delivery }),
     };
   }

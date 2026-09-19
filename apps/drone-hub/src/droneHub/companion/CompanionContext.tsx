@@ -1,6 +1,7 @@
 import type { CompanionImageAttachment } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { setCompanionClipboard } from './companion-clipboard';
+import { isCompanionPreviewable } from './companion-attachment-files';
 import { CompanionScreen, type CompanionSenseSources } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { desktopCompanionSessionStore } from './companion-session-store';
@@ -68,6 +69,8 @@ type CompanionContextValue = {
   addTextAttachment(text: string): void;
   /** Queue an image (for example one pasted from the clipboard) for the next instruction. */
   addAttachment(file: CompanionImageAttachment): Promise<void>;
+  /** Show why a pasted or dropped file could not be attached. */
+  reportAttachmentError(error: unknown): void;
   screen: CompanionScreen;
   sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
@@ -203,7 +206,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(file),
       });
       if (generation !== captureGeneration.current) return;
-      updateAttachments([...attachmentsRef.current, { ...file, name: attachment.name, size: attachment.size, path: attachment.path, id: newId() }]);
+      // The bytes stay in memory only for the tray's preview; any other file is already safe on disk.
+      updateAttachments([...attachmentsRef.current, { ...file, dataBase64: isCompanionPreviewable(file) ? file.dataBase64 : '', name: attachment.name, size: attachment.size, path: attachment.path, id: newId() }]);
       setProposalActionError('');
     } catch (error) {
       if (generation !== captureGeneration.current) return;
@@ -211,6 +215,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
     setPanelVisibility('open');
   }, [updateAttachments]);
+  const reportAttachmentError = React.useCallback((error: unknown) => {
+    setProposalActionError(error instanceof Error ? error.message : String(error));
+    setPanelVisibility('open');
+  }, []);
   const addTextAttachment = React.useCallback((text: string) => {
     if (!text.trim()) return;
     const bytes = new TextEncoder().encode(text);
@@ -738,7 +746,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       screen,
-      attachments, removeAttachment, addTextAttachment, addAttachment,
+      attachments, removeAttachment, addTextAttachment, addAttachment, reportAttachmentError,
       sessionId: controller.getSessionId(),
       error: proposalActionError || state.error || autoApproveSettings.error,
       live,
@@ -788,7 +796,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleAutoApprove,
     }),
     [
-      attachments, removeAttachment, addTextAttachment, addAttachment,
+      attachments, removeAttachment, addTextAttachment, addAttachment, reportAttachmentError,
       proposalStore, proposalStoreVersion, proposalActionError,
       shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, voice.pendingTranscriptions,
       close,

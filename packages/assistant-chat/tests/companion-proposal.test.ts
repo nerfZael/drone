@@ -391,3 +391,16 @@ test('message proposals preserve and present reusable image paths', () => {
   expect(parseCompanionProposalText(serializeCompanionProposal(proposal))).toEqual(proposal);
   expect(() => parseCompanionProposalText(JSON.stringify({ ...proposal, operations: [{ ...proposal.operations[0], attachmentPaths: Array(9).fill('/capture.png') }] }))).toThrow('at most 8');
 });
+
+test('a new drone can receive Companion home files with its first message, shown for review', () => {
+  const proposal = parseCompanionProposalText(JSON.stringify({ version: 1, title: 'Fix from screenshot', operations: [
+    { id: 'make', type: 'create_drone', prompt: 'Fix the layout shown here', attachmentPaths: ['/home/uploads/shot.png', '/home/notes.md'] },
+  ] }));
+  expect(proposal.operations[0]).toMatchObject({ type: 'create_drone', attachmentPaths: ['/home/uploads/shot.png', '/home/notes.md'] });
+  expect(parseCompanionProposalText(serializeCompanionProposal(proposal))).toEqual(proposal);
+  expect(companionProposalOperationDetails(proposal.operations[0])).toContainEqual({ label: 'Attachments', value: '/home/uploads/shot.png\n/home/notes.md' });
+  const broken = (attachmentPaths: unknown) => () => parseCompanionProposalText(JSON.stringify({ ...proposal, operations: [{ ...proposal.operations[0], attachmentPaths }] }));
+  expect(broken(Array(9).fill('/x.png'))).toThrow('at most 8');
+  expect(broken('/x.png')).toThrow('at most 8');
+  expect(broken([''])).toThrow();
+});

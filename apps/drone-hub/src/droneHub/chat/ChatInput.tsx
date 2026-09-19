@@ -1,3 +1,4 @@
+import { AttachmentViewerDialog, portalContainerOf, type ViewedAttachment } from '../media/AttachmentViewerDialog';
 import React from 'react';
 import {
   CHAT_ATTACHMENT_POLICY,
@@ -205,6 +206,18 @@ type PendingChatSend = {
   submit: ChatInputProps['onSend'];
 };
 
+
+/** Pasted text is readable as it is; a picked file is readable when it is some kind of text. */
+function draftAttachmentIsReadable(attachment: DraftChatAttachment): boolean {
+  return attachment.kind === 'text' || (attachment.kind === 'file' && /^text\/|json|xml|javascript|yaml/i.test(attachment.mime));
+}
+
+function viewedDraftText(attachment: DraftChatAttachment): ViewedAttachment {
+  if (attachment.kind === 'text') return { kind: 'text', name: attachment.name, text: attachment.text };
+  const file = (attachment as Extract<DraftChatAttachment, { kind: 'file' }>).file;
+  return { kind: 'text', name: attachment.name, loadText: () => file.text() };
+}
+
 export function ChatInput({
   resetKey,
   draftPersistenceKey,
@@ -241,6 +254,7 @@ export function ChatInput({
   const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
+  const [viewedAttachment, setViewedAttachment] = React.useState<{ attachment: ViewedAttachment; container?: HTMLElement } | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [composerFocused, setComposerFocused] = React.useState(false);
@@ -1246,13 +1260,20 @@ export function ChatInput({
                 {attachments.map((a) => (
                   <div key={a.id} className="relative flex-shrink-0">
                     {a.kind === 'image' ? (
-                      <img
-                        src={a.previewUrl}
-                        alt={a.name}
-                        className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
-                      />
+                      <button type="button" aria-label={`View ${a.name}`} title="View full size" className="block cursor-zoom-in rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                        onClick={(event) => setViewedAttachment({ attachment: { kind: 'image', name: a.name, src: a.previewUrl }, container: portalContainerOf(event.currentTarget) })}>
+                        <img
+                          src={a.previewUrl}
+                          alt={a.name}
+                          className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
+                        />
+                      </button>
                     ) : (
-                      <div className="min-h-[3.5rem] w-[11.25rem] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
+                      <div role={draftAttachmentIsReadable(a) ? 'button' : undefined} tabIndex={draftAttachmentIsReadable(a) ? 0 : undefined}
+                        title={draftAttachmentIsReadable(a) ? 'View contents' : undefined}
+                        onClick={draftAttachmentIsReadable(a) ? (event) => setViewedAttachment({ attachment: viewedDraftText(a), container: portalContainerOf(event.currentTarget) }) : undefined}
+                        onKeyDown={draftAttachmentIsReadable(a) ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setViewedAttachment({ attachment: viewedDraftText(a), container: portalContainerOf(event.currentTarget) }); } } : undefined}
+                        className={`min-h-[3.5rem] w-[11.25rem] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 ${draftAttachmentIsReadable(a) ? 'cursor-pointer hover:border-[var(--border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]' : ''}`}>
                         <div
                           className="text-9 uppercase tracking-wide text-[var(--muted-dim)]"
                         >
@@ -1282,6 +1303,7 @@ export function ChatInput({
             </div>
           )}
 
+          {viewedAttachment ? <AttachmentViewerDialog attachment={viewedAttachment.attachment} portalContainer={viewedAttachment.container} onClose={() => setViewedAttachment(null)} /> : null}
           {attachmentsOn ? (
             <input
               ref={fileInputRef}

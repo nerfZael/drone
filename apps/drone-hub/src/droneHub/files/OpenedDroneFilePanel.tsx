@@ -51,6 +51,10 @@ import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
 import { DRONE_HUB_MONACO_FONT_FAMILY } from './monaco-editor-loader';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
+import {
+  MonacoEditorValueSynchronizer,
+  replaceMonacoEditorValue,
+} from './monaco-editor-value-sync';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
@@ -318,6 +322,12 @@ export function OpenedDroneFilePanel({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const [fullScreen, setFullScreen] = React.useState(false);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
+  const editorMonacoRef = React.useRef<Parameters<MonacoEditorMountHandler>[1] | null>(null);
+  const editorModelChangeListenerRef = React.useRef<{ dispose: () => void } | null>(null);
+  const applyingIncomingEditorValueRef = React.useRef(false);
+  const editorValueSynchronizerRef = React.useRef(new MonacoEditorValueSynchronizer());
+  const incomingEditorValueRef = React.useRef({ path: activeFilePath, value: fileContent ?? '' });
+  incomingEditorValueRef.current = { path: activeFilePath, value: fileContent ?? '' };
   const editorTargetHighlightRef = React.useRef<{
     editor: MonacoEditorInstance;
     decorationIds: string[];
@@ -612,9 +622,11 @@ export function OpenedDroneFilePanel({
     (next) => {
       const content = next ?? '';
       updateCompanionContentRef(content);
+      if (applyingIncomingEditorValueRef.current) return;
+      editorValueSynchronizerRef.current.recordLocalChange(activeFilePath, content);
       onFileContentChange?.(content);
     },
-    [onFileContentChange, updateCompanionContentRef],
+    [activeFilePath, onFileContentChange, updateCompanionContentRef],
   );
   const handleEditorBeforeMount = React.useCallback<
     NonNullable<MonacoEditorProps['beforeMount']>
@@ -623,6 +635,33 @@ export function OpenedDroneFilePanel({
     configureMonacoTypeScriptDiagnostics(monaco.languages.typescript);
   }, []);
   const workspaceNavigationId = useWorkspaceNavigationId(droneId);
+  const syncIncomingEditorValue = React.useCallback((editor: MonacoEditorInstance) => {
+    const model = editor.getModel();
+    const monaco = editorMonacoRef.current;
+    const incoming = incomingEditorValueRef.current;
+    if (!model || !monaco || !incoming.path) return;
+    if (model.uri.toString() !== monaco.Uri.parse(incoming.path).toString()) return;
+    if (
+      !editorValueSynchronizerRef.current.shouldApplyIncoming(
+        incoming.path,
+        incoming.value,
+        model.getValue(),
+      )
+    ) return;
+
+    applyingIncomingEditorValueRef.current = true;
+    try {
+      replaceMonacoEditorValue(editor, incoming.value);
+    } finally {
+      applyingIncomingEditorValueRef.current = false;
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const editor = editorRef.current;
+    if (editor && openedFileEditorVisible) syncIncomingEditorValue(editor);
+  }, [activeFilePath, fileContent, openedFileEditorVisible, syncIncomingEditorValue]);
+
   React.useEffect(() => {
     if (!activeFilePath || !droneId) return;
     let id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath });
@@ -635,6 +674,11 @@ export function OpenedDroneFilePanel({
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
+      editorMonacoRef.current = monaco;
+      editorModelChangeListenerRef.current?.dispose();
+      editorModelChangeListenerRef.current = editor.onDidChangeModel(() => {
+        syncIncomingEditorValue(editor);
+      });
       editor.onDidFocusEditorText(() => companionWorkspace?.focusEditor(companionEditorTargetId));
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void onSaveFile?.(editor.getValue());
@@ -646,12 +690,13 @@ export function OpenedDroneFilePanel({
         languageActionsRef.current?.findReferences();
       });
       applyEditorCursorTarget();
+      syncIncomingEditorValue(editor);
       const diagnosticId = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });
       desktopWorkspaceLoads.mark(diagnosticId, 'editorMounted');
       desktopWorkspaceLoads.mark(diagnosticId, 'editorReady');
       desktopWorkspaceLoads.committed(diagnosticId);
     },
-    [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile],
+    [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile, syncIncomingEditorValue],
   );
   const imageDiagnosticRef = React.useRef<HTMLImageElement | null>(null);
   React.useEffect(() => {
@@ -673,11 +718,17 @@ export function OpenedDroneFilePanel({
   React.useEffect(() => {
     if (!openedFileEditorVisible) {
       clearEditorTargetHighlight();
+      editorModelChangeListenerRef.current?.dispose();
+      editorModelChangeListenerRef.current = null;
       editorRef.current = null;
+      editorMonacoRef.current = null;
     }
   }, [clearEditorTargetHighlight, openedFileEditorVisible]);
 
-  React.useEffect(() => clearEditorTargetHighlight, [clearEditorTargetHighlight]);
+  React.useEffect(() => () => {
+    clearEditorTargetHighlight();
+    editorModelChangeListenerRef.current?.dispose();
+  }, [clearEditorTargetHighlight]);
 
   React.useEffect(() => {
     languageRequestSeqRef.current += 1;
@@ -1135,7 +1186,7 @@ export function OpenedDroneFilePanel({
                     <MonacoEditor
                       path={activeFilePath || undefined}
                       language={editorLanguageForPath(activeFilePath)}
-                      value={fileContent ?? ''}
+                      defaultValue={fileContent ?? ''}
                       loading={plainTextEditorFallback}
                       onChange={handleEditorChange}
                       beforeMount={handleEditorBeforeMount}

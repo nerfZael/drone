@@ -1,4 +1,5 @@
 import React from 'react';
+import { getSpeechMuted, subscribeSpeechMuted } from '../media/speech-playback';
 
 // Companion's own volume, applied on top of the system volume like a media player's slider.
 // Above 100% it amplifies, because generated speech is often quieter than other desktop audio.
@@ -40,8 +41,10 @@ export function connectCompanionVolume(context: AudioContext): { input: AudioNod
   limiter.attack.value = 0.003; limiter.release.value = 0.1;
   gain.connect(limiter);
   limiter.connect(context.destination);
-  const apply = () => { gain.gain.value = getCompanionVolume(); };
+  // Muting speech silences the voice but not the cue sounds, which do not pass through here.
+  const apply = () => { gain.gain.value = getSpeechMuted() ? 0 : getCompanionVolume(); };
   apply();
-  const unsubscribe = subscribeCompanionVolume(apply);
-  return { input: gain, release() { unsubscribe(); gain.disconnect(); limiter.disconnect(); } };
+  const unsubscribeVolume = subscribeCompanionVolume(apply);
+  const unsubscribeMuted = subscribeSpeechMuted(apply);
+  return { input: gain, release() { unsubscribeVolume(); unsubscribeMuted(); gain.disconnect(); limiter.disconnect(); } };
 }

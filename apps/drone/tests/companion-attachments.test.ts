@@ -36,7 +36,7 @@ test('pasted text is inlined into the instruction, stored beside captures, and r
     const note = { name: 'pasted-text.txt', mime: 'text/plain', size: 11, dataBase64: Buffer.from('héllo wörld').toString('base64') };
     const textOnly = await prepareCompanionAttachments('Summarise', [note], root);
     expect(typeof textOnly).toBe('string');
-    expect(textOnly).toContain('Summarise\n\nPasted text attachment 1');
+    expect(textOnly).toContain('Summarise\n\nText attachment 1');
     expect(textOnly).toContain('<pasted_text>\nhéllo wörld\n</pasted_text>');
     const mixed = await prepareCompanionAttachments('Compare', [image, note], root);
     if (typeof mixed === 'string') throw new Error('missing images');
@@ -46,7 +46,6 @@ test('pasted text is inlined into the instruction, stored beside captures, and r
     const stored = /\((\/[^,]+pasted-text-2\.txt),/.exec(mixed.text)![1];
     expect(await fs.readFile(stored, 'utf8')).toBe('héllo wörld');
     expect(await readCompanionAttachments([stored], [root])).toMatchObject([{ mime: 'text/plain', name: 'pasted-text-2.txt' }]);
-    await expect(prepareCompanionAttachments('x', [{ ...note, mime: 'application/pdf' }], root)).rejects.toThrow();
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
@@ -124,6 +123,45 @@ test('the home watcher reports nested changes once per burst and stops when clos
     await new Promise(resolve => setTimeout(resolve, 400));
     expect(notices).toBe(2);
     expect(watchCompanionHome(() => {}, path.join(root, 'missing')).active).toBe(false);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('text-like files in Companion home travel as text attachments; other types are refused', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'companion-attachments-test-'));
+  try {
+    await fs.writeFile(path.join(root, 'image-transcription.md'), '# Transcription');
+    await fs.writeFile(path.join(root, 'data.json'), '{"a":1}');
+    await fs.writeFile(path.join(root, 'archive.zip'), 'PK');
+    expect(await readCompanionAttachments([path.join(root, 'image-transcription.md'), path.join(root, 'data.json')], [root])).toMatchObject([
+      { name: 'image-transcription.md', mime: 'text/plain', dataBase64: Buffer.from('# Transcription').toString('base64') }, { name: 'data.json', mime: 'text/plain' },
+    ]);
+    // Any other file is a chat attachment too: the drone receives it as a file and is told its path.
+    expect(await readCompanionAttachments([path.join(root, 'archive.zip')], [root])).toMatchObject([{ name: 'archive.zip', mime: 'application/octet-stream', size: 2 }]);
+    // A dropped Markdown file is uploaded as text and can then be named by an instruction.
+    const stored = await storeCompanionUpload({ name: 'plan.md', mime: 'text/plain', size: 6, dataBase64: Buffer.from('# Plan').toString('base64') }, root);
+    expect(stored).toMatchObject({ name: 'plan.md', relativePath: 'uploads/plan.md' });
+    const prepared = await prepareCompanionAttachments('Read this', [{ name: stored.name, mime: stored.mime, size: stored.size, path: stored.path }], root);
+    expect(prepared).toContain('<pasted_text>\n# Plan\n</pasted_text>');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('any file can be attached: it is kept in uploads and given to the model by path', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'companion-attachments-test-'));
+  try {
+    const pdf = await storeCompanionUpload({ name: '../../Quarterly report.pdf', mime: 'application/pdf', size: 5, dataBase64: Buffer.from('%PDF-').toString('base64') }, root);
+    expect(pdf).toMatchObject({ name: 'Quarterly report.pdf', mime: 'application/pdf', size: 5, relativePath: 'uploads/Quarterly report.pdf' });
+    expect(await fs.readFile(pdf.path, 'utf8')).toBe('%PDF-');
+    const shot = await storeCompanionUpload(image, root);
+    const result = await prepareCompanionAttachments('File this', [pdf, shot].map(({ relativePath: _relative, ...ref }) => ref), root);
+    if (typeof result === 'string') throw new Error('missing images');
+    expect(result.images).toHaveLength(1);
+    expect(result.text).toContain('Attached file, given by path');
+    expect(result.text).toContain('uploads/Quarterly report.pdf');
+    expect(result.text).toContain('attachmentPaths');
+    // Only a file: the instruction stays plain text.
+    expect(typeof await prepareCompanionAttachments('Just this', [{ name: pdf.name, mime: pdf.mime, size: pdf.size, path: pdf.path }], root)).toBe('string');
+    await expect(storeCompanionUpload({ name: 'empty.bin', mime: 'application/octet-stream', dataBase64: '' }, root)).rejects.toThrow();
+    await expect(storeCompanionUpload({ name: 'x.bin', mime: 'application/octet-stream', dataBase64: '<script>' }, root)).rejects.toThrow('invalid');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

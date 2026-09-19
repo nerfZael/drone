@@ -1,3 +1,4 @@
+import { holdSpeechPlayback } from '../media/speech-playback';
 import { normalizeGroqTranscriptionPrompt } from '@drone/assistant-chat';
 import React from 'react';
 import {
@@ -198,7 +199,17 @@ export function useChatVoiceRecorder({
     if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
   }, []);
 
+  // Spoken audio (Companion's speak, chat speech) must not talk over the user or leak into the
+  // microphone: it waits or pauses while this recorder is starting or recording, and continues
+  // when the recording is paused, sent or discarded.
+  const releaseSpeechHold = React.useRef<(() => void) | null>(null);
+  const holdSpeechWhile = React.useCallback((recordingVoice: boolean) => {
+    if (recordingVoice && !releaseSpeechHold.current) releaseSpeechHold.current = holdSpeechPlayback();
+    else if (!recordingVoice && releaseSpeechHold.current) { releaseSpeechHold.current(); releaseSpeechHold.current = null; }
+  }, []);
+  React.useEffect(() => () => holdSpeechWhile(false), [holdSpeechWhile]);
   const setStatusValue = React.useCallback((next: ChatVoiceRecordingStatus) => {
+    holdSpeechWhile(next === 'starting' || next === 'recording');
     statusRef.current = next;
     if (mountedRef.current) setStatus(next);
   }, []);

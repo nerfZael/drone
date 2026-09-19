@@ -268,6 +268,15 @@ export type DroneHubAppModel = {
   globalDictationProps: GlobalDictationOverlayProps;
 };
 
+
+/** Files a Companion proposal names from Companion home, as chat attachments. The Hub refuses paths outside it. */
+async function readCompanionProposalAttachments(paths: string[] | undefined) {
+  if (!paths?.length) return [];
+  return (await requestJson<{ attachments: import('@drone/assistant-chat').CompanionImageAttachment[] }>('/api/companion/attachments/read', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths }),
+  })).attachments;
+}
+
 function droneHubBusyDebugEnabled(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -3215,9 +3224,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             }
             let creationError = '';
             let created: { droneId: string; droneName: string } | null = null;
+            // Read before creating anything: a bad path must fail the operation, not leave a drone without its files.
+            const attachments = await readCompanionProposalAttachments(operation.attachmentPaths);
             const ok = await createDroneFromDraft({
               name: operation.name,
               prompt: operation.prompt,
+              attachments,
               repoPath,
               group: operation.group,
               creationPreferences: effectiveCreationPreferences,
@@ -3354,10 +3366,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             };
           },
           sendMessage: async (operation) => {
-            const attachments = operation.attachmentPaths?.length
-              ? (await requestJson<{ attachments: import('@drone/assistant-chat').CompanionImageAttachment[] }>('/api/companion/attachments/read', {
-                  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths: operation.attachmentPaths }),
-                })).attachments : [];
+            const attachments = await readCompanionProposalAttachments(operation.attachmentPaths);
             const userTimeZone = clientTimeZone();
             const response = await requestJson<{
               ok: true;

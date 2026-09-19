@@ -1446,7 +1446,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const fileName = String((item as any).fileName ?? '').trim();
       const pathRaw = String((item as any).path ?? '').trim();
       const relRaw = String((item as any).relativePath ?? '').trim();
-      if (!name || (!mime.startsWith('image/') && mime !== 'text/plain')) continue;
+      if (!name || !mime) continue;
       if (!Number.isFinite(sizeNum) || sizeNum <= 0) continue;
       if (!pathRaw || !pathRaw.startsWith('/')) continue;
       out.push({
