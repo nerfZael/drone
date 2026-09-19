@@ -14,6 +14,7 @@ import {
   useLocalCheckout,
   type LocalAutoUpdates,
 } from './use-local-checkout';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 export type { RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
@@ -212,7 +213,7 @@ export function useWorkspaceActions({
     async (repoPath: string) => {
       const path = String(repoPath ?? '').trim();
       if (!path) return;
-      const ok = window.confirm(`Remove repo "${path}" from the registry?`);
+      const ok = await confirmDialog({ title: `Remove repo "${path}" from the registry?`, confirmLabel: 'Remove', destructive: true });
       if (!ok) return;
       setDeletingRepos((prev) => ({ ...prev, [path]: true }));
       try {
@@ -414,15 +415,16 @@ export function useWorkspaceActions({
           : [];
         const preview: string[] = conflictFiles.slice(0, 8);
         const suffix = conflictFiles.length > preview.length ? `\n- and ${conflictFiles.length - preview.length} more` : '';
-        const confirmed = window.confirm(
-          [
-            'Applying these drone changes would conflict with your host repo.',
-            '',
-            preview.length > 0 ? preview.map((file) => `- ${file}`).join('\n') + suffix : 'No individual files were reported.',
-            '',
-            'Apply the conflict set onto the host repo so you can resolve it there?',
+        const confirmed = await confirmDialog({
+          title: 'Apply the conflicting changes onto the host repo?',
+          message: [
+            'Applying these drone changes would conflict with your host repo, where you can then resolve them.',
+            preview.length > 0
+              ? preview.map((file) => `- ${file}`).join('\n') + suffix
+              : 'No individual files were reported.',
           ].join('\n'),
-        );
+          confirmLabel: 'Apply conflicts to host',
+        });
         if (confirmed) {
           response = await postJson(url, { ...body, applyConflictsToHost: true });
         }
@@ -572,9 +574,7 @@ export function useWorkspaceActions({
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
     if (!isHostRuntimeDrone(currentDrone)) {
-      const confirmed = window.confirm(
-        'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
-      );
+      const confirmed = await confirmDialog({ title: 'Pull host branch changes into this drone branch?', message: 'A clean merge creates a merge commit in the drone repo.', confirmLabel: 'Pull changes' });
       if (!confirmed) return;
     }
     clearRepoOperationError();
@@ -652,9 +652,11 @@ export function useWorkspaceActions({
               : 'one or more files';
           const autoCommitMessage = String(response.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
           const sourceLabel = peerDroneLabel(sourceDrone, 'source drone');
-          const confirmed = window.confirm(
-            `"${sourceLabel}" has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue sync.\n\nPress Cancel to stop.`,
-          );
+          const confirmed = await confirmDialog({
+            title: `"${sourceLabel}" has uncommitted changes`,
+            message: `${dirtyLabel}. Stage everything, create a placeholder commit, and continue the sync?`,
+            confirmLabel: 'Commit and continue',
+          });
           if (!confirmed) return { ok: false, error: '', meta: null };
           response = await postJson(url, { sourceDroneId, commitDirty: true, commitMessage: autoCommitMessage });
         }

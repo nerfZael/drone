@@ -1,5 +1,6 @@
 import React from 'react';
 import type { MeshDevice } from './use-device-mesh';
+import { confirmDialog, confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 type Root = { id: string; label: string; path: string };
@@ -314,7 +315,7 @@ export function CrossDeviceAssistantPolicyPanel({
   };
 
   const save = async () => {
-    if (!window.confirm('Apply these workspace and device access changes?')) return;
+    if (!(await confirmDialog({ title: 'Apply these workspace and device access changes?', confirmLabel: 'Apply' }))) return;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -720,8 +721,8 @@ export function CrossDeviceAssistantPolicyPanel({
             <span className="text-11 font-[var(--weight-semibold)] text-[var(--yellow)]">Unsaved changes</span>
             <button
               type="button"
-              onClick={() => {
-                if (!window.confirm('Discard unsaved workspace changes?')) return;
+              onClick={async () => {
+                if (!(await confirmDiscardDialog('Discard unsaved workspace changes?'))) return;
                 setPolicy(savedPolicy);
                 setError(null);
               }}

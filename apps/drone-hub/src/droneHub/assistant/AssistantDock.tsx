@@ -142,6 +142,7 @@ import type {
   PendingAssistantScopeSave,
 } from './assistant-types';
 import { DroneHubPermissionsView } from '../app/DroneHubPermissionsView';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
@@ -890,9 +891,7 @@ export function AssistantDock({
   const promoteThreadSystemPrompt = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
     if (!threadId) return;
-    const confirmed = window.confirm(
-      'Promote this chat system prompt to the matching global prompt for new Built-in chats? Existing chats keep their own prompts.',
-    );
+    const confirmed = await confirmDialog({ title: 'Promote this system prompt to the global prompt?', message: 'New Built-in chats will start with it. Existing chats keep their own prompts.', confirmLabel: 'Promote' });
     if (!confirmed) return;
     setPromoteSystemPromptSaving(true);
     setSystemPromptError(null);

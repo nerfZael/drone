@@ -16,6 +16,7 @@ import {
   type MeshGrant,
   useDeviceMesh,
 } from './use-device-mesh';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -611,8 +612,8 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                   capabilities={mesh.status!.capabilities}
                   busy={mesh.busyId === device.id}
                   onSave={(update) => void mesh.saveDevice(device.id, update)}
-                  onRevoke={() => {
-                    if (window.confirm(`Revoke ${device.name}? It will lose access immediately.`))
+                  onRevoke={async () => {
+                    if (await confirmDialog({ title: `Revoke ${device.name}?`, message: 'It will lose access immediately.', confirmLabel: 'Revoke', destructive: true }))
                       void mesh.revoke(device.id);
                   }}
                 />

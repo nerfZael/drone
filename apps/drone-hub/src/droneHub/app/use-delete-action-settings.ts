@@ -9,6 +9,7 @@ import type {
   DroneDeleteMode,
 } from './settings-types';
 import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsPostMutation, useSettingsQuery } from './settings-query';
+import { confirmDeleteDialog } from '../../ui/AppConfirmDialog';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -129,9 +130,7 @@ export function useDeleteActionSettings(
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       if (deletingArchivedById[droneId] || restoringArchivedById[droneId]) return;
-      const ok = window.confirm(
-        'Permanently delete this archived drone now?\n\nThis removes the container and cannot be undone.',
-      );
+      const ok = await confirmDeleteDialog('Permanently delete this archived drone now?', 'This removes the container and cannot be undone.', 'Delete permanently');
       if (!ok) return;
       setDeletingArchivedById((prev) => ({ ...prev, [droneId]: true }));
       setArchiveNotice(null);
@@ -206,9 +205,7 @@ export function useDeleteActionSettings(
       const key = archivedChatKey(droneId, chatName);
       if (!key) return;
       if (deletingArchivedChatByKey[key] || restoringArchivedChatByKey[key]) return;
-      const ok = window.confirm(
-        `Permanently delete archived chat "${chatName}" from "${droneId}" now?\n\nThis cannot be undone.`,
-      );
+      const ok = await confirmDeleteDialog(`Permanently delete archived chat "${chatName}" from "${droneId}" now?`, 'This cannot be undone.', 'Delete permanently');
       if (!ok) return;
       setDeletingArchivedChatByKey((prev) => ({ ...prev, [key]: true }));
       setArchiveNotice(null);

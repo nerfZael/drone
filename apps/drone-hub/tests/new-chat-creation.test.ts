@@ -122,7 +122,9 @@ describe('new chat creation defaults', () => {
       modelSource.indexOf('const createDroneChatFromShortcut'),
       modelSource.indexOf('const cloneDroneChatFromShortcut'),
     );
-    expect(shortcutCreator).toContain('createDraftDroneChat(currentDrone)');
+    // The shortcut targets the focused chat's drone, and still creates through the one draft flow.
+    expect(shortcutCreator).toContain('return target ? createChatForTarget(target) : false;');
+    expect(modelSource).toContain('return drone ? createDraftDroneChat(drone) : false;');
 
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/use-sidebar-interactions.ts', import.meta.url),

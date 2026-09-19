@@ -77,6 +77,7 @@ import {
   createGroupChatOlderLoadCoordinator,
   groupChatTailHasOlder,
 } from './group-chat-history';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -878,17 +879,16 @@ export function GroupMultiChatColumn({
             conflictFiles.length > preview.length
               ? `\n- and ${conflictFiles.length - preview.length} more`
               : '';
-          const confirmed = window.confirm(
-            [
-              'Applying these drone changes would conflict with your host repo.',
-              '',
+          const confirmed = await confirmDialog({
+            title: 'Apply the conflicting changes onto the host repo?',
+            message: [
+              'Applying these drone changes would conflict with your host repo, where you can then resolve them.',
               preview.length > 0
                 ? preview.map((file) => `- ${file}`).join('\n') + suffix
                 : 'No individual files were reported.',
-              '',
-              'Apply the conflict set onto the host repo so you can resolve it there?',
             ].join('\n'),
-          );
+            confirmLabel: 'Apply conflicts to host',
+          });
           if (confirmed) {
             result = await postPull({ ...body, applyConflictsToHost: true });
           }
@@ -933,9 +933,7 @@ export function GroupMultiChatColumn({
   const pushRepoChanges = React.useCallback(async () => {
     if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
     if (!hostRuntime) {
-      const confirmed = window.confirm(
-        'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
-      );
+      const confirmed = await confirmDialog({ title: 'Pull host branch changes into this drone branch?', message: 'A clean merge creates a merge commit in the drone repo.', confirmLabel: 'Pull changes' });
       if (!confirmed) return;
     }
     setQuickActionBusy('push');

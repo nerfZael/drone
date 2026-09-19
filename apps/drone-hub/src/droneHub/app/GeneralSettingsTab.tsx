@@ -18,6 +18,7 @@ import {
   VOICE_INPUT_SILENCE_MILLIS_MAX,
   VOICE_INPUT_SILENCE_MILLIS_MIN,
 } from '../chat/voice-input-silence';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
@@ -974,8 +975,8 @@ export function GeneralSettingsTab({
             <div className="flex flex-wrap items-center gap-2">
               <UiButton
                 variant="primary"
-                onClick={() => {
-                  const ok = window.confirm('Replay onboarding from the beginning? This will clear onboarding dismissal state.');
+                onClick={async () => {
+                  const ok = await confirmDialog({ title: 'Replay onboarding from the beginning?', message: 'This will clear onboarding dismissal state.', confirmLabel: 'Replay' });
                   if (!ok) return;
                   onReplayOnboarding();
                 }}
@@ -984,8 +985,8 @@ export function GeneralSettingsTab({
                 Replay onboarding
               </UiButton>
               <UiButton
-                onClick={() => {
-                  const ok = window.confirm('Clear onboarding state?');
+                onClick={async () => {
+                  const ok = await confirmDialog({ title: 'Clear onboarding state?', confirmLabel: 'Clear', destructive: true });
                   if (!ok) return;
                   onResetOnboarding();
                 }}

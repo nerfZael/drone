@@ -6,7 +6,7 @@ import { parseCanvasChatNodeId } from './app-config';
 import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 import { droneRenameErrorMessage, type DroneRenameTarget } from './drone-rename';
-import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
+import { alertDialog, confirmDialog, useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   claimDroneOperation,
   droneActionState,
@@ -103,12 +103,12 @@ export function useDroneMutationActions({
       }
       if (newName.length > 80 || /[\r\n]/.test(newName)) {
         if (opts?.showAlert) {
-          window.alert('Invalid drone name. Must be 1-80 chars and cannot contain newlines.');
+          await alertDialog({ title: 'Invalid drone name', message: 'It must be 1-80 characters and cannot contain newlines.' });
         }
         return { ok: false, error: 'invalid new name' };
       }
       if (currentDrones.some((d) => d.name === newName && d.id !== droneId)) {
-        if (opts?.showAlert) window.alert(`A drone named "${newName}" already exists.`);
+        if (opts?.showAlert) await alertDialog({ title: `A drone named "${newName}" already exists.` });
         return { ok: false, error: 'name already exists' };
       }
 
@@ -157,7 +157,7 @@ export function useDroneMutationActions({
           console.error('[DroneHub] rename drone failed', { id: droneId, newName, error: e });
         }
         if (opts?.showAlert) {
-          window.alert(`Rename failed: ${msg}`);
+          await alertDialog({ title: 'Rename failed', message: msg });
         }
         return { ok: false, error: msg };
       } finally {
@@ -192,9 +192,18 @@ export function useDroneMutationActions({
         return false;
       }
       if (opts?.confirmed !== true) {
-        const ok = window.confirm(deleteMode === 'archive'
-          ? `Archive drone "${droneName}"?\n\nThis removes it from the active list now. You can restore it from Settings > Archive before it auto-deletes.`
-          : `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`);
+        const ok = await confirmDialog(deleteMode === 'archive'
+          ? {
+              title: `Archive drone "${droneName}"?`,
+              message: 'This removes it from the active list now. You can restore it from Settings > Archive before it auto-deletes.',
+              confirmLabel: 'Archive',
+            }
+          : {
+              title: `Delete drone "${droneName}"?`,
+              message: 'This will remove the container and remove it from your registry.',
+              confirmLabel: 'Delete',
+              destructive: true,
+            });
         if (!ok) return false;
       }
       if (
@@ -232,7 +241,7 @@ export function useDroneMutationActions({
           return next;
         });
         if (opts?.showAlert !== false) {
-          window.alert(`${deleteMode === 'archive' ? 'Archive' : 'Delete'} failed: ${msg}`);
+          await alertDialog({ title: `${deleteMode === 'archive' ? 'Archive' : 'Delete'} failed`, message: msg });
         }
         return false;
       } finally {
@@ -313,7 +322,7 @@ export function useDroneMutationActions({
       const current = drones.find((d) => d.id === droneId) ?? null;
       const droneName = String(current?.name ?? '').trim() || droneId;
       if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
-        window.alert(`Drone "${droneName}" is still starting.`);
+        await alertDialog({ title: `Drone "${droneName}" is still starting.` });
         return;
       }
       if (droneOperationsRef.current[droneId] || optimisticallyDeletedDrones[droneId]) {
@@ -339,11 +348,11 @@ export function useDroneMutationActions({
           { method: 'POST' },
         );
         const img = String((r as any)?.baseImage ?? '').trim();
-        window.alert(img ? `Base image set: ${img}` : 'Base image set.');
+        await alertDialog({ title: 'Base image set', message: img || undefined });
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         console.error('[DroneHub] set base image failed', { id: droneId, error: e });
-        window.alert(`Set base image failed: ${msg}`);
+        await alertDialog({ title: 'Set base image failed', message: msg });
       } finally {
         finishDroneOperation(droneId, 'set-base-image');
       }
@@ -372,7 +381,7 @@ export function useDroneMutationActions({
       } catch (error: any) {
         const message = error?.message ?? String(error);
         console.error('[DroneHub] start drone container failed', { id: droneId, error });
-        window.alert(`Start container failed: ${message}`);
+        await alertDialog({ title: 'Start container failed', message });
         return false;
       } finally {
         finishDroneOperation(droneId, 'start-container');

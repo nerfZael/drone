@@ -1,5 +1,6 @@
 import React from 'react';
 import type { MeshDevice } from './use-device-mesh';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 type Credential = 'openai' | 'codex' | 'openrouter' | 'cerebras' | 'groq';
@@ -47,7 +48,7 @@ export function ProviderCredentialTransferPanel({
       credential === 'codex'
         ? `Replace this computer's file-based Codex login with the login from ${selectedSource.name}?`
         : `Copy the ${credentialLabel(credential).toLowerCase()} from ${selectedSource.name} to this computer?`;
-    if (!window.confirm(warning)) return;
+    if (!(await confirmDialog({ title: warning, confirmLabel: credential === 'codex' ? 'Replace login' : 'Copy', destructive: credential === 'codex' }))) return;
     setBusy(credential);
     setError(null);
     setMessage(null);

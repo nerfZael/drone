@@ -1,5 +1,6 @@
 import React from 'react';
 import { UiDialog } from '../../ui/components/Dialog';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 import { DroneEditorDock } from '../app/DroneEditorDock';
 import { useFileEditorState } from '../app/use-file-editor-state';
 import { DroneFilesDock } from '../files/DroneFilesDock';
@@ -74,8 +75,15 @@ export default function CompanionHomeFilesDialog({ target, onClose }: { target: 
     navigationSeq: editor.openedFile?.navigationSeq ?? 0,
   };
   const close = () => {
-    if (editor.openedFileTabs.some(tab => tab.dirty) && !window.confirm('Discard unsaved changes in Companion home?')) return;
-    onClose();
+    void (async () => {
+      const dirty = editor.openedFileTabs.filter(tab => tab.dirty);
+      if (dirty.length > 0 && !(await confirmDialog({
+        title: 'Discard unsaved changes in Companion home?',
+        message: `Closing this window will discard them: ${dirty.slice(0, 4).map(tab => tab.name || tab.path || 'file').join(', ')}${dirty.length > 4 ? `, and ${dirty.length - 4} more` : ''}.`,
+        confirmLabel: 'Discard changes', destructive: true,
+      }))) return;
+      onClose();
+    })();
   };
   return <UiDialog open onClose={close} title="Companion home" size="large" hideHeader className="!max-w-[min(76rem,calc(100vw-3rem))]" bodyClassName="min-h-0 !p-0">
     <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-1.5">

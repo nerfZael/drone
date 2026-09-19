@@ -3,7 +3,7 @@ import type { SidebarCommandQueue } from '@drone/hub-model/sidebar';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
 import { isUngroupedGroupName } from '../../domain';
-import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
+import { alertDialog, promptDialog, useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { isNotFoundError } from './hooks';
 import {
   buildSidebarGroupDeleteConfirmation,
@@ -122,12 +122,12 @@ export function useGroupManagement({
       const mutationKey = sidebarGroupMutationKey(group, repoGroupPath);
       if (renamingGroups[mutationKey]) return false;
 
-      const next = typeof nextNameRaw === 'string' ? nextNameRaw : window.prompt(`Rename group "${group}" to:`, group);
+      const next = typeof nextNameRaw === 'string' ? nextNameRaw : await promptDialog({ title: `Rename group "${group}"`, label: 'Group name', initialValue: group, confirmLabel: 'Rename' });
       const newName = String(next ?? '').trim();
       if (!newName) return false;
       if (newName === group) return false;
       if (isUngroupedGroupName(newName)) {
-        window.alert('"Ungrouped" is reserved.');
+        await alertDialog({ title: '"Ungrouped" is reserved.' });
         return false;
       }
 
@@ -199,7 +199,7 @@ export function useGroupManagement({
       } catch (e: any) {
         const msg = String(e?.message ?? e ?? '').trim();
         console.error('[DroneHub] rename group failed', { group, newName, error: e });
-        window.alert(msg || 'Rename failed.');
+        await alertDialog({ title: 'Rename failed', message: msg || undefined });
         return false;
       } finally {
         setRenamingGroups((prev) => {
@@ -313,11 +313,12 @@ export function useGroupManagement({
               return changed ? nextMap : prev;
             });
             const plural = failed.length === 1 ? '' : 's';
-            window.alert(
-              failed.length === targetNames.length
+            await alertDialog({
+              title: 'Some drones were not deleted',
+              message: failed.length === targetNames.length
                 ? `Failed to delete ${failed.length} drone${plural} from "${groupLabel}".`
                 : `Deleted ${targetNames.length - failed.length} drone${targetNames.length - failed.length === 1 ? '' : 's'} from "${groupLabel}", but ${failed.length} failed.`,
-            );
+            });
           }
         } else {
           const query = `?repoPath=${encodeURIComponent(scopedRepoPath)}`;
@@ -499,11 +500,12 @@ export function useGroupManagement({
           if (!response.ok || errors.length > 0) {
             const failedCount = errors.length || failedTargetIds.length;
             const deletedCount = removedIds.length;
-            window.alert(
-              deletedCount === 0
+            await alertDialog({
+              title: 'Some drones were not deleted',
+              message: deletedCount === 0
                 ? `Failed to delete ${failedCount} drone${failedCount === 1 ? '' : 's'} from “${groupLabel}”.`
                 : `Deleted ${deletedCount} drone${deletedCount === 1 ? '' : 's'} from “${groupLabel}”, but ${failedCount} failed.`,
-            );
+            });
           }
           return response.ok;
         } catch (error: any) {
@@ -518,7 +520,7 @@ export function useGroupManagement({
             }
             return changed ? nextMap : prev;
           });
-          window.alert(String(error?.message ?? '').trim() || 'Delete drones failed.');
+          await alertDialog({ title: 'Delete drones failed', message: String(error?.message ?? '').trim() || undefined });
           return false;
         } finally {
           setDeletingGroups((prev) => {

@@ -17,6 +17,7 @@ import {
 } from './SettingsSurface';
 import { buttonClassName, inputClassName, textareaClassName } from './skill-library-ui';
 import type { UseSkillLibraryResult } from './use-skill-library';
+import { confirmDeleteDialog, confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLibraryResult }) {
   const [libraryTab, setLibraryTab] = React.useState<'skills' | 'import'>('skills');
@@ -48,10 +49,10 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
   const fileCountLabel = `${draft.files.length} ${draft.files.length === 1 ? 'file' : 'files'}`;
 
   const handleSelectSkill = React.useCallback(
-    (skillId: string) => {
+    async (skillId: string) => {
       if (selectedSkillId === skillId) return;
       if (draftDirty) {
-        const ok = window.confirm('Discard unsaved skill edits?');
+        const ok = await confirmDiscardDialog('Discard unsaved skill edits?');
         if (!ok) return;
       }
       selectSkill(skillId);
@@ -59,31 +60,31 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
     [draftDirty, selectSkill, selectedSkillId],
   );
 
-  const handleCreateNew = React.useCallback(() => {
+  const handleCreateNew = React.useCallback(async () => {
     if (draftDirty) {
-      const ok = window.confirm('Discard unsaved skill edits and start a new skill?');
+      const ok = await confirmDiscardDialog('Discard unsaved skill edits and start a new skill?');
       if (!ok) return;
     }
     startNewSkill();
   }, [draftDirty, startNewSkill]);
 
-  const handleReset = React.useCallback(() => {
+  const handleReset = React.useCallback(async () => {
     if (!draftDirty) return;
-    const ok = window.confirm('Discard unsaved changes?');
+    const ok = await confirmDiscardDialog('Discard unsaved changes?');
     if (!ok) return;
     resetDraft();
   }, [draftDirty, resetDraft]);
 
-  const handleDelete = React.useCallback(() => {
+  const handleDelete = React.useCallback(async () => {
     if (!draft.id) return;
     const label = draft.name.trim() || draft.slug.trim() || 'this skill';
-    const ok = window.confirm(`Delete ${label}?`);
+    const ok = await confirmDeleteDialog(`Delete ${label}?`);
     if (!ok) return;
     void deleteSelectedSkill();
   }, [deleteSelectedSkill, draft.id, draft.name, draft.slug]);
 
   const handleSkillsViewChange = React.useCallback(
-    (next: 'details' | 'files') => {
+    async (next: 'details' | 'files') => {
       if (next === skillsView) return;
       if (next === 'files') {
         if (!skillLibrary.preparePackageDraft()) return;
@@ -91,7 +92,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
         return;
       }
       if (packageDraftDirty) {
-        const ok = window.confirm('Discard unsaved file edits and return to skill details?');
+        const ok = await confirmDiscardDialog('Discard unsaved file edits and return to skill details?');
         if (!ok) return;
         if (!skillLibrary.preparePackageDraft()) return;
       }

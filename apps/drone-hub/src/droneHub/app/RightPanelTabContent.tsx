@@ -250,7 +250,7 @@ type RightPanelTabContentProps = {
     name: string;
   }) => void;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
-  onConfirmCloseOpenedEditorFilesForPaths: (paths: string[], actionLabel?: string) => boolean;
+  onConfirmCloseOpenedEditorFilesForPaths: (paths: string[], actionLabel?: string) => boolean | Promise<boolean>;
   onCloseOpenedEditorFilesForPaths: (paths: string[]) => void;
   onRemapOpenedEditorFilesForPathChange: (sourcePath: string, targetPath: string) => void;
   onActivateOpenedEditorFileTab: (tabId: string) => void;

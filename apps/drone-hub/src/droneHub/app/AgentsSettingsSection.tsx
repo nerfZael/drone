@@ -1,5 +1,6 @@
 import React from 'react';
 import type { UseAgentsSettingsResult } from './use-agents-settings';
+import { confirmDeleteDialog, confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsResult }) {
   const {
@@ -37,33 +38,33 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
   const libraryBusy =
     agentsFileLoading || savingAgentsFile || deletingAgentsFile || importingAgentsFiles;
 
-  const confirmDiscard = () =>
-    !agentsFileDraftDirty || window.confirm('Discard unsaved changes to this AGENTS.md file?');
+  const confirmDiscard = async () =>
+    !agentsFileDraftDirty || (await confirmDiscardDialog('Discard unsaved changes to this AGENTS.md file?'));
 
-  const handleSelectFile = (fileId: string) => {
-    if (selectedAgentsFile?.id === fileId || !confirmDiscard()) return;
+  const handleSelectFile = async (fileId: string) => {
+    if (selectedAgentsFile?.id === fileId || !(await confirmDiscard())) return;
     void selectAgentsFile(fileId);
   };
 
-  const handleBeginFile = () => {
-    if (!confirmDiscard()) return;
+  const handleBeginFile = async () => {
+    if (!(await confirmDiscard())) return;
     beginAgentsFile();
   };
 
-  const handleCloseFile = () => {
-    if (!confirmDiscard()) return;
+  const handleCloseFile = async () => {
+    if (!(await confirmDiscard())) return;
     closeAgentsFile();
   };
 
-  const handleDeleteFile = () => {
+  const handleDeleteFile = async () => {
     if (!selectedAgentsFile) return;
-    if (!window.confirm(`Delete "${selectedAgentsFile.name}" from the AGENTS.md library?`)) return;
+    if (!(await confirmDeleteDialog(`Delete "${selectedAgentsFile.name}" from the AGENTS.md library?`))) return;
     void deleteAgentsFile();
   };
 
-  const handleImportFiles = (incoming: FileList | File[]) => {
+  const handleImportFiles = async (incoming: FileList | File[]) => {
     const nextFiles = Array.from(incoming);
-    if (nextFiles.length === 0 || !confirmDiscard()) return;
+    if (nextFiles.length === 0 || !(await confirmDiscard())) return;
     void importAgentsFiles(nextFiles);
   };
 

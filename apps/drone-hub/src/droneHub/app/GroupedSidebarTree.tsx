@@ -112,7 +112,7 @@ import {
   buildSidebarChatGroupDeleteConfirmation,
   type DeleteDroneChatOptions,
 } from './sidebar-chat-delete-confirmation';
-import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
+import { alertDialog, confirmDeleteDialog, promptDialog, useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   droneActionState,
   type DroneOperationsById,
@@ -2609,8 +2609,8 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
   const renameChatGroup = React.useCallback((droneId: string, path: string) => {
     setChatTreeEditor({ mode: 'rename', droneId, parentPath: sidebarChatGroupParentPath(path), path, value: sidebarChatGroupBaseName(path), error: null });
   }, []);
-  const deleteChatGroup = React.useCallback((droneId: string, path: string) => {
-    if (!window.confirm(`Delete the group “${sidebarChatGroupBaseName(path)}”? Its chats will move to the parent group.`)) return;
+  const deleteChatGroup = React.useCallback(async (droneId: string, path: string) => {
+    if (!(await confirmDeleteDialog(`Delete the group “${sidebarChatGroupBaseName(path)}”?`, 'Its chats will move to the parent group.'))) return;
     void props.onMoveSidebar({ kind: 'chat-group-delete', droneId, path }).then((ok) => {
       if (!ok) return;
       const prefix = chatGroupCollapseKey(droneId, path);
@@ -2620,12 +2620,12 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     });
   }, [props.onMoveSidebar, props.setCollapsedDroneSections]);
   const createChatInGroup = React.useCallback(async (drone: DroneSummary, path: string) => {
-    const requested = window.prompt(`New chat in ${sidebarChatGroupBaseName(path)}`, '');
+    const requested = await promptDialog({ title: `New chat in ${sidebarChatGroupBaseName(path)}`, label: 'Chat name', placeholder: 'Chat name', confirmLabel: 'Create chat' });
     const name = String(requested ?? '').trim();
     if (!name) return;
     const result = await props.onCreateDroneChat(drone, name);
     if (!result.ok || !result.chatName) {
-      if (result.error) window.alert(result.error);
+      if (result.error) await alertDialog({ title: 'Could not create the chat', message: result.error });
       return;
     }
     const tree = chatTreeByDrone[drone.id];
@@ -2715,7 +2715,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       try {
         const result = await onDeleteDroneChat(droneId, chatName, opts);
         if (!result.ok && result.error) {
-          window.alert(result.error);
+          await alertDialog({ title: 'Could not delete the chat', message: result.error });
         } else if (result.ok) {
           const targetId = sidebarChatSidebarNodeId(droneId, chatName);
           await onMoveSidebar({

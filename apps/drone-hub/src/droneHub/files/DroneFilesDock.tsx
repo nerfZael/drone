@@ -54,6 +54,7 @@ import {
 } from './filesystem-mutation-refresh';
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
 import { createDirectoryRefreshThrottle, subscribeDirectoryEvents } from './workspace-events';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 
@@ -190,7 +191,7 @@ export function DroneFilesDock({
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
   onCloseOpenedFile?: () => void;
-  onConfirmCloseOpenedFilesForPaths?: (paths: string[], actionLabel?: string) => boolean;
+  onConfirmCloseOpenedFilesForPaths?: (paths: string[], actionLabel?: string) => boolean | Promise<boolean>;
   onCloseOpenedFilesForPaths?: (paths: string[]) => void;
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
@@ -891,11 +892,17 @@ export function DroneFilesDock({
       if (entriesToDelete.length === 0) return;
       const preview = entriesToDelete.slice(0, 4).map((entry) => entry.name).join(', ');
       const suffix = entriesToDelete.length > 4 ? `, and ${entriesToDelete.length - 4} more` : '';
-      const confirmed = window.confirm(`Delete ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}?\n\n${preview}${suffix}`);
-      if (!confirmed) return;
       const paths = entriesToDelete.map((entry) => entry.path);
-      if (onConfirmCloseOpenedFilesForPaths && !onConfirmCloseOpenedFilesForPaths(paths, 'Delete selected item')) return;
-      void runAction('Deleting', async () => {
+      void (async () => {
+        const confirmed = await confirmDialog({
+          title: `Delete ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}?`,
+          message: `${preview}${suffix}`,
+          confirmLabel: 'Delete',
+          destructive: true,
+        });
+        if (!confirmed) return;
+        if (onConfirmCloseOpenedFilesForPaths && !(await onConfirmCloseOpenedFilesForPaths(paths, 'Deleting the selected items'))) return;
+        void runAction('Deleting', async () => {
         const refreshPlan = filesystemMutationRefreshPlan({ sourcePaths: paths });
         await runFilesystemMutationWithReconciliation(
           () => runDroneFsAction(droneId, {
@@ -919,7 +926,8 @@ export function DroneFilesDock({
           `Deleted ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}.`,
           filesystemMutationRefreshPlan({ sourcePaths: paths }),
         );
-      });
+        });
+      })();
     },
     [
       activeOpenedFilePath,

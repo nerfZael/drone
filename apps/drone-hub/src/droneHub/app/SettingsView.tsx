@@ -35,6 +35,7 @@ import { useVoiceInputSettings } from './use-voice-input-settings';
 import { useSyncSets } from './use-sync-sets';
 import { CompanionSettingsTab } from '../companion/CompanionSettingsTab';
 import { useCompanionSettings } from '../companion/use-companion-settings';
+import { confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -162,9 +163,9 @@ export function SettingsView({
   }, [activeTab]);
 
   const handleSelectTab = React.useCallback(
-    (tabId: SettingsTabId) => {
+    async (tabId: SettingsTabId) => {
       if (activeTab === 'companion' && tabId !== 'companion' && companion.dirty) {
-        if (!window.confirm('Discard unsaved Companion settings?')) return;
+        if (!(await confirmDiscardDialog('Discard unsaved Companion settings?'))) return;
         void companion.load();
       }
       onSelectTab(tabId);
@@ -176,32 +177,32 @@ export function SettingsView({
     [activeTab, companion, deleteAction, onSelectTab],
   );
 
-  const handleBackToWorkspace = React.useCallback(() => {
+  const handleBackToWorkspace = React.useCallback(async () => {
     if (activeTab === 'companion' && companion.dirty) {
-      if (!window.confirm('Discard unsaved Companion settings?')) return;
+      if (!(await confirmDiscardDialog('Discard unsaved Companion settings?'))) return;
       void companion.load();
     }
     if (skillLibrary.draftDirty) {
-      if (!window.confirm('Discard unsaved skill edits?')) return;
+      if (!(await confirmDiscardDialog('Discard unsaved skill edits?'))) return;
     }
     onBackToWorkspace();
   }, [activeTab, companion, onBackToWorkspace, skillLibrary.draftDirty]);
 
-  const handleRefreshAll = React.useCallback(() => {
+  const handleRefreshAll = React.useCallback(async () => {
     if (skillLibrary.draftDirty) {
-      const ok = window.confirm('Discard unsaved skill edits and refresh all settings?');
+      const ok = await confirmDiscardDialog('Discard unsaved skill edits and refresh all settings?');
       if (!ok) return;
     }
     if (mcpServers.mcpDraftDirty) {
-      const ok = window.confirm('Discard unsaved MCP server edits and refresh all settings?');
+      const ok = await confirmDiscardDialog('Discard unsaved MCP server edits and refresh all settings?');
       if (!ok) return;
     }
     if (agentsDraftDirty) {
-      const ok = window.confirm('Discard unsaved AGENTS.md edits and refresh all settings?');
+      const ok = await confirmDiscardDialog('Discard unsaved AGENTS.md edits and refresh all settings?');
       if (!ok) return;
     }
     if (companion.dirty) {
-      const ok = window.confirm('Discard unsaved Companion settings and refresh all settings?');
+      const ok = await confirmDiscardDialog('Discard unsaved Companion settings and refresh all settings?');
       if (!ok) return;
     }
     void llm.loadLlmSettings();

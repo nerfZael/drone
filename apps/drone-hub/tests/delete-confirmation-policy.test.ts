@@ -29,7 +29,7 @@ describe('delete confirmation policy', () => {
     );
     expect(droneSource).toContain('if (opts?.confirmed !== true) {');
     expect(workspaceSource).toContain(
-      'const ok = window.confirm(`Remove repo "${path}" from the registry?`);',
+      'const ok = await confirmDialog({ title: `Remove repo "${path}" from the registry?`, confirmLabel: \'Remove\', destructive: true });',
     );
   });
 });

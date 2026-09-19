@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useChatContextMenu } from './use-chat-context-menu';
+import { registerAppDialogSurface } from '../../ui/AppConfirmDialog';
 import type { ChatContextTarget } from './ChatContextActions';
 
 /** Render an additional chat view exclusively in its native desktop window. */
@@ -63,6 +64,8 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     observer.observe(document.head, { childList: true, subtree: true, characterData: true });
     observer.observe(document.documentElement, { attributes: true });
     child.document.body.appendChild(host);
+    // Confirmations raised from this chat open here, not in the Hub window behind it.
+    const unregisterDialogSurface = registerAppDialogSurface(child.document);
     const focused = () => { host.dataset.desktopChatFocused = 'true'; };
     const blurred = () => { host.dataset.desktopChatFocused = 'false'; };
     host.dataset.desktopChatFocused = String(child.document.hasFocus());
@@ -76,6 +79,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     setPinned(false);
     const closed = () => {
       observer.disconnect();
+      unregisterDialogSurface();
       removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;
@@ -87,6 +91,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     child.addEventListener('beforeunload', closed);
     cleanup.current = () => {
       observer.disconnect();
+      unregisterDialogSurface();
       removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;

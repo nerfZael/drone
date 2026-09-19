@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatProfileDisplayName } from './profile-display';
 import type { UseProfileSettingsResult } from './use-profile-settings';
+import { confirmDeleteDialog } from '../../ui/AppConfirmDialog';
 
 export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsResult }) {
   const {
@@ -225,10 +226,8 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                const ok = window.confirm(
-                                  `Delete profile ${formatProfileDisplayName(item.name)}?\n\nThis removes all containers and host runtimes tracked by that profile.`,
-                                );
+                              onClick={async () => {
+                                const ok = await confirmDeleteDialog(`Delete profile ${formatProfileDisplayName(item.name)}?`, 'This removes all containers and host runtimes tracked by that profile.');
                                 if (!ok) return;
                                 void deleteProfile(item.name);
                               }}

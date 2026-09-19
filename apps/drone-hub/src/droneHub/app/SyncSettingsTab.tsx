@@ -10,6 +10,7 @@ import {
   secondaryButtonClass,
 } from './sync-set-form';
 import type { SyncSetDraftInput, UseSyncSetsResult } from './use-sync-sets';
+import { confirmDeleteDialog, confirmDialog } from '../../ui/AppConfirmDialog';
 
 function summarizeTargetStates(statuses: SyncSetTargetStatus[]) {
   let synced = 0;
@@ -221,10 +222,8 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                             <>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const confirmed = window.confirm(
-                                    `Apply ${syncSet.label} to all existing drones${syncSet.applyToHost ? ' and host' : ''}?\n\nThis is a full mirror and will remove target files that are not present in the source.`,
-                                  );
+                                onClick={async () => {
+                                  const confirmed = await confirmDialog({ title: `Apply ${syncSet.label} to all existing drones${syncSet.applyToHost ? ' and host' : ''}?`, message: 'This is a full mirror and will remove target files that are not present in the source.', confirmLabel: 'Apply', destructive: true });
                                   if (!confirmed) return;
                                   void applySyncSetToExistingDrones(syncSet.id, syncSet.label);
                                 }}
@@ -249,8 +248,8 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const confirmed = window.confirm(`Delete sync set ${syncSet.label}?\n\nThis removes the saved definition and the hub-managed source directory if one exists.`);
+                                onClick={async () => {
+                                  const confirmed = await confirmDeleteDialog(`Delete sync set ${syncSet.label}?`, `This removes the saved definition and the hub-managed source directory if one exists.`);
                                   if (!confirmed) return;
                                   void deleteSyncSet(syncSet.id, syncSet.label);
                                 }}

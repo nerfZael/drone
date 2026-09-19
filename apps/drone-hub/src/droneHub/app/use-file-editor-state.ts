@@ -50,6 +50,7 @@ import { appendFileDictationLine } from '../files/file-dictation-text';
 import type { InitialFileRead } from '../files/prepare-workspace-file-open';
 import { readDesktopFile } from '../files/read-desktop-file';
 import { subscribeFileEvents, type WorkspaceFileEvent } from '../files/workspace-events';
+import { confirmDialog } from '../../ui/AppConfirmDialog';
 import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
 
 type RequestJson = typeof requestJsonFn;
@@ -129,7 +130,7 @@ function oversizedFileKindForPath(pathRaw: string): OpenedFileKind {
   return desktopMediaFileKindForExtension(ext) ?? 'large-text';
 }
 
-function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): boolean {
+async function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): Promise<boolean> {
   const dirtyTabs = tabs.filter(openedFileTabDirty);
   if (dirtyTabs.length === 0) return true;
   if (typeof window === 'undefined') return true;
@@ -138,9 +139,12 @@ function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): bo
     .map((tab) => tab.name || tab.path || 'file')
     .join(', ');
   const suffix = dirtyTabs.length > 4 ? `, and ${dirtyTabs.length - 4} more` : '';
-  return window.confirm(
-    `${actionLabel} will discard unsaved changes in ${dirtyTabs.length} file${dirtyTabs.length === 1 ? '' : 's'}.\n\n${preview}${suffix}`,
-  );
+  return await confirmDialog({
+    title: `Discard unsaved changes in ${dirtyTabs.length} file${dirtyTabs.length === 1 ? '' : 's'}?`,
+    message: `${actionLabel} will discard them: ${preview}${suffix}.`,
+    confirmLabel: 'Discard changes',
+    destructive: true,
+  });
 }
 
 function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>): {
@@ -321,9 +325,11 @@ export function useFileEditorState({
     const requestedTabId = String(tabId ?? activeTabId ?? '').trim();
     const target = tabs.find((tab) => tab.tabId === requestedTabId);
     if (!target) return;
-    if (!confirmDiscardDirtyTabs([target], `Close ${target.name || 'this file'}`)) return;
-    setOpenFailure(null);
-    setTabState((prev) => closeFileTab(prev, requestedTabId));
+    void confirmDiscardDirtyTabs([target], `Closing ${target.name || 'this file'}`).then((confirmed) => {
+      if (!confirmed) return;
+      setOpenFailure(null);
+      setTabState((prev) => closeFileTab(prev, requestedTabId));
+    });
   }, [activeTabId, setTabState, tabs]);
 
   const normalizePositiveInt = React.useCallback((raw: unknown): number | null => {
@@ -1262,7 +1268,7 @@ export function useFileEditorState({
     if (activeTab) reloadFileTabFromDisk(activeTab.tabId);
   }, [activeTab, reloadFileTabFromDisk]);
 
-  const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action'): boolean => {
+  const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action'): Promise<boolean> => {
     const dirtyTabs = dirtyFileTabsForPaths(tabs, paths);
     return confirmDiscardDirtyTabs(dirtyTabs, actionLabel);
   }, [tabs]);

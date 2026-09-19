@@ -2,6 +2,7 @@ import React from 'react';
 import { MCP_AGENT_OPTIONS } from './mcp-server-library-model';
 import { buttonClassName, inputClassName, textareaClassName } from './skill-library-ui';
 import type { UseMcpServersResult } from './use-mcp-servers';
+import { confirmDeleteDialog, confirmDialog, confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
   const [tokenPage, setTokenPage] = React.useState(0);
@@ -59,10 +60,10 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
   }, [tokenPage, tokenPageCount]);
 
   const handleSelect = React.useCallback(
-    (serverId: string) => {
+    async (serverId: string) => {
       if (serverId === selectedMcpServerId) return;
       if (mcpDraftDirty) {
-        const ok = window.confirm('Discard unsaved MCP server edits?');
+        const ok = await confirmDiscardDialog('Discard unsaved MCP server edits?');
         if (!ok) return;
       }
       selectMcpServer(serverId);
@@ -70,45 +71,45 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
     [mcpDraftDirty, selectMcpServer, selectedMcpServerId],
   );
 
-  const handleNew = React.useCallback(() => {
+  const handleNew = React.useCallback(async () => {
     if (mcpDraftDirty) {
-      const ok = window.confirm('Discard unsaved MCP server edits and start a new one?');
+      const ok = await confirmDiscardDialog('Discard unsaved MCP server edits and start a new one?');
       if (!ok) return;
     }
     startNewMcpServer();
   }, [mcpDraftDirty, startNewMcpServer]);
 
-  const handleRefresh = React.useCallback(() => {
+  const handleRefresh = React.useCallback(async () => {
     if (mcpDraftDirty) {
-      const ok = window.confirm('Discard unsaved MCP server edits and reload?');
+      const ok = await confirmDiscardDialog('Discard unsaved MCP server edits and reload?');
       if (!ok) return;
     }
     void loadMcpServers();
   }, [loadMcpServers, mcpDraftDirty]);
 
-  const handleAddDroneHub = React.useCallback(() => {
+  const handleAddDroneHub = React.useCallback(async () => {
     if (mcpDraftDirty) {
-      const ok = window.confirm('Discard unsaved MCP server edits and add the Drone Hub MCP preset?');
+      const ok = await confirmDiscardDialog('Discard unsaved MCP server edits and add the Drone Hub MCP preset?');
       if (!ok) return;
     }
     void upsertDroneHubMcpServer();
   }, [mcpDraftDirty, upsertDroneHubMcpServer]);
 
-  const handleDelete = React.useCallback(() => {
+  const handleDelete = React.useCallback(async () => {
     if (!mcpDraft.id) return;
-    const ok = window.confirm(`Delete ${mcpDraft.name.trim() || 'this MCP server'}?`);
+    const ok = await confirmDeleteDialog(`Delete ${mcpDraft.name.trim() || 'this MCP server'}?`);
     if (!ok) return;
     void deleteSelectedMcpServer();
   }, [deleteSelectedMcpServer, mcpDraft.id, mcpDraft.name]);
 
-  const handleRegenerateToken = React.useCallback((tokenId: string, tokenName: string) => {
-    const ok = window.confirm(`Regenerate ${tokenName}? Existing configs using the old token will stop working until updated.`);
+  const handleRegenerateToken = React.useCallback(async (tokenId: string, tokenName: string) => {
+    const ok = await confirmDialog({ title: `Regenerate ${tokenName}?`, message: 'Existing configs using the old token will stop working until updated.', confirmLabel: 'Regenerate', destructive: true });
     if (!ok) return;
     void regenerateMcpToken(tokenId);
   }, [regenerateMcpToken]);
 
-  const handleRevokeToken = React.useCallback((tokenId: string, tokenName: string) => {
-    const ok = window.confirm(`Revoke ${tokenName}? Agents using this token will lose Drone Hub MCP access.`);
+  const handleRevokeToken = React.useCallback(async (tokenId: string, tokenName: string) => {
+    const ok = await confirmDialog({ title: `Revoke ${tokenName}?`, message: 'Agents using this token will lose Drone Hub MCP access.', confirmLabel: 'Revoke', destructive: true });
     if (!ok) return;
     void revokeMcpToken(tokenId);
   }, [revokeMcpToken]);

@@ -10,6 +10,7 @@ import {
 } from './SettingsSurface';
 import { buttonClassName, importStatusClassName, inputClassName, textareaClassName } from './skill-library-ui';
 import type { UseSkillLibraryResult } from './use-skill-library';
+import { confirmDiscardDialog } from '../../ui/AppConfirmDialog';
 
 type SkillSourceImportSectionProps = Pick<
   UseSkillLibraryResult,
@@ -59,10 +60,10 @@ export function SkillSourceImportSection({
   importSourceSkill,
 }: SkillSourceImportSectionProps) {
   const handleImportCandidate = React.useCallback(
-    (candidate: (typeof filteredSourceSkills)[number]) => {
+    async (candidate: (typeof filteredSourceSkills)[number]) => {
       if (candidate.importStatus !== 'importable') return;
       if (draftDirty) {
-        const ok = window.confirm('Discard unsaved skill edits and import this skill?');
+        const ok = await confirmDiscardDialog('Discard unsaved skill edits and import this skill?');
         if (!ok) return;
       }
       void importSourceSkill(candidate);

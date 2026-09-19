@@ -12,6 +12,7 @@ import type { UseSkillLibraryResult } from './use-skill-library';
 import { IconChevron } from '../icons';
 import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
 import { SkillTextEditor } from './SkillTextEditor';
+import { confirmDeleteDialog, confirmDiscardDialog, promptDialog } from '../../ui/AppConfirmDialog';
 
 type SkillTreeNode = {
   key: string;
@@ -177,9 +178,9 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
   const activeSlug = packageDraft.slug || 'new-skill';
 
   const activateNode = React.useCallback(
-    (node: SkillTreeNode) => {
+    async (node: SkillTreeNode) => {
       if (node.skillKey !== activeSkillKey) {
-        if (draftDirty && !window.confirm('Discard unsaved skill edits?')) return;
+        if (draftDirty && !(await confirmDiscardDialog('Discard unsaved skill edits?'))) return;
         selectSkill(node.skillId);
       }
       setSelection({
@@ -194,17 +195,20 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
     [activeSkillKey, draftDirty, selectSkill],
   );
 
-  const createFile = React.useCallback(() => {
+  const createFile = React.useCallback(async () => {
     const basePath =
       selectedNode?.kind === 'directory'
         ? selectedNode.relativePath
         : selectedNode?.relativePath
           ? pathParent(selectedNode.relativePath)
           : '';
-    const raw = window.prompt(
-      'File path relative to the skill folder',
-      basePath ? `${basePath}/` : '',
-    );
+    const raw = await promptDialog({
+      title: 'New file',
+      message: 'File path relative to the skill folder.',
+      label: 'File path',
+      initialValue: basePath ? `${basePath}/` : '',
+      confirmLabel: 'Create file',
+    });
     if (raw == null || !raw.trim()) return;
     if (!addPackageFile(raw)) return;
     const normalized = normalizeSkillPackagePath(raw);
@@ -213,15 +217,21 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
     if (parent) setExpanded((current) => ({ ...current, [`${activeSkillKey}:${parent}`]: true }));
   }, [activeSkillKey, addPackageFile, selectedNode]);
 
-  const renameSelected = React.useCallback(() => {
+  const renameSelected = React.useCallback(async () => {
     if (!selectedNode) return;
     if (selectedNode.root) {
-      const raw = window.prompt('Skill folder name', activeSlug);
+      const raw = await promptDialog({ title: 'Rename skill folder', label: 'Skill folder name', initialValue: activeSlug, confirmLabel: 'Rename' });
       if (raw == null || !raw.trim() || !updatePackageSlug(raw)) return;
       setSelection({ skillKey: activeSkillKey, relativePath: '', kind: 'directory' });
       return;
     }
-    const raw = window.prompt('New package path', selectedNode.relativePath);
+    const raw = await promptDialog({
+      title: `Rename ${selectedNode.kind === 'directory' ? 'folder' : 'file'}`,
+      message: 'Path relative to the skill folder.',
+      label: 'New path',
+      initialValue: selectedNode.relativePath,
+      confirmLabel: 'Rename',
+    });
     if (raw == null || !raw.trim() || !renamePackagePath(selectedNode.relativePath, raw)) return;
     const normalized = normalizeSkillPackagePath(raw);
     setSelection({
@@ -231,22 +241,22 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
     });
   }, [activeSkillKey, activeSlug, renamePackagePath, selectedNode, updatePackageSlug]);
 
-  const deleteSelected = React.useCallback(() => {
+  const deleteSelected = React.useCallback(async () => {
     if (!selectedNode || selectedNode.relativePath === 'SKILL.md') return;
     if (selectedNode.root) {
       if (!draft.id) return;
-      if (!window.confirm(`Delete skill folder ${activeSlug}? This cannot be undone.`)) return;
+      if (!(await confirmDeleteDialog(`Delete skill folder ${activeSlug}?`))) return;
       void deleteSelectedSkill();
       return;
     }
     const label = selectedNode.kind === 'directory' ? 'folder and all of its files' : 'file';
-    if (!window.confirm(`Delete this ${label}: ${selectedNode.relativePath}?`)) return;
+    if (!(await confirmDeleteDialog(`Delete this ${label}?`, selectedNode.relativePath))) return;
     if (!deletePackagePath(selectedNode.relativePath)) return;
     setSelection({ skillKey: activeSkillKey, relativePath: 'SKILL.md', kind: 'file' });
   }, [activeSkillKey, activeSlug, deletePackagePath, deleteSelectedSkill, draft.id, selectedNode]);
 
-  const revertPackage = React.useCallback(() => {
-    if (!draftDirty || !window.confirm('Discard unsaved skill edits?')) return;
+  const revertPackage = React.useCallback(async () => {
+    if (!draftDirty || !(await confirmDiscardDialog('Discard unsaved skill edits?'))) return;
     resetDraft();
   }, [draftDirty, resetDraft]);
 
