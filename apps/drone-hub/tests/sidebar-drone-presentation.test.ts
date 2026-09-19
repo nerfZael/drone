@@ -398,7 +398,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(cardSource).toContain("label: 'Start container'");
     expect(cardSource).toContain("tone: 'danger'");
     expect(cardSource).not.toContain('<IconMore');
-    expect(menuSource).toContain('createPortal(menu, document.body)');
+    expect(menuSource).toContain('createPortal(menu, view.document.body)');
     expect(menuSource).toContain('fixed z-[200]');
     expect(menuSource).toContain('role="separator"');
     expect(menuSource).toContain('contextMenuItemBaseClass');

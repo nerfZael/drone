@@ -116,8 +116,8 @@ describe('OpenedDroneFilePanel', () => {
       new URL('../src/droneHub/files/monaco-editor-loader.tsx', import.meta.url),
       'utf8',
     );
-    const fileEditorSource = readFileSync(
-      new URL('../src/droneHub/files/OpenedDroneFilePanel.tsx', import.meta.url),
+    const sharedOptionsSource = readFileSync(
+      new URL('../src/droneHub/files/editor-monaco-options.ts', import.meta.url),
       'utf8',
     );
     const chatEditorSource = readFileSync(
@@ -127,8 +127,20 @@ describe('OpenedDroneFilePanel', () => {
 
     expect(loaderSource).toContain('verticalScrollbarSize: 4');
     expect(loaderSource).toContain('horizontalScrollbarSize: 4');
-    expect(fileEditorSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
+    expect(sharedOptionsSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
     expect(chatEditorSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
+  });
+
+  test('every full editor surface starts from the shared Monaco options', () => {
+    for (const path of [
+      '../src/droneHub/files/OpenedDroneFilePanel.tsx',
+      '../src/droneHub/app/SkillTextEditor.tsx',
+      '../src/droneHub/media/AttachmentViewerDialog.tsx',
+    ]) {
+      const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+      expect(source).toContain('...droneHubMonacoEditorOptions(');
+      expect(source).not.toMatch(/fontSize: (\d|editorZoomedPixels)/);
+    }
   });
 
   test('navigates and briefly highlights line-linked files in the appropriate view', () => {

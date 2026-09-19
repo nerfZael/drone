@@ -39,7 +39,6 @@ import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configurat
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
 import {
-  DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
   defineDroneHubMonacoThemes,
   MonacoEditor,
   MonacoEditorErrorBoundary,
@@ -47,8 +46,8 @@ import {
   type MonacoEditorMountHandler,
   type MonacoEditorProps,
 } from './monaco-editor-loader';
-import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
-import { DRONE_HUB_MONACO_FONT_FAMILY } from './monaco-editor-loader';
+import { useEditorZoomLevel } from './editor-zoom';
+import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from './editor-monaco-options';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 import {
@@ -134,10 +133,7 @@ function PlainTextEditorFallback({
       spellCheck={false}
       data-editor-zoom-surface="file-editor"
       className="h-full w-full resize-none border-0 bg-[var(--panel)] px-4 py-4 font-mono text-ui leading-5 text-[var(--fg-secondary)] outline-none"
-      style={{
-        fontSize: `${editorZoomedPixels(13, editorZoomLevel)}px`,
-        lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,
-      }}
+      style={droneHubEditorTextStyle(editorZoomLevel)}
       aria-label="Plain text editor"
     />
   );
@@ -529,30 +525,8 @@ export function OpenedDroneFilePanel({
   ]);
   const monacoOptions = React.useMemo<MonacoEditorProps['options']>(
     () => ({
+      ...droneHubMonacoEditorOptions(editorZoomLevel),
       readOnly: Boolean(fileSaving) || readOnly,
-      fontFamily: DRONE_HUB_MONACO_FONT_FAMILY,
-      fontSize: editorZoomedPixels(13, editorZoomLevel),
-      lineHeight: editorZoomedPixels(20, editorZoomLevel),
-      lineNumbersMinChars: 3,
-      renderLineHighlight: 'all',
-      cursorBlinking: 'smooth',
-      // The caret jumps to where you click, as in VS Code; gliding there reads as lag.
-      cursorSmoothCaretAnimation: 'off',
-      smoothScrolling: true,
-      minimap: { enabled: false },
-      scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
-      wordWrap: 'on',
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      padding: { top: 16, bottom: 24 },
-      'semanticHighlighting.enabled': true,
-      bracketPairColorization: { enabled: true },
-      guides: {
-        indentation: true,
-        highlightActiveIndentation: true,
-        bracketPairs: false,
-        bracketPairsHorizontal: false,
-      },
     }),
     [editorZoomLevel, fileSaving, readOnly],
   );

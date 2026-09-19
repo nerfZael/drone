@@ -19,7 +19,8 @@ import { useFloatingWindowKeeper } from './use-floating-window-keeper';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
 import { requestChatFileOpen } from './chat-file-navigation';
-import { IconDetachedChat } from './DetachedChatIndicator';
+import { IconDetachedChat, openDesktopChatMenuItems } from './DetachedChatIndicator';
+import { useChatContextMenu } from './use-chat-context-menu';
 import { ChatWindowTab } from './ChatWindowTab';
 
 export type DetachedChatWindowsProps = {
@@ -109,12 +110,15 @@ function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: 
 function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
   const context = React.useContext(WindowContext)!;
   const chat = useDetachedChatStore((state) => state.chats[params.chatKey]);
+  const contextMenu = useChatContextMenu(`Actions for ${chat?.chatName ?? 'chat'}`,
+    () => chat ? openDesktopChatMenuItems(chat.droneId, chat.chatName) : []);
   if (!chat?.open) return null;
   const drone = context.drones.find((item) => item.id === chat.droneId);
   const foreign = context.currentDroneId !== chat.droneId;
   const available = drone && [...drone.chats, ...(drone.workflowChats ?? [])].includes(chat.chatName);
   const content = (
     <div tabIndex={-1} data-side-chat-name={params.chatKey} data-detached-chat-key={params.chatKey} data-chat-drone-id={chat.droneId} data-chat-name={chat.chatName}
+      onContextMenu={contextMenu.onContextMenu}
       className="dh-floating-chat flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]">
       <button type="button" onClick={() => dispatchAssistantOpenDroneChat(chat.droneId, chat.chatName)}
         title={`Open ${drone?.name ?? chat.droneId} / ${chat.chatName}`}
@@ -123,8 +127,9 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
         {foreign && <span className="shrink-0">Other drone ↗</span>}
       </button>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {available ? <DetachedChatContent chat={chat} drone={drone} context={context} /> : <div role="status" className="p-3 text-[var(--muted)]">This chat is unavailable. Close this window to return to the workspace.</div>}
+        {available ? <DetachedChatContent chat={chat} drone={drone} context={context} /> : <div role="status" className="p-3 text-[var(--muted)]">This chat is unavailable. Close this window.</div>}
       </div>
+      {contextMenu.menu}
     </div>
   );
   return content;
@@ -150,7 +155,7 @@ function DetachedTab(props: IDockviewPanelHeaderProps) {
 }
 function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
   if (!activePanel) return null;
-  return <button type="button" className="dh-chat-window-action" title="Return chat to workspace" aria-label="Return chat to workspace"
+  return <button type="button" className="dh-chat-window-action" title="Close detached chat" aria-label="Close detached chat"
     onPointerDown={(event) => event.stopPropagation()}
     onClick={() => useDetachedChatStore.getState().attach(activePanel.id)}>
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
@@ -277,7 +282,7 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
       const panel = api.addPanel({ id: key, component: 'detached', title: chat.chatName, params: { chatKey: key }, floating: bounds,
         minimumWidth: Math.min(280, api.width), minimumHeight: Math.min(220, api.height), inactive: true });
       prepareSideChatPanel(panel);
-      panel.group.element.querySelector('.dv-void-container')?.setAttribute('title', 'Drag to move this detached chat. Close to return it to the workspace.');
+      panel.group.element.querySelector('.dv-void-container')?.setAttribute('title', 'Drag to move this detached chat.');
       focus(key);
     }
   }, [chats, ready, props.visible, focus]);

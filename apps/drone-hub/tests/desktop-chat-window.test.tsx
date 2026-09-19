@@ -57,9 +57,28 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     await act(async () => { menu[1].onSelect(); });
     expect(opens).toBe(1);
     expect(focuses).toBe(2);
-    await act(async () => { child.document.querySelector('button')!.click(); });
+    // No header of its own: the OS title bar names and closes the window.
+    expect(child.document.body.textContent).not.toContain('Test chat');
+    expect(child.document.querySelectorAll('button').length).toBe(0);
+    expect(child.document.querySelector('.dh-floating-chat')).not.toBeNull();
+    const rightClick = async (target: { dispatchEvent(event: unknown): boolean }) => act(async () => {
+      target.dispatchEvent(new child.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+    // Right-clicking a field keeps the native menu (paste, spelling).
+    await rightClick(desktopDraft);
+    expect(child.document.querySelector('[role="menu"]')).toBeNull();
+    await rightClick(child.document.querySelector('.dh-floating-chat')!);
+    const pinItem = child.document.querySelector('[role="menuitemcheckbox"]') as unknown as HTMLButtonElement;
+    expect(pinItem.textContent).toBe('Always on top');
+    expect(pinItem.getAttribute('aria-checked')).toBe('false');
+    expect(dom.document.querySelector('[role="menu"]')).toBeNull();
+    await act(async () => { pinItem.click(); });
     expect(pins).toEqual([[`drone-hub-chat:${chatKey}`, true]]);
-    expect(child.document.querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
+    expect(child.document.querySelector('[role="menu"]')).toBeNull();
+    await rightClick(child.document.querySelector('.dh-floating-chat')!);
+    expect(child.document.querySelector('[role="menuitemcheckbox"]')!.getAttribute('aria-checked')).toBe('true');
+    await act(async () => { child.dispatchEvent(new child.KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(child.document.querySelector('[role="menu"]')).toBeNull();
     await act(async () => { child.dispatchEvent(new child.Event('beforeunload')); });
     expect(useDesktopChatRequests.getState().windows).toEqual({});
     expect(element.querySelector('textarea')).toBe(hubDraft);

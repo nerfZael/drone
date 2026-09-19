@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { keepsNativeContextMenu } from '../src/droneHub/app/use-chat-context-menu';
 import { placeDetachedChat } from '../src/droneHub/app/detached-chat-placement';
 import { resolveChatNameForDrone } from '../src/droneHub/app/helpers';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -139,5 +141,35 @@ describe('detached chat navigation', () => {
     expect(consumePendingSideChat('b')).toBeNull();
     expect(consumePendingSideChat('a')).toEqual({ droneId: 'a', target });
     expect(consumePendingSideChat('a')).toBeNull();
+  });
+});
+
+describe('chat windows alongside the main chat', () => {
+  const source = (path: string) => readFileSync(new URL(`../src/droneHub/${path}`, import.meta.url), 'utf8');
+  test('detaching a chat leaves the main chat in place, as opening a desktop window does', () => {
+    const workspace = source('app/SelectedDroneWorkspace.tsx');
+    expect(workspace).not.toContain('useDetachedChatStore');
+    expect(workspace).not.toContain('open in a detached window');
+    expect(source('app/DetachedChatWindows.tsx')).not.toContain('Return chat to workspace');
+  });
+  test('right-clicking the main chat or a detached chat offers the desktop window', () => {
+    expect(source('app/SelectedDroneWorkspace.tsx')).toContain('onContextMenu={chatContextMenu.onContextMenu}');
+    expect(source('app/DetachedChatWindows.tsx')).toContain('openDesktopChatMenuItems(chat.droneId, chat.chatName)');
+  });
+  test('a wide chat window keeps the transcript in the main chat’s centered column', () => {
+    expect(source('app/GroupMultiChatColumn.tsx')).toContain("compact ? 'mx-auto w-full max-w-[1170px]' : ''");
+    expect(source('chat/ChatTranscriptFrame.tsx')).toContain('mx-auto flex max-w-[1170px]');
+  });
+  test('keeps the native menu for selections, fields and links', () => {
+    const element = (closest: boolean, selection: string, clickedOnSelection = true) => ({
+      closest: () => (closest ? {} : null),
+      ownerDocument: { defaultView: { getSelection: () => ({ toString: () => selection, containsNode: () => clickedOnSelection }) } },
+    }) as unknown as EventTarget;
+    expect(keepsNativeContextMenu(element(true, ''))).toBe(true);
+    expect(keepsNativeContextMenu(element(false, 'copied words'))).toBe(true);
+    // A selection left elsewhere in the window does not block the chat menu.
+    expect(keepsNativeContextMenu(element(false, 'copied words', false))).toBe(false);
+    expect(keepsNativeContextMenu(element(false, '  '))).toBe(false);
+    expect(keepsNativeContextMenu(null)).toBe(true);
   });
 });

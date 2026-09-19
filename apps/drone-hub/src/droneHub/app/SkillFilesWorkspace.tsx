@@ -251,8 +251,9 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
   }, [draftDirty, resetDraft]);
 
   function renderNodes(nodes: SkillTreeNode[], depth: number, zoom: number): React.ReactNode {
-    const rowHeight = Math.round(23 * zoom);
-    const textSize = Math.round(12 * zoom * 10) / 10;
+    // Same row geometry and selection colors as the file explorer (DroneFilesDock).
+    const rowHeight = Math.round(24 * zoom);
+    const textSize = Math.round(13 * zoom * 10) / 10;
     return nodes.map((node) => {
       const open = expanded[node.key] === true;
       const selected = selectedNode?.key === node.key;
@@ -266,7 +267,7 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
             onClick={() => activateNode(node)}
             className={`flex w-full min-w-0 items-center gap-1.5 pr-2 text-left transition-colors ${
               selected
-                ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]'
+                ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)]'
                 : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)]'
             }`}
             style={{

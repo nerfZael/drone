@@ -2,9 +2,9 @@ import React from 'react';
 
 import { desktopMonacoTheme } from '../../theme';
 import { editorLanguageForPath } from '../code-languages';
-import { editorZoomedPixels, useEditorZoomLevel } from '../files/editor-zoom';
+import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from '../files/editor-monaco-options';
+import { useEditorZoomLevel } from '../files/editor-zoom';
 import {
-  DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
   defineDroneHubMonacoThemes,
   MonacoEditor,
   MonacoEditorErrorBoundary,
@@ -45,10 +45,7 @@ function PlainSkillEditor({
         }
       }}
       className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-12 leading-5 text-[var(--fg-secondary)] outline-none"
-      style={{
-        fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
-        lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,
-      }}
+      style={droneHubEditorTextStyle(editorZoomLevel)}
       aria-label="Skill file editor"
     />
   );
@@ -82,16 +79,8 @@ export function SkillTextEditor({
   );
   const options = React.useMemo<MonacoEditorProps['options']>(
     () => ({
+      ...droneHubMonacoEditorOptions(editorZoomLevel),
       readOnly: saving,
-      fontSize: editorZoomedPixels(12, editorZoomLevel),
-      minimap: { enabled: false },
-      scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
-      wordWrap: 'on',
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      padding: { top: 12, bottom: 12 },
-      bracketPairColorization: { enabled: true },
-      guides: { indentation: true, highlightActiveIndentation: true },
       // Skill files contain prose, where smart punctuation and non-Latin text
       // are intentional. Keep warnings for genuinely invisible characters.
       unicodeHighlight: {

@@ -3,8 +3,10 @@ import { UiDialog } from '../../ui/components/Dialog';
 import { desktopMonacoTheme } from '../../theme';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { PortableEditorHost } from '../chat/PortableEditorHost';
+import { droneHubMonacoEditorOptions } from '../files/editor-monaco-options';
+import { EDITOR_ZOOM_DEFAULT_LEVEL } from '../files/editor-zoom';
 import {
-  DRONE_HUB_MONACO_SCROLLBAR_OPTIONS, defineDroneHubMonacoThemes, MonacoEditor, MonacoEditorErrorBoundary, type MonacoEditorProps,
+  defineDroneHubMonacoThemes, MonacoEditor, MonacoEditorErrorBoundary, type MonacoEditorProps,
 } from '../files/monaco-editor-loader';
 
 /** Something to look at in full: an image by URL, or text given directly or fetched when the viewer opens. */
@@ -74,8 +76,8 @@ function TextViewer({ text, name, detached }: { text: string; name: string; deta
   const themeId = useDroneHubUiStore(state => state.themeId);
   const fallback = <pre className="dh-agent-activity-scrollbar h-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs text-[var(--fg-secondary)]">{text}</pre>;
   const options = React.useMemo<MonacoEditorProps['options']>(() => ({
-    readOnly: true, domReadOnly: true, fontSize: 12, minimap: { enabled: false }, scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
-    wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, padding: { top: 12, bottom: 12 }, renderLineHighlight: 'none',
+    ...droneHubMonacoEditorOptions(EDITOR_ZOOM_DEFAULT_LEVEL),
+    readOnly: true, domReadOnly: true, padding: { top: 12, bottom: 12 }, renderLineHighlight: 'none',
     unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: true },
     // Native EditContext belongs to the creating JS window and cannot follow the floating one.
     ...(detached ? { editContext: false } : {}),

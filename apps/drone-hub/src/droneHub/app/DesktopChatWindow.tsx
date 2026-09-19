@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { useChatContextMenu } from './use-chat-context-menu';
 
 /** Render an additional chat view exclusively in its native desktop window. */
 export function DesktopChatWindow({ chatKey, title, request, onClose, children }: {
@@ -19,7 +20,6 @@ export function DesktopChatWindow({ chatKey, title, request, onClose, children }
   const [outside, setOutside] = React.useState(false);
   const [pinned, setPinned] = React.useState(false);
   const [error, setError] = React.useState('');
-  const [pinBusy, setPinBusy] = React.useState(false);
   const name = `drone-hub-chat:${chatKey}`;
   React.useLayoutEffect(() => {
     return () => { cleanup.current?.(); host.remove(); };
@@ -85,23 +85,25 @@ export function DesktopChatWindow({ chatKey, title, request, onClose, children }
     open();
   }, [request, open]);
   const togglePin = async () => {
-    setPinBusy(true);
     try {
       const value = await window.droneHubDesktop?.setChatWindowAlwaysOnTop?.(name, !pinned);
       if (popup.current) setPinned(value === true);
     } catch { setError('Could not change always-on-top. Try again.'); }
-    finally { setPinBusy(false); }
   };
+  // The OS title bar already names the chat and closes the window, so the one
+  // window option lives behind right-click instead of a header of its own.
+  const contextMenu = useChatContextMenu(`Window options for ${title}`, () => [
+    { id: 'always-on-top', label: 'Always on top', checked: pinned, onSelect: () => void togglePin() },
+  ]);
   if (!outside) return error ? <div role="alert" className="absolute bottom-3 right-3 z-50 rounded bg-[var(--panel)] p-3 text-[var(--red)]">
     {error} <button onClick={open}>Retry</button> <button onClick={onClose}>Dismiss</button>
   </div> : null;
-  return createPortal(<>
-    <div className="flex shrink-0 items-center gap-3 border-b border-[var(--border)] px-2 py-1 text-11 text-[var(--muted)]">
-      <span className="min-w-0 flex-1 truncate">{title}</span>
-      <button type="button" aria-pressed={pinned} disabled={pinBusy} onClick={() => void togglePin()}>{pinned ? 'Always on top: On' : 'Always on top: Off'}</button>
-      <button type="button" onClick={onClose}>Close window</button>
-    </div>
+  // dh-floating-chat gives this window the same slim composer and tighter
+  // transcript as a floating chat in the Hub once it is narrow enough.
+  return createPortal(<div onContextMenu={contextMenu.onContextMenu}
+    className="dh-floating-chat flex min-h-0 flex-1 flex-col bg-[var(--chat-background)]">
     {error && <div role="alert" className="px-2 text-12 text-[var(--red)]">{error}</div>}
     {children}
-  </>, host);
+    {contextMenu.menu}
+  </div>, host);
 }

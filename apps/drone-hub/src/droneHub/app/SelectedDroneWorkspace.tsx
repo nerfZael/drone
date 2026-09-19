@@ -1,8 +1,9 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
-import { detachedChatKey, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore } from './detached-chat-store';
 import { SideChatControls } from './SideChatControls';
+import { detachChatMenuItems } from './DetachedChatIndicator';
+import { useChatContextMenu } from './use-chat-context-menu';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import React from 'react';
 import { useWorkspaceSideChats } from './use-workspace-side-chats';
@@ -702,11 +703,8 @@ export function SelectedDroneWorkspace({
       }),
     [activeChatName, currentDrone.id],
   );
-  const detachedMainKey = detachedChatKey(currentDrone.id, activeChatName);
-  const mainChatDetached = useDetachedChatStore((state) => Boolean(state.chats[detachedMainKey]?.open));
-  React.useEffect(() => {
-    if (mainChatDetached) window.dispatchEvent(new CustomEvent(DETACHED_CHAT_FOCUS_EVENT, { detail: { key: detachedMainKey } }));
-  }, [mainChatDetached, detachedMainKey]);
+  const chatContextMenu = useChatContextMenu(`Actions for ${activeChatName}`,
+    () => detachChatMenuItems(currentDrone.id, activeChatName));
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -2417,13 +2415,7 @@ export function SelectedDroneWorkspace({
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
-        chatContent={mainChatDetached ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-[var(--muted)]">
-            <span>This chat is open in a detached window.</span>
-            <button className="text-[var(--accent)] hover:underline" onClick={() => useDetachedChatStore.getState().detach(currentDrone.id, activeChatName)}>Focus detached chat</button>
-            <button className="text-[var(--accent)] hover:underline" onClick={() => useDetachedChatStore.getState().attach(detachedMainKey)}>Return chat to workspace</button>
-          </div>
-        ) : (
+        chatContent={(
           <SideChatForkContext.Provider value={{
             droneId: currentDrone.id,
             chatName: activeChatName,
@@ -2439,6 +2431,7 @@ export function SelectedDroneWorkspace({
             onDragOver={onFleetDropDragOver}
             onDragLeave={onFleetDropDragLeave}
             onDrop={onFleetDropDrop}
+            onContextMenu={chatContextMenu.onContextMenu}
             className={cn(
               'flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative',
               fleetBadgeDropActive && 'ring-1 ring-inset ring-[var(--accent-muted)]',
@@ -2760,6 +2753,7 @@ export function SelectedDroneWorkspace({
                 </div>
               ) : null}
             </ChatSurface>
+            {chatContextMenu.menu}
           </div>
           </SideChatForkContext.Provider>
         )}

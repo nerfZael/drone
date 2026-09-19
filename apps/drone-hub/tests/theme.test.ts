@@ -86,6 +86,17 @@ describe('desktop themes', () => {
     );
   });
 
+  test('gives markdown structure its own look in every editor theme', () => {
+    for (const theme of DESKTOP_THEMES) {
+      const { rules, colors } = desktopMonacoTheme(theme.id).definition;
+      const rule = (token: string) => rules.find((candidate) => candidate.token === token);
+      expect(rule('keyword.md')?.fontStyle).toBe('bold');
+      expect(rule('string.link.md')?.fontStyle).toBe('underline');
+      // Inline code is tokenized as a variable, which otherwise matches body text.
+      expect(`#${rule('variable.md')?.foreground}`).not.toBe(colors['editor.foreground']);
+    }
+  });
+
   test('maps Catppuccin desktop surfaces into a readable visual hierarchy', () => {
     const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
     const catppuccinStart = css.indexOf(":root[data-theme='catppuccin-mocha']");

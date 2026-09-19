@@ -22,14 +22,16 @@ export function detachChatMenuItem(droneId: string, chatName: string): SidebarCo
   };
 }
 
+/** Empty outside the desktop app, which is the only place a chat can get its own OS window. */
+export function openDesktopChatMenuItems(droneId: string, chatName: string): SidebarContextMenuItem[] {
+  return window.droneHubDesktop?.setChatWindowAlwaysOnTop ? [{
+    id: 'open-desktop-chat',
+    label: 'Open in desktop window',
+    icon: <IconDetachedChat />,
+    onSelect: () => useDesktopChatRequests.getState().request(droneId, chatName),
+  }] : [];
+}
+
 export function detachChatMenuItems(droneId: string, chatName: string): SidebarContextMenuItem[] {
-  return [
-    detachChatMenuItem(droneId, chatName),
-    ...(window.droneHubDesktop?.setChatWindowAlwaysOnTop ? [{
-      id: 'open-desktop-chat',
-      label: 'Open in desktop window',
-      icon: <IconDetachedChat />,
-      onSelect: () => useDesktopChatRequests.getState().request(droneId, chatName),
-    }] : []),
-  ];
+  return [detachChatMenuItem(droneId, chatName), ...openDesktopChatMenuItems(droneId, chatName)];
 }

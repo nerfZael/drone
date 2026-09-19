@@ -1182,7 +1182,8 @@ export function GroupMultiChatColumn({
             {error}
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
-          <div ref={bindColumnContentRef} className="flex flex-col gap-[var(--chat-turn-gap,1.25rem)]">
+          // A wide or maximized chat window keeps the conversation in the same centered column as the main chat.
+          <div ref={bindColumnContentRef} className={`flex flex-col gap-[var(--chat-turn-gap,1.25rem)] ${compact ? 'mx-auto w-full max-w-[1170px]' : ''}`}>
             {olderLoading ? (
               <div className="text-center text-10 text-[var(--muted)]" role="status">
                 Loading older messages…
