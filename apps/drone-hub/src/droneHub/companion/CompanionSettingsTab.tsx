@@ -1,7 +1,8 @@
 import { AiGatewayKeySettings } from '../app/AiGatewayKeySettings';
 import React from 'react';
 import { CompanionShortcutSettings } from './CompanionShortcutSettings';
-import { UiSegmentedControl } from '../../ui/components';
+import { UiMenuSelect, UiSegmentedControl } from '../../ui/components';
+import type { UseSpeechSettingsResult } from '../app/use-speech-settings';
 import { AssistantToolsPanel } from '../assistant/AssistantSettingsPanels';
 import type { AssistantToolSummary } from '../assistant/assistant-types';
 import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
@@ -14,8 +15,9 @@ import {
 
 const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter', cerebras: 'Cerebras' } as const;
 
-export function CompanionSettingsTab({ settings }: {
+export function CompanionSettingsTab({ settings, speech }: {
   settings: ReturnType<typeof useCompanionSettings>;
+  speech?: UseSpeechSettingsResult;
 }) {
   const companion = useCompanion();
   const live = companion?.live;
@@ -65,6 +67,19 @@ export function CompanionSettingsTab({ settings }: {
   };
   const toggleTool = (name: string, enabled: boolean) => toggleTools([name], enabled);
   const providerHasCredentials = data.credentials[draft.provider];
+  const speechModel = speech?.speechSettings?.speech.models.find((model) => model.id === speech.modelDraft);
+  const speechDirty = Boolean(
+    speech?.speechSettings &&
+      (speech.modelDraft !== speech.speechSettings.speech.model ||
+        speech.voiceDraft !== speech.speechSettings.speech.voice),
+  );
+  const setSpeechModel = (modelId: string) => {
+    if (!speech?.speechSettings) return;
+    const model = speech.speechSettings.speech.models.find((candidate) => candidate.id === modelId);
+    if (!model) return;
+    speech.setModelDraft(model.id);
+    if (!model.voices.includes(speech.voiceDraft)) speech.setVoiceDraft(model.defaultVoice);
+  };
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -205,6 +220,51 @@ export function CompanionSettingsTab({ settings }: {
         ) : null}
         {!providerHasCredentials ? <div className="mt-2 text-xs text-[var(--red)]">{PROVIDER_LABELS[draft.provider]} credentials are not configured. Runs will fail until they are added in General settings.</div> : null}
       </section>
+
+      {speech ? <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
+        <h3 className="text-sm font-semibold text-[var(--fg)]">Spoken output</h3>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Choose the model and default voice used when Companion calls speak. OpenAI TTS-1 is the default for new settings. Availability, mute, and volume remain in General settings.
+        </p>
+        {speech.speechSettingsError ? <div role="alert" className="mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-2 text-xs text-[var(--red)]">
+          {speech.speechSettingsError} <button type="button" className="underline" onClick={() => void speech.loadSpeechSettings()}>Retry</button>
+        </div> : null}
+        {speech.speechSettingsLoading && !speech.speechSettings ? <div className="mt-3 text-xs text-[var(--muted)]">Loading speech settings…</div> : null}
+        {speech.speechSettings ? <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-[var(--fg-secondary)]">
+            Speech model
+            <UiMenuSelect
+              value={speech.modelDraft}
+              onValueChange={setSpeechModel}
+              disabled={speech.speechSettingsLoading || speech.speechSettingsSaving}
+              entries={speech.speechSettings.speech.models.map((model) => ({ value: model.id, label: model.label }))}
+              header="Speech model"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-[var(--fg-secondary)]">
+            Voice
+            <UiMenuSelect
+              value={speech.voiceDraft}
+              onValueChange={speech.setVoiceDraft}
+              disabled={speech.speechSettingsLoading || speech.speechSettingsSaving || !speechModel}
+              entries={(speechModel?.voices ?? []).map((voice) => ({
+                value: voice,
+                label: voice.charAt(0).toUpperCase() + voice.slice(1),
+              }))}
+              header="Speech voice"
+            />
+          </label>
+        </div> : null}
+        {speechModel ? <p className="mt-2 text-[10px] text-[var(--muted-dim)]">
+          {speechModel.provider === 'openai' ? 'Uses the OpenAI API key.' : 'Uses the Groq API key.'} Up to {speechModel.maxCharacters.toLocaleString()} characters per speak call.
+        </p> : null}
+        {speech.speechSettingsNotice ? <p className="mt-2 text-xs text-[var(--green)]">{speech.speechSettingsNotice}</p> : null}
+        <button type="button" disabled={!speechDirty || speech.speechSettingsLoading || speech.speechSettingsSaving}
+          onClick={() => void speech.saveSpeechOutputSettings()}
+          className="mt-3 rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-contrast)] disabled:opacity-40">
+          {speech.speechSettingsSaving ? 'Saving…' : 'Save spoken output'}
+        </button>
+      </section> : null}
 
       <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <h3 className="text-sm font-semibold text-[var(--fg)]">Follow-up delivery</h3>

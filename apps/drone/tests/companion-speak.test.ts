@@ -14,7 +14,15 @@ test('Companion exposes speak through its real MCP provider and respects both to
     const requests: unknown[] = [];
     let status = 'queued';
     globalThis.fetch = (async (input, init) => {
-      expect(String(input)).toBe('http://companion-speech.test/api/audio/speech');
+      const url = String(input);
+      if (url === 'http://companion-speech.test/api/settings/speech') {
+        expect(init?.method).toBe('GET');
+        return Response.json({
+          ok: true,
+          speech: { muted: status === 'muted', model: 'tts-1', voice: 'alloy' },
+        });
+      }
+      expect(url).toBe('http://companion-speech.test/api/audio/speech');
       expect(init?.method).toBe('POST');
       requests.push(JSON.parse(String(init?.body)));
       return Response.json({ ok: true, jobId: 'speech-job', status }, { status: 202 });
@@ -39,9 +47,14 @@ test('Companion exposes speak through its real MCP provider and respects both to
       expect(result.details).toMatchObject({ ok: true, status: 'queued' });
       expect(requests).toEqual([{ text: 'Your screenshot is attached.', voice: 'hannah' }]);
       status = 'muted';
-      expect((await speech.execute('muted', { text: 'Ready.' })).details).toMatchObject({ status: 'muted' });
-      await expect(speech.execute('oversized', { text: 'x'.repeat(201) })).rejects.toThrow('Input validation error');
-      expect(requests).toHaveLength(2);
+      expect((await speech.execute('muted', { text: 'Ready.' })).details).toMatchObject({
+        ok: true,
+        status: 'muted',
+        model: 'tts-1',
+        voice: 'alloy',
+      });
+      await expect(speech.execute('oversized', { text: 'x'.repeat(4097) })).rejects.toThrow('Input validation error');
+      expect(requests).toHaveLength(1);
       context.settings.enabledTools = [];
       expect(await load()).toEqual([]);
       context.settings.enabledTools = ['speak'];

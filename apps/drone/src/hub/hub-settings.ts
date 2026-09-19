@@ -16,7 +16,17 @@ import {
   type DroneRegistry,
 } from '../host/registry';
 import { createCodexLoginManager } from './codex-login-manager';
-import { GROQ_SPEECH_VOICES, type GroqSpeechVoice } from './groq-speech';
+import {
+  DEFAULT_SPEECH_MODEL,
+  inferLegacySpeechModel,
+  parseSpeechModel,
+  parseSpeechVoice,
+  SPEECH_MODELS,
+  speechModelDetails,
+  speechModelSupportsVoice,
+  type SpeechModel,
+  type SpeechVoice,
+} from './speech-models';
 
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
@@ -121,7 +131,8 @@ export type SpeechSettings = {
   enabled: boolean;
   muted: boolean;
   volume: number;
-  voice: GroqSpeechVoice;
+  model: SpeechModel;
+  voice: SpeechVoice;
 };
 export type VoiceInputEndThoughtPreset = 'quick' | 'balanced' | 'patient' | 'custom';
 export type VoiceInputNoiseHandling = 'auto' | 'quiet' | 'noisy';
@@ -194,7 +205,8 @@ export const DEFAULT_SPEECH_SETTINGS: SpeechSettings = {
   enabled: true,
   muted: false,
   volume: 1,
-  voice: 'troy',
+  model: DEFAULT_SPEECH_MODEL,
+  voice: speechModelDetails(DEFAULT_SPEECH_MODEL).defaultVoice,
 };
 export const DEFAULT_VOICE_INPUT_SETTINGS: VoiceInputSettings = {
   endThoughtPreset: 'balanced',
@@ -303,13 +315,6 @@ export function parseSpeechVolume(raw: unknown): number | null {
   const volume = Number(raw);
   if (!Number.isFinite(volume) || volume < 0 || volume > 1) return null;
   return volume;
-}
-
-export function parseSpeechVoice(raw: unknown): GroqSpeechVoice | null {
-  const voice = String(raw ?? '').trim().toLowerCase();
-  return (GROQ_SPEECH_VOICES as readonly string[]).includes(voice)
-    ? (voice as GroqSpeechVoice)
-    : null;
 }
 
 function normalizeApiKey(raw: unknown): string {
@@ -1053,11 +1058,16 @@ export async function resolveFilesystemSettingsResponse(): Promise<{
 export async function resolveEffectiveSpeechSettings(): Promise<SpeechSettings> {
   const record = await getCanonicalSetting<Partial<SpeechSettings>>(SETTING_KEYS.speech, () => null);
   const stored = record?.value;
+  const storedVoice = parseSpeechVoice(stored?.voice);
+  const model = parseSpeechModel(stored?.model) ?? (storedVoice ? inferLegacySpeechModel(storedVoice) : DEFAULT_SPEECH_SETTINGS.model);
   return {
     enabled: typeof stored?.enabled === 'boolean' ? stored.enabled : DEFAULT_SPEECH_SETTINGS.enabled,
     muted: typeof stored?.muted === 'boolean' ? stored.muted : DEFAULT_SPEECH_SETTINGS.muted,
     volume: parseSpeechVolume(stored?.volume) ?? DEFAULT_SPEECH_SETTINGS.volume,
-    voice: parseSpeechVoice(stored?.voice) ?? DEFAULT_SPEECH_SETTINGS.voice,
+    model,
+    voice: storedVoice && speechModelSupportsVoice(model, storedVoice)
+      ? storedVoice
+      : speechModelDetails(model).defaultVoice,
   };
 }
 
@@ -1070,27 +1080,35 @@ export async function upsertStoredSpeechSettings(input: Partial<SpeechSettings>)
   }
   const volume = input.volume == null ? null : parseSpeechVolume(input.volume);
   if (input.volume != null && volume == null) throw new Error('volume must be between 0 and 1');
+  const model = input.model == null ? null : parseSpeechModel(input.model);
+  if (input.model != null && !model) throw new Error('speech model is not supported');
   const voice = input.voice == null ? null : parseSpeechVoice(input.voice);
   if (input.voice != null && !voice) throw new Error('voice is not supported');
 
   const current = await resolveEffectiveSpeechSettings();
+  const nextModel = model ?? current.model;
+  const nextVoice = voice ?? (model && model !== current.model ? speechModelDetails(nextModel).defaultVoice : current.voice);
+  if (!speechModelSupportsVoice(nextModel, nextVoice)) {
+    throw new Error(`voice ${nextVoice} is not supported by ${nextModel}`);
+  }
   await putCanonicalSetting(SETTING_KEYS.speech, {
     enabled: input.enabled ?? current.enabled,
     muted: input.muted ?? current.muted,
     volume: volume ?? current.volume,
-    voice: voice ?? current.voice,
+    model: nextModel,
+    voice: nextVoice,
   });
 }
 
 export async function resolveSpeechSettingsResponse(): Promise<{
   ok: true;
-  speech: SpeechSettings & { voices: readonly GroqSpeechVoice[] };
+  speech: SpeechSettings & { models: typeof SPEECH_MODELS };
 }> {
   return {
     ok: true,
     speech: {
       ...(await resolveEffectiveSpeechSettings()),
-      voices: GROQ_SPEECH_VOICES,
+      models: SPEECH_MODELS,
     },
   };
 }
