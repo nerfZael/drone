@@ -94,6 +94,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelTab: RightPanelTab;
   requestRightPanelTab: (tab: RightPanelTab) => void;
   setSidebarCollapsed: Setter<boolean>;
+  toggleSidebarCollapsedManually: () => void;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
   requestJson: RequestJson;
@@ -157,6 +158,7 @@ export function useDroneHubLifecycleEffects({
   rightPanelTab,
   requestRightPanelTab,
   setSidebarCollapsed,
+  toggleSidebarCollapsedManually,
   shortcutBindings,
   llmSettings,
   requestJson,
@@ -486,7 +488,7 @@ export function useDroneHubLifecycleEffects({
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       toggleSidebarCollapsed: () => {
-        setSidebarCollapsed((prev) => !prev);
+        toggleSidebarCollapsedManually();
         return true;
       },
       toggleRightPanelWidth: () => {
@@ -796,6 +798,7 @@ export function useDroneHubLifecycleEffects({
     rightPanelTab,
     requestRightPanelTab,
     setSidebarCollapsed,
+    toggleSidebarCollapsedManually,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut,
