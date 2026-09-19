@@ -3,7 +3,9 @@ import { ChatSurface, adaptNativeAgentChatSurface } from '../chat';
 import { AssistantDock, type AssistantMessageFeatures } from '../assistant/AssistantDock';
 import { GroupMultiChatColumn, type GroupMultiChatColumnProps } from './GroupMultiChatColumn';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
-import { SideChatForkContext } from '../chat/SideChatForkContext';
+import { SideChatForkProvider } from '../chat/SideChatForkContext';
+import { useChatContextMenu } from './use-chat-context-menu';
+import { openDesktopChatMenuItems } from './DetachedChatIndicator';
 
 type Props = Pick<
   GroupMultiChatColumnProps,
@@ -30,8 +32,10 @@ export function WorkspaceSideChatContent({
   messageFeatures,
   ...actions
 }: Props) {
+  const contextMenu = useChatContextMenu(`Actions for ${chat.name}`,
+    () => openDesktopChatMenuItems(drone.id, chat.name), { droneId: drone.id, chatName: chat.name });
   return (
-    <SideChatForkContext.Provider
+    <SideChatForkProvider
       value={{
         droneId: drone.id,
         chatName: chat.name,
@@ -42,6 +46,7 @@ export function WorkspaceSideChatContent({
       }}
     >
       <div
+        onContextMenu={contextMenu.onContextMenu}
         data-side-chat-name={chat.name}
         data-chat-drone-id={drone.id}
         data-chat-name={chat.name}
@@ -74,7 +79,8 @@ export function WorkspaceSideChatContent({
             />
           )}
         </div>
+        {contextMenu.menu}
       </div>
-    </SideChatForkContext.Provider>
+    </SideChatForkProvider>
   );
 }

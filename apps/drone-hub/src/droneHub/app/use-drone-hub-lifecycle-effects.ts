@@ -437,7 +437,6 @@ export function useDroneHubLifecycleEffects({
       alignFloatingChats: () => currentDrone ? requestAlignFloatingChats(currentDrone.id) : false,
       createDraftDroneInCurrentGroup: () => openCurrentGroupDraftChatComposer(),
       createDroneChat: () => {
-        if (!currentDrone) return false;
         void (async () => {
           const created = await createDroneChatFromShortcut();
           if (!created) return;
@@ -446,7 +445,6 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       cloneDroneChat: () => {
-        if (!currentDrone) return false;
         void cloneDroneChatFromShortcut();
         return true;
       },

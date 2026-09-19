@@ -13,6 +13,7 @@ export type SidebarContextMenuItem = {
   shortcut?: string;
   separatorBefore?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
   /** Set for an on/off item; it is announced as a checkbox and shows a check mark when on. */
   checked?: boolean;
   tone?: 'neutral' | 'danger';
@@ -103,6 +104,7 @@ export function SidebarContextMenu({
             role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
             aria-checked={item.checked}
             disabled={item.disabled}
+            title={item.disabledReason}
             onClick={() => {
               onClose();
               item.onSelect();
@@ -130,7 +132,10 @@ export function SidebarContextMenu({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5 9-10" /></svg>
               ) : item.icon}
             </span>
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{item.label}</span>
+              {item.disabledReason && <span className="block text-11 font-normal whitespace-normal">{item.disabledReason}</span>}
+            </span>
             {item.shortcut ? (
               <span className="ml-4 shrink-0 font-mono text-11 text-[var(--muted-dim)] opacity-75">
                 {item.shortcut}

@@ -79,15 +79,33 @@ async function settle() {
   for (let i = 0; i < 6; i++) await Promise.resolve();
 }
 
+test('fork shortcut uses the displaced regular chat instead of the promoted main fork', () => {
+  const checkpoint = { dataset: { sideChatCheckpointId: 'default-answer' } };
+  const scope = { dataset: { sideChatName: 'default' }, querySelector: () => checkpoint };
+  const harness = sideChatHarness(null, {
+    querySelector: () => scope,
+    querySelectorAll: () => [scope],
+  });
+  try {
+    harness.render('A');
+    harness.open('A', false);
+    expect(harness.bodies).toHaveLength(1);
+    expect(harness.bodies[0]).toMatchObject({ copyFrom: 'default', checkpointId: 'default-answer', sideChat: true });
+  } finally {
+    harness.unmount();
+  }
+});
+
 // Like the transcript-scroll tests, run the real hook with controlled effects
 // and deferred I/O, without replacing React globally for other test files.
-function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null) {
+function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, document = { querySelector: (): any => null, querySelectorAll: (): any[] => [] }) {
   let cursor = 0;
   let dirty = false;
   let writes = 0;
   const slots: any[] = [];
   const effects: (() => void)[] = [];
   const requests: ReturnType<typeof Promise.withResolvers<any>>[] = [];
+  const bodies: unknown[] = [];
   const confirmation = Promise.withResolvers<boolean>();
   const useMemo = (factory: () => any, deps: any[]) => {
     const index = cursor++;
@@ -152,7 +170,8 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null) {
       };
       if (name === '../http')
         return {
-          requestJson: () => {
+          requestJson: (_url: string, options: { body: string }) => {
+            bodies.push(JSON.parse(options.body));
             const pending = Promise.withResolvers<any>();
             requests.push(pending);
             return pending.promise;
@@ -162,10 +181,11 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null) {
     },
     exports,
     window,
-    { querySelector: () => null },
+    document,
   );
   return {
     requests,
+    bodies,
     confirmation,
     stateWrites: () => writes,
     render(droneId: string) {
@@ -178,11 +198,11 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null) {
       } while (dirty);
       return result;
     },
-    open(droneId: string) {
+    open(droneId: string, explicitTarget = true) {
       window.dispatchEvent(
         new CustomEvent(OPEN_SIDE_CHAT_EVENT, {
           cancelable: true,
-          detail: { droneId, target: { sourceChatName: 'main', checkpointId: 'answer' } },
+          detail: { droneId, ...(explicitTarget ? { target: { sourceChatName: 'main', checkpointId: 'answer' } } : {}) },
         }),
       );
     },

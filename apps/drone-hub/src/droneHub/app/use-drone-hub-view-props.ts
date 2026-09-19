@@ -530,6 +530,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
   } = args;
 
   return {
+    chatContextActions: args.chatContextActions,
     detachedChatWindowsProps: {
       drones,
       onRenameChat: renameCanvasChat,

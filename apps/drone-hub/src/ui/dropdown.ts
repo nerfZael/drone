@@ -8,7 +8,7 @@ export const dropdownMenuItemBaseClass = 'w-full text-left px-3 py-2.5 dh-type-m
 export const contextMenuPanelBaseClass = `${dropdownPanelBaseClass} p-1`;
 
 export const contextMenuItemBaseClass =
-  'flex min-h-8 w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left dh-type-menu-item transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40';
+  'flex min-h-8 w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left dh-type-menu-item transition-colors duration-100 focus-visible:outline-none focus-visible:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40';
 
 export const contextMenuSeparatorClass =
   '-mx-1 my-1 border-t border-[var(--border-subtle)] opacity-70';

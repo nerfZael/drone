@@ -1,7 +1,7 @@
 import { useDesktopChatRequests } from './desktop-chat-requests';
 import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
-import { SideChatForkContext } from '../chat/SideChatForkContext';
+import { SideChatForkProvider } from '../chat/SideChatForkContext';
 import React from 'react';
 import { DockviewReact, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
@@ -36,7 +36,7 @@ export type DetachedChatWindowsProps = {
 const WindowContext = React.createContext<DetachedChatWindowsProps | null>(null);
 const nativeAdapter = adaptNativeAgentChatSurface();
 
-function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean }) {
+export function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean }) {
   const [agent, setAgent] = React.useState<{ kind: string; id?: string } | null>(null);
   const [error, setError] = React.useState('');
   const [retry, setRetry] = React.useState(0);
@@ -101,17 +101,17 @@ function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: 
     onAutoRenameChatFromFirstPrompt={context.onAutoRenameChatFromFirstPrompt}
     onPublish={draft ? publish : undefined} publishing={publishing}
     onOpenDrone={() => dispatchAssistantOpenDroneChat(drone.id, chat.chatName)} onDeleteDrone={() => {}} focusedNewChatActionId="" columnWidthPx={320} />;
-  return <SideChatForkContext.Provider value={{ droneId: drone.id, chatName: chat.chatName, busy: false, supported: !draft && (agent.kind === 'native' || ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) }}>
+  return <SideChatForkProvider value={{ droneId: drone.id, chatName: chat.chatName, busy: false, supported: !draft && (agent.kind === 'native' || ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) }}>
     {publishError && <div role="alert" className="shrink-0 px-3 py-2 text-[var(--red)]">{publishError}</div>}
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
-  </SideChatForkContext.Provider>;
+  </SideChatForkProvider>;
 }
 
 function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
   const context = React.useContext(WindowContext)!;
   const chat = useDetachedChatStore((state) => state.chats[params.chatKey]);
   const contextMenu = useChatContextMenu(`Actions for ${chat?.chatName ?? 'chat'}`,
-    () => chat ? openDesktopChatMenuItems(chat.droneId, chat.chatName) : []);
+    () => chat ? openDesktopChatMenuItems(chat.droneId, chat.chatName) : [], chat);
   if (!chat?.open) return null;
   const drone = context.drones.find((item) => item.id === chat.droneId);
   const foreign = context.currentDroneId !== chat.droneId;
@@ -168,8 +168,8 @@ function DesktopChatWindows({ context }: { context: DetachedChatWindowsProps }) 
   const windows = useDesktopChatRequests((state) => state.windows);
   return <>{Object.entries(windows).map(([key, chat]) => {
     const drone = context.drones.find((item) => item.id === chat.droneId);
-    const available = drone && [...drone.chats, ...(drone.workflowChats ?? [])].includes(chat.chatName);
-    return <DesktopChatWindow key={key} chatKey={key} title={`${drone?.name ?? 'Drone'} · ${chat.chatName}`}
+    const available = drone && [...drone.chats, ...(drone.workflowChats ?? []), ...(drone.sideChats ?? []).map((sideChat) => sideChat.name)].includes(chat.chatName);
+    return <DesktopChatWindow key={key} chatKey={key} chatTarget={available ? chat : undefined} title={`${drone?.name ?? 'Drone'} · ${chat.chatName}`}
       request={chat.request} onClose={() => useDesktopChatRequests.getState().close(key)}>
       {available ? <DetachedChatContent desktop chat={{ ...chat, open: true }} drone={drone} context={context} />
         : <div role="status" className="p-3 text-[var(--muted)]">This chat is unavailable.</div>}

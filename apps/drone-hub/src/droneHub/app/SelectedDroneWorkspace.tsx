@@ -2,6 +2,7 @@ import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { SideChatControls } from './SideChatControls';
+import { DisplacedMainChat } from './DisplacedMainChat';
 import { detachChatMenuItems } from './DetachedChatIndicator';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -10,7 +11,7 @@ import { useWorkspaceSideChats } from './use-workspace-side-chats';
 import { WorkspaceSideChatContent } from './WorkspaceSideChatContent';
 import { focusSideChat } from './side-chat-events';
 import { latestExternalCheckpointId } from './side-chat-checkpoint-model';
-import { SideChatForkContext } from '../chat/SideChatForkContext';
+import { SideChatForkProvider } from '../chat/SideChatForkContext';
 import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import type {
@@ -704,7 +705,7 @@ export function SelectedDroneWorkspace({
     [activeChatName, currentDrone.id],
   );
   const chatContextMenu = useChatContextMenu(`Actions for ${activeChatName}`,
-    () => detachChatMenuItems(currentDrone.id, activeChatName));
+    () => detachChatMenuItems(currentDrone.id, activeChatName), { droneId: currentDrone.id, chatName: activeChatName });
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -977,6 +978,11 @@ export function SelectedDroneWorkspace({
   const sideChatWorkspace = useWorkspaceSideChats(currentDrone, activeChatName);
   const [sideChatReturnRequest, setSideChatReturnRequest] = React.useState<{ droneId: string; chatName: string } | null>(null);
   const mainSideChat = sideChatWorkspace.sideChats.find((chat) => chat.name === activeChatName);
+  const previousMainChat = readSideChatWorkspaceState(currentDrone.id).previousMainChat;
+  const displacedMainChatName = mainSideChat
+    ? ([...currentDrone.chats, ...(currentDrone.workflowChats ?? [])].includes(previousMainChat)
+      ? previousMainChat : resolveChatNameForDrone(currentDrone, ''))
+    : undefined;
   const openSideChatAsMain = (chatName: string) => {
     if (!mainSideChat) {
       saveSideChatWorkspaceState(currentDrone.id, { previousMainChat: activeChatName });
@@ -2358,6 +2364,18 @@ export function SelectedDroneWorkspace({
       <DockableDroneWorkspace
         sideChats={sideChatWorkspace.sideChats}
         mainChatName={activeChatName}
+        displacedMainChatName={displacedMainChatName}
+        onRestoreMainChat={() => { if (displacedMainChatName) setSelectedChat(displacedMainChatName); }}
+        renderDisplacedMainChat={(chatName) => (
+          <DisplacedMainChat drone={currentDrone} chatName={chatName} context={{
+            drones: [currentDrone], currentDroneId: currentDrone.id, visible: true,
+            onSendPromptInNewChat: (_drone, payload, context, sourceChatName) => onSendPromptInNewChat(payload, context, sourceChatName),
+            onCreateQueuedNewChatNow,
+            onCreateNewChatAutoFocusHandled,
+            promotingNewChatActionById,
+            promoteNewChatActionErrorById,
+          }} />
+        )}
         sideChatReturnRequest={sideChatReturnRequest}
         sideChatFocusRequest={sideChatWorkspace.focusRequest}
         mainChatControls={mainSideChat ? (
@@ -2416,7 +2434,7 @@ export function SelectedDroneWorkspace({
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
         chatContent={(
-          <SideChatForkContext.Provider value={{
+          <SideChatForkProvider value={{
             droneId: currentDrone.id,
             chatName: activeChatName,
             busy: Boolean(sideChatWorkspace.busy),
@@ -2755,7 +2773,7 @@ export function SelectedDroneWorkspace({
             </ChatSurface>
             {chatContextMenu.menu}
           </div>
-          </SideChatForkContext.Provider>
+          </SideChatForkProvider>
         )}
       />
     </>

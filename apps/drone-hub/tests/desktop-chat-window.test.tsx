@@ -7,10 +7,13 @@ import { detachedChatKey, useDetachedChatStore } from '../src/droneHub/app/detac
 import { useDesktopChatRequests } from '../src/droneHub/app/desktop-chat-requests';
 import { DesktopChatWindow } from '../src/droneHub/app/DesktopChatWindow';
 import { ASSISTANT_OPEN_DRONE_CHAT_EVENT } from '../src/droneHub/assistant/open-drone-chat-event';
+import { ChatContextActionsContext, type ChatContextTarget } from '../src/droneHub/app/ChatContextActions';
+import { OPEN_SIDE_CHAT_EVENT } from '../src/droneHub/app/side-chat-events';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 
 function DesktopViews() {
   const windows = useDesktopChatRequests(state => state.windows);
-  return <>{Object.entries(windows).map(([key, chat]) => <DesktopChatWindow key={key} chatKey={key}
+  return <>{Object.entries(windows).map(([key, chat]) => <DesktopChatWindow key={key} chatKey={key} chatTarget={chat}
     title="Test chat" request={chat.request} onClose={() => useDesktopChatRequests.getState().close(key)}>
     <textarea defaultValue="desktop draft" />
   </DesktopChatWindow>)}</>;
@@ -21,6 +24,13 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
   const child = new Window({ url: 'about:blank' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const pins: unknown[] = [];
+  const created: ChatContextTarget[] = [];
+  const cloned: ChatContextTarget[] = [];
+  const forks: unknown[] = [];
+  dom.addEventListener(OPEN_SIDE_CHAT_EVENT, (event) => {
+    event.preventDefault();
+    forks.push((event as unknown as CustomEvent).detail);
+  });
   let opens = 0;
   let focuses = 0;
   let navigations = 0;
@@ -40,8 +50,15 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
   const root = createRoot(element as unknown as HTMLElement);
   const chatKey = detachedChatKey('drone', 'chat');
   const hubState = useDetachedChatStore.getState().chats;
+  const originalBindings = useDroneHubUiStore.getState().shortcutBindings;
+  useDroneHubUiStore.setState({ shortcutBindings: { ...originalBindings,
+    cloneDroneChat: { key: 'k', mod: true, ctrl: false, meta: false, alt: false, shift: true },
+  } });
   try {
-    await act(async () => { root.render(<><textarea defaultValue="Hub draft" /><DesktopViews /></>); });
+    await act(async () => { root.render(<ChatContextActionsContext.Provider value={{
+      createChat: (target) => { created.push(target); },
+      cloneChat: (target) => { cloned.push(target); },
+    }}><textarea defaultValue="Hub draft" /><DesktopViews /></ChatContextActionsContext.Provider>); });
     const hubDraft = element.querySelector('textarea')!;
     const menu = detachChatMenuItems('drone', 'chat');
     expect(menu.map(item => item.id)).toEqual(['detach-chat', 'open-desktop-chat']);
@@ -61,6 +78,25 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     expect(child.document.body.textContent).not.toContain('Test chat');
     expect(child.document.querySelectorAll('button').length).toBe(0);
     expect(child.document.querySelector('.dh-floating-chat')).not.toBeNull();
+    // Desktop shortcuts use their own document and the same explicit target
+    // as the menu, even when keyboard focus is on the window body.
+    await act(async () => { child.document.body.dispatchEvent(new child.KeyboardEvent('keydown', {
+      key: 'K', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+    })); });
+    expect(cloned).toEqual([expect.objectContaining({ droneId: 'drone', chatName: 'chat' })]);
+    cloned.length = 0;
+    await act(async () => { desktopDraft.dispatchEvent(new child.KeyboardEvent('keydown', {
+      key: 'K', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+    })); });
+    expect(cloned).toHaveLength(0);
+    const desktopHost = child.document.querySelector('[data-desktop-chat-focused]')!;
+    await act(async () => { child.dispatchEvent(new child.Event('blur')); });
+    expect(desktopHost.getAttribute('data-desktop-chat-focused')).toBe('false');
+    desktopDraft.value = 'preserved desktop draft';
+    await act(async () => { child.dispatchEvent(new child.Event('focus')); });
+    expect(desktopHost.getAttribute('data-desktop-chat-focused')).toBe('true');
+    expect(child.document.querySelector('textarea')).toBe(desktopDraft);
+    expect(desktopDraft.value).toBe('preserved desktop draft');
     const rightClick = async (target: { dispatchEvent(event: unknown): boolean }) => act(async () => {
       target.dispatchEvent(new child.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
     });
@@ -72,7 +108,26 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     expect(pinItem.textContent).toBe('Always on top');
     expect(pinItem.getAttribute('aria-checked')).toBe('false');
     expect(dom.document.querySelector('[role="menu"]')).toBeNull();
-    await act(async () => { pinItem.click(); });
+    const findAction = (label: string) => [...child.document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.startsWith(label))!;
+    expect(findAction('Fork into side chat').disabled).toBe(true);
+    expect(findAction('Clone chat').textContent).toContain('Ctrl/Cmd+Shift+K');
+    await act(async () => { findAction('Clone chat').click(); });
+    expect(cloned).toEqual([expect.objectContaining({ droneId: 'drone', chatName: 'chat' })]);
+    expect(child.document.querySelector('[role="menu"]')).toBeNull();
+    await rightClick(child.document.querySelector('.dh-floating-chat')!);
+    await act(async () => { findAction('New chat').click(); });
+    expect(created).toEqual([expect.objectContaining({ droneId: 'drone', chatName: 'chat' })]);
+    const checkpoint = child.document.createElement('div');
+    checkpoint.dataset.sideChatCheckpointId = 'desktop-answer';
+    child.document.querySelector('.dh-floating-chat')!.appendChild(checkpoint);
+    await rightClick(checkpoint);
+    expect(findAction('Fork into side chat').disabled).toBe(false);
+    await act(async () => { findAction('Fork into side chat').click(); });
+    expect(forks).toEqual([{ droneId: 'drone', target: { sourceChatName: 'chat', checkpointId: 'desktop-answer' } }]);
+    checkpoint.remove();
+    await rightClick(child.document.querySelector('.dh-floating-chat')!);
+    await act(async () => { (child.document.querySelector('[role="menuitemcheckbox"]') as unknown as HTMLButtonElement).click(); });
     expect(pins).toEqual([[`drone-hub-chat:${chatKey}`, true]]);
     expect(child.document.querySelector('[role="menu"]')).toBeNull();
     await rightClick(child.document.querySelector('.dh-floating-chat')!);
@@ -88,6 +143,7 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
   } finally {
     await act(async () => root.unmount());
     useDesktopChatRequests.setState({ windows: {} });
+    useDroneHubUiStore.setState({ shortcutBindings: originalBindings });
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);

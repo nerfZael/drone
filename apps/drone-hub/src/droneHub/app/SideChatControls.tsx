@@ -26,7 +26,7 @@ export function SideChatControls({ chat, busy, main = false, droneId, onKeep, on
   const iconSize = main ? 16 : 14;
   const moveLabel = main ? 'Return to floating window' : 'Open as main chat';
   const moveBinding = useDroneHubUiStore((state) => state.shortcutBindings.toggleSideChatMain);
-  const moveTitle = `${main ? 'Return to the previous floating position and restore the previous main chat.' : 'Open as main chat.'}${moveBinding ? ` (${formatShortcutBinding(moveBinding)})` : ''}`;
+  const moveTitle = `${main ? 'Return to the previous floating position and restore the previous main chat.' : 'Open as main chat and show the previous main chat in this window.'}${moveBinding ? ` (${formatShortcutBinding(moveBinding)})` : ''}`;
   // The floating title bar is a drag handle; keep its buttons from starting a drag.
   const stopDrag = main ? undefined : (event: React.PointerEvent) => event.stopPropagation();
   const buttons = (

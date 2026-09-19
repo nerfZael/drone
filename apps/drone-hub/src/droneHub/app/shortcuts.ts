@@ -58,12 +58,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'createDroneChat',
     label: 'Create draft chat',
-    description: 'Creates a draft chat on the selected drone and focuses its composer.',
+    description: 'Creates a draft chat on the focused chat’s drone and focuses its composer; falls back to the main chat’s drone.',
   },
   {
     id: 'cloneDroneChat',
-    label: 'Clone current chat',
-    description: 'Clones the selected drone\'s current chat and opens the clone.',
+    label: 'Clone focused chat',
+    description: 'Clones the focused chat and opens the clone; falls back to the main chat.',
   },
   {
     id: 'createSideChat',

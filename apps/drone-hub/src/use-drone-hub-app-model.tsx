@@ -4719,18 +4719,27 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     showShortcutToast,
     unhideOptimisticallyRemovedDraftChat,
   ]);
-  const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
-    if (!currentDrone || selectedGroupMultiChat) return false;
-    return await createDraftDroneChat(currentDrone);
-  }, [createDraftDroneChat, currentDrone, selectedGroupMultiChat]);
-  const cloneDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
-    if (!currentDrone || selectedGroupMultiChat) return false;
-    const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
-    const result = await cloneDroneChat(currentDrone.id, sourceChatName);
-    const chatName = String(result.chatName ?? '').trim();
-    if (result.ok && chatName) selectDroneChat(currentDrone.id, chatName);
+  const createChatForTarget = React.useCallback(async ({ droneId }: { droneId: string }): Promise<boolean> => {
+    const drone = droneByIdRef.current[droneId];
+    return drone ? createDraftDroneChat(drone) : false;
+  }, [createDraftDroneChat]);
+  const cloneChatForTarget = React.useCallback(async ({ droneId, chatName }: { droneId: string; chatName: string }): Promise<boolean> => {
+    const result = await cloneDroneChat(droneId, chatName);
+    if (result.ok && result.chatName) selectDroneChat(droneId, result.chatName);
     return result.ok === true;
-  }, [cloneDroneChat, currentDrone, selectDroneChat, selectedChat, selectedGroupMultiChat]);
+  }, [cloneDroneChat, selectDroneChat]);
+  const resolveShortcutChat = React.useCallback(() => focusedChatIdentity(document,
+    currentDrone && !selectedGroupMultiChat
+      ? { droneId: currentDrone.id, chatName: resolveChatNameForDrone(currentDrone, selectedChat) }
+      : null), [currentDrone, selectedChat, selectedGroupMultiChat]);
+  const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
+    const target = resolveShortcutChat();
+    return target ? createChatForTarget(target) : false;
+  }, [resolveShortcutChat, createChatForTarget]);
+  const cloneDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
+    const target = resolveShortcutChat();
+    return target ? cloneChatForTarget(target) : false;
+  }, [resolveShortcutChat, cloneChatForTarget]);
   const resolveGlobalDictationTarget = React.useCallback(
     (destination: GlobalDictationDroneDestination): GlobalDictationTargetResult => {
       if (destination === 'root-drone') {
@@ -5817,6 +5826,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
 
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
+    chatContextActions: {
+      createChat: createChatForTarget,
+      cloneChat: cloneChatForTarget,
+    },
     renameCanvasChat,
     detachedChatAgent: currentDrone && effectiveChatInfo
       ? { droneId: currentDrone.id, chatName: selectedChat || 'default', agent: effectiveChatInfo.agent }

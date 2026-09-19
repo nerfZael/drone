@@ -1,5 +1,6 @@
 import { DetachedChatWindows, type DetachedChatWindowsProps } from './DetachedChatWindows';
 import React from 'react';
+import { ChatContextActionsContext, type ChatContextActions } from './ChatContextActions';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
 import type { SettingsView as SettingsViewComponent } from './SettingsView';
 import { DraftChatWorkspace, type DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
@@ -24,6 +25,7 @@ const SettingsView = React.lazy(async () => {
 });
 
 export type DroneHubWorkspaceContentProps = {
+  chatContextActions?: ChatContextActions;
   appView: AppView;
   detachedChatWindowsProps: Omit<DetachedChatWindowsProps, 'visible' | 'currentDroneId'>;
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
@@ -54,6 +56,7 @@ function WorkspaceViewFallback() {
 }
 
 export function DroneHubWorkspaceContent({
+  chatContextActions,
   appView,
   detachedChatWindowsProps,
   setupWelcomeProps,
@@ -92,19 +95,21 @@ export function DroneHubWorkspaceContent({
     );
 
   return (
-    <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
-      <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
-      <DetachedChatWindows {...detachedChatWindowsProps}
-        currentDroneId={selectedDroneWorkspaceProps?.currentDrone.id ?? null}
-        visible={appView === 'workspace' && !setupWelcomeProps && !draftChatWorkspaceProps && !groupMultiChatWorkspaceProps && Boolean(selectedDroneWorkspaceProps)} />
-      <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
-        <div
-          className={`absolute overflow-hidden ${previewHostState.previewVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}
-          style={previewHostState.style}
-        >
-          {renderPersistentPreviewContent(previewHostState.activeDroneId, previewHostState.previewVisible)}
+    <ChatContextActionsContext.Provider value={chatContextActions ?? null}>
+      <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
+        <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
+        <DetachedChatWindows {...detachedChatWindowsProps}
+          currentDroneId={selectedDroneWorkspaceProps?.currentDrone.id ?? null}
+          visible={appView === 'workspace' && !setupWelcomeProps && !draftChatWorkspaceProps && !groupMultiChatWorkspaceProps && Boolean(selectedDroneWorkspaceProps)} />
+        <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
+          <div
+            className={`absolute overflow-hidden ${previewHostState.previewVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}
+            style={previewHostState.style}
+          >
+            {renderPersistentPreviewContent(previewHostState.activeDroneId, previewHostState.previewVisible)}
+          </div>
         </div>
       </div>
-    </div>
+    </ChatContextActionsContext.Provider>
   );
 }

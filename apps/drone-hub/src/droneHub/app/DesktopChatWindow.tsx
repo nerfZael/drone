@@ -1,9 +1,11 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useChatContextMenu } from './use-chat-context-menu';
+import type { ChatContextTarget } from './ChatContextActions';
 
 /** Render an additional chat view exclusively in its native desktop window. */
-export function DesktopChatWindow({ chatKey, title, request, onClose, children }: {
+export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose, children }: {
+  chatTarget?: ChatContextTarget;
   chatKey: string; title: string; request: number; onClose: () => void; children: React.ReactNode;
 }) {
   const titleRef = React.useRef(title);
@@ -61,10 +63,20 @@ export function DesktopChatWindow({ chatKey, title, request, onClose, children }
     observer.observe(document.head, { childList: true, subtree: true, characterData: true });
     observer.observe(document.documentElement, { attributes: true });
     child.document.body.appendChild(host);
+    const focused = () => { host.dataset.desktopChatFocused = 'true'; };
+    const blurred = () => { host.dataset.desktopChatFocused = 'false'; };
+    host.dataset.desktopChatFocused = String(child.document.hasFocus());
+    child.addEventListener('focus', focused);
+    child.addEventListener('blur', blurred);
+    const removeFocusListeners = () => {
+      child.removeEventListener('focus', focused);
+      child.removeEventListener('blur', blurred);
+    };
     setOutside(true);
     setPinned(false);
     const closed = () => {
       observer.disconnect();
+      removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;
       cleanup.current = null;
@@ -75,11 +87,13 @@ export function DesktopChatWindow({ chatKey, title, request, onClose, children }
     child.addEventListener('beforeunload', closed);
     cleanup.current = () => {
       observer.disconnect();
+      removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;
       child.close();
     };
     child.focus();
+    host.dataset.desktopChatFocused = String(child.document.hasFocus());
   }, [host, name]);
   React.useEffect(() => {
     open();
@@ -90,11 +104,18 @@ export function DesktopChatWindow({ chatKey, title, request, onClose, children }
       if (popup.current) setPinned(value === true);
     } catch { setError('Could not change always-on-top. Try again.'); }
   };
-  // The OS title bar already names the chat and closes the window, so the one
-  // window option lives behind right-click instead of a header of its own.
-  const contextMenu = useChatContextMenu(`Window options for ${title}`, () => [
+  // The OS title bar already names and closes the chat; its actions and window
+  // option live behind right-click instead of a header of their own.
+  const contextMenu = useChatContextMenu(`Actions for ${title}`, () => [
     { id: 'always-on-top', label: 'Always on top', checked: pinned, onSelect: () => void togglePin() },
-  ]);
+  ], chatTarget);
+  React.useEffect(() => {
+    if (!outside) return;
+    const doc = host.ownerDocument;
+    const onKey = (event: KeyboardEvent) => contextMenu.onDesktopKeyDown(event, host);
+    doc.addEventListener('keydown', onKey);
+    return () => doc.removeEventListener('keydown', onKey);
+  }, [outside, host, contextMenu.onDesktopKeyDown]);
   if (!outside) return error ? <div role="alert" className="absolute bottom-3 right-3 z-50 rounded bg-[var(--panel)] p-3 text-[var(--red)]">
     {error} <button onClick={open}>Retry</button> <button onClick={onClose}>Dismiss</button>
   </div> : null;

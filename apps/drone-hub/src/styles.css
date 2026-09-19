@@ -3785,9 +3785,11 @@ select:disabled optgroup {
 /*
  * Only the focused floating window shows its composer; the others give that
  * space to the transcript. Focus routing marks the active window's tab or
- * content root, so test the whole frame.
+ * content root, so test the whole frame. Native desktop windows track their
+ * own window focus on the portal host.
  */
-.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]):not(:has([data-side-chat-active="true"])) .dh-floating-chat .dh-chat-composer {
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]):not(:has([data-side-chat-active="true"])) .dh-floating-chat .dh-chat-composer,
+[data-desktop-chat-focused="false"] .dh-floating-chat .dh-chat-composer {
   display: none;
 }
 

@@ -54,15 +54,16 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
       if (busyRef.current) return;
       const activeSide = document.querySelector<HTMLElement>('[data-side-chat-active="true"]')
         ?.dataset.sideChatName;
-      const source = sideChats.find((chat) => chat.name === activeSide);
-      const sourceChatName = detail.target?.sourceChatName ?? source?.name ?? mainChatName;
-      const sourceScope = source
+      const sourceScope = activeSide
         ? [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')].find(
             (element) =>
-              element.dataset.sideChatName === source.name &&
+              element.dataset.sideChatName === activeSide &&
               element.querySelector('[data-side-chat-checkpoint-id]'),
           )
         : document.querySelector('[data-main-workspace-chat]');
+      // A promoted fork's window can hold the regular main chat, which is
+      // not in sideChats. Route from the visible chat's identity.
+      const sourceChatName = detail.target?.sourceChatName ?? activeSide ?? mainChatName;
       // Explicit message actions never use the focused chat or the latest visible answer.
       const checkpointId = detail.target
         ? detail.target.checkpointId
