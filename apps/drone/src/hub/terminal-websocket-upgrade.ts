@@ -27,6 +27,11 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   allowedOrigins: Set<string>;
   webSocketServer: WebSocketServer;
   companionWebSocketServer?: WebSocketServer;
+  /** Explorer folder events; `resolveWorkspace` also knows places that are browsed like a drone but are not one. */
+  directoryEvents?: {
+    webSocketServer: WebSocketServer;
+    resolveWorkspace: (socket: Duplex, droneRef: string) => Promise<{ id: string; drone: any } | null>;
+  };
   handleDeviceMeshUpgrade?: (request: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean;
   isSafeSessionName: (value: string) => boolean;
   parseSince: (value: string | null) => number | undefined;
@@ -64,6 +69,26 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
         return;
       }
       const parts = url.pathname.split('/').filter(Boolean);
+      if (
+        opts.directoryEvents &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'fs' &&
+        parts[4] === 'directory-events'
+      ) {
+        if (!isHubApiAuthorizedForWebSocket(req, url, opts.apiToken)) {
+          rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
+          return;
+        }
+        const workspace = await opts.directoryEvents.resolveWorkspace(socket, decodeURIComponent(parts[2]));
+        if (!workspace) return;
+        const directoryEvents = opts.directoryEvents.webSocketServer;
+        directoryEvents.handleUpgrade(req, socket, head, (webSocket: WebSocket) => {
+          directoryEvents.emit('connection', webSocket, req, { drone: workspace.drone });
+        });
+        return;
+      }
       const isTerminalStreamRoute =
         parts.length === 6 &&
         parts[0] === 'api' &&

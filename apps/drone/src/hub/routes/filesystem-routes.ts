@@ -32,6 +32,7 @@ type FilesystemDependencyName =
   | 'parseContainerFsListOutput'
   | 'parseFsSearchOutput'
   | 'readHostFileBytes'
+  | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneOrRespond'
   | 'runHostCommand'
   | 'withLockedDroneContainer'

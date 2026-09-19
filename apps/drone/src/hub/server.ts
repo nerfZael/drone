@@ -318,6 +318,7 @@ import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { registerReflexRoutes } from './reflex/reflex-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
+import { createDirectoryEventsWebSocketServer } from './directory-events-websocket-server';
 import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
@@ -5964,6 +5965,7 @@ async function startDroneHubApiServerWithLifecycle(
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
+    resolveDroneDaemonClientForEntry,
     // Companion home is not a drone, but the explorer and editor can browse it like a host drone's folder.
     resolveDroneOrRespond: async (res: http.ServerResponse, droneRef: string) =>
       String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
@@ -6360,11 +6362,24 @@ async function startDroneHubApiServerWithLifecycle(
       handleHubRequestFailure({ req, res, error, log: hubLog, respond: json });
     }
   };
+  const directoryEventsWss = createDirectoryEventsWebSocketServer({
+    droneRuntime,
+    normalizeFsPathForRuntime,
+    resolveDaemonClient: async (drone) => (await resolveDroneDaemonClientForEntry(drone))?.client ?? null,
+  });
   const handleHubUpgrade = createTerminalWebSocketUpgradeHandler({
     apiToken,
     allowedOrigins,
     webSocketServer: wss,
     companionWebSocketServer: companionWss,
+    directoryEvents: {
+      webSocketServer: directoryEventsWss,
+      // Companion home is browsed like a host drone's folder, as in the filesystem routes.
+      resolveWorkspace: async (socket, droneRef) =>
+        String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
+          ? { id: COMPANION_HOME_TARGET_ID, drone: { id: COMPANION_HOME_TARGET_ID, runtime: 'host', cwd: await ensureCompanionHome() } }
+          : resolveDroneOrRejectUpgrade(socket, droneRef),
+    },
     handleDeviceMeshUpgrade: deviceMesh.handleLiveAudioUpgrade,
     isSafeSessionName: isSafeTmuxSessionName,
     parseSince: parseOptionalNonNegativeInt,
@@ -6399,7 +6414,7 @@ async function startDroneHubApiServerWithLifecycle(
     requestListener: handleHubHttpRequest,
     upgradeListener: handleHubUpgrade,
     webSocketServer: wss,
-    additionalWebSocketServers: [companionWss],
+    additionalWebSocketServers: [companionWss, directoryEventsWss],
     ...(mcpToken && containerMcpHost && containerMcpPort > 0
       ? {
           containerMcp: {

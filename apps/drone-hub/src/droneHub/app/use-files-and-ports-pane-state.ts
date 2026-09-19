@@ -127,6 +127,8 @@ export function useFilesAndPortsPaneState({
   const [fsError, setFsError] = React.useState<string | null>(null);
   const [fsLoading, setFsLoading] = React.useState(true);
   const lastFsRefreshNonceRef = React.useRef(fsRefreshNonce);
+  const fsRespRef = React.useRef(fsResp);
+  fsRespRef.current = fsResp;
 
   const defaultFsPathForCurrentDrone = React.useMemo(() => {
     if (!currentDrone) return '/';
@@ -205,6 +207,12 @@ export function useFilesAndPortsPaneState({
     const cacheKey = fsListCacheKey(droneId, currentFsPath);
     const diagnosticId = beginDesktopWorkspaceLoad('directory-load', droneId, currentFsPath);
     const cached = readFsListCache(cacheKey, true);
+    // A refresh of the folder already on screen (after a file operation, or because
+    // the folder changed on disk) keeps it there while it is read again. Blanking it
+    // would collapse the whole tree each time an agent adds a file.
+    const shown = fsRespRef.current;
+    const refreshingShownListing =
+      forceInitialLoad && !cached && shown?.ok === true && shown.id === droneId && shown.path === currentFsPath;
     if (cached) {
       desktopWorkspaceLoads.mark(diagnosticId, 'cacheHit', 1);
       hasLoadedData = true;
@@ -212,6 +220,9 @@ export function useFilesAndPortsPaneState({
       setFsError(null);
       setFsLoading(false);
       desktopWorkspaceLoads.committed(diagnosticId);
+    } else if (refreshingShownListing) {
+      hasLoadedData = true;
+      setFsError(null);
     } else {
       setFsResp(null);
       setFsError(null);
@@ -293,7 +304,7 @@ export function useFilesAndPortsPaneState({
       void load(true, true);
     };
 
-    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
+    void load((Boolean(cached) && !forceInitialLoad) || refreshingShownListing, Boolean(cached) || forceInitialLoad);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;

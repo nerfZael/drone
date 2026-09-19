@@ -53,6 +53,7 @@ import {
   type FilesystemMutationRefreshPlan,
 } from './filesystem-mutation-refresh';
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
+import { createDirectoryRefreshThrottle, subscribeDirectoryEvents } from './directory-events';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 
@@ -60,6 +61,9 @@ type ChildDirectoryCacheEntry = {
   atMs: number;
   entries: DroneFsEntry[];
 };
+
+const DIRECTORY_REFRESH_MIN_INTERVAL_MS = 1_000;
+const DIRECTORY_BACKSTOP_INTERVAL_MS = 30_000;
 
 const childDirectoryCache = new Map<string, ChildDirectoryCacheEntry>();
 
@@ -429,7 +433,10 @@ export function DroneFilesDock({
       childRequestTrackerRef.current.begin(dirPath, seq);
       const lifetime = new AbortController();
       childAbortRef.current.set(dirPath, lifetime);
-      if (!cached) setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
+      // A folder that already shows its entries is read again quietly; with folder
+      // events that can happen every second while an agent works in it.
+      const showsEntries = Object.prototype.hasOwnProperty.call(childEntriesByPath, dirPath);
+      if (!cached && !showsEntries) setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
       setChildErrorByPath((prev) => ({ ...prev, [dirPath]: null }));
 
       try {
@@ -632,6 +639,55 @@ export function DroneFilesDock({
     },
     [droneId, expandedDirs, loadDirectory, normalizedPath, onRefresh, setExpandedDirs],
   );
+
+  // The folders on screen: the root and every expanded folder whose ancestors are expanded too.
+  const shownDirectories = React.useMemo(
+    () => [
+      normalizedPath,
+      ...visibleEntries
+        .filter((entry) => entry.kind === 'directory' && expandedDirs[entry.path] === true)
+        .map((entry) => entry.path),
+    ],
+    [expandedDirs, normalizedPath, visibleEntries],
+  );
+  const shownDirectoriesRef = React.useRef(shownDirectories);
+  shownDirectoriesRef.current = shownDirectories;
+  const refreshAfterMutationRef = React.useRef(refreshAfterMutation);
+  refreshAfterMutationRef.current = refreshAfterMutation;
+  const directoryEventsRef = React.useRef<ReturnType<typeof subscribeDirectoryEvents> | null>(null);
+
+  // The Hub says which shown folder gained or lost an entry, and only that folder is read again.
+  React.useEffect(() => {
+    if (!droneId || typeof window === 'undefined') return;
+    const rereadDirectory = (directory: string) =>
+      refreshAfterMutationRef.current(null, { listingPaths: [directory], staleSubtrees: [] });
+    const throttle = createDirectoryRefreshThrottle(rereadDirectory, DIRECTORY_REFRESH_MIN_INTERVAL_MS);
+    const rereadShownDirectories = () => {
+      for (const directory of shownDirectoriesRef.current) throttle.request(directory);
+    };
+    const events = subscribeDirectoryEvents(droneId, shownDirectoriesRef.current, {
+      onChanged: throttle.request,
+      onResync: rereadShownDirectories,
+    });
+    directoryEventsRef.current = events;
+    // Watch events can be lost (a mount edited from outside a container, an
+    // overflowing kernel queue), so expanded folders are still read again now
+    // and then while the app is visible. The root has its own slow re-read.
+    const backstop = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      for (const directory of shownDirectoriesRef.current.slice(1)) throttle.request(directory);
+    }, DIRECTORY_BACKSTOP_INTERVAL_MS);
+    return () => {
+      window.clearInterval(backstop);
+      throttle.cancel();
+      events.close();
+      directoryEventsRef.current = null;
+    };
+  }, [droneId]);
+  const shownDirectoriesKey = shownDirectories.join('\u0000');
+  React.useEffect(() => {
+    directoryEventsRef.current?.setDirectories(shownDirectoriesRef.current);
+  }, [shownDirectoriesKey]);
 
   const runAction = React.useCallback(
     async (label: string, task: () => Promise<void>) => {

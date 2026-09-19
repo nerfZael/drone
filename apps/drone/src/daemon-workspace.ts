@@ -5,6 +5,12 @@ import type http from 'node:http';
 import path from 'node:path';
 import type { URL } from 'node:url';
 
+import {
+  setStreamedDirectories,
+  streamDirectoryEvents,
+  streamFileEvents,
+} from './daemon-file-events';
+
 export const DAEMON_JSON_MAX_BYTES = 8 * 1024 * 1024;
 const WORKSPACE_FILE_MAX_BYTES = 2 * 1024 * 1024;
 const WORKSPACE_CHUNK_MAX_BYTES = 128 * 1024;
@@ -602,6 +608,28 @@ export async function handleDaemonWorkspaceRequest(input: {
     res.setHeader('x-drone-file-size', String(read.size));
     res.setHeader('x-drone-file-mtime-ms', String(read.mtimeMs));
     res.end(read.content);
+    return true;
+  }
+
+  if (pathname === '/v1/workspace/file-events' && method === 'GET') {
+    streamFileEvents({ req, res, filePath: requiredAbsolutePath(url.searchParams.get('path')) });
+    return true;
+  }
+
+  if (pathname === '/v1/workspace/directory-events' && (method === 'POST' || method === 'PUT')) {
+    const body = await readLimitedJson(req, DAEMON_JSON_MAX_BYTES);
+    const directories = (Array.isArray(body?.paths) ? body.paths : []).map((entry: unknown) =>
+      requiredAbsolutePath(entry),
+    );
+    if (method === 'POST') {
+      streamDirectoryEvents({ req, res, directories });
+      return true;
+    }
+    const streamId = String(url.searchParams.get('stream') ?? '');
+    if (!setStreamedDirectories(streamId, directories)) {
+      throw new DaemonHttpError(404, 'directory event stream not found');
+    }
+    sendJson(res, 200, { ok: true });
     return true;
   }
 

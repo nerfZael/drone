@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createReadStream, watch as watchFs } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
@@ -14,11 +14,15 @@ import {
   readHostMediaRange,
   type ResolvedByteRange,
 } from './filesystem-media-range';
+import { watchFileChanges } from '../daemon-file-events';
+import { subscribeDaemonFileEvents } from './daemon-file-events';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
 import type { FilesystemRouteDependencies } from './routes/filesystem-routes';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
+
+const FILE_REVISION_BACKSTOP_MS = 30_000;
 
 export function writeFileSseFrame(res: ServerResponse, frame: string): boolean {
   if (res.writableEnded || res.destroyed) return false;
@@ -71,6 +75,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
+    resolveDroneDaemonClientForEntry,
     resolveDroneOrRespond,
     runHostCommand,
     withLockedDroneContainer,
@@ -824,15 +829,14 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           return written;
         };
         let busy = false;
-        let forceAfterBusy = false;
+        let changedWhileBusy = false;
         let lastRevision: string | null = null;
-        let lastFingerprint: { size: number; mtimeMs: number | null } | null = null;
-        let lastHashAt = 0;
         let lastMissing = false;
-        const poll = async (forceHash = false) => {
+        // Compares the file with the last revision sent and reports a difference.
+        const checkRevision = async () => {
           if (closed) return;
           if (busy) {
-            if (forceHash) forceAfterBusy = true;
+            changedWhileBusy = true;
             return;
           }
           busy = true;
@@ -842,14 +846,6 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               droneName,
               targetPath,
             });
-            const fingerprintChanged =
-              lastFingerprint == null ||
-              fingerprint.size !== lastFingerprint.size ||
-              fingerprint.mtimeMs !== lastFingerprint.mtimeMs;
-            lastFingerprint = {
-              size: fingerprint.size,
-              mtimeMs: fingerprint.mtimeMs,
-            };
             if (fingerprint.size > FS_EDITOR_MAX_BYTES) {
               const metadataRevision = `metadata:${fingerprint.size}:${fingerprint.mtimeMs ?? 'unknown'}`;
               const event =
@@ -859,7 +855,6 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                     ? 'changed'
                     : null;
               lastRevision = metadataRevision;
-              lastHashAt = Date.now();
               lastMissing = false;
               if (event) {
                 publish(event, {
@@ -871,21 +866,11 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               }
               return;
             }
-            const shouldHash =
-              forceHash ||
-              lastRevision == null ||
-              fingerprintChanged ||
-              Date.now() - lastHashAt >= 30_000;
-            if (!shouldHash) {
-              lastMissing = false;
-              return;
-            }
             const current = await readFileRevision({
               drone: resolved.drone,
               droneName,
               targetPath,
             });
-            lastHashAt = Date.now();
             const event =
               lastRevision == null
                 ? 'snapshot'
@@ -901,8 +886,6 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             if (missing && !lastMissing) {
               lastMissing = true;
               lastRevision = null;
-              lastFingerprint = null;
-              lastHashAt = 0;
               publish('deleted', { ok: false, id: droneId, path: targetPath });
             } else if (!missing) {
               publish('stream-error', {
@@ -914,34 +897,31 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             }
           } finally {
             busy = false;
-            if (forceAfterBusy && !closed) {
-              forceAfterBusy = false;
-              void poll(true);
+            if (changedWhileBusy && !closed) {
+              changedWhileBusy = false;
+              void checkRevision();
             }
           }
         };
         const hostRuntime = droneRuntime(resolved.drone) === 'host';
-        const resolvedHostPath = hostRuntime ? path.resolve(targetPath) : null;
-        let hostWatcher: ReturnType<typeof watchFs> | null = null;
-        if (resolvedHostPath) {
-          try {
-            hostWatcher = watchFs(
-              path.dirname(resolvedHostPath),
-              { persistent: false },
-              (_eventType, filename) => {
-                if (filename == null || String(filename) === path.basename(resolvedHostPath)) {
-                  void poll(true);
-                }
+        const stopHostWatch = hostRuntime
+          ? watchFileChanges(path.resolve(targetPath), () => void checkRevision())
+          : null;
+        // A container's files are watched by its own daemon, which reports each change.
+        const stopDaemonEvents = hostRuntime
+          ? null
+          : subscribeDaemonFileEvents(
+              {
+                resolveClient: async () =>
+                  (await resolveDroneDaemonClientForEntry(resolved.drone))?.client ?? null,
               },
+              targetPath,
+              () => void checkRevision(),
             );
-          } catch {
-            hostWatcher = null;
-          }
-        }
-        hostWatcher?.on('error', () => {
-          // The periodic revision check remains the correctness fallback.
-        });
-        const timer = setInterval(() => void poll(hostRuntime), hostRuntime ? 30_000 : 2_000);
+        // Watch events can be lost (a mount edited from outside the container, an
+        // overflowing kernel queue, a dead watcher), so the contents are still
+        // compared now and then. This bounds how stale an open file can get.
+        const timer = setInterval(() => void checkRevision(), FILE_REVISION_BACKSTOP_MS);
         timer.unref?.();
         const heartbeat = setInterval(() => {
           if (!closed && !writeFileSseFrame(res, ': keepalive\n\n')) cleanup();
@@ -952,11 +932,12 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           closed = true;
           clearInterval(timer);
           clearInterval(heartbeat);
-          hostWatcher?.close();
+          stopHostWatch?.();
+          stopDaemonEvents?.();
         };
         req.on('close', cleanup);
         res.on('close', cleanup);
-        void poll(true);
+        void checkRevision();
         return;
       }
 

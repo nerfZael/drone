@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWorkspaceNavigationId } from '../app/workspace-navigation-context';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceCommitted, desktopWorkspaceLoads } from './workspace-load-telemetry';
-import { UiCenteredLoadingState } from '../../ui/components';
+import { UiButton, UiCenteredLoadingState, UiDialog } from '../../ui/components';
 import {
   defaultTextFileViewModeForFile,
   editorLanguageForPath,
@@ -35,6 +35,7 @@ import {
   type MarkdownOutlineExpansionCommand,
 } from './MarkdownOutlinePreview';
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
+import { useHeldHtmlPreview } from './use-held-html-preview';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
@@ -470,6 +471,21 @@ export function OpenedDroneFilePanel({
     openedFileShowsMarkdownPreview || openedFileShowsHtmlPreview;
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsPreview;
+  // A rendered page is not swapped under the reader: newer contents wait behind a prompt.
+  const heldHtmlPreview = useHeldHtmlPreview({
+    fileKey: activeFileViewModeKey,
+    showing: openedFileShowsHtmlPreview,
+    loading: Boolean(fileLoading),
+    source: fileContent ?? '',
+  });
+  const [reloadPromptOpen, setReloadPromptOpen] = React.useState(false);
+  React.useEffect(() => setReloadPromptOpen(false), [activeFileViewModeKey]);
+  // Unsaved edits are never dropped by one click; the dialog asks what to do with them.
+  const requestReloadFromDisk = () => {
+    if (fileDirty) setReloadPromptOpen(true);
+    else onReloadFromDisk?.();
+  };
+  const canSaveOverExternalChange = Boolean(file.canOverwriteExternalChange && onOverwriteFile);
   const companionEditorTargetId = `editor:${droneId}:${activeFilePath}`;
   const companionEditorMode = openedFileIsLargeText
     ? 'large-file'
@@ -946,6 +962,21 @@ export function OpenedDroneFilePanel({
                         </button>
                       </div>
                     ) : null}
+                    {openedFileShowsHtmlPreview ? (
+                      <button
+                        type="button"
+                        onClick={heldHtmlPreview.refresh}
+                        disabled={Boolean(fileLoading)}
+                        className={headingActionClassName(Boolean(fileLoading))}
+                        title="Reload preview"
+                        aria-label="Reload preview"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+                          <path d="M20 4v7h-7" />
+                        </svg>
+                      </button>
+                    ) : null}
                     {openedFileShowsMarkdownPreview ? (
                       <div
                         className="flex h-7 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-0.5"
@@ -1036,14 +1067,77 @@ export function OpenedDroneFilePanel({
               ) : null}
               <button
                 type="button"
-                onClick={onReloadFromDisk}
+                onClick={requestReloadFromDisk}
                 className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel)] px-2 py-1 font-[var(--weight-semibold)] text-[var(--fg)] hover:bg-[var(--hover)]"
               >
-                Reload from disk
+                {fileDirty ? 'Reload from disk…' : 'Reload from disk'}
               </button>
             </div>
           </div>
         ) : null}
+        {openedFileShowsHtmlPreview && heldHtmlPreview.stale ? (
+          <div role="status" className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-3 py-2 text-compact text-[var(--fg-secondary)]">
+            <span>This page changed. The preview still shows the earlier version.</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={heldHtmlPreview.ignore}
+                className="rounded-[var(--radius-medium)] border border-transparent bg-transparent px-2 py-1 font-[var(--weight-semibold)] text-[var(--muted)] hover:bg-[var(--hover)]"
+              >
+                Ignore
+              </button>
+              <button
+                type="button"
+                onClick={heldHtmlPreview.refresh}
+                className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel)] px-2 py-1 font-[var(--weight-semibold)] text-[var(--fg)] hover:bg-[var(--hover)]"
+              >
+                Reload preview
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <UiDialog
+          open={reloadPromptOpen}
+          onClose={() => setReloadPromptOpen(false)}
+          title={`Reload ${fileName || 'this file'} from disk?`}
+          description={
+            canSaveOverExternalChange
+              ? 'The file changed on disk and you have unsaved edits. Save your edits over the new version, or discard them and load what is on disk.'
+              : 'The file on disk is gone or changed and you have unsaved edits. Reloading discards them.'
+          }
+          tone="danger"
+          size="small"
+          showCloseButton={false}
+          // Full screen shows only this panel, so the dialog has to live inside it.
+          portalContainer={fullScreen ? panelRef.current ?? undefined : undefined}
+          footer={
+            <>
+              <UiButton size="medium" onClick={() => setReloadPromptOpen(false)}>Cancel</UiButton>
+              <UiButton
+                size="medium"
+                variant="danger"
+                onClick={() => {
+                  setReloadPromptOpen(false);
+                  onReloadFromDisk?.();
+                }}
+              >
+                Discard my edits and reload
+              </UiButton>
+              {canSaveOverExternalChange ? (
+                <UiButton
+                  size="medium"
+                  variant="primary"
+                  onClick={() => {
+                    setReloadPromptOpen(false);
+                    void onOverwriteFile?.();
+                  }}
+                >
+                  Save my edits
+                </UiButton>
+              ) : null}
+            </>
+          }
+        />
         <div className="flex-1 min-h-[360px] flex flex-col">
           <div className="flex-1 min-h-0">
             {fileLoading ? (
@@ -1149,7 +1243,7 @@ export function OpenedDroneFilePanel({
                 targetNavigationSeq={fileNavigationSeq}
               />
             ) : openedFileShowsHtmlPreview ? (
-              <IsolatedHtmlPreview source={fileContent ?? ''} fileName={fileName} />
+              <IsolatedHtmlPreview key={heldHtmlPreview.renderSeq} source={heldHtmlPreview.source} fileName={fileName} />
             ) : openedFileEditorVisible ? (
               <AppShortcutBoundary
                 data-editor-zoom-surface="file-editor"
