@@ -67,11 +67,11 @@ describe('desktop themes', () => {
     const catppuccin = desktopMonacoTheme('catppuccin-mocha');
     expect(catppuccin.id).toBe('drone-hub-catppuccin-mocha');
     expect(catppuccin.definition.colors).toMatchObject({
-      'editor.background': '#1E1E2E',
-      'editor.foreground': '#CDD6F4',
+      'editor.background': '#11111B',
+      'editor.foreground': '#BAC2DE',
       'editorCursor.foreground': '#F5E0DC',
       'editor.selectionBackground': '#9399B240',
-      'editor.lineHighlightBackground': '#CDD6F40D',
+      'editor.lineHighlightBackground': '#CDD6F418',
       'editorLineNumber.foreground': '#7F849C',
       'editorLineNumber.activeForeground': '#B4BEFE',
       'editorWidget.background': '#181825',
@@ -94,6 +94,21 @@ describe('desktop themes', () => {
       expect(rule('string.link.md')?.fontStyle).toBe('underline');
       // Inline code is tokenized as a variable, which otherwise matches body text.
       expect(`#${rule('variable.md')?.foreground}`).not.toBe(colors['editor.foreground']);
+    }
+  });
+
+  test('gives the file preview the same surface and text colour as the editor', () => {
+    const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const catppuccinStart = css.indexOf(":root[data-theme='catppuccin-mocha']");
+    const blocks = {
+      monolith: css.slice(css.indexOf(':root {'), catppuccinStart),
+      'catppuccin-mocha': css.slice(catppuccinStart, css.indexOf('/* Excalidraw owns', catppuccinStart)),
+    };
+    for (const theme of DESKTOP_THEMES) {
+      const tokens = cssCustomProperties(blocks[theme.id]);
+      const { colors } = desktopMonacoTheme(theme.id).definition;
+      expect(tokens['--editor-surface']?.toUpperCase()).toBe(colors['editor.background']);
+      expect(tokens['--editor-fg']?.toUpperCase()).toBe(colors['editor.foreground']);
     }
   });
 

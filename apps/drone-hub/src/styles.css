@@ -24,6 +24,10 @@
   --panel-alt: #171d27;
   --panel-raised: #1c2330;
   --workspace: var(--panel);
+  /* What a file is read and edited on, in the editor and its preview alike. These match
+     the Monaco theme's editor.background and editor.foreground. */
+  --editor-surface: #0c0f14;
+  --editor-fg: #c7cdda;
   --app-header-bg: var(--panel-alt);
   --app-header-border: var(--border);
   --workspace-header-title-fg: var(--fg-strong);
@@ -321,6 +325,8 @@
   --panel-alt: #181825;
   --panel-raised: #313244;
   --workspace: #1e1e2e;
+  --editor-surface: #11111b;
+  --editor-fg: #bac2de;
   --app-header-bg: #181825;
   --app-header-border: rgba(69, 71, 90, .52);
   --workspace-header-title-fg: #f2f4ff;
@@ -1247,7 +1253,7 @@ code, pre {
 .dh-markdown-outline {
   height: 100%;
   overflow: auto;
-  background: var(--panel-alt);
+  background: var(--editor-surface);
 }
 
 .dh-markdown-outline__heading-button:focus-visible {
@@ -1781,6 +1787,13 @@ code, pre {
   margin-inline: auto;
 }
 
+/* Body text matches the editor's, so switching between edit and preview keeps the
+   page's brightness. Outline sections are agent Markdown roots with their own colour. */
+.dh-markdown--document,
+.dh-markdown--document .dh-markdown--agent {
+  color: var(--editor-fg);
+}
+
 /* Outline sections render individual Markdown roots inside the document shell. */
 .dh-markdown--document .dh-markdown {
   font-size: inherit;
@@ -1958,6 +1971,21 @@ code, pre {
 .dh-markdown button.dh-inline-code-file-link:focus-visible code {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Monaco has one theme per page, and Mocha's is tuned for the file editor's darker
+   well. The chat composer sits on the workspace, so it keeps the workspace colours. */
+:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor {
+  --vscode-editor-background: var(--workspace);
+  --vscode-editorGutter-background: var(--workspace);
+  --vscode-editor-foreground: var(--fg-secondary);
+}
+:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .mtk1 {
+  color: var(--fg-secondary);
+}
+:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .view-overlays .current-line,
+:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .margin-view-overlays .current-line-margin {
+  background-color: #cdd6f40d;
 }
 
 .monaco-editor .dh-editor-target-line-highlight {

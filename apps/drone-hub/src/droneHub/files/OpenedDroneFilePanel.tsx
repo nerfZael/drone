@@ -133,7 +133,7 @@ function PlainTextEditorFallback({
       readOnly={saving || readOnly}
       spellCheck={false}
       data-editor-zoom-surface="file-editor"
-      className="h-full w-full resize-none border-0 bg-[var(--panel)] px-4 py-4 font-mono text-ui leading-5 text-[var(--fg-secondary)] outline-none"
+      className="h-full w-full resize-none border-0 bg-[var(--editor-surface)] px-4 py-4 font-mono text-ui leading-5 text-[var(--editor-fg)] outline-none"
       style={droneHubEditorTextStyle(editorZoomLevel)}
       aria-label="Plain text editor"
     />

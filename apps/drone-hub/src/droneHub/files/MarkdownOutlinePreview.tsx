@@ -324,7 +324,7 @@ export function MarkdownOutlinePreview({
   const preview = outline.sections.length === 0 ? (
       <div
         ref={previewRef}
-        className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-6 py-6"
+        className="h-full w-full overflow-auto bg-[var(--editor-surface)] px-6 py-6"
       >
         <MarkdownMessage
           text={text}
