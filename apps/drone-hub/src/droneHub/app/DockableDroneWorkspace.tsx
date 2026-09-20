@@ -10,7 +10,11 @@ import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
-import { requestNewTerminalSession } from '../terminal/terminal-new-session-request';
+import { TerminalHeaderControlsContext } from '../terminal/terminal-header-controls-context';
+import {
+  requestNewTerminalSession,
+  useCanRequestNewTerminalSession,
+} from '../terminal/terminal-new-session-request';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
@@ -507,7 +511,9 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
       className="dh-utility-panel relative h-full"
     >
       <EditorPaneContext.Provider value={api.id === EXPLORER_PANEL_ID ? 'explorer' : 'editor'}>
-        {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
+        <TerminalHeaderControlsContext.Provider value>
+          {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
+        </TerminalHeaderControlsContext.Provider>
       </EditorPaneContext.Provider>
     </UiPanel>
   );
@@ -559,6 +565,9 @@ function dragEventOf(event: DragEvent | PointerEvent): DragEvent | null {
 function TerminalDockTab({ api, params }: IDockviewPanelHeaderProps<{ paneKey?: WorkspacePaneKey }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   const title = usePanelTitle(api);
+  const paneKey = params?.paneKey ?? 'single';
+  // False while the terminal is still provisioning or its pane has not loaded.
+  const canOpen = useCanRequestNewTerminalSession(ctx.droneId, paneKey);
   const middleButtonDown = React.useRef(false);
   const stop = (event: React.SyntheticEvent) => event.stopPropagation();
   return (
@@ -582,12 +591,13 @@ function TerminalDockTab({ api, params }: IDockviewPanelHeaderProps<{ paneKey?: 
       <button
         type="button"
         className="dh-dock-tab-button"
-        title="Open a new terminal"
+        title={canOpen ? 'Open a new terminal' : 'The terminal is not ready yet'}
         aria-label="Open a new terminal"
+        disabled={!canOpen}
         onPointerDown={stop}
         onClick={(event) => {
           stop(event);
-          requestNewTerminalSession(ctx.droneId, params?.paneKey ?? 'single');
+          requestNewTerminalSession(ctx.droneId, paneKey);
         }}
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

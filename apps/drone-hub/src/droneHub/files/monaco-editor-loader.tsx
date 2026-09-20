@@ -1,4 +1,5 @@
 import React from 'react';
+import type { languages } from 'monaco-editor';
 import { DESKTOP_THEMES, desktopMonacoTheme } from '../../theme';
 import { withMarkdownListMarkerToken } from './markdown-list-marker-tokens';
 
@@ -52,9 +53,10 @@ export function useIdleMonacoEditorPreload(): void {
   }, []);
 }
 
+// Monaco's bundled languages keep the lazy import of their grammar on their registration.
 type LazyMonacoLanguage = {
   id: string;
-  loader?: () => Promise<{ language: Parameters<typeof withMarkdownListMarkerToken>[0] }>;
+  loader?: () => Promise<{ language: languages.IMonarchLanguage }>;
 };
 
 /**
@@ -69,10 +71,7 @@ function registerMarkdownListMarkerTokens(monaco: Parameters<MonacoBeforeMountHa
   // Without the lazy loader there is no grammar to extend; the built-in one stays.
   if (typeof loadMarkdown !== 'function') return;
   monaco.languages.registerTokensProviderFactory('markdown', {
-    create: async () =>
-      withMarkdownListMarkerToken((await loadMarkdown()).language) as Awaited<
-        ReturnType<Parameters<typeof monaco.languages.registerTokensProviderFactory>[1]['create']>
-      >,
+    create: async () => withMarkdownListMarkerToken((await loadMarkdown()).language),
   });
 }
 

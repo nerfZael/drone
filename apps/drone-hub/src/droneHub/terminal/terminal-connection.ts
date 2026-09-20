@@ -6,6 +6,8 @@ import { terminalOpenRequests, type ShellTerminalTarget } from './terminal-open-
 export type TerminalSink = {
   write: (data: string | Uint8Array, done?: () => void) => void;
   reset: () => void;
+  /** The session's foreground process, when the daemon is new enough to report it. */
+  process?: (command: string) => void;
 };
 export type TerminalConnectionState = {
   sessionName: string;
@@ -262,6 +264,8 @@ export class TerminalConnection {
           this.measure('output-stream-connected', performance.now());
           void this.flushInput();
         }
+      } else if (message.type === 'process') {
+        if (typeof message.command === 'string') this.sink.process?.(message.command);
       } else if (message.type === 'snapshot') {
         this.sink.reset();
         const snapshotStarted = performance.now();

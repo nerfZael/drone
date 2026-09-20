@@ -24,7 +24,7 @@ function TerminalGlyph() {
  * Terminal sessions as a list beside the terminal rather than a tab strip above it: a
  * terminal can spare width far more easily than rows. It keeps one width however many
  * sessions there are, so opening a second terminal never reflows the first. New terminals
- * are opened from the dock header.
+ * are opened from the dock header where there is one.
  */
 export function DroneTerminalSessionList({
   sessions,
@@ -32,18 +32,45 @@ export function DroneTerminalSessionList({
   closingSessionId,
   onActivateSession,
   onCloseSession,
+  onCreateSession,
 }: {
   sessions: TerminalPaneSession[];
   activeSessionId: string | null;
   closingSessionId: string | null;
   onActivateSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
+  /** Given only where no dock header carries the new-terminal button. */
+  onCreateSession?: () => void;
 }) {
   return (
     <div
       data-terminal-session-list=""
-      className="flex w-40 shrink-0 flex-col border-l border-[var(--border-subtle)] bg-[var(--panel-alt)]"
+      className="flex w-[clamp(7rem,28%,10rem)] shrink-0 flex-col border-l border-[var(--border-subtle)] bg-[var(--panel-alt)]"
     >
+      {onCreateSession ? (
+        <div className="flex h-7 shrink-0 items-center justify-end px-1">
+          <button
+            type="button"
+            aria-label="Open a new terminal"
+            title="Open a new terminal"
+            onClick={onCreateSession}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-small)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
       <div
         role="tablist"
         aria-label="Terminal sessions"

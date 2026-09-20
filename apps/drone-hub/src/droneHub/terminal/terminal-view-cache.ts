@@ -5,7 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import type { ITheme } from '@xterm/xterm';
 import { TerminalConnection } from './terminal-connection';
 import { terminalOpenRequests, type ShellTerminalTarget } from './terminal-open-request';
-import { setTerminalProgramTitle } from './terminal-titles';
+import { setTerminalProcess, setTerminalProgramTitle } from './terminal-titles';
 
 type View = {
   element: HTMLDivElement;
@@ -51,6 +51,7 @@ export function acquireTerminalView(
       {
         write: (data, done) => terminal.write(data, done),
         reset: () => terminal.reset(),
+        process: (command) => setTerminalProcess(key, command),
       },
       started,
     );

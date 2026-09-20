@@ -7,8 +7,13 @@ import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { DroneTerminalEmptyState } from './DroneTerminalEmptyState';
 import { DroneTerminalSessionList } from './DroneTerminalSessionList';
+import { TerminalHeaderControlsContext } from './terminal-header-controls-context';
 import { onNewTerminalSessionRequest } from './terminal-new-session-request';
-import { forgetTerminalProgramTitle, useTerminalProgramTitles } from './terminal-titles';
+import {
+  forgetTerminalSessionNaming,
+  terminalSessionLabel,
+  useTerminalSessionNaming,
+} from './terminal-titles';
 import type { TerminalPaneSessionsState } from './terminal-tabs-state';
 import { desktopThemeDefinition } from '../../theme';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
@@ -69,7 +74,7 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
     onCloseSession,
   } = props;
   const themeId = useDroneHubUiStore((state) => state.themeId);
-  const programTitles = useTerminalProgramTitles();
+  const sessionNaming = useTerminalSessionNaming();
   const host = React.useRef<HTMLDivElement | null>(null);
   const view = React.useRef<ReturnType<typeof acquireTerminalView> | null>(null);
   const latest = React.useRef(props);
@@ -92,18 +97,21 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
     timeoutMs: 18_000,
   });
 
-  // The dock header's new-terminal button asks through this channel.
-  React.useEffect(
-    () =>
-      onNewTerminalSessionRequest(droneId, paneKey, () => {
-        const current = latest.current;
-        if (current.disabled) return;
-        setCloseError(null);
-        beginTerminalOpen();
-        current.onCreateSession(droneId, paneKey, String(current.defaultCwd).trim());
-      }),
-    [droneId, paneKey],
-  );
+  const headerHostsNewTerminal = React.useContext(TerminalHeaderControlsContext);
+  const createSession = React.useCallback(() => {
+    const current = latest.current;
+    if (current.disabled) return;
+    setCloseError(null);
+    beginTerminalOpen();
+    current.onCreateSession(droneId, paneKey, String(current.defaultCwd).trim());
+  }, [droneId, paneKey]);
+
+  // The dock header's new-terminal button asks through this channel. Listening only while
+  // a session can be opened is what lets that button show itself as unavailable.
+  React.useEffect(() => {
+    if (disabled) return;
+    return onNewTerminalSessionRequest(droneId, paneKey, createSession);
+  }, [droneId, paneKey, disabled, createSession]);
 
   React.useEffect(() => {
     if (droneId && !disabled && !sessionsState.initialized)
@@ -179,13 +187,13 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
         });
       }
       evictTerminalView(closingKey);
-      forgetTerminalProgramTitle(closingKey);
+      forgetTerminalSessionNaming(closingKey);
       onCloseSession(droneId, paneKey, sessionId);
       setCloseError(null);
     } catch (error: any) {
       if (Number(error?.status) === 404) {
         evictTerminalView(closingKey);
-        forgetTerminalProgramTitle(closingKey);
+        forgetTerminalSessionNaming(closingKey);
         onCloseSession(droneId, paneKey, sessionId);
       } else setCloseError(formatDroneRuntimeError(error));
     } finally {
@@ -194,12 +202,14 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
   };
 
   const state = connectionState?.key === key ? connectionState.value : null;
-  // A program's own title (its prompt, its current task) names the session better than
-  // "Terminal 2" does; the ordinal name stays as the fallback.
-  const titledSessions = sessionsState.sessions.map((session) => {
-    const programTitle = programTitles.get(terminalViewKey(droneId, paneKey, session.id));
-    return programTitle ? { ...session, title: programTitle } : session;
-  });
+  // What is running names a session better than "Terminal 2" does; that stays the fallback.
+  const titledSessions = sessionsState.sessions.map((session) => ({
+    ...session,
+    title: terminalSessionLabel(
+      sessionNaming.get(terminalViewKey(droneId, paneKey, session.id)),
+      session.title,
+    ),
+  }));
   const error = closeError || state?.error;
   return (
     <UiPanel flush surface="alternate" className="relative h-full w-full">
@@ -252,6 +262,7 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
           onCloseSession={(id) => {
             void close(id);
           }}
+          onCreateSession={headerHostsNewTerminal || disabled ? undefined : createSession}
         />
       </div>
     </UiPanel>

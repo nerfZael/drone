@@ -32,6 +32,7 @@ export function installTerminalSocket(
       let closed = false;
       let failed = false;
       let unsubscribe = () => {};
+      let unsubscribeProcess = () => {};
       let release = () => {};
       let outstanding = 0;
       let queuedInput = 0;
@@ -125,6 +126,13 @@ export function installTerminalSocket(
             });
           }
         };
+        // Names the session in the viewer's list. Viewers that predate it ignore the message.
+        const sendProcess = (command: string) => {
+          if (command && !closed && !failed && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: 'process', command }));
+        };
+        sendProcess(control.processName);
+        unsubscribeProcess = control.subscribeProcess(sendProcess);
         unsubscribe = control.subscribe(pump, () =>
           fail(new Error('terminal session was interrupted or exited'), true),
         );
@@ -205,6 +213,7 @@ export function installTerminalSocket(
       const cleanup = () => {
         closed = true;
         unsubscribe();
+        unsubscribeProcess();
         release();
       };
       ws.on('close', cleanup);

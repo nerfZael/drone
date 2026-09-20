@@ -297,6 +297,8 @@ test(
             snapshot: async () => ({ offset: 0, data: Buffer.alloc(0) }),
             replaySince: () => Buffer.alloc(0),
             subscribe: () => () => {},
+            processName: '',
+            subscribeProcess: () => () => {},
             paste: async (bytes: Buffer) => {
               pasted = bytes;
             },
@@ -420,5 +422,53 @@ test(
     assert.ok(snapshot.data.includes(Buffer.from('\x1b[32m')));
     assert.ok(snapshot.data.includes(Buffer.from('\x1b[1;9H')));
     release();
+  },
+);
+
+test(
+  "reports the pane's foreground command to the control and to socket viewers",
+  { timeout: 20000 },
+  async (t) => {
+    const { controls } = await fixture(t);
+    const { control, release } = await controls.acquire('probe');
+    t.after(release);
+    // tmux announces the first value shortly after the subscription is accepted.
+    await waitFor(() => control.processName === 'bash');
+    const seen: string[] = [];
+    const remove = control.subscribeProcess((name) => seen.push(name));
+    t.after(remove);
+
+    const daemon = http.createServer((_req, res) => {
+      res.statusCode = 404;
+      res.end();
+    });
+    const closeSocket = installTerminalSocket(daemon, 'test-token', controls);
+    await new Promise<void>((r) => daemon.listen(0, '127.0.0.1', r));
+    const port = (daemon.address() as any).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/terminal/connect?session=probe`, {
+      headers: { authorization: 'Bearer test-token' },
+    });
+    const commands: string[] = [];
+    ws.on('message', (data, binary) => {
+      if (binary) {
+        ws.send(JSON.stringify({ type: 'ack', bytes: (data as Buffer).length }));
+        return;
+      }
+      const message = JSON.parse(data.toString());
+      if (message.type === 'process') commands.push(message.command);
+    });
+    t.after(async () => {
+      ws.terminate();
+      closeSocket();
+      await new Promise<void>((r) => daemon.close(() => r()));
+    });
+    // A viewer that connects late still learns what is already running.
+    await waitFor(() => commands[0] === 'bash');
+
+    await control.input(Buffer.from('sleep 2\r'));
+    await waitFor(() => control.processName === 'sleep');
+    await waitFor(() => control.processName === 'bash', 8000);
+    assert.deepEqual(seen, ['sleep', 'bash']);
+    await waitFor(() => commands.join() === 'bash,sleep,bash');
   },
 );

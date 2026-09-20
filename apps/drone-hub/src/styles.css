@@ -3234,9 +3234,14 @@ select:disabled optgroup {
   cursor: pointer;
 }
 
-.dh-dock-tab-button:hover {
+.dh-dock-tab-button:hover:not(:disabled) {
   color: var(--fg-secondary);
   background: var(--dv-icon-hover-background-color);
+}
+
+.dh-dock-tab-button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
 }
 
 .dh-dock-tab-divider {
@@ -3353,6 +3358,16 @@ select:disabled optgroup {
 
 .dh-dockable-workspace--compact-headers .dv-tab .dv-default-tab .dv-default-tab-action {
   padding: 2px;
+}
+
+.dh-dockable-workspace--compact-headers .dh-dock-tab-button {
+  width: 14px;
+  height: 14px;
+}
+
+.dh-dockable-workspace--compact-headers .dh-dock-tab-divider {
+  height: 8px;
+  margin: 0 2px;
 }
 
 .dh-dockable-workspace--compact-headers .dv-tab .dv-default-tab .dv-svg {

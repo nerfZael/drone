@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 
 const REPLAY_BYTES = 2 * 1024 * 1024;
 const MAX_COMMAND_BYTES = 1024 * 1024;
+const PROCESS_SUBSCRIPTION = 'drone-process';
+// %subscription-changed <name> <session> <window> <window index> <pane> : <value>
+const PROCESS_CHANGED = new RegExp(
+  `^%subscription-changed ${PROCESS_SUBSCRIPTION} \\S+ \\S+ \\S+ (%\\d+) : (.*)$`,
+);
 type Reply = { data: Buffer; offset: number };
 type Pending = {
   resolve: (reply: Reply) => void;
@@ -52,7 +57,10 @@ export class TerminalControl {
   private replayBytes = 0;
   private listeners = new Set<(data: Buffer) => void>();
   private exitListeners = new Set<() => void>();
+  private processListeners = new Set<(name: string) => void>();
   private paneId = '';
+  /** The pane's foreground command ("bash", "node"), or '' while tmux has not said. */
+  processName = '';
 
   constructor(
     readonly session: string,
@@ -117,6 +125,11 @@ export class TerminalControl {
     }
     if (text.startsWith('%exit'))
       return this.close(new Error('terminal session was interrupted or exited'));
+    const process = PROCESS_CHANGED.exec(text);
+    if (process) {
+      if (!this.paneId || process[1] === this.paneId) this.setProcessName(process[2]);
+      return;
+    }
     const match = /^%output (%\d+) /.exec(text);
     if (!match || (this.paneId && match[1] !== this.paneId)) return;
     const bytes = decodeTmuxOutput(line.subarray(match[0].length));
@@ -142,6 +155,17 @@ export class TerminalControl {
     for (const listener of this.listeners) listener(bytes);
   }
 
+  private setProcessName(raw: string) {
+    // A command name is a label for people; keep it to one short printable line.
+    const name = raw
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 64);
+    if (name === this.processName) return;
+    this.processName = name;
+    for (const listener of this.processListeners) listener(name);
+  }
+
   async commands(commands: string[]): Promise<Reply[]> {
     await this.ready;
     if (this.closed) throw new Error('terminal session was interrupted or exited');
@@ -161,6 +185,11 @@ export class TerminalControl {
     const [reply] = await this.commands([`display-message -p -t =${this.session}:^ '#{pane_id}'`]);
     this.paneId = reply.data.toString('utf8').trim();
     if (!/^%\d+$/.test(this.paneId)) throw new Error('terminal pane not found');
+    // tmux 3.2 and later report the pane's foreground command as it changes. An older
+    // tmux rejects the subscription, and its sessions simply go without a process name.
+    await this.commands([
+      `refresh-client -B "${PROCESS_SUBSCRIPTION}:${this.paneId}:#{pane_current_command}"`,
+    ]).catch(() => {});
   }
 
   async input(data: Buffer) {
@@ -244,6 +273,13 @@ export class TerminalControl {
     };
   }
 
+  subscribeProcess(listener: (name: string) => void): () => void {
+    this.processListeners.add(listener);
+    return () => {
+      this.processListeners.delete(listener);
+    };
+  }
+
   close(error = new Error('terminal connection closed')) {
     if (this.closed) return;
     this.closed = true;
@@ -255,6 +291,7 @@ export class TerminalControl {
     for (const listener of this.exitListeners) listener();
     this.listeners.clear();
     this.exitListeners.clear();
+    this.processListeners.clear();
     this.replay = [];
   }
 }

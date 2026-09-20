@@ -297,3 +297,23 @@ test('HTTP polling clears successive output errors once polling recovers', async
   expect(connection!.state.error).toBeNull();
   expect(writes).toContain('prompt');
 });
+
+test("passes the daemon's foreground process to the sink and tolerates a sink without one", async () => {
+  const processes: string[] = [];
+  connection = new TerminalConnection(target, {
+    write: (_data, done) => done?.(),
+    reset() {},
+    process: (command) => processes.push(command),
+  });
+  await tick();
+  const socket = Socket.instances[0];
+  socket.receive({ type: 'ready', generation: 'first', offsetBytes: 0 });
+  socket.receive({ type: 'process', command: 'node' });
+  socket.receive({ type: 'process', command: 42 });
+  expect(processes).toEqual(['node']);
+  connection.dispose();
+
+  create();
+  await tick();
+  Socket.instances[1].receive({ type: 'process', command: 'bash' });
+});
