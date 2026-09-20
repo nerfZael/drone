@@ -1,5 +1,6 @@
 import React from 'react';
 import { DESKTOP_THEMES, desktopMonacoTheme } from '../../theme';
+import { withMarkdownListMarkerToken } from './markdown-list-marker-tokens';
 
 type MonacoReactModule = typeof import('@monaco-editor/react');
 export type MonacoEditorComponent = MonacoReactModule['default'];
@@ -51,8 +52,33 @@ export function useIdleMonacoEditorPreload(): void {
   }, []);
 }
 
+type LazyMonacoLanguage = {
+  id: string;
+  loader?: () => Promise<{ language: Parameters<typeof withMarkdownListMarkerToken>[0] }>;
+};
+
+/**
+ * Replaces the built-in Markdown tokenizer factory with one that marks list markers. It
+ * runs before the first editor mounts, so no Markdown model has been tokenized yet.
+ */
+function registerMarkdownListMarkerTokens(monaco: Parameters<MonacoBeforeMountHandler>[0]): void {
+  const markdown = (monaco.languages.getLanguages() as LazyMonacoLanguage[]).find(
+    (language) => language.id === 'markdown',
+  );
+  const loadMarkdown = markdown?.loader;
+  // Without the lazy loader there is no grammar to extend; the built-in one stays.
+  if (typeof loadMarkdown !== 'function') return;
+  monaco.languages.registerTokensProviderFactory('markdown', {
+    create: async () =>
+      withMarkdownListMarkerToken((await loadMarkdown()).language) as Awaited<
+        ReturnType<Parameters<typeof monaco.languages.registerTokensProviderFactory>[1]['create']>
+      >,
+  });
+}
+
 export const defineDroneHubMonacoThemes: MonacoBeforeMountHandler = (monaco) => {
   if (themedMonacoInstances.has(monaco)) return;
+  registerMarkdownListMarkerTokens(monaco);
   for (const theme of DESKTOP_THEMES) {
     const editorTheme = desktopMonacoTheme(theme.id);
     monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);

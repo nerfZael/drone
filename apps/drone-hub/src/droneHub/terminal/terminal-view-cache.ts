@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import type { ITheme } from '@xterm/xterm';
 import { TerminalConnection } from './terminal-connection';
 import { terminalOpenRequests, type ShellTerminalTarget } from './terminal-open-request';
+import { setTerminalProgramTitle } from './terminal-titles';
 
 type View = {
   element: HTMLDivElement;
@@ -61,6 +62,7 @@ export function acquireTerminalView(
     connection.measure('xterm-setup', mounting);
     terminal.onData((data) => connection.send(data));
     terminal.onResize(({ cols, rows }) => connection.resize(cols, rows));
+    terminal.onTitleChange((title) => setTerminalProgramTitle(key, title));
     view = { element, terminal, fit, connection, users: 0 };
     views.set(key, view);
   }

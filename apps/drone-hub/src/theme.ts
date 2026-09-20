@@ -83,7 +83,7 @@ const DESKTOP_THEME_BY_ID: Record<DesktopThemeId, DesktopThemeDefinition> = {
     swatches: ['#1e1e2e', '#313244', '#cba6f7', '#a6e3a1'],
     browserColor: '#1e1e2e',
     terminal: {
-      background: '#1e1e2e',
+      background: '#11111b',
       foreground: '#cdd6f4',
       cursor: '#f5e0dc',
       cursorAccent: '#11111b',
@@ -141,8 +141,10 @@ const MONOLITH_MONACO_THEME: DesktopMonacoTheme = {
       { token: 'regexp', foreground: 'C6A0F6' },
       { token: 'tag', foreground: 'FF8585' },
       { token: 'attribute.name', foreground: 'FFC15A' },
-      // Markdown. Its headings and list markers are 'keyword', inline code is 'variable'.
+      // Markdown. Its headings are 'keyword', inline code is 'variable'.
       { token: 'keyword.md', foreground: 'C9A9FF', fontStyle: 'bold' },
+      // List markers, split from headings by markdown-list-marker-tokens.
+      { token: 'keyword.list.md', foreground: 'FFB77A' },
       { token: 'variable.md', foreground: 'FFB77A' },
       { token: 'string.link.md', foreground: '8DB4FF', fontStyle: 'underline' },
       { token: 'strong.md', foreground: 'E5E9F0', fontStyle: 'bold' },
@@ -201,8 +203,10 @@ const CATPPUCCIN_MOCHA_MONACO_THEME: DesktopMonacoTheme = {
       { token: 'attribute.name', foreground: 'F9E2AF' },
       { token: 'annotation', foreground: 'F9E2AF' },
       { token: 'macro', foreground: 'F5E0DC' },
-      // Markdown. Its headings and list markers are 'keyword', inline code is 'variable'.
+      // Markdown. Its headings are 'keyword', inline code is 'variable'.
       { token: 'keyword.md', foreground: 'CBA6F7', fontStyle: 'bold' },
+      // List markers, split from headings by markdown-list-marker-tokens.
+      { token: 'keyword.list.md', foreground: 'FAB387' },
       { token: 'variable.md', foreground: 'FAB387' },
       { token: 'string.link.md', foreground: '89B4FA', fontStyle: 'underline' },
       { token: 'strong.md', foreground: 'CDD6F4', fontStyle: 'bold' },

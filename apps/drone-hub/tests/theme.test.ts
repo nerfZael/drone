@@ -38,7 +38,7 @@ describe('desktop themes', () => {
 
   test('uses the official Catppuccin Mocha colors in terminal integrations', () => {
     expect(desktopThemeDefinition('catppuccin-mocha').terminal).toMatchObject({
-      background: '#1e1e2e',
+      background: '#11111b',
       foreground: '#cdd6f4',
       cursor: '#f5e0dc',
       cursorAccent: '#11111b',
@@ -184,7 +184,8 @@ describe('desktop themes', () => {
       '--sidebar-brand-size': '.875rem',
       '--sidebar-brand-weight': '600',
       '--sidebar-heading-weight': '400',
-      '--sidebar-drone-fg': '#cdd6f4',
+      '--sidebar-drone-fg': '#bac2de',
+      '--sidebar-drone-selected-fg': '#cdd6f4',
       '--sidebar-drone-active-fg': '#f2f4ff',
       '--sidebar-drone-compact-size': '.75rem',
       '--sidebar-drone-size': '.8125rem',

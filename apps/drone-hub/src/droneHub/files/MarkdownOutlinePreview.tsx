@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { parseMarkdownOutline, type MarkdownOutlineSection } from './markdown-outline';
+import type { MarkdownPreviewAlignment } from './markdown-preview-alignment';
 
 type MarkdownOutlinePreviewProps = {
   text: string;
@@ -11,6 +12,7 @@ type MarkdownOutlinePreviewProps = {
   expansionCommand?: MarkdownOutlineExpansionCommand | null;
   targetLine?: number | null;
   targetNavigationSeq?: number;
+  alignment?: MarkdownPreviewAlignment;
 };
 
 const HEADING_REMARK_PLUGINS = [remarkGfm];
@@ -193,6 +195,7 @@ export function MarkdownOutlinePreview({
   targetLine: externalTargetLine,
   targetNavigationSeq: externalNavigationSeq = 0,
   searchRequest = 0,
+  alignment = 'center',
 }: MarkdownOutlinePreviewProps) {
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -324,7 +327,8 @@ export function MarkdownOutlinePreview({
   const preview = outline.sections.length === 0 ? (
       <div
         ref={previewRef}
-        className="h-full w-full overflow-auto bg-[var(--editor-surface)] px-6 py-6"
+        data-preview-alignment={alignment}
+        className="dh-markdown-preview-plain h-full w-full overflow-auto bg-[var(--editor-surface)] px-6 py-6"
       >
         <MarkdownMessage
           text={text}
@@ -335,7 +339,7 @@ export function MarkdownOutlinePreview({
         />
       </div>
     ) : (
-    <div ref={previewRef} className="dh-markdown-outline">
+    <div ref={previewRef} data-preview-alignment={alignment} className="dh-markdown-outline">
       <div className="dh-markdown dh-markdown--agent dh-markdown--document dh-markdown-outline__document">
         {outline.preamble ? (
           <div className="dh-markdown-outline__preamble">

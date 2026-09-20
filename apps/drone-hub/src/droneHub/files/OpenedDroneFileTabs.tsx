@@ -124,7 +124,7 @@ export function OpenedDroneFileTabs({
               }}
               className={`group/tab relative flex h-9 min-w-[120px] max-w-[200px] items-center gap-0 overflow-hidden border-r border-[var(--border-subtle)] text-ui transition-colors ${
                 active
-                  ? 'bg-[var(--panel)] text-[var(--fg)] shadow-[inset_0_2px_0_var(--accent)]'
+                  ? 'bg-[var(--editor-surface)] text-[var(--fg)] shadow-[inset_0_2px_0_var(--accent)]'
                   : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               } ${draggingTabId === tab.tabId ? 'opacity-45' : ''}`}
               title={title}

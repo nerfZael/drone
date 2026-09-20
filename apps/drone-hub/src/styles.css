@@ -42,7 +42,8 @@
   --field-focus-border: color-mix(in srgb, var(--accent-muted) 86%, var(--field-border));
   --field-fg: var(--fg);
   --field-placeholder: var(--muted);
-  --sidebar-fg: var(--fg-secondary);
+  /* Navigation steps down from reading text; the selected row steps back up. */
+  --sidebar-fg: #b5bccb;
   --sidebar-fg-active: var(--fg);
   --sidebar-subitem-fg: var(--muted);
   --sidebar-heading-fg: var(--fg-secondary);
@@ -65,6 +66,11 @@
   --sidebar-font: var(--sans);
   --sidebar-heading-weight: 400;
   --sidebar-drone-fg: var(--sidebar-fg);
+  --sidebar-drone-selected-fg: var(--fg-secondary);
+  --explorer-row-fg: #bcc3d1;
+  --dock-tab-bg: var(--surface-soft);
+  --dock-tab-fg: var(--muted);
+  --dock-tab-quiet-fg: var(--muted-dim);
   --sidebar-drone-active-fg: var(--sidebar-fg-active);
   --sidebar-drone-weight: 400;
   --sidebar-row-selected-bg: rgba(177, 156, 255, .075);
@@ -165,6 +171,8 @@
   --assistant-bubble-border: var(--accent-border);
   --assistant-bubble-fade: var(--accent-subtle);
   --assistant-message-fg: var(--fg-secondary);
+  /* Bold carries emphasis by weight; brightening it too makes replies patchy. */
+  --assistant-message-strong-fg: currentColor;
   --chat-card-bg: var(--panel-alt);
   --chat-card-border: var(--border);
   --chat-card-selected: var(--panel-raised);
@@ -324,6 +332,9 @@
   --panel: #181825;
   --panel-alt: #181825;
   --panel-raised: #313244;
+  /* Conversation sits on Base, the softest surface, with its bubbles and composer raised
+     above it. Navigation and chrome sit on Mantle. Files, previews and the terminal are
+     dense text, so they get the darkest well (--editor-surface). */
   --workspace: #1e1e2e;
   --editor-surface: #11111b;
   --editor-fg: #bac2de;
@@ -340,9 +351,9 @@
   --field-focus-border: rgba(180, 190, 254, .88);
   --field-fg: #e6e9ff;
   --field-placeholder: #a6adc8;
-  --sidebar-fg: #cdd6f4;
+  --sidebar-fg: #bac2de;
   --sidebar-fg-active: #f2f4ff;
-  --sidebar-subitem-fg: #bac2de;
+  --sidebar-subitem-fg: #a6adc8;
   --sidebar-heading-fg: #cdd6f4;
   --sidebar-action-fg: #bac2de;
   --sidebar-bg: #181825;
@@ -362,7 +373,8 @@
   --sidebar-brand-transform: none;
   --sidebar-font: system-ui, -apple-system, sans-serif;
   --sidebar-heading-weight: 400;
-  --sidebar-drone-fg: #cdd6f4;
+  --sidebar-drone-fg: #bac2de;
+  --sidebar-drone-selected-fg: #cdd6f4;
   --sidebar-drone-active-fg: #f2f4ff;
   --sidebar-drone-weight: 400;
   --sidebar-row-selected-bg: rgba(203, 166, 247, .12);
@@ -372,6 +384,10 @@
   --sidebar-repository-row-edge: rgba(49, 50, 68, .62);
   --sidebar-row-radius: .25rem;
   --sidebar-meta-fg: #a6adc8;
+  --explorer-row-fg: #bac2de;
+  --dock-tab-bg: rgba(205, 214, 244, .035);
+  --dock-tab-fg: #a6adc8;
+  --dock-tab-quiet-fg: #7f849c;
   --sidebar-blocked-indicator: #ff596b;
   --sidebar-drone-compact-size: .75rem;
   --sidebar-drone-size: .8125rem;
@@ -410,9 +426,9 @@
   --surface-inset-faint: rgba(17, 17, 27, .10);
   --surface-inset: rgba(205, 214, 244, .022);
   --surface-inset-strong: #313244;
-  --utility-panel-bg: #1e1e2e;
+  --utility-panel-bg: #181825;
   --utility-panel-chrome: #181825;
-  --utility-panel-inset: #181825;
+  --utility-panel-inset: #11111b;
   --utility-panel-card: #242437;
   --utility-panel-card-strong: #2b2b40;
   --utility-panel-hover: #29293d;
@@ -452,6 +468,8 @@
   --assistant-bubble-border: transparent;
   --assistant-bubble-fade: var(--bg);
   --assistant-message-fg: #cdd6f4;
+  /* Bold carries emphasis by weight; brightening it too makes replies patchy. */
+  --assistant-message-strong-fg: currentColor;
   --chat-card-bg: #242437;
   --chat-card-border: rgba(88, 91, 115, .72);
   --chat-card-selected: #313244;
@@ -490,6 +508,7 @@
   --link-strong: #b4befe;
   --cursor: #f5e0dc;
   --code-bg: #313244;
+  --document-code-bg: #292a3c;
   --code-border: rgba(69, 71, 90, .48);
   --code-fg: #b4befe;
   --code-block-bg: #292a3c;
@@ -1269,6 +1288,19 @@ code, pre {
   padding: clamp(24px, 3vw, 40px) clamp(20px, 3vw, 40px) 48px;
 }
 
+/* Left alignment starts the prose about where the editor starts its text, past the
+   line-number gutter, so toggling edit and preview keeps the reading position. */
+[data-preview-alignment='left'] .dh-markdown-outline__document,
+.dh-markdown-preview-plain[data-preview-alignment='left'] .dh-markdown--document {
+  margin-inline: 0;
+}
+[data-preview-alignment='left'] .dh-markdown-outline__document {
+  padding-left: 4.75rem;
+}
+.dh-markdown-preview-plain[data-preview-alignment='left'] {
+  padding-left: 4.75rem;
+}
+
 .dh-markdown-outline__preamble,
 .dh-markdown-outline__tree,
 .dh-markdown-outline__section,
@@ -1710,7 +1742,7 @@ code, pre {
 }
 .dh-markdown--agent strong,
 .dh-markdown--agent b {
-  color: var(--fg);
+  color: var(--assistant-message-strong-fg, var(--fg));
 }
 .dh-markdown h1,
 .dh-markdown h2,
@@ -1974,10 +2006,10 @@ code, pre {
 }
 
 /* Monaco has one theme per page, and Mocha's is tuned for the file editor's darker
-   well. The chat composer sits on the workspace, so it keeps the workspace colours. */
+   well. The chat composer is a raised field, so it keeps the composer's colours. */
 :root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor {
-  --vscode-editor-background: var(--workspace);
-  --vscode-editorGutter-background: var(--workspace);
+  --vscode-editor-background: var(--chat-composer-input);
+  --vscode-editorGutter-background: var(--chat-composer-input);
   --vscode-editor-foreground: var(--fg-secondary);
 }
 :root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .mtk1 {
@@ -2118,6 +2150,12 @@ code, pre {
   padding: .15rem .42rem;
   border-radius: 4px;
   color: var(--code-fg);
+}
+
+/* A file preview sits on the darker editor surface, where the chat's inline-code chip
+   would outweigh the sentence around it. */
+.dh-markdown--document :not(pre) > code {
+  background: var(--document-code-bg, var(--code-bg));
 }
 
 .dh-markdown pre {
@@ -3050,14 +3088,14 @@ select:disabled optgroup {
   min-height: 0;
   --dv-group-view-background-color: var(--panel);
   --dv-tabs-and-actions-container-background-color: var(--panel-alt);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--surface-strong);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--dock-tab-bg, var(--surface-strong));
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-soft);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--dock-tab-bg, var(--surface-soft));
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-activegroup-visiblepanel-tab-color: var(--fg-secondary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--fg-secondary);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-dim);
+  --dv-activegroup-visiblepanel-tab-color: var(--dock-tab-fg, var(--fg-secondary));
+  --dv-activegroup-hiddenpanel-tab-color: var(--dock-tab-quiet-fg, var(--muted));
+  --dv-inactivegroup-visiblepanel-tab-color: var(--dock-tab-fg, var(--fg-secondary));
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--dock-tab-quiet-fg, var(--muted-dim));
   --dv-separator-border: var(--border-subtle);
   --dv-tab-divider-color: var(--border-subtle);
   --dv-tabs-and-actions-container-height: 28px;
@@ -3076,6 +3114,13 @@ select:disabled optgroup {
   padding-left: 0;
   border-bottom: 1px solid var(--border-subtle);
   font-family: var(--display);
+}
+
+/* A lone tab is only the panel's label, so it sits flat on the chrome instead of
+   drawing a lighter band across the top of every panel. */
+.dh-dockable-workspace .dv-tabs-and-actions-container.dv-single-tab {
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
 }
 
 /* A single floating chat uses the entire title bar to move the window. */
@@ -3175,6 +3220,36 @@ select:disabled optgroup {
   display: flex;
   align-items: stretch;
   height: 100%;
+}
+
+/* Controls a panel adds to its own dock tab, before the close button. */
+.dh-dock-tab-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 2px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dh-dock-tab-button:hover {
+  color: var(--fg-secondary);
+  background: var(--dv-icon-hover-background-color);
+}
+
+.dh-dock-tab-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 5px;
+  background: var(--border);
+}
+
+/* They belong to the panel on show; a tab waiting behind another keeps only its name. */
+.dh-dockable-workspace .dv-tab.dv-inactive-tab .dh-dock-tab-button,
+.dh-dockable-workspace .dv-tab.dv-inactive-tab .dh-dock-tab-divider {
+  display: none;
 }
 
 .dh-chat-window-action {

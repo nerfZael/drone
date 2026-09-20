@@ -6,7 +6,9 @@ import { formatDroneRuntimeError } from '../app/chat-startup-errors';
 import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { DroneTerminalEmptyState } from './DroneTerminalEmptyState';
-import { DroneTerminalTabsBar } from './DroneTerminalTabsBar';
+import { DroneTerminalSessionList } from './DroneTerminalSessionList';
+import { onNewTerminalSessionRequest } from './terminal-new-session-request';
+import { forgetTerminalProgramTitle, useTerminalProgramTitles } from './terminal-titles';
 import type { TerminalPaneSessionsState } from './terminal-tabs-state';
 import { desktopThemeDefinition } from '../../theme';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
@@ -67,6 +69,7 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
     onCloseSession,
   } = props;
   const themeId = useDroneHubUiStore((state) => state.themeId);
+  const programTitles = useTerminalProgramTitles();
   const host = React.useRef<HTMLDivElement | null>(null);
   const view = React.useRef<ReturnType<typeof acquireTerminalView> | null>(null);
   const latest = React.useRef(props);
@@ -88,6 +91,19 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
     resetKey: `${droneId}\u0000terminal`,
     timeoutMs: 18_000,
   });
+
+  // The dock header's new-terminal button asks through this channel.
+  React.useEffect(
+    () =>
+      onNewTerminalSessionRequest(droneId, paneKey, () => {
+        const current = latest.current;
+        if (current.disabled) return;
+        setCloseError(null);
+        beginTerminalOpen();
+        current.onCreateSession(droneId, paneKey, String(current.defaultCwd).trim());
+      }),
+    [droneId, paneKey],
+  );
 
   React.useEffect(() => {
     if (droneId && !disabled && !sessionsState.initialized)
@@ -163,11 +179,13 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
         });
       }
       evictTerminalView(closingKey);
+      forgetTerminalProgramTitle(closingKey);
       onCloseSession(droneId, paneKey, sessionId);
       setCloseError(null);
     } catch (error: any) {
       if (Number(error?.status) === 404) {
         evictTerminalView(closingKey);
+        forgetTerminalProgramTitle(closingKey);
         onCloseSession(droneId, paneKey, sessionId);
       } else setCloseError(formatDroneRuntimeError(error));
     } finally {
@@ -176,6 +194,12 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
   };
 
   const state = connectionState?.key === key ? connectionState.value : null;
+  // A program's own title (its prompt, its current task) names the session better than
+  // "Terminal 2" does; the ordinal name stays as the fallback.
+  const titledSessions = sessionsState.sessions.map((session) => {
+    const programTitle = programTitles.get(terminalViewKey(droneId, paneKey, session.id));
+    return programTitle ? { ...session, title: programTitle } : session;
+  });
   const error = closeError || state?.error;
   return (
     <UiPanel flush surface="alternate" className="relative h-full w-full">
@@ -187,53 +211,49 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
           </button>
         </UiPanelStatusStrip>
       )}
-      <DroneTerminalTabsBar
-        sessions={sessionsState.sessions}
-        activeSessionId={activeSession?.id ?? null}
-        closingSessionId={closingSessionId}
-        disabled={disabled}
-        onActivateSession={(id) => {
-          setCloseError(null);
-          beginTerminalOpen();
-          onActivateSession(droneId, paneKey, id);
-        }}
-        onCloseSession={(id) => {
-          void close(id);
-        }}
-        onCreateSession={() => {
-          setCloseError(null);
-          beginTerminalOpen();
-          onCreateSession(droneId, paneKey, String(defaultCwd).trim());
-        }}
-      />
-      <UiPanelBody className="relative bg-[var(--bg)] pt-1 pl-1">
-        {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 && (
-          <DroneTerminalEmptyState
-            onCreateSession={() => onCreateSession(droneId, paneKey, String(defaultCwd).trim())}
-          />
-        )}
-        {disabled && (
-          <UiPaneState
-            kind={startup.timedOut ? 'warning' : 'loading'}
-            title={provisioningLabel(hubPhase)}
-            description={String(hubMessage ?? '').trim() || 'Connecting terminal…'}
-            className="absolute inset-0 z-10 bg-[var(--surface-inset-strong)]/80 backdrop-blur"
-          />
-        )}
-        {!disabled && activeId && (!state || state.connecting) && !error && (
+      <div className="flex min-h-0 flex-1">
+        <UiPanelBody className="relative bg-[var(--editor-surface)] pt-2 pl-3">
+          {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 && (
+            <DroneTerminalEmptyState
+              onCreateSession={() => onCreateSession(droneId, paneKey, String(defaultCwd).trim())}
+            />
+          )}
+          {disabled && (
+            <UiPaneState
+              kind={startup.timedOut ? 'warning' : 'loading'}
+              title={provisioningLabel(hubPhase)}
+              description={String(hubMessage ?? '').trim() || 'Connecting terminal…'}
+              className="absolute inset-0 z-10 bg-[var(--surface-inset-strong)]/80 backdrop-blur"
+            />
+          )}
+          {!disabled && activeId && (!state || state.connecting) && !error && (
+            <div
+              className="absolute right-3 top-1 text-xs text-[var(--muted)] pointer-events-none"
+              role="status"
+            >
+              Connecting terminal…
+            </div>
+          )}
           <div
-            className="absolute right-3 top-1 text-xs text-[var(--muted)] pointer-events-none"
-            role="status"
-          >
-            Connecting terminal…
-          </div>
-        )}
-        <div
-          ref={host}
-          className="w-full h-full min-h-0 overflow-hidden"
-          onClick={() => view.current?.terminal.focus()}
+            ref={host}
+            className="w-full h-full min-h-0 overflow-hidden"
+            onClick={() => view.current?.terminal.focus()}
+          />
+        </UiPanelBody>
+        <DroneTerminalSessionList
+          sessions={titledSessions}
+          activeSessionId={activeSession?.id ?? null}
+          closingSessionId={closingSessionId}
+          onActivateSession={(id) => {
+            setCloseError(null);
+            beginTerminalOpen();
+            onActivateSession(droneId, paneKey, id);
+          }}
+          onCloseSession={(id) => {
+            void close(id);
+          }}
         />
-      </UiPanelBody>
+      </div>
     </UiPanel>
   );
 }

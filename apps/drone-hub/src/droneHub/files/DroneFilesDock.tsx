@@ -1221,7 +1221,7 @@ export function DroneFilesDock({
                   className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                     selected
                       ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                      : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                      : 'text-[var(--explorer-row-fg,var(--fg-secondary))] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   }`}
                   style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
                   title={`${title}${ignored ? ' • Ignored by Git' : ''} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
@@ -1229,7 +1229,7 @@ export function DroneFilesDock({
                   <span className={`inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : ''}`} style={explorerIconSlotStyle}>
                     <IconChevron down={open} size={explorerChevronPx} />
                   </span>
-                  <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
+                  <span className={`min-w-0 flex-1 truncate ${ignored && !selected ? 'text-[var(--muted-dim)] opacity-85' : ''}`}>
                     {node.name}
                   </span>
                   {childError ? <span className="px-1 text-caption text-[var(--red)]">Error</span> : null}
@@ -1314,7 +1314,7 @@ export function DroneFilesDock({
                   ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   : active
                     ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                    : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    : 'text-[var(--explorer-row-fg,var(--fg-secondary))] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
               }`}
               style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
               title={`${entry.path} • ${modified}${ignored ? ' • Ignored by Git' : ''} • Right-click for actions`}
@@ -1322,7 +1322,7 @@ export function DroneFilesDock({
               <span className={`inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`} style={explorerIconSlotStyle}>
                 <FileTypeIcon path={entry.path} size={explorerFileIconPx} />
               </span>
-              <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : openable ? '' : 'opacity-70'}`}>
+              <span className={`min-w-0 flex-1 truncate ${ignored && !selected && !active ? 'text-[var(--muted-dim)] opacity-85' : openable ? '' : 'opacity-70'}`}>
                 {node.name}
               </span>
             </button>

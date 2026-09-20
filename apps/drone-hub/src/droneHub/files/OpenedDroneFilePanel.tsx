@@ -48,6 +48,10 @@ import {
   type MonacoEditorProps,
 } from './monaco-editor-loader';
 import { useEditorZoomLevel } from './editor-zoom';
+import {
+  toggleMarkdownPreviewAlignment,
+  useMarkdownPreviewAlignment,
+} from './markdown-preview-alignment';
 import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from './editor-monaco-options';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
@@ -57,6 +61,36 @@ import {
 } from './monaco-editor-value-sync';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
+
+function PreviewAlignmentIcon({ alignment }: { alignment: 'center' | 'left' }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {alignment === 'left' ? (
+        <>
+          <path d="M2.5 4h11" />
+          <path d="M2.5 8h7" />
+          <path d="M2.5 12h9" />
+        </>
+      ) : (
+        <>
+          <path d="M2.5 4h11" />
+          <path d="M4.5 8h7" />
+          <path d="M3.5 12h9" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 function CollapseAllHeadingsIcon() {
   return (
@@ -314,6 +348,7 @@ export function OpenedDroneFilePanel({
   const [markdownOutlineExpansionCommand, setMarkdownOutlineExpansionCommand] =
     React.useState<MarkdownOutlineExpansionCommand | null>(null);
   const [previewSearchRequest, setPreviewSearchRequest] = React.useState(0);
+  const markdownPreviewAlignment = useMarkdownPreviewAlignment();
   const [previewContentsCopied, setPreviewContentsCopied] = React.useState(false);
   const previewCopyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
@@ -937,6 +972,24 @@ export function OpenedDroneFilePanel({
                     onOpenTarget={onOpenFileDictationTarget}
                   />
                 ) : null}
+                {openedFileShowsMarkdownPreview ? (
+                  <button
+                    type="button"
+                    onClick={toggleMarkdownPreviewAlignment}
+                    className={`${headingActionClassName(false)} ${
+                      markdownPreviewAlignment === 'left' ? '!bg-[var(--hover)] !text-[var(--fg-secondary)]' : ''
+                    }`}
+                    aria-pressed={markdownPreviewAlignment === 'left'}
+                    title={
+                      markdownPreviewAlignment === 'left'
+                        ? 'Centre the preview text'
+                        : 'Align the preview text with the editor'
+                    }
+                    aria-label="Align the preview text with the editor"
+                  >
+                    <PreviewAlignmentIcon alignment={markdownPreviewAlignment} />
+                  </button>
+                ) : null}
                 {openedFileIsMarkdown || openedFileIsHtml ? (
                   <>
                     {openedFileShowsPreview ? (
@@ -1239,6 +1292,7 @@ export function OpenedDroneFilePanel({
                 text={fileContent ?? ''}
                 onOpenLink={openMarkdownPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}
+                alignment={markdownPreviewAlignment}
                 targetLine={fileTargetLine}
                 targetNavigationSeq={fileNavigationSeq}
               />

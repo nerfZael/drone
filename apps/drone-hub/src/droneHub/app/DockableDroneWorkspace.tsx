@@ -10,6 +10,7 @@ import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
+import { requestNewTerminalSession } from '../terminal/terminal-new-session-request';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
@@ -551,6 +552,65 @@ function dragEventOf(event: DragEvent | PointerEvent): DragEvent | null {
   return 'dataTransfer' in event ? event : null;
 }
 
+/**
+ * The terminal's tab carries its new-terminal button beside the close button, the way an
+ * editor's panel header does, so the terminal pane itself needs no toolbar row.
+ */
+function TerminalDockTab({ api, params }: IDockviewPanelHeaderProps<{ paneKey?: WorkspacePaneKey }>) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
+  const title = usePanelTitle(api);
+  const middleButtonDown = React.useRef(false);
+  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+  return (
+    <div
+      className="dv-default-tab"
+      data-testid="dockview-dv-default-tab"
+      title={title}
+      onPointerDown={(event) => {
+        middleButtonDown.current = event.button === 1;
+        if (event.button === 1) event.preventDefault();
+      }}
+      onPointerUp={(event) => {
+        if (middleButtonDown.current && event.button === 1) api.close();
+        middleButtonDown.current = false;
+      }}
+      onPointerLeave={() => {
+        middleButtonDown.current = false;
+      }}
+    >
+      <span className="dv-default-tab-content">{title}</span>
+      <button
+        type="button"
+        className="dh-dock-tab-button"
+        title="Open a new terminal"
+        aria-label="Open a new terminal"
+        onPointerDown={stop}
+        onClick={(event) => {
+          stop(event);
+          requestNewTerminalSession(ctx.droneId, params?.paneKey ?? 'single');
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+      </button>
+      <span className="dh-dock-tab-divider" aria-hidden="true" />
+      <div
+        className="dv-default-tab-action"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.preventDefault();
+          api.close();
+        }}
+      >
+        <svg height="11" width="11" viewBox="0 0 28 28" aria-hidden="true" focusable={false} className="dv-svg">
+          <path d="M2.1 27.3L0 25.2L11.55 13.65L0 2.1L2.1 0L13.65 11.55L25.2 0L27.3 2.1L15.75 13.65L27.3 25.2L25.2 27.3L13.65 15.75L2.1 27.3Z" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   const sideChat = props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX);
@@ -579,6 +639,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
       onRename={!displaced && onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
   }
   if (!closeable) return <MainChatTab {...props} />;
+  if (tabFromPanelId(props.api.id) === 'terminal') return <TerminalDockTab {...props} />;
   return (
     <DockviewDefaultTab
       {...props}
