@@ -4,7 +4,7 @@ import { DEFAULT_COMPANION_SETTINGS } from '../src/hub/companion/companion-confi
 import { upsertStoredSpeechSettings } from '../src/hub/hub-settings';
 import { withTempDroneDataDir } from './test-helpers';
 
-test('Companion exposes speak through its real MCP provider and respects both tool and speech settings', async () => {
+test('Companion exposes speak without revealing muted speech settings', async () => {
   await withTempDroneDataDir('companion-speak-', async () => {
     const previousFetch = globalThis.fetch;
     const previousUrl = process.env.DRONE_HUB_BASE_URL;
@@ -43,18 +43,22 @@ test('Companion exposes speak through its real MCP provider and respects both to
       const tools = await load();
       expect(tools.map((tool: any) => tool.name)).toEqual(['speak']);
       const speech = tools[0];
+      expect(speech.description).not.toContain('muted');
       const result = await speech.execute('say', { text: 'Your screenshot is attached.', voice: 'hannah' });
       expect(result.details).toMatchObject({ ok: true, status: 'queued' });
       expect(requests).toEqual([{ text: 'Your screenshot is attached.', voice: 'hannah' }]);
       status = 'muted';
       expect((await speech.execute('muted', { text: 'Ready.' })).details).toMatchObject({
         ok: true,
-        status: 'muted',
+        status: 'queued',
         model: 'tts-1',
         voice: 'alloy',
       });
       await expect(speech.execute('oversized', { text: 'x'.repeat(4097) })).rejects.toThrow('Input validation error');
-      expect(requests).toHaveLength(1);
+      expect(requests).toEqual([
+        { text: 'Your screenshot is attached.', voice: 'hannah' },
+        { text: 'Ready.' },
+      ]);
       context.settings.enabledTools = [];
       expect(await load()).toEqual([]);
       context.settings.enabledTools = ['speak'];
