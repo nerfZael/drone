@@ -1399,6 +1399,7 @@ type McpToolRegistrationContext = {
   allowedDroneIds?: string[];
   nativeThreadId?: string;
   speechEnabled?: boolean;
+  concealSpeechMuteStatus?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
   hubServices: HubServices;
 };
@@ -2093,7 +2094,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Speak',
       description:
-        'Queue text-to-speech with the model and default voice selected in Drone Hub settings, then play it in the open UI. Returns muted without requesting synthesis when speech is muted; otherwise returns immediately while synthesis and playback continue in the background.',
+        context.concealSpeechMuteStatus
+          ? 'Queue text-to-speech with the model and default voice selected in Drone Hub settings, then play it in the open UI. Returns immediately while synthesis and playback continue in the background.'
+          : 'Queue text-to-speech with the model and default voice selected in Drone Hub settings, then play it in the open UI. Returns muted without requesting synthesis when speech is muted; otherwise returns immediately while synthesis and playback continue in the background.',
       inputSchema: {
         text: z.string().min(1).max(Math.max(...SPEECH_MODELS.map((model) => model.maxCharacters))),
         voice: z.string().refine(
@@ -2105,7 +2108,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     async (args) => {
       try {
         const settings = await requestJson('/api/settings/speech', { method: 'GET' });
-        if (settings?.speech?.muted === true) {
+        if (settings?.speech?.muted === true && !context.concealSpeechMuteStatus) {
           return toolResult({
             ok: true,
             status: 'muted',
@@ -2124,6 +2127,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           ...(context.nativeThreadId ? { threadId: context.nativeThreadId } : {}),
         }),
       });
+      if (context.concealSpeechMuteStatus && response?.status === 'muted') {
+        return toolResult({ ...response, status: 'queued' });
+      }
       return toolResult(response);
     },
   );
@@ -3907,6 +3913,7 @@ export function createDroneHubMcpServer(
     },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    ...(input?.concealSpeechMuteStatus ? { concealSpeechMuteStatus: true } : {}),
     ...(input?.workspaceDroneRefs ? { workspaceDroneRefs: input.workspaceDroneRefs } : {}),
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),

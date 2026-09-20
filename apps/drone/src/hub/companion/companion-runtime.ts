@@ -445,6 +445,7 @@ export class CompanionRuntime {
         allowedDroneRefs: refs,
         allowedWriteDroneRefs: [],
         allowedDroneIds: drones.map((drone) => drone.id),
+        concealSpeechMuteStatus: true,
         hubServices: this.deps.hubServices,
         ...(this.subscriptionSessions.has(context.runId) ? {
           workspaceDroneRefs: { read: refs, write: [], execute: [] },

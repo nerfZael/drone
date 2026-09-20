@@ -57,6 +57,7 @@ export async function createInProcessDroneHubMcpClient(input: {
   allowedDroneIds: string[];
   principal?: McpTokenIdentity;
   nativeThreadId?: string;
+  concealSpeechMuteStatus?: boolean;
   hubServices?: HubServices;
 }): Promise<Client> {
   const speechSettings = await resolveEffectiveSpeechSettings();
@@ -70,6 +71,7 @@ export async function createInProcessDroneHubMcpClient(input: {
     speechEnabled: speechSettings.enabled,
     correlationId: input.correlationId,
     ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    ...(input.concealSpeechMuteStatus ? { concealSpeechMuteStatus: true } : {}),
     ...(input.hubServices ? { hubServices: input.hubServices } : {}),
     ...(input.workspaceDroneRefs
       ? { workspaceDroneRefs: input.workspaceDroneRefs, allowedDroneIds: input.allowedDroneIds }
