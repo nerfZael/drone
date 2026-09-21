@@ -1,3 +1,4 @@
+import { useCompanionMirror } from './CompanionMirrorContext';
 import { useCompanionJev } from './use-companion-jev';
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
@@ -38,6 +39,7 @@ type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
   const [jevDecisionIntervalMs, setJevDecisionIntervalMs] = React.useState(250);
+  const liveSettingsVersion = useCompanionMirror()?.liveSettingsVersion;
   const [mode, setMode] = React.useState<'live' | 'jev'>('live');
   const modeRef = React.useRef(mode);
   const [jevSystemPrompt, setJevSystemPrompt] = React.useState('');
@@ -120,6 +122,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       if (mounted.current && generation === settingsGeneration.current) setSettingsError(error instanceof Error ? error.message : 'Could not load Live voice setting.');
     } finally { if (mounted.current && generation === settingsGeneration.current) setLoading(false); }
   }, [stop]);
+
+  React.useEffect(() => { if (liveSettingsVersion) void load(); }, [liveSettingsVersion, load]);
 
   React.useEffect(() => {
     mounted.current = true;

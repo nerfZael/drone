@@ -7,6 +7,7 @@ import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import { ThemedTextInput } from '../components/ThemedTextInput';
+import { MobileCompanionBehaviorSettings } from './MobileCompanionBehaviorSettings';
 import { PhoneAssistantSettings } from './PhoneAssistantSettings';
 
 export function MobileCompanionLiveSettingsCard() {
@@ -30,6 +31,7 @@ export function MobileCompanionLiveSettingsCard() {
     setSystemPrompt(preference.systemPrompt);
     setPromptSaved(false);
   }, [preference.systemPrompt]);
+  const voiceRunning = companion.live.targetDeviceId === target?.id && !['idle', 'error'].includes(companion.live.status);
   const writable = Boolean(self && isGranted(self.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'live.settings.update'));
   const promptWritable = Boolean(self && isGranted(self.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'live.prompt.update'));
   return <View style={styles.card}>
@@ -60,12 +62,17 @@ export function MobileCompanionLiveSettingsCard() {
       <View style={styles.row}>
         <Text style={styles.copy}>Live voice on {target.name}</Text>
         {preference.loading || preference.saving ? <ActivityIndicator color={colors.accent} /> : null}
-        <Switch accessibilityLabel="Companion Live voice" value={preference.enabled}
-          disabled={preference.loading || preference.saving || !writable || Boolean(preference.error)}
-          onValueChange={(enabled) => { void preference.save(enabled).then((saved) => {
-            if (saved === false && companion.live.targetDeviceId === target.id) companion.live.stop();
-          }); }} />
+        <Button tone="quiet" disabled={preference.loading || preference.saving || !writable || voiceRunning}
+          onPress={() => void preference.save(false).then((saved) => { if (saved === false && companion.live.targetDeviceId === target.id) companion.live.stop(); })}>
+          {!preference.enabled ? 'Normal ✓' : 'Use Normal voice'}
+        </Button>
+        <Button tone="quiet" disabled={preference.loading || preference.saving || !writable || voiceRunning}
+          onPress={() => void preference.save(true)}>
+          {preference.enabled && preference.mode === 'live' ? 'Live ✓' : 'Use Live voice'}
+        </Button>
       </View>
+      {preference.enabled && preference.mode === 'jev' ? <ErrorBanner message="This Hub uses JEV voice, which mobile does not support. Choose Normal or Live above. This also changes the desktop preference." /> : null}
+      <Text style={styles.copy}>Normal records until you send. Live supports a two-way conversation. Changes apply to the next voice session; end an active session before changing modes.</Text>
       <Text style={styles.copy}>Off by default. Saves immediately on this Hub and also changes desktop Companion. Tap the Companion microphone to start a two-way Live conversation. The Hub’s Companion model and ASAP/Queue setting still apply.</Text>
       <Text style={styles.copy}>Live uses the Hub’s OpenAI API key. Headset controls can pause and resume Live while the phone is locked.</Text>
       {promptSupported && promptReadable ? <><View style={styles.promptHeader}>
@@ -94,6 +101,7 @@ export function MobileCompanionLiveSettingsCard() {
           ? 'Allow Live prompt access for this phone in the Hub device settings.'
           : 'Update the selected Drone Hub to edit the GPT-Live system prompt from mobile.'}</Text>}
       {!writable ? <Text style={styles.copy}>Allow Live settings changes for this phone in the Hub device settings.</Text> : null}
+      <MobileCompanionBehaviorSettings key={target.id} deviceId={target.id} />
       {preference.error ? <><ErrorBanner message={preference.error} /><Button tone="quiet" onPress={() => void preference.load().catch(() => undefined)}>Retry</Button></> : null}
     </> : <Text style={styles.copy}>Connect to an updated Drone Hub to configure Companion Live voice.</Text>}
   </View>;

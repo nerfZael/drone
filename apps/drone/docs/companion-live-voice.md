@@ -64,14 +64,37 @@ with browser autoplay blocked, and with **End voice** pressed during connection.
 
 ## Mobile
 
+### Shared mobile behavior settings
+
+Mobile Companion settings offer **Normal** (record until sent) and **Live** voice,
+using the same host preference as desktop. Mode changes update both interfaces.
+JEV is not implemented on mobile: if the host has that legacy mode selected, mobile
+shows an explanation and requires an explicit choice of Normal or Live. End an
+active phone voice session before changing modes.
+
+The selected Hub also exposes **Shared Companion behavior** on mobile: ASAP/Queue
+follow-up delivery, the delegated backend system prompt, enabled tools, and persistent
+instructions. The Live voice personality remains separate from the backend prompt.
+Tool dependencies are preserved, and instruction saves check the revision so that a
+stale phone draft cannot overwrite newer desktop or Companion edits.
+
+Grant `behavior.settings.get/update` and `instructions.get/update` separately in
+host device settings. Existing run/model permissions do not implicitly grant these
+operations. Settings apply to new backend runs; running work keeps its captured settings.
+
 ### Mirror on the host desktop
 
 Enable **Settings → Companion → Mirror remote Companion on this device** on the
 hosting Hub. The preference saves immediately and defaults off. An updated phone
 app publishes its Live session to a desktop panel labeled **Live on [phone name]**.
-The panel shows recent captions, the backend reply, the pending proposal, and the
-latest execution result. Voice continues on the phone. **Hide** collapses only the
+The panel shows the voice transcript, backend reply, accepted “show on screen” content,
+tool activity, subscriptions, selectable pending proposals, and session execution history. Voice continues on the phone. **Hide** collapses only the
 desktop view; **Show** restores it without restarting the conversation.
+
+Mute/unmute, pause/resume, end voice, or stop the Companion turn from the desktop.
+Pause releases audio and its billable connection; resume opens a new voice connection.
+End voice keeps backend work running; Stop Companion turn cancels backend work and
+ends voice. These controls require an updated phone. Older phones retain approval controls.
 
 Approve or discard from either device. Desktop actions return to the phone, which
 checks the proposal revision and prevents duplicate execution. Disconnected mirrors
@@ -80,10 +103,11 @@ Auto-approve is shared across Companion sessions on the Hub and updates both app
 The setting applies when Companion requests proposal execution.
 
 Both the Hub and phone app must include mirroring support. The mirror depends on
-the phone remaining connected. It shows recent conversation text and one latest
-execution, not a durable history. An oversized proposal stays on the phone and the
-mirror explains that it must be reviewed there; proposal contents are never
-truncated for desktop approval.
+the phone remaining connected. History belongs to the open phone session, not durable
+storage. To stay within mesh message limits, oversized review snapshots omit older
+executions/activity or show recent conversation text with an explicit notice. An
+oversized proposal stays on the phone and must be reviewed there; proposal contents
+are never truncated for desktop approval.
 
 Manual verification: start Live on the phone, open the host desktop afterward,
 approve a proposal with the phone locked, toggle auto-approve from each device,

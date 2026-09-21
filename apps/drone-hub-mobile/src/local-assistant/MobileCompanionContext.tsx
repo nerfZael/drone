@@ -1,4 +1,4 @@
-import { CompanionScreen } from '@drone/assistant-chat';
+import { presentedChatSubscriptionResourceLabel, presentedChatSubscriptionDisplayIntent, companionToolActivityLabel, CompanionScreen } from '@drone/assistant-chat';
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import { useMobileCompanionMirror } from './use-mobile-companion-mirror';
@@ -131,6 +131,7 @@ const MobileCompanionContext = React.createContext<MobileCompanionContextValue |
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const [screen] = React.useState(() => new CompanionScreen());
   React.useEffect(() => () => screen.detach(), [screen]);
+  const screenSnapshot = React.useSyncExternalStore(screen.subscribe, screen.getSnapshot);
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
   const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
@@ -468,8 +469,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setCheckingVoiceMode(true);
     try {
       const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id,
-        'live.settings.get', undefined, signal) as { enabled?: unknown };
+        'live.settings.get', undefined, signal) as { enabled?: unknown; mode?: unknown };
       if (signal.aborted || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
+      if (preference?.enabled && preference.mode === 'jev') throw new Error('This Hub uses JEV voice. Choose Normal or Live voice in Companion settings; mobile does not support JEV.');
       if (preference?.enabled !== true) throw new Error('Enable Companion Live voice in Drone Hub settings first.');
       await startOwnedAudio(startLive);
     } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
@@ -559,9 +561,10 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       preparingVoice.current = true;
       setCheckingVoiceMode(true);
       try {
-        const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown };
+        const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown; mode?: unknown };
         if (!controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
         if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
+        if (preference.enabled && preference.mode === 'jev') throw new Error('This Hub uses JEV voice. Choose Normal or Live voice in Companion settings; mobile does not support JEV.');
         if (preference.enabled) {
           await startLive();
           return;
@@ -685,6 +688,13 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const selected = proposalStore.selected;
       const latest = proposalStore.history[proposalStore.history.length - 1];
       return {
+        voiceControls: true, muted: live.muted, screenMarkdown: screenSnapshot.markdown,
+        proposals: proposalStore.listPending(), selectedProposalId: proposalStore.selectedId,
+        history: proposalStore.history.map(item => ({ proposal: item.entry.proposal, execution: item.execution,
+          defaultRepoPath: item.entry.context?.defaultRepoPath ?? '' })),
+        subscriptions: (state.subscriptions ?? []).map(item => ({ id: item.id, label: presentedChatSubscriptionResourceLabel(item),
+          intent: presentedChatSubscriptionDisplayIntent(item.intent, state.subscriptions ?? []), status: item.status })),
+        activity: state.activity.map(item => ({ callId: item.callId, label: companionToolActivityLabel(item), status: item.status, error: item.error })),
         status: effectiveStatus, liveStatus: live.status, captions: live.captions,
         reply: state.reply, error: live.error || proposalActionError || state.error,
         proposal: selected?.visible ? selected.proposal : null,
@@ -696,11 +706,28 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
           defaultRepoPath: latest.entry.context?.defaultRepoPath ?? '' } : null,
       };
     },
-    act: (command) => {
-      if (command.action !== 'approve' && command.action !== 'discard') throw new Error('Unknown proposal action.');
+    act: async (command) => {
       const target = workspaceTargetRef.current;
       if (!live.hasStarted || !target?.reachable || target.targetDeviceId !== live.targetDeviceId) throw new Error('The phone changed Hubs or disconnected.');
+      if (command.action === 'end_voice') { live.stop(); return; }
+      if (command.action === 'stop_turn') { await cancel(); return; }
+      if (command.action === 'pause') {
+        if (!['listening', 'connecting'].includes(live.status)) throw new Error('Voice is no longer running.');
+        live.pause(); return;
+      }
+      if (command.action === 'resume') {
+        if (live.status !== 'paused') throw new Error('Voice is no longer paused.');
+        await live.resume(); return;
+      }
+      if (command.action === 'mute' || command.action === 'unmute') {
+        if (live.status !== 'listening') throw new Error('Voice is not connected.');
+        if (live.muted !== (command.action === 'mute')) live.toggleMute();
+        return;
+      }
       if (proposalStore.executingId) throw new Error('The proposal is already being applied.');
+      if (command.proposalRevision !== proposalStore.getSnapshot()) throw new Error('The proposal changed. Review the latest version.');
+      if (command.action === 'select_proposal') { proposalStore.select(command.targetId ?? ''); return; }
+      if (command.action !== 'approve' && command.action !== 'discard') throw new Error('Unknown proposal action.');
       const selected = proposalStore.selected;
       if (!selected?.visible || command.proposalRevision !== proposalStore.getSnapshot()) throw new Error('The proposal changed. Review the latest version.');
       if (command.action === 'discard') { proposalStore.discard(selected.id, String(selected.revision)); return; }

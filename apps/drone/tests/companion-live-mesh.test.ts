@@ -54,15 +54,15 @@ test('close arriving before start cannot create a billable session; shutdown pre
 test('mobile Live settings use the existing Hub preference and validate writes', async () => {
   await withTempDroneDataDir('mobile-live-settings-', async () => {
     const h = harness();
-    expect(await h.live.invoke('phone', 'live.settings.get', {})).toEqual({ enabled: false });
+    expect(await h.live.invoke('phone', 'live.settings.get', {})).toEqual({ enabled: false, mode: 'live' });
     await h.live.invoke('phone', 'live.settings.update', { enabled: true });
-    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT });
+    expect(await readCompanionLiveSettings()).toMatchObject({ enabled: true, mode: 'live', systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT });
     expect(await h.live.invoke('phone', 'live.prompt.get', {})).toMatchObject({ systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT, maxSystemPromptChars: 8_000 });
     await h.live.invoke('phone', 'live.prompt.update', { systemPrompt: 'Be gently humorous.' });
-    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: 'Be gently humorous.' });
+    expect(await readCompanionLiveSettings()).toMatchObject({ enabled: true, mode: 'live', systemPrompt: 'Be gently humorous.' });
     await expect(h.live.invoke('phone', 'live.settings.update', { enabled: 'yes' })).rejects.toThrow('boolean');
     await expect(h.live.invoke('phone', 'live.prompt.update', { systemPrompt: 42 })).rejects.toThrow('string');
-    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: 'Be gently humorous.' });
+    expect(await readCompanionLiveSettings()).toMatchObject({ enabled: true, mode: 'live', systemPrompt: 'Be gently humorous.' });
     h.live.close();
   });
 });
@@ -145,4 +145,17 @@ test('mesh timing batches follow session ownership and are not forwarded after r
   await h.live.invoke('phone', 'live.ping', { sessionId: 'a', timingEvents: batch });
   expect(h.sockets[1].messages).toHaveLength(1);
   h.live.close();
+});
+
+
+test('access revocation or shutdown during voice-mode lookup cannot start audio', async () => {
+  const h = harness();
+  const pending = h.live.invoke('phone', 'live.start', { sessionId: 'pending' });
+  h.live.revokeDevice('phone');
+  expect(await pending).toEqual({ accepted: false });
+  expect(h.sockets).toHaveLength(0);
+  const closing = h.live.invoke('phone', 'live.start', { sessionId: 'closing' });
+  h.live.close();
+  await expect(closing).rejects.toThrow('shutting down');
+  expect(h.sockets).toHaveLength(0);
 });

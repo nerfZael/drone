@@ -1,3 +1,4 @@
+import { companionBehaviorSettings } from './companion-behavior-settings';
 import { companionSettingsResponse, readCompanionSettings, writeCompanionSettings } from '../companion/companion-config';
 import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from '../companion/companion-auto-approve-settings';
 import crypto from 'node:crypto';
@@ -49,6 +50,7 @@ export function createCompanionCapability(
   mirrors?: CompanionMirrorService,
 ): CapabilityHandler {
   const live = new CompanionLiveMeshSessions({
+    settingsChanged: async settings => { await mirrors?.liveSettingsChanged(settings); },
     createSocket: send => new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry }),
     emit: (deviceId, payload) => broadcast(COMPANION_CAPABILITY.id, 'live.event', payload, 'live.start', [deviceId]),
   });
@@ -97,6 +99,7 @@ export function createCompanionCapability(
         else throw new Error('Unsupported mirror operation.');
         return { ok: true };
       }
+      if (['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update'].includes(operation)) return companionBehaviorSettings(operation, payload);
       if (operation === 'model.settings.get' || operation === 'model.settings.update') {
         if (operation === 'model.settings.update') {
           await writeCompanionSettings({

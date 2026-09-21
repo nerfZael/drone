@@ -11,7 +11,8 @@ type LiveSettings = {
 
 /** The preference belongs to the selected Hub, shared with desktop Companion. */
 export function useMobileCompanionLiveSettings(deviceId: string, promptSupported = true) {
-  const { request } = useMesh();
+  const { request, subscribe } = useMesh();
+  const [mode, setMode] = React.useState<'live' | 'jev'>('live');
   const [enabled, setEnabled] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -26,13 +27,14 @@ export function useMobileCompanionLiveSettings(deviceId: string, promptSupported
     const current = ++generation.current;
     setLoading(true);
     try {
-      const preference = await request(deviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown };
+      const preference = await request(deviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown; mode?: unknown };
       if (typeof preference?.enabled !== 'boolean') throw new Error('Invalid Live voice setting from the Hub.');
       const value = promptSupported
         ? parseLiveSettings(await request(deviceId, COMPANION_CAPABILITY.id, 'live.prompt.get'))
         : { enabled: preference.enabled, systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 0 };
       if (current === generation.current) {
         setEnabled(preference.enabled);
+        setMode(preference.mode === 'jev' ? 'jev' : 'live');
         setSystemPrompt(value.systemPrompt);
         setDefaultSystemPrompt(value.defaultSystemPrompt);
         setMaxSystemPromptChars(value.maxSystemPromptChars);
@@ -45,20 +47,26 @@ export function useMobileCompanionLiveSettings(deviceId: string, promptSupported
     } finally { if (current === generation.current) setLoading(false); }
   }, [deviceId, promptSupported, request]);
   React.useEffect(() => {
-    setEnabled(false); setSystemPrompt(''); setDefaultSystemPrompt(''); setMaxSystemPromptChars(0); setError(''); setLoading(false);
+    setMode('live'); setEnabled(false); setSystemPrompt(''); setDefaultSystemPrompt(''); setMaxSystemPromptChars(0); setError(''); setLoading(false);
     if (deviceId) void load().catch(() => undefined);
     return () => { generation.current++; };
   }, [deviceId, load]);
+  React.useEffect(() => subscribe('companion', 'live.settings.changed', event => {
+    if (event.sourceDeviceId !== deviceId || writing.current || typeof event.payload?.enabled !== 'boolean') return;
+    generation.current++; setLoading(false);
+    setEnabled(event.payload.enabled); setMode(event.payload.mode === 'jev' ? 'jev' : 'live'); setError('');
+  }), [deviceId, subscribe]);
   const save = React.useCallback(async (nextEnabled: boolean) => {
     if (!deviceId || writing.current) return;
     writing.current = true;
     const current = ++generation.current;
     setSaving(true);
     try {
-      const value = await request(deviceId, COMPANION_CAPABILITY.id, 'live.settings.update', { enabled: nextEnabled }) as { enabled?: unknown };
+      const value = await request(deviceId, COMPANION_CAPABILITY.id, 'live.settings.update', { enabled: nextEnabled, mode: 'live' }) as { enabled?: unknown; mode?: unknown };
       if (typeof value?.enabled !== 'boolean') throw new Error('Invalid Live voice setting from the Hub.');
       if (current === generation.current) {
         setEnabled(value.enabled);
+        setMode(value.mode === 'jev' ? 'jev' : 'live');
         setError('');
         return value.enabled;
       }
@@ -88,6 +96,7 @@ export function useMobileCompanionLiveSettings(deviceId: string, promptSupported
     }
   }, [deviceId, promptSupported, request]);
   return {
+    mode,
     enabled,
     systemPrompt,
     defaultSystemPrompt,

@@ -10,6 +10,7 @@ import type { MobileCompanionWorkspaceTarget } from '../src/local-assistant/Mobi
 let headsetCallbacks: { start(): Promise<void>; ended(): void };
 mock.module('../src/local-assistant/use-mobile-companion-headset-shortcut', () => ({ useMobileCompanionHeadsetShortcut: () => ({ enabled: false, ended() {} }) }));
 let enabled = false;
+let voiceMode = 'live';
 let livePrompt = 'Speak calmly.';
 let autoApprove = false;
 let rejectSettings = false;
@@ -41,8 +42,8 @@ const mesh = {
     }
     if (operation.startsWith('live.settings')) {
       if (rejectSettings) throw new Error('Hub unavailable');
-      if (operation === 'live.settings.update') enabled = payload.enabled;
-      return { enabled };
+      if (operation === 'live.settings.update') { enabled = payload.enabled; voiceMode = payload.mode ?? voiceMode; }
+      return { enabled, mode: voiceMode };
     }
     if (operation.startsWith('live.prompt')) {
       if (rejectSettings) throw new Error('Hub unavailable');
@@ -68,7 +69,7 @@ const { MobileCompanionProvider, useMobileCompanion } = await import('../src/loc
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
 async function harness(settingsOnly = false, executeProposal: MobileCompanionWorkspaceTarget['executeProposal'] = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
-  autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.hasStarted = false; live.status = 'idle'; calls.length = 0;
+  autoApprove = savedAutoApprove; enabled = false; voiceMode = 'live'; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.hasStarted = false; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   let root!: ReactTestRenderer;
@@ -465,16 +466,17 @@ test('desktop mirror approvals validate the current phone revision and execute o
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
     let publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
     expect(publication.snapshot.proposal.operations[0].name).toBe('Review');
-    const click = (commandId: string, proposalRevision: number, sourceDeviceId = 'hub', action = 'approve') => {
+    const click = (commandId: string, proposalRevision: number, sourceDeviceId = 'hub', action = 'approve', targetId?: string) => {
       for (const listener of listeners) listener({ sourceDeviceId, event: 'mirror.command', payload: {
-        sessionId: publication.sessionId, commandId, proposalRevision, action, expiresAt: Date.now() + 10_000,
+        sessionId: publication.sessionId, commandId, proposalRevision, action, targetId, expiresAt: Date.now() + 10_000,
       } });
     };
     await act(async () => { click('foreign', 1, 'another-hub'); click('stale', 0); await tick(); });
     expect(executions).toBe(0);
     expect(calls.find((call) => call.operation === 'mirror.result' && call.payload.commandId === 'stale')!.payload)
       .toMatchObject({ ok: false, error: 'The proposal changed. Review the latest version.' });
-    await act(async () => { h.context().selectProposal(second.targetId); });
+    await act(async () => { click('select', publication.snapshot.proposalRevision, 'hub', 'select_proposal', second.targetId); await tick(); });
+    expect(h.context().selectedProposalId).toBe(second.targetId);
     // Both documents have revision 1: switching documents must invalidate the old mirror approval too.
     await act(async () => { click('selection-stale', publication.snapshot.proposalRevision); await tick(); });
     expect(executions).toBe(0);
@@ -491,6 +493,8 @@ test('desktop mirror approvals validate the current phone revision and execute o
     expect(executedTitles).toEqual(['Second']);
     expect(completed.proposal.title).toBe('Create group');
     expect(completed.lastExecution.execution.ok).toBe(true);
+    expect(completed.history).toHaveLength(1);
+    expect(completed.proposals).toHaveLength(1);
     expect(live.status).toBe('listening');
     await act(async () => { click('late', 1); await tick(); });
     expect(executions).toBe(1);
@@ -902,4 +906,95 @@ test('manual review selects one proposal and agent discard needs no approval', a
     expect(calls.find(call => call.operation === 'proposal.result')!.payload.result)
       .toMatchObject({ targetId: drafts[1].targetId, revision: '1', autoApproved: false });
   } finally { await h.cleanup(); }
+});
+
+
+test('mobile reports unsupported JEV and explicitly selecting Live updates the shared mode', async () => {
+  const h = await harness();
+  try {
+    enabled = true; voiceMode = 'jev';
+    await act(async () => { await h.context().toggle(); });
+    expect(h.context().error).toContain('JEV');
+    expect(recorded).toBe(0); expect(live.hasStarted).toBe(false);
+    await act(async () => { await h.context().liveSettings.load(); });
+    expect(h.context().liveSettings.mode).toBe('jev');
+    await act(async () => { await h.context().liveSettings.save(true); });
+    expect(voiceMode).toBe('live');
+    await act(async () => { await h.context().toggle(); });
+    expect(live.hasStarted).toBe(true);
+  } finally { await h.cleanup(); }
+});
+
+test('mirror voice commands control the phone without proposals and reject stale or foreign sessions', async () => {
+  const originalRequest = mesh.request;
+  const originalMute = live.toggleMute;
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    const value = await originalRequest(...args);
+    return args[2] === 'mirror.settings.get' || args[2] === 'mirror.publish' ? { enabled: true } : value;
+  };
+  live.muted = false;
+  live.toggleMute = () => { live.muted = !live.muted; notifyLive(); };
+  const h = await harness();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    await h.refresh();
+    const publication = calls.filter(call => call.operation === 'mirror.publish').at(-1)!.payload;
+    const command = async (action: string, sessionId = publication.sessionId, sourceDeviceId = 'hub') => {
+      await act(async () => {
+        for (const listener of listeners) listener({ sourceDeviceId, event: 'mirror.command', payload: {
+          action, commandId: `voice-${++nextId}`, sessionId, proposalRevision: 0, expiresAt: Date.now() + 10_000,
+        } });
+        await tick();
+      });
+      await h.refresh();
+    };
+    await command('mute', 'stale'); expect(live.muted).toBe(false);
+    await command('mute', publication.sessionId, 'other-hub'); expect(live.muted).toBe(false);
+    await command('mute'); expect(live.muted).toBe(true);
+    await command('mute'); expect(live.muted).toBe(true); // Explicit commands never toggle by accident.
+    await command('unmute'); expect(live.muted).toBe(false);
+    await command('pause'); expect(live.status).toBe('paused');
+    await command('resume'); expect(live.status).toBe('listening');
+    await command('end_voice'); expect(live.status).toBe('idle');
+    expect(calls.some(call => call.operation === 'run.cancel')).toBe(false);
+    await command('resume');
+    expect(calls.filter(call => call.operation === 'mirror.result').at(-1)!.payload).toMatchObject({ ok: false, error: 'Voice is no longer paused.' });
+  } finally { await h.cleanup(); mesh.request = originalRequest; live.toggleMute = originalMute; }
+});
+
+
+test('mobile voice settings follow changes from desktop without restarting the provider', async () => {
+  const h = await harness();
+  try {
+    await act(async () => {
+      for (const listener of listeners) listener({ sourceDeviceId: 'hub', event: 'live.settings.changed', payload: { enabled: true, mode: 'jev' } });
+    });
+    expect(h.context().liveSettings.enabled).toBe(true);
+    expect(h.context().liveSettings.mode).toBe('jev');
+    await act(async () => {
+      for (const listener of listeners) listener({ sourceDeviceId: 'other-hub', event: 'live.settings.changed', payload: { enabled: false, mode: 'live' } });
+    });
+    expect(h.context().liveSettings.mode).toBe('jev');
+  } finally { await h.cleanup(); }
+});
+
+
+test('large mirror snapshots disclose omissions and never send a truncated approval document', async () => {
+  const { boundedSnapshot } = await import('../src/local-assistant/use-mobile-companion-mirror');
+  const proposal = { version: 1 as const, title: 'Large proposal', operations: [{ id: 'send', type: 'send_message' as const, droneId: 'drone', message: 'X'.repeat(80_000) }] };
+  const snapshot = { status: 'completed' as const, liveStatus: 'listening' as const,
+    captions: '👋'.repeat(40_000), reply: 'Ready', error: '', proposal, proposalRevision: 1,
+    proposalExecuting: false, proposalExecution: null, proposalDefaultRepoPath: '/repo', lastExecution: null,
+    history: [{ proposal, execution: { ok: true, operations: [] }, defaultRepoPath: '/repo' }],
+  };
+  const bounded = boundedSnapshot(snapshot);
+  expect(bounded.proposal).toBeNull();
+  expect(bounded.reviewNotice).toContain('Review and approve it on the phone');
+  expect(bounded.reviewNotice).toContain('Older executions');
+  expect(new TextEncoder().encode(JSON.stringify(bounded)).length).toBeLessThan(240 * 1024);
+  expect(snapshot.history).toHaveLength(1);
+  expect(snapshot.proposal.operations[0].message).toHaveLength(80_000);
+  const small = { ...snapshot, captions: 'Hi', history: [], proposal: { ...proposal, operations: [{ ...proposal.operations[0], message: 'Hello' }] } };
+  expect(boundedSnapshot(small)).toEqual(small);
 });
