@@ -2577,6 +2577,44 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   );
 
   server.registerTool(
+    'clone_chat',
+    {
+      title: 'Clone drone chat',
+      description:
+        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to create a temporary side chat at the latest available checkpoint. Ordinary clones require the source chat to be stopped. Side chats require a supported agent and usable checkpoint, and cannot be drafts.',
+      inputSchema: {
+        drone: z.string().trim().min(1),
+        sourceChat: z.string().trim().min(1).describe('Source chat name.'),
+        chat: z.string().trim().min(1).describe('New chat name. Must not already exist.'),
+        draft: z.boolean().optional(),
+        sideChat: z.boolean().optional(),
+      },
+    },
+    async (args) => {
+      if (args.sideChat && args.draft) {
+        throw new Error('sideChat and draft cannot both be true');
+      }
+      await requireContainerDroneForManagedChat(context, args.drone, 'clone chats');
+      const [resolved] = await resolveDroneRefs([args.drone]);
+      if (!resolved?.found) throw new Error(`unknown drone: ${args.drone}`);
+      const result = await requestJson(
+        `/api/drones/${encodeURIComponent(resolved.id)}/chats`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: args.chat,
+            copyFrom: args.sourceChat,
+            mode: 'fork',
+            ...(args.draft === true ? { draft: true } : {}),
+            ...(args.sideChat === true ? { sideChat: true } : {}),
+          }),
+        },
+      );
+      return toolResult(result);
+    },
+  );
+
+  server.registerTool(
     'create_chat',
     {
       title: 'Create drone chat',
@@ -3623,6 +3661,7 @@ const WRITE_SCOPED_TOOLS = new Set([
   'rename_drones',
   'reorder_drones',
   'create_chat',
+  'clone_chat',
   'rename_chat',
   'delete_chat',
   'create_chat_group',
@@ -3653,6 +3692,7 @@ const CHAT_WRITE_SCOPED_TOOLS = new Set([
   'create_whiteboard',
   'update_whiteboard',
   'create_chat',
+  'clone_chat',
   'rename_chat',
   'delete_chat',
   'create_chat_group',
@@ -3686,6 +3726,7 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'list_chats',
   'get_chat_tree',
   'create_chat',
+  'clone_chat',
   'rename_chat',
   'delete_chat',
   'create_chat_group',

@@ -96,6 +96,7 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(scoped, 'get_chat_tree', { drone: 'drone-b' })).not.toThrow();
     for (const tool of [
       'create_chat',
+      'clone_chat',
       'rename_chat',
       'delete_chat',
       'create_chat_group',
@@ -1960,6 +1961,71 @@ describe('Drone Hub assistant MCP transport', () => {
         expect(promptBodies[1]).toMatchObject({ requireExistingChat: true });
         expect(promptBodies[2]).toMatchObject({ requireExistingChat: true });
         expect(promptBodies[3]?.requireExistingChat).toBeUndefined();
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('clones chat history and side chats through the existing creation endpoint', async () => {
+    await withTempDroneDataDir('drone-mcp-clone-chat-', async () => {
+      const previousFetch = globalThis.fetch;
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const requests: any[] = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({ ok: true, drones: [{ id: 'drone-1', name: 'Drone one', runtime: 'container' }] });
+        }
+        if (url.pathname === '/api/drones/drone-1/chats' && init?.method === 'POST') {
+          const body = JSON.parse(String(init.body));
+          requests.push(body);
+          if (body.copyFrom === 'missing') {
+            return Response.json({ ok: false, error: 'unknown chat: missing' }, { status: 404 });
+          }
+          return Response.json({
+            ok: true, chat: body.name, chatId: 'cloned-id',
+            ...(body.sideChat ? { sideChatOrigin: { sourceChatName: body.copyFrom, checkpointId: 'checkpoint-1' } } : {}),
+          }, { status: 201 });
+        }
+        return Response.json({ error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'clone-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({ correlationId: 'clone-chat-test' });
+        for (const options of [{}, { draft: true }, { sideChat: true }]) {
+          const result = await client.callTool({
+            name: 'clone_chat',
+            arguments: { drone: 'Drone one', sourceChat: 'default', chat: 'copy', ...options },
+          });
+          expect(result.isError).not.toBe(true);
+          expect(result.structuredContent).toMatchObject({ chat: 'copy', chatId: 'cloned-id' });
+          expect(requests.at(-1)).toEqual({ name: 'copy', copyFrom: 'default', mode: 'fork', ...options });
+          if ('sideChat' in options) {
+            expect(result.structuredContent).toMatchObject({ sideChatOrigin: { checkpointId: 'checkpoint-1' } });
+          }
+        }
+        const invalid = await client.callTool({
+          name: 'clone_chat',
+          arguments: { drone: 'drone-1', sourceChat: 'default', chat: 'copy', sideChat: true, draft: true },
+        });
+        expect(invalid.isError).toBe(true);
+        expect(JSON.stringify(invalid.content)).toContain('sideChat and draft cannot both be true');
+        expect(requests).toHaveLength(3);
+        const missing = await client.callTool({
+          name: 'clone_chat',
+          arguments: { drone: 'drone-1', sourceChat: 'missing', chat: 'copy' },
+        });
+        expect(missing.isError).toBe(true);
+        expect(JSON.stringify(missing.content)).toContain('unknown chat: missing');
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;
