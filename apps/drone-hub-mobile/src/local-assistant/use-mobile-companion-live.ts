@@ -287,7 +287,16 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     if (target.current) target.current.muted = session.muted;
     setState((value) => ({ ...value, muted: session.muted }));
   }, []);
-  return { ...state, shortcutArmed, setHeadsetShortcut, start, stop, reset, pause, resume, toggleMute };
+  const schedule = React.useCallback((callback: () => void, delayMs: number) => {
+    // Mirror timers also survive releasing native controls when voice stops.
+    let fired = false;
+    let cancelNative = () => {};
+    const fire = () => { if (fired) return; fired = true; cancelFallback(); cancelNative(); callback(); };
+    const cancelFallback = scheduleTimeout(fire, delayMs);
+    cancelNative = controls.current?.schedule(fire, delayMs) ?? (() => {});
+    return () => { fired = true; cancelFallback(); cancelNative(); };
+  }, []);
+  return { ...state, shortcutArmed, setHeadsetShortcut, start, stop, reset, pause, resume, toggleMute, schedule };
 }
 
 const EMPTY: State = { hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };

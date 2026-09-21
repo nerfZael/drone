@@ -21,6 +21,7 @@ import { EditorZoomController } from './droneHub/files/editor-zoom';
 import { FileDictationProvider } from './droneHub/files/FileDictationContext';
 import { CompanionWorkspaceProvider } from './droneHub/companion/CompanionWorkspaceContext';
 import { CompanionProvider } from './droneHub/companion/CompanionContext';
+import { CompanionMirrorProvider } from './droneHub/companion/CompanionMirrorContext';
 import { NavigationSizeController } from './droneHub/app/NavigationSizeController';
 import { GlobalDictationOverlay } from './droneHub/dictation/GlobalDictationOverlay';
 
@@ -98,11 +99,11 @@ export default function DroneHubApp() {
           <CompanionWorkspaceProvider>
             <ContinuousDictationProvider>
               <RecorderCompanionProvider>
-              <CompanionProvider>
+              <CompanionMirrorProvider><CompanionProvider>
                 <FileDictationProvider>
                   <DroneHubAppContent />
                 </FileDictationProvider>
-              </CompanionProvider>
+              </CompanionProvider></CompanionMirrorProvider>
               </RecorderCompanionProvider>
             </ContinuousDictationProvider>
           </CompanionWorkspaceProvider>

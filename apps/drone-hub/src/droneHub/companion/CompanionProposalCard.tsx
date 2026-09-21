@@ -628,6 +628,7 @@ function ProposalActions({
   executing,
   execution,
   applyDisabled,
+  controlsDisabled = false,
   historyDetails,
   onExecute,
   onDiscard,
@@ -635,6 +636,7 @@ function ProposalActions({
   executing: boolean;
   execution: CompanionProposalExecution | null;
   applyDisabled: boolean;
+  controlsDisabled?: boolean;
   historyDetails?: CompanionProposalHistoryDetails;
   onExecute?(): void;
   onDiscard?(): void;
@@ -648,7 +650,7 @@ function ProposalActions({
   }
   return (
     <>
-      <UiButton variant="ghost" size="small" onClick={onDiscard} disabled={executing}>
+      <UiButton variant="ghost" size="small" onClick={onDiscard} disabled={executing || controlsDisabled}>
         Discard
       </UiButton>
       <UiButton variant="primary" size="small" onClick={onExecute} disabled={applyDisabled} loading={executing}>
@@ -686,6 +688,7 @@ export function CompanionProposalCard({
   onExecute,
   onDiscard,
   historyDetails,
+  controlsDisabled = false,
 }: {
   proposal: CompanionProposal;
   defaultRepoPath: string;
@@ -701,6 +704,7 @@ export function CompanionProposalCard({
   onExecute?(): void;
   onDiscard?(): void;
   historyDetails?: CompanionProposalHistoryDetails;
+  controlsDisabled?: boolean;
 }) {
   const companionWindow = useCompanionWindow();
   const operationResult = React.useMemo(
@@ -712,7 +716,7 @@ export function CompanionProposalCard({
   );
   const completedCount = execution?.operations.filter((item) => item.status === 'completed').length ?? 0;
   const applyDisabled =
-    executing || executionBlocked || companionBusy || proposal.operations.length === 0 || execution !== null;
+    controlsDisabled || executing || executionBlocked || companionBusy || proposal.operations.length === 0 || execution !== null;
   const status = historyDetails && execution?.ok
     ? { tone: 'success' as const, label: 'Applied' }
     : failureStatus(execution, completedCount);
@@ -774,6 +778,7 @@ export function CompanionProposalCard({
       executing={executing}
       execution={execution}
       applyDisabled={applyDisabled}
+      controlsDisabled={controlsDisabled}
       historyDetails={historyDetails}
       onExecute={onExecute}
       onDiscard={onDiscard}
