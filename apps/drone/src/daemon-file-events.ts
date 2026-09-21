@@ -3,6 +3,8 @@ import { statSync, watch, type FSWatcher } from 'node:fs';
 import type http from 'node:http';
 import path from 'node:path';
 
+import { watchRepository } from './repo-watch';
+
 const CHANGE_SETTLE_MS = 40;
 const KEEPALIVE_MS = 15_000;
 // Only while the directory is missing or cannot be watched.
@@ -237,4 +239,24 @@ export function setStreamedDirectories(streamId: string, directories: readonly s
   if (!watches) return false;
   watches.set(directories);
   return true;
+}
+
+/**
+ * GET /v1/workspace/repo-events?path= as server-sent events: `ready` once the
+ * repository is being followed, `live` with whether its watches are in place,
+ * and `changed` whenever git status may have changed. Like file events these
+ * carry no state; the Hub runs git status itself.
+ */
+export function streamRepoEvents(input: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  repoPath: string;
+}): void {
+  let stopWatching: () => void = () => undefined;
+  const send = openEventStream(input.req, input.res, () => stopWatching());
+  send('ready', {});
+  stopWatching = watchRepository(input.repoPath, {
+    onChange: () => send('changed', {}),
+    onLive: (live) => send('live', { live }),
+  });
 }

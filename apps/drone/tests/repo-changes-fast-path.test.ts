@@ -100,9 +100,12 @@ describe('repository changes fast path', () => {
     const result = await droneRepoChangesSummary({
       container: 'drone-one',
       repoPathInContainer: '/work/repo',
-      runGit: async ({ args }) => {
+      runGit: async ({ args: rawArgs }) => {
+        // Scans leave the index alone, so the repository watch does not see them as changes.
+        const args = rawArgs.filter((arg) => arg !== '--no-optional-locks');
         if (args[0] === 'rev-parse') return { code: 0, stdout: '/work/repo\n', stderr: '' };
         if (args[0] === 'status') {
+          expect(rawArgs[0]).toBe('--no-optional-locks');
           return {
             code: 0,
             stdout: `# branch.oid ${'a'.repeat(40)}\0# branch.head main\0? new.txt\0`,
@@ -131,9 +134,12 @@ describe('repository changes fast path', () => {
     const result = await droneRepoChangesSummary({
       container: 'drone-one',
       repoPathInContainer: '/work/repo',
-      runGit: async ({ args }) => {
+      runGit: async ({ args: rawArgs }) => {
+        // Scans leave the index alone, so the repository watch does not see them as changes.
+        const args = rawArgs.filter((arg) => arg !== '--no-optional-locks');
         if (args[0] === 'rev-parse') return { code: 0, stdout: '/work/repo\n', stderr: '' };
         if (args[0] === 'status') {
+          expect(rawArgs[0]).toBe('--no-optional-locks');
           return {
             code: 0,
             stdout: `# branch.oid ${'a'.repeat(40)}\0# branch.head main\0? gone.txt\0`,

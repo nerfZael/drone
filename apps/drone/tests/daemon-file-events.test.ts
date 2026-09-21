@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -53,6 +54,7 @@ async function until(condition: () => boolean, label: string): Promise<void> {
 
 describe('container file events', () => {
   test('the daemon advertises the capability the Hub requires', () => {
+    expect(DRONE_DAEMON_CAPABILITIES).toContain('workspace-repo-events-v1');
     expect(DRONE_DAEMON_CAPABILITIES).toContain('workspace-file-events-v1');
   });
 
@@ -231,9 +233,15 @@ describe('container file events', () => {
 });
 
 describe('workspace events socket', () => {
-  async function openExplorerSocket(deps: Omit<Parameters<typeof createWorkspaceEventsWebSocketServer>[0], 'watchFileRevision'>) {
+  type SocketDependencies = Parameters<typeof createWorkspaceEventsWebSocketServer>[0];
+  async function openExplorerSocket(
+    deps: Omit<SocketDependencies, 'watchFileRevision' | 'resolveRepoPath' | 'onRepoChanged'> &
+      Partial<Pick<SocketDependencies, 'resolveRepoPath' | 'onRepoChanged'>>,
+  ) {
     const watched: string[] = [];
     const wss = createWorkspaceEventsWebSocketServer({
+      resolveRepoPath: async () => null,
+      onRepoChanged: () => undefined,
       ...deps,
       watchFileRevision: ({ targetPath }, publish) => {
         watched.push(targetPath);
@@ -247,7 +255,7 @@ describe('workspace events socket', () => {
     });
     await new Promise<void>((resolve) => hub.listen(0, '127.0.0.1', resolve));
     const client = new WebSocket(`ws://127.0.0.1:${(hub.address() as import('node:net').AddressInfo).port}`);
-    const messages: Array<{ type: string; path?: string; event?: string; revision?: string }> = [];
+    const messages: Array<{ type: string; path?: string; event?: string; revision?: string; live?: boolean }> = [];
     client.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => client.once('open', () => resolve()));
     return {
@@ -313,6 +321,64 @@ describe('workspace events socket', () => {
 
       for (const socket of sockets) socket.destroy();
       await until(() => explorer.messages.some((message) => message.type === 'resync'), 'resync after the daemon link dropped');
+    } finally {
+      await explorer.close();
+    }
+  });
+
+  test('a container drone changes panel hears git status change through its daemon, and knows when it cannot', async () => {
+    execFileSync('git', ['-C', dir, 'init', '--quiet']);
+    fs.writeFileSync(path.join(dir, 'app.ts'), 'one');
+    const order: string[] = [];
+    const explorer = await openExplorerSocket({
+      droneRuntime: () => 'container',
+      normalizeFsPathForRuntime: (_drone, rawPath) => rawPath,
+      resolveDaemonClient: async () => ({ baseUrl, token: 'secret' }) as any,
+      resolveRepoPath: async () => dir,
+      onRepoChanged: (context, repoPath) => order.push(`invalidate ${context.id} ${repoPath}`),
+    });
+    explorer.client.on('message', (raw) => order.push(JSON.parse(raw.toString()).type));
+    try {
+      explorer.client.send(JSON.stringify({ directories: [], files: [], repo: true }));
+      await until(() => explorer.messages.some((m) => m.type === 'repo-watch' && m.live === true), 'the watch to be in place');
+      expect(seenAuthorization).toBe('Bearer secret');
+
+      fs.writeFileSync(path.join(dir, 'app.ts'), 'two');
+      await until(() => explorer.messages.some((m) => m.type === 'repo-changed'), 'the edit');
+      // The cached scan is dropped before the app is told to read again.
+      expect(order.filter((entry) => entry !== 'repo-watch')).toEqual([`invalidate drone-a ${dir}`, 'repo-changed']);
+
+      // The daemon goes away: the app is told to check on its own, then that it may stop, and to read again.
+      const seen = explorer.messages.length;
+      for (const socket of sockets) socket.destroy();
+      await until(() => explorer.messages.slice(seen).some((m) => m.type === 'repo-watch' && m.live === false), 'the lost watch');
+      await until(() => explorer.messages.slice(seen).some((m) => m.type === 'repo-watch' && m.live === true), 'the watch to return');
+      await until(() => explorer.messages.slice(seen).some((m) => m.type === 'repo-changed'), 'the read after the gap');
+
+      // Closing the panel ends the daemon stream.
+      const streams = streamsOpened;
+      explorer.client.send(JSON.stringify({ directories: [], files: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const quietFrom = explorer.messages.length;
+      fs.writeFileSync(path.join(dir, 'app.ts'), 'three');
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(explorer.messages.slice(quietFrom)).toEqual([]);
+      expect(streamsOpened).toBe(streams);
+    } finally {
+      await explorer.close();
+    }
+  });
+
+  test('a drone without a repository is told its git status is not watched', async () => {
+    const explorer = await openExplorerSocket({
+      droneRuntime: () => 'host',
+      normalizeFsPathForRuntime: (_drone, rawPath) => rawPath,
+      resolveDaemonClient: async () => null,
+    });
+    try {
+      explorer.client.send(JSON.stringify({ repo: true }));
+      await until(() => explorer.messages.some((m) => m.type === 'repo-watch'), 'the answer');
+      expect(explorer.messages).toEqual([{ type: 'repo-watch', live: false }]);
     } finally {
       await explorer.close();
     }

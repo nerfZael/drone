@@ -4,7 +4,8 @@ import { type RawData, type WebSocket, WebSocketServer } from 'ws';
 
 import { DirectoryWatchSet, MAX_WATCHED_DIRECTORIES } from '../daemon-file-events';
 import type { DroneClient } from '../host/api';
-import { subscribeDaemonDirectoryEvents } from './daemon-file-events';
+import { watchRepository } from '../repo-watch';
+import { subscribeDaemonDirectoryEvents, subscribeDaemonRepoEvents } from './daemon-file-events';
 import type { FileRevisionEvent } from './file-revision-watch';
 
 /** Editor tabs with a live view: the active tab plus tabs in their own windows. */
@@ -20,16 +21,23 @@ export type WorkspaceEventsSocketDependencies = {
     input: { drone: any; droneId: string; droneName: string; targetPath: string },
     publish: (event: FileRevisionEvent, data: Record<string, unknown>) => void,
   ) => () => void;
+  /** The folder git status is read from for this drone, or null when it has no repository. */
+  resolveRepoPath: (drone: any) => Promise<string | null>;
+  /** Runs before the app hears of a change, so its next read does not get a cached scan. */
+  onRepoChanged: (context: WorkspaceEventsSocketContext, repoPath: string) => void;
 };
 
 /**
  * One socket per workspace open in the app, shared by its explorer and editor.
- * The app sends `{ directories, files }` with the folders the explorer shows
- * and the files with a live editor view, again whenever either changes. The
- * Hub answers with
+ * The app sends `{ directories, files, repo }` with the folders the explorer
+ * shows, the files with a live editor view, and whether a changes panel is
+ * open, again whenever any of them changes. The Hub answers with
  *   `{ type: 'directory-changed', path }` when a folder gains or loses an entry,
  *   `{ type: 'file', event, path, revision, ... }` per open file (see file-revision-watch),
- *   `{ type: 'resync' }` when folders may have changed unseen.
+ *   `{ type: 'resync' }` when folders may have changed unseen,
+ *   `{ type: 'repo-changed' }` when git status may have changed,
+ *   `{ type: 'repo-watch', live }` with whether git status is being watched;
+ *     until it is, the app keeps checking on its own.
  * Paths in answers are spelled the way the app spelled them.
  *
  * A socket rather than event streams: the app already holds several
@@ -103,8 +111,41 @@ export function createWorkspaceEventsWebSocketServer(
       }
     };
 
+    let stopRepoWatch: (() => void) | null = null;
+    let repoWanted = false;
+    const setRepo = (wanted: boolean) => {
+      if (wanted === repoWanted) return;
+      repoWanted = wanted;
+      if (!wanted) {
+        stopRepoWatch?.();
+        stopRepoWatch = null;
+        return;
+      }
+      void deps
+        .resolveRepoPath(drone)
+        .catch(() => null)
+        .then((repoPath) => {
+          if (!repoWanted || stopRepoWatch) return;
+          if (!repoPath) {
+            send({ type: 'repo-watch', live: false });
+            return;
+          }
+          const listener = {
+            onChange: () => {
+              deps.onRepoChanged(context, repoPath);
+              send({ type: 'repo-changed' });
+            },
+            onLive: (live: boolean) => send({ type: 'repo-watch', live }),
+          };
+          // A container's repository is watched by its own daemon.
+          stopRepoWatch = hostRuntime
+            ? watchRepository(repoPath, listener)
+            : subscribeDaemonRepoEvents({ resolveClient: () => deps.resolveDaemonClient(drone) }, repoPath, listener);
+        });
+    };
+
     socket.on('message', (raw: RawData) => {
-      let message: { directories?: unknown; files?: unknown } | null = null;
+      let message: { directories?: unknown; files?: unknown; repo?: unknown } | null = null;
       try {
         message = JSON.parse(raw.toString());
       } catch {
@@ -112,8 +153,10 @@ export function createWorkspaceEventsWebSocketServer(
       }
       setDirectories(message?.directories);
       setFiles(message?.files);
+      setRepo(message?.repo === true);
     });
     const close = () => {
+      setRepo(false);
       hostDirectories?.close();
       daemonDirectories?.close();
       daemonDirectories = null;

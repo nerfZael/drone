@@ -100,6 +100,30 @@ export function defaultKindForEntry(entry: RepoChangeEntry | null): DiffKind {
   return hasUnstaged(entry) ? 'unstaged' : 'staged';
 }
 
+/**
+ * The files whose content or git state changed since they were last listed.
+ * A file stays in the list under the same path while it keeps being edited,
+ * so its path says nothing about whether a diff loaded earlier still holds;
+ * its review token does. `seenTokenByPath` is brought up to date with the list.
+ */
+export function entriesChangedSinceSeen(
+  entries: ReadonlyArray<Pick<RepoChangeEntry, 'path' | 'reviewToken'>>,
+  seenTokenByPath: Map<string, string>,
+): string[] {
+  const changed: string[] = [];
+  const listed = new Set<string>();
+  for (const entry of entries) {
+    listed.add(entry.path);
+    const token = String(entry.reviewToken ?? '');
+    const seen = seenTokenByPath.get(entry.path);
+    seenTokenByPath.set(entry.path, token);
+    // Without a token there is nothing to compare, as with a Hub too old to send one.
+    if (seen !== undefined && token && seen !== token) changed.push(entry.path);
+  }
+  for (const path of [...seenTokenByPath.keys()]) if (!listed.has(path)) seenTokenByPath.delete(path);
+  return changed;
+}
+
 export function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: DiffKind): DiffKind | null {
   if (!entry) return null;
   if (preferred === 'unstaged') {

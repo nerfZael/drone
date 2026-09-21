@@ -9,6 +9,7 @@ import {
   setStreamedDirectories,
   streamDirectoryEvents,
   streamFileEvents,
+  streamRepoEvents,
 } from './daemon-file-events';
 
 export const DAEMON_JSON_MAX_BYTES = 8 * 1024 * 1024;
@@ -613,6 +614,11 @@ export async function handleDaemonWorkspaceRequest(input: {
 
   if (pathname === '/v1/workspace/file-events' && method === 'GET') {
     streamFileEvents({ req, res, filePath: requiredAbsolutePath(url.searchParams.get('path')) });
+    return true;
+  }
+
+  if (pathname === '/v1/workspace/repo-events' && method === 'GET') {
+    streamRepoEvents({ req, res, repoPath: requiredAbsolutePath(url.searchParams.get('path')) });
     return true;
   }
 

@@ -41,11 +41,13 @@ type DirectorySubscriber = {
   onResync: () => void;
 };
 type FileSubscriber = { path: string; onEvent: (event: WorkspaceFileEvent) => void };
+type RepoSubscriber = { onChanged: () => void; onLive: (live: boolean) => void };
 
 /**
- * The one connection a workspace's explorer and editor share with the Hub.
- * It tells the Hub which folders are shown and which files have a live view,
- * again whenever either changes, and hands the Hub's answers to whoever asked.
+ * The one connection a workspace's explorer, editor and changes panel share
+ * with the Hub. It tells the Hub which folders are shown, which files have a
+ * live view and whether git status is on screen, again whenever any of that
+ * changes, and hands the Hub's answers to whoever asked.
  * It opens with the first subscriber and closes with the last.
  *
  * A socket rather than event streams: the app already holds several
@@ -54,6 +56,8 @@ type FileSubscriber = { path: string; onEvent: (event: WorkspaceFileEvent) => vo
 class WorkspaceEventsChannel {
   private readonly directorySubscribers = new Set<DirectorySubscriber>();
   private readonly fileSubscribers = new Set<FileSubscriber>();
+  private readonly repoSubscribers = new Set<RepoSubscriber>();
+  private repoLive = false;
   private socket: WorkspaceEventsSocket | null = null;
   private open = false;
   private connections = 0;
@@ -77,17 +81,32 @@ class WorkspaceEventsChannel {
     this.fileSubscribers.add(subscriber);
     this.changed();
   }
-  remove(subscriber: DirectorySubscriber | FileSubscriber): void {
+  addRepo(subscriber: RepoSubscriber): void {
+    this.repoSubscribers.add(subscriber);
+    // A second panel on a repository already being watched learns so at once.
+    if (this.repoLive) subscriber.onLive(true);
+    this.changed();
+  }
+  private subscriberCount(): number {
+    return this.directorySubscribers.size + this.fileSubscribers.size + this.repoSubscribers.size;
+  }
+  private setRepoLive(live: boolean): void {
+    if (this.repoLive === live) return;
+    this.repoLive = live;
+    for (const subscriber of [...this.repoSubscribers]) subscriber.onLive(live);
+  }
+  remove(subscriber: DirectorySubscriber | FileSubscriber | RepoSubscriber): void {
     this.directorySubscribers.delete(subscriber as DirectorySubscriber);
     this.fileSubscribers.delete(subscriber as FileSubscriber);
-    if (this.directorySubscribers.size + this.fileSubscribers.size > 0) {
+    this.repoSubscribers.delete(subscriber as RepoSubscriber);
+    if (this.subscriberCount() > 0) {
       this.changed();
       return;
     }
     if (this.idleTimer != null) return;
     this.idleTimer = this.runtime.setTimeout(() => {
       this.idleTimer = null;
-      if (this.directorySubscribers.size + this.fileSubscribers.size > 0) return;
+      if (this.subscriberCount() > 0) return;
       if (this.retryTimer != null) this.runtime.clearTimeout(this.retryTimer);
       this.retryTimer = null;
       const current = this.socket;
@@ -113,9 +132,12 @@ class WorkspaceEventsChannel {
     if (!this.open || !this.socket) return;
     const directories = [...new Set([...this.directorySubscribers].flatMap((subscriber) => subscriber.directories))];
     const files = [...new Set([...this.fileSubscribers].map((subscriber) => subscriber.path))];
-    const message = JSON.stringify({ directories, files });
+    // Left out unless wanted, which an older Hub reads the same way.
+    const message = JSON.stringify({ directories, files, ...(this.repoSubscribers.size > 0 ? { repo: true } : {}) });
     if (message === this.lastSent) return;
     this.lastSent = message;
+    // The Hub stops watching once no panel asks, and says nothing more about it.
+    if (this.repoSubscribers.size === 0) this.repoLive = false;
     this.socket.send(message);
   }
 
@@ -137,6 +159,8 @@ class WorkspaceEventsChannel {
       this.sendWanted();
       // Files announce themselves with a fresh snapshot; folders have to be read again.
       if (this.connections > 1) for (const subscriber of [...this.directorySubscribers]) subscriber.onResync();
+      // Git status changes while disconnected went unseen as well.
+      if (this.connections > 1) for (const subscriber of [...this.repoSubscribers]) subscriber.onChanged();
     };
     current.onmessage = (event: { data: unknown }) => {
       if (this.socket !== current) return;
@@ -153,6 +177,10 @@ class WorkspaceEventsChannel {
         }
       } else if (message?.type === 'resync') {
         for (const subscriber of [...this.directorySubscribers]) subscriber.onResync();
+      } else if (message?.type === 'repo-changed') {
+        for (const subscriber of [...this.repoSubscribers]) subscriber.onChanged();
+      } else if (message?.type === 'repo-watch') {
+        this.setRepoLive((message as { live?: unknown }).live === true);
       } else if (message?.type === 'file' && typeof path === 'string' && typeof message.event === 'string') {
         for (const subscriber of [...this.fileSubscribers]) {
           if (subscriber.path === path) subscriber.onEvent(message as WorkspaceFileEvent);
@@ -163,6 +191,7 @@ class WorkspaceEventsChannel {
       if (this.socket !== current) return;
       this.socket = null;
       this.open = false;
+      this.setRepoLive(false);
       this.reconnectLater(startedAt);
     };
   }
@@ -173,7 +202,7 @@ class WorkspaceEventsChannel {
     this.retryMs = Date.now() - startedAt > RETRY_MAX_MS ? RETRY_MIN_MS : Math.min(RETRY_MAX_MS, this.retryMs * 2);
     this.retryTimer = this.runtime.setTimeout(() => {
       this.retryTimer = null;
-      if (this.directorySubscribers.size + this.fileSubscribers.size > 0) this.connect();
+      if (this.subscriberCount() > 0) this.connect();
     }, this.retryMs);
   }
 }
@@ -231,6 +260,25 @@ export function subscribeFileEvents(
   const channel = workspaceEventsChannel(droneId, runtime);
   const subscriber: FileSubscriber = { path, onEvent };
   channel.addFile(subscriber);
+  return () => channel.remove(subscriber);
+}
+
+/**
+ * Follows a drone's git status for a changes panel. `onChanged` means it may
+ * have changed and should be read again, which includes every reconnection.
+ * `onLive(true)` means the Hub is watching the repository, so the panel only
+ * needs to check on its own now and then; until then, and again after
+ * `onLive(false)`, nothing tells it about changes. An older Hub never answers,
+ * which leaves the panel checking as it always has.
+ */
+export function subscribeRepoEvents(
+  droneId: string,
+  callbacks: { onChanged: () => void; onLive: (live: boolean) => void },
+  runtime: WorkspaceEventsRuntime = browserRuntime,
+): () => void {
+  const channel = workspaceEventsChannel(droneId, runtime);
+  const subscriber: RepoSubscriber = { ...callbacks };
+  channel.addRepo(subscriber);
   return () => channel.remove(subscriber);
 }
 

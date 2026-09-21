@@ -13,6 +13,9 @@ import type { ChangesDataMode } from './helpers';
 
 const CHANGES_STALE_TIME_MS = 12_000;
 const WORKING_TREE_POLL_INTERVAL_MS = 5_000;
+// While the Hub watches the repository it reports changes as they happen. This
+// only covers a watch that stopped seeing them without anyone noticing.
+const WORKING_TREE_WATCHED_POLL_INTERVAL_MS = 60_000;
 const PULL_PREVIEW_POLL_INTERVAL_MS = 10_000;
 
 type ChangesContextMode = 'branch' | 'pull-request';
@@ -30,6 +33,8 @@ type ChangesQueryOptions = {
   pullRequestNumber: number | null;
   selectedCommitSha: string | null;
   externalPullRequestData?: boolean;
+  /** The Hub is watching the repository and reports its changes; see useRepoLiveUpdates. */
+  repoWatched?: boolean;
 };
 
 export const changesQueryKeys = {
@@ -62,6 +67,7 @@ export function useChangesQueries(options: ChangesQueryOptions) {
     pullRequestNumber,
     selectedCommitSha,
     externalPullRequestData = false,
+    repoWatched = false,
   } = options;
   const available = repoAttached && !disabled;
   const encodedDroneId = encodeURIComponent(droneId);
@@ -70,7 +76,9 @@ export function useChangesQueries(options: ChangesQueryOptions) {
     queryKey: changesQueryKeys.workingTree(droneId, repoPath),
     url: `/api/drones/${encodedDroneId}/repo/changes`,
     enabled: available && primaryView === 'changes' && dataMode === 'working-tree',
-    refetchInterval: WORKING_TREE_POLL_INTERVAL_MS,
+    refetchInterval: repoWatched ? WORKING_TREE_WATCHED_POLL_INTERVAL_MS : WORKING_TREE_POLL_INTERVAL_MS,
+    // Nothing is read while the window is in the background, so coming back always is.
+    refetchOnWindowFocus: 'always',
   });
   const pullPreview = useChangesResourceQuery<Successful<RepoPullChangesPayload>>({
     queryKey: changesQueryKeys.pullPreview(droneId, repoPath),
@@ -149,12 +157,14 @@ function useChangesResourceQuery<T>(options: {
   url: string;
   enabled: boolean;
   refetchInterval?: number;
+  refetchOnWindowFocus?: boolean | 'always';
 }) {
   return useQuery<T, Error>({
     queryKey: options.queryKey,
     queryFn: ({ signal }) => requestJson<T>(options.url, { signal }),
     enabled: options.enabled,
     refetchInterval: options.refetchInterval,
+    refetchOnWindowFocus: options.refetchOnWindowFocus,
     refetchIntervalInBackground: false,
     staleTime: CHANGES_STALE_TIME_MS,
   });

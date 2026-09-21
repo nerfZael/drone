@@ -88,6 +88,7 @@ import {
   fileNameForChangesPath,
   diffKey,
   effectiveKindForEntry,
+  entriesChangedSinceSeen,
   hasStaged,
   hasUnstaged,
   parentDirPaths,
@@ -105,6 +106,7 @@ import {
   type ExplorerNode,
 } from './helpers';
 import { changesQueryKeys, useChangesQueries } from './useChangesQueries';
+import { useRepoLiveUpdates } from './useRepoLiveUpdates';
 import {
   readViewedChangesStore,
   setEntryViewed,
@@ -641,6 +643,8 @@ function LiveDroneChangesDock({
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
   const [expandedRangesByDiffKey, setExpandedRangesByDiffKey] = React.useState<Record<string, DiffExpansionRange[]>>({});
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
+  const seenEntryTokensRef = React.useRef<{ droneId: string; tokenByPath: Map<string, string> } | null>(null);
+  const staleWhileLoadingRef = React.useRef<Set<string>>(new Set());
   const diffSourceByKeyRef = React.useRef<Record<string, string | null>>({});
   const diffSourceInflightByKeyRef = React.useRef<Record<string, Promise<string | null>>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
@@ -659,6 +663,11 @@ function LiveDroneChangesDock({
   const explorerBadgeHeightPx = Math.round(15 * explorerZoom * 10) / 10;
 
   const queryClient = useQueryClient();
+  const repoWatched = useRepoLiveUpdates(
+    droneId,
+    repoPath,
+    repoAttached && !disabled && !reviewOverride && contextMode === 'branch',
+  );
   const {
     changes,
     changesLoading,
@@ -692,6 +701,7 @@ function LiveDroneChangesDock({
     pullRequestNumber,
     selectedCommitSha,
     externalPullRequestData: Boolean(reviewOverride),
+    repoWatched,
   });
 
   React.useEffect(() => {
@@ -1597,6 +1607,8 @@ function LiveDroneChangesDock({
         }));
       } finally {
         inflightRef.current.delete(key);
+        // The file changed again while this was loading, so what arrived may predate it.
+        if (staleWhileLoadingRef.current.delete(key) && mountedRef.current) void loadDiff(path, kind, false, true);
       }
     },
     [clearDiffExpansionSource, clearExpandedRangesForDiff, droneId, workingDiffStateKey],
@@ -1875,6 +1887,44 @@ function LiveDroneChangesDock({
     if (!selectedEntry || !splitShownKind) return;
     void loadDiff(selectedEntry.path, splitShownKind, true, true);
   }, [dataMode, disabled, entries, loadDiff, refreshNonce, repoAttached, selectedEntry, splitShownKind, stackedPreferredKind, viewMode]);
+
+  // The list is read again every time git status changes, but a file being
+  // edited keeps its place in it, so nothing above would load its diff again.
+  React.useEffect(() => {
+    if (dataMode !== 'working-tree') return;
+    if (!repoAttached || disabled) return;
+    if (seenEntryTokensRef.current?.droneId !== droneId) {
+      seenEntryTokensRef.current = { droneId, tokenByPath: new Map() };
+      staleWhileLoadingRef.current.clear();
+    }
+    const changedPaths = entriesChangedSinceSeen(entries, seenEntryTokensRef.current.tokenByPath);
+    if (changedPaths.length === 0) return;
+    const shownKeys = new Set<string>();
+    if (viewMode === 'stacked') {
+      for (const entry of entries) {
+        const kind = effectiveKindForEntry(entry, stackedPreferredKind);
+        if (kind) shownKeys.add(workingDiffStateKey(entry.path, kind));
+      }
+    } else if (selectedEntry && splitShownKind) {
+      shownKeys.add(workingDiffStateKey(selectedEntry.path, splitShownKind));
+    }
+    const dropped = new Set<string>();
+    for (const path of changedPaths) {
+      for (const kind of ['staged', 'unstaged'] as const) {
+        const key = workingDiffStateKey(path, kind);
+        if (inflightRef.current.has(key)) staleWhileLoadingRef.current.add(key);
+        else if (diffByKeyRef.current[key]?.status !== 'loaded') continue;
+        else if (shownKeys.has(key)) void loadDiff(path, kind, false, true);
+        // Not on screen: loaded again when it next is.
+        else dropped.add(key);
+      }
+    }
+    if (dropped.size === 0) return;
+    const withoutDropped = (current: Record<string, DiffState>) =>
+      Object.fromEntries(Object.entries(current).filter(([key]) => !dropped.has(key)));
+    diffByKeyRef.current = withoutDropped(diffByKeyRef.current);
+    setDiffByKey(withoutDropped);
+  }, [dataMode, disabled, droneId, entries, loadDiff, repoAttached, selectedEntry, splitShownKind, stackedPreferredKind, viewMode, workingDiffStateKey]);
 
   React.useEffect(() => {
     if (dataMode !== 'pull-preview') return;

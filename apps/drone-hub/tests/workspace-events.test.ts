@@ -4,6 +4,7 @@ import {
   createDirectoryRefreshThrottle,
   subscribeDirectoryEvents,
   subscribeFileEvents,
+  subscribeRepoEvents,
   type WorkspaceEventsRuntime,
   type WorkspaceFileEvent,
 } from '../src/droneHub/files/workspace-events';
@@ -129,6 +130,71 @@ describe('workspace events channel', () => {
 });
 
 describe('folder refresh throttle', () => {
+  test('a changes panel shares the connection, and asks for git status only while it is open', async () => {
+    const { runtime, sockets, sent } = fakeRuntime();
+    const explorer = subscribeDirectoryEvents('drone-a', ['/work'], { onChanged() {}, onResync() {} }, runtime);
+    await flush();
+    sockets[0].onopen({});
+    const seen: string[] = [];
+    const stopPanel = subscribeRepoEvents('drone-a', { onChanged: () => seen.push('changed'), onLive: (live) => seen.push(`live ${live}`) }, runtime);
+    await flush();
+    expect(sockets.length).toBe(1);
+    // An explorer on its own sends what it always has, which is what an older Hub expects.
+    expect(sent(0)).toEqual([{ directories: ['/work'], files: [] }, { directories: ['/work'], files: [], repo: true }]);
+
+    sockets[0].onmessage({ data: JSON.stringify({ type: 'repo-watch', live: true }) });
+    sockets[0].onmessage({ data: JSON.stringify({ type: 'repo-changed' }) });
+    expect(seen).toEqual(['live true', 'changed']);
+
+    // A second panel on the same drone does not wait for an answer the Hub already gave.
+    const late: string[] = [];
+    const stopLate = subscribeRepoEvents('drone-a', { onChanged() {}, onLive: (live) => late.push(`live ${live}`) }, runtime);
+    expect(late).toEqual(['live true']);
+    stopLate();
+
+    stopPanel();
+    await flush();
+    expect(sent(0).at(-1)).toEqual({ directories: ['/work'], files: [] });
+    // The Hub has stopped watching; a panel opened now waits to hear that it watches again.
+    const reopened: string[] = [];
+    const stopReopened = subscribeRepoEvents('drone-a', { onChanged() {}, onLive: (live) => reopened.push(`live ${live}`) }, runtime);
+    expect(reopened).toEqual([]);
+    stopReopened();
+    explorer.close();
+  });
+
+  test('a changes panel closed and reopened in one render keeps what the Hub said about the watch', async () => {
+    const { runtime, sockets, sent } = fakeRuntime();
+    const stopFirst = subscribeRepoEvents('drone-a', { onChanged() {}, onLive() {} }, runtime);
+    await flush();
+    sockets[0].onopen({});
+    sockets[0].onmessage({ data: JSON.stringify({ type: 'repo-watch', live: true }) });
+    stopFirst();
+    const seen: string[] = [];
+    const stopSecond = subscribeRepoEvents('drone-a', { onChanged() {}, onLive: (live) => seen.push(`live ${live}`) }, runtime);
+    await flush();
+    // Nothing new was asked of the Hub, so it will not answer again.
+    expect(sent(0)).toEqual([{ directories: [], files: [], repo: true }]);
+    expect(seen).toEqual(['live true']);
+    stopSecond();
+  });
+
+  test('a lost connection puts the changes panel back on its own, and a new one has it read again', async () => {
+    const { runtime, sockets, timers } = fakeRuntime();
+    const seen: string[] = [];
+    const stop = subscribeRepoEvents('drone-a', { onChanged: () => seen.push('changed'), onLive: (live) => seen.push(`live ${live}`) }, runtime);
+    await flush();
+    sockets[0].onopen({});
+    sockets[0].onmessage({ data: JSON.stringify({ type: 'repo-watch', live: true }) });
+    sockets[0].onclose({});
+    expect(seen).toEqual(['live true', 'live false']);
+    timers.at(-1)!.run();
+    sockets[1].onopen({});
+    expect(JSON.parse(sockets[1].sent[0])).toEqual({ directories: [], files: [], repo: true });
+    expect(seen).toEqual(['live true', 'live false', 'changed']);
+    stop();
+  });
+
   test('reads a folder right away, then once more per interval while changes keep coming', () => {
     const pending: Array<() => void> = [];
     const refreshed: string[] = [];

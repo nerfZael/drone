@@ -34,6 +34,7 @@ function followDaemonEvents(
   deps: DaemonFileEventsDependencies,
   request: () => { path: string; method: 'GET' | 'POST'; body?: unknown },
   onEvent: (event: string, data: any, client: DroneClient) => void,
+  onDisconnected?: () => void,
 ): () => void {
   const abort = new AbortController();
   const sleep = deps.sleep ?? sleepUntilAborted;
@@ -107,6 +108,7 @@ function followDaemonEvents(
         // Retried below; the caller's periodic check covers the gap.
       }
       if (abort.signal.aborted) return;
+      onDisconnected?.();
       // A stream that stayed up for a while is a fresh failure, not a persistent one.
       retryMs = Date.now() - startedAt > RETRY_MAX_MS ? RETRY_MIN_MS : Math.min(RETRY_MAX_MS, retryMs * 2);
       await sleep(retryMs, abort.signal);
@@ -196,4 +198,32 @@ export function subscribeDaemonDirectoryEvents(
     },
     close,
   };
+}
+
+/**
+ * Follows a container repository's git status through its drone's daemon.
+ * `onChange` means git status may have changed, which includes every
+ * reconnection, since nothing was seen while disconnected. `onLive(false)`
+ * means changes can go unseen for now: the daemon could not place its watches,
+ * is too old to have them, or cannot be reached.
+ */
+export function subscribeDaemonRepoEvents(
+  deps: DaemonFileEventsDependencies,
+  repoPath: string,
+  listener: { onChange: () => void; onLive: (live: boolean) => void },
+): () => void {
+  const path = `/v1/workspace/repo-events?path=${encodeURIComponent(repoPath)}`;
+  let connections = 0;
+  return followDaemonEvents(
+    deps,
+    () => ({ path, method: 'GET' }),
+    (event, data) => {
+      if (event === 'ready') {
+        connections += 1;
+        if (connections > 1) listener.onChange();
+      } else if (event === 'changed') listener.onChange();
+      else if (event === 'live') listener.onLive(data?.live === true);
+    },
+    () => listener.onLive(false),
+  );
 }

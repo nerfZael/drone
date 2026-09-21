@@ -1,6 +1,7 @@
 // A real Hub on Node, as it runs in production: the workspace events socket end to end,
 // including the upgrade route and its token check.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -103,6 +104,56 @@ test('an open host file and its folder are followed over the workspace events so
     fs.writeFileSync(notePath, '# Third\n');
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(messages.slice(seen).some((message) => message.type === 'file'), false);
+  } finally {
+    socket.terminate();
+  }
+});
+
+test('a host drone changes panel is told when git status changes, and its next read is not a cached one', async () => {
+  const droneId = 'host-repo-events';
+  const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(tempRoot, 'repo-')));
+  const git = (...args: string[]) => execFileSync('git', ['-C', repoRoot, ...args], { encoding: 'utf8' });
+  git('init', '--quiet', '--initial-branch=main');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+  fs.writeFileSync(path.join(repoRoot, 'app.ts'), 'export const one = 1;\n');
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'first');
+  const now = new Date().toISOString();
+  const repository = await getDroneLifecycleRepository();
+  assert.ok(repository, 'the drone store is available on Node');
+  await repository.upsert('real', droneId, {
+    id: droneId, name: droneId, runtime: 'host', hostPort: 4556, containerPort: 7777, token: 'host-token',
+    cwd: repoRoot, repoPath: repoRoot, repoAttached: true, createdAt: now,
+    chats: { default: { createdAt: now, agent: { kind: 'builtin', id: 'cursor' }, turns: [], pendingPrompts: [] } },
+  } as any);
+  const changedCount = async () => {
+    const response = await fetch(`${baseUrl}/api/drones/${droneId}/repo/changes`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(response.status, 200);
+    return ((await response.json()) as any).counts.changed as number;
+  };
+
+  const { socket, messages } = await openEvents(droneId);
+  try {
+    socket.send(JSON.stringify({ directories: [], files: [], repo: true }));
+    await until(() => messages.find((message) => message.type === 'repo-watch' && message.live === true), 'the watch to be in place');
+    assert.equal(await changedCount(), 0);
+
+    // Inside the two seconds the scan above stays cached for.
+    fs.writeFileSync(path.join(repoRoot, 'app.ts'), 'export const one = 2;\n');
+    await until(() => messages.find((message) => message.type === 'repo-changed'), 'the edit');
+    assert.equal(await changedCount(), 1);
+
+    const seen = messages.length;
+    git('commit', '--quiet', '-am', 'second');
+    await until(() => messages.slice(seen).find((message) => message.type === 'repo-changed'), 'the commit');
+    assert.equal(await changedCount(), 0);
+
+    // The Hub's own reads settle: they are not changes that ask for another read.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const settled = messages.length;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    assert.equal(messages.length, settled);
   } finally {
     socket.terminate();
   }

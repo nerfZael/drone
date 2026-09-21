@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendDiffExpansionRange,
   buildExplorerTree,
+  entriesChangedSinceSeen,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
   explorerNodeEntries,
@@ -195,5 +196,31 @@ describe('changes file actions', () => {
     };
     expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-preview')).toBe(false);
     expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-request')).toBe(false);
+  });
+});
+
+describe('entriesChangedSinceSeen', () => {
+  test('names the files edited again while they stayed in the list', () => {
+    const seen = new Map<string, string>();
+    // First sight of a file is not a change to a diff loaded for it.
+    expect(entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't1' }, { path: 'b.ts', reviewToken: 't1' }], seen)).toEqual([]);
+    expect(entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't2' }, { path: 'b.ts', reviewToken: 't1' }], seen)).toEqual(['a.ts']);
+    expect(entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't2' }, { path: 'b.ts', reviewToken: 't1' }], seen)).toEqual([]);
+  });
+
+  test('a file that left the list and came back is seen for the first time again', () => {
+    const seen = new Map<string, string>();
+    entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't1' }], seen);
+    entriesChangedSinceSeen([], seen);
+    expect(seen.size).toBe(0);
+    expect(entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't2' }], seen)).toEqual([]);
+  });
+
+  test('entries without a token never count as changed', () => {
+    const seen = new Map<string, string>();
+    entriesChangedSinceSeen([{ path: 'a.ts' }], seen);
+    expect(entriesChangedSinceSeen([{ path: 'a.ts' }], seen)).toEqual([]);
+    entriesChangedSinceSeen([{ path: 'a.ts', reviewToken: 't1' }], seen);
+    expect(entriesChangedSinceSeen([{ path: 'a.ts' }], seen)).toEqual([]);
   });
 });

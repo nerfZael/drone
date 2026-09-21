@@ -6378,6 +6378,19 @@ async function startDroneHubApiServerWithLifecycle(
       dvmExec,
       resolveDaemonClient,
     }),
+    // The same folders, and the same cache keys, as GET /api/drones/:name/repo/changes.
+    resolveRepoPath: async (drone) => {
+      if (!isRepoAttachedDrone(drone)) return null;
+      if (droneRuntime(drone) !== 'host') return droneRepoPathInContainer(drone);
+      const repoPath = String(drone?.repoPath ?? '').trim();
+      return repoPath ? await gitTopLevel(repoPath) : null;
+    },
+    onRepoChanged: (context, repoPath) =>
+      repoChangesScanCache.invalidate(
+        droneRuntime(context.drone) === 'host'
+          ? `host\0${repoPath}`
+          : `container\0${context.id}\0${repoPath}`,
+      ),
   });
   const handleHubUpgrade = createTerminalWebSocketUpgradeHandler({
     apiToken,

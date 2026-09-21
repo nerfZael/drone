@@ -679,7 +679,7 @@ async function readHostWorktreeFileMetadata(repoRoot: string, repoRelativePath: 
 
 async function applyWorkingTreeReviewMetadata(repoRoot: string, summary: RepoChangesSummary): Promise<RepoChangesSummary> {
   const trackedNumStatArgs = (baseline: string) => [
-    '-C', repoRoot, 'diff', '--numstat', '-z', baseline, '--',
+    '--no-optional-locks', '-C', repoRoot, 'diff', '--numstat', '-z', baseline, '--',
   ];
   const trackedNumStatPromise = runLocalOrThrow('git', trackedNumStatArgs('HEAD')).catch(() =>
     runLocalOrThrow('git', trackedNumStatArgs(EMPTY_GIT_TREE_SHA)).catch(() => ''),
@@ -932,7 +932,10 @@ export async function gitIsClean(repoRoot: string): Promise<boolean> {
 }
 
 export async function gitRepoChangesSummary(repoRoot: string): Promise<RepoChangesSummary> {
+  // The changes panel reads this whenever the repository watch reports a change.
+  // A scan that refreshed the index would itself be reported as one.
   const raw = await runLocalOrThrow('git', [
+    '--no-optional-locks',
     '-C',
     repoRoot,
     'status',

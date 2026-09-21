@@ -175,14 +175,15 @@ export async function droneRepoChangesSummary(opts: {
   const statusRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
-    args: ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'],
+    // See gitRepoChangesSummary: a scan must not rewrite the index the repository watch follows.
+    args: ['--no-optional-locks', 'status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'],
     runGit: opts.runGit,
   });
   const parsed = parseGitStatusPorcelainV2Z(statusRaw.stdout);
   let trackedNumStat = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
-    args: ['diff', '--numstat', '-z', 'HEAD', '--'],
+    args: ['--no-optional-locks', 'diff', '--numstat', '-z', 'HEAD', '--'],
     okCodes: [0, 128],
     runGit: opts.runGit,
   });
@@ -190,7 +191,7 @@ export async function droneRepoChangesSummary(opts: {
     trackedNumStat = await runGitInDroneOrThrow({
       container: opts.container,
       repoPathInContainer,
-      args: ['diff', '--numstat', '-z', EMPTY_GIT_TREE_SHA, '--'],
+      args: ['--no-optional-locks', 'diff', '--numstat', '-z', EMPTY_GIT_TREE_SHA, '--'],
       okCodes: [0, 128],
       runGit: opts.runGit,
     });

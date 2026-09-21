@@ -3,7 +3,7 @@ import {
   type ManagedDroneDesiredState,
 } from '../managed-drone-state';
 import { DroneApiRequestError, type DroneClient, type DroneDaemonConnection } from '../host/api';
-import { WORKSPACE_DIRECTORY_EVENTS_CAPABILITY } from '../daemon-capabilities';
+import { WORKSPACE_REPO_EVENTS_CAPABILITY } from '../daemon-capabilities';
 
 type SyncOptions = { droneId: string; droneEntry: any };
 
@@ -64,7 +64,7 @@ type ManagedDroneStateSyncDependencies = {
 // Managed-state sync is also the deployment boundary for daemon-side behavior.
 // Bump this requirement when a daemon change must reach already-running drones:
 // the newest capability implies the earlier ones, since they ship in one build.
-const REQUIRED_CAPABILITY = WORKSPACE_DIRECTORY_EVENTS_CAPABILITY;
+const REQUIRED_CAPABILITY = WORKSPACE_REPO_EVENTS_CAPABILITY;
 
 export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDependencies) {
   async function ensureCapability(
