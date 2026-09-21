@@ -12,6 +12,7 @@ import type { CompanionTelemetryService } from './companion-telemetry';
 import { COMPANION_INSTRUCTIONS_MAX_CHARS } from '@drone/assistant-chat';
 import { readCompanionInstructions, writeCompanionInstructions } from './companion-instructions';
 import { companionLiveSettingsResponse, readCompanionLiveSettings, writeCompanionLiveSettings } from './companion-live-settings';
+import type { CompanionMirrorService } from './CompanionMirrorService';
 
 export function registerCompanionRoutes(
   router: HubRouter,
@@ -19,6 +20,7 @@ export function registerCompanionRoutes(
   workspaces?: CompanionWorkspaceService,
   organization?: { services: HubServices; sidebar: SidebarCommandService },
   runtime?: CompanionRuntime,
+  mirrors?: CompanionMirrorService,
 ): void {
   router.post('/api/companion/attachments/read', async ({ readJson, json, fail }) => {
     try {
@@ -34,6 +36,13 @@ export function registerCompanionRoutes(
   router.post('/api/companion/home/uploads/remove', async ({ readJson, json, fail }) => {
     try { await removeCompanionUpload((await readJson())?.path); json(200, { ok: true }); }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
+  router.put('/api/settings/companion/mirror', async ({ readJson, json, fail }) => {
+    if (!mirrors) { fail(503, 'Companion mirroring is unavailable.'); return; }
+    try {
+      await mirrors.setEnabled((await readJson<{ enabled: unknown }>()).enabled);
+      json(200, { ok: true, ...await mirrors.settings() });
+    } catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });
   router.get('/api/settings/companion/live-voice', async ({ req, json }) => {
     const settings = await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings());
@@ -53,7 +62,9 @@ export function registerCompanionRoutes(
   router.put('/api/settings/companion/auto-approve', async ({ req, readJson, json, fail }) => {
     try {
       const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
-      json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionAutoApproveSettings(body)) });
+      const settings = await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionAutoApproveSettings(body));
+      await mirrors?.autoApproveChanged(settings);
+      json(200, { ok: true, ...settings });
     }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });

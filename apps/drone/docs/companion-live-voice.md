@@ -64,6 +64,34 @@ with browser autoplay blocked, and with **End voice** pressed during connection.
 
 ## Mobile
 
+### Mirror on the host desktop
+
+Enable **Settings → Companion → Mirror remote Companion on this device** on the
+hosting Hub. The preference saves immediately and defaults off. An updated phone
+app publishes its Live session to a desktop panel labeled **Live on [phone name]**.
+The panel shows recent captions, the backend reply, the pending proposal, and the
+latest execution result. Voice continues on the phone. **Hide** collapses only the
+desktop view; **Show** restores it without restarting the conversation.
+
+Approve or discard from either device. Desktop actions return to the phone, which
+checks the proposal revision and prevents duplicate execution. Disconnected mirrors
+retain their last view with controls disabled; reconnecting refreshes the view.
+Auto-approve is shared across Companion sessions on the Hub and updates both apps.
+The setting applies when Companion requests proposal execution.
+
+Both the Hub and phone app must include mirroring support. The mirror depends on
+the phone remaining connected. It shows recent conversation text and one latest
+execution, not a durable history. An oversized proposal stays on the phone and the
+mirror explains that it must be reviewed there; proposal contents are never
+truncated for desktop approval.
+
+Manual verification: start Live on the phone, open the host desktop afterward,
+approve a proposal with the phone locked, toggle auto-approve from each device,
+hide and restore the panel, and disconnect/reconnect the phone. Confirm that a
+proposal executes once when both devices attempt approval.
+
+### Phone setup
+
 Mobile also supports Live with client delegation. **Settings → Built-in → Companion Live voice** contains the toggle; the compact Companion overlay keeps only conversation controls. Select the Hub if more than one is connected. The toggle saves immediately to that Hub and shares the desktop preference. The phone rereads it before starting voice. With Live off, the existing recording and transcription path remains available.
 
 Install an updated native app containing the `DroneLiveVoice` PCM capture/playback

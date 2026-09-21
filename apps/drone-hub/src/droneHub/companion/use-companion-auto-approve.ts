@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCompanionMirror } from './CompanionMirrorContext';
 
 async function request(enabled?: boolean): Promise<boolean> {
   const response = await fetch('/api/settings/companion/auto-approve', {
@@ -14,6 +15,7 @@ async function request(enabled?: boolean): Promise<boolean> {
 }
 
 export function useCompanionAutoApprove() {
+  const mirror = useCompanionMirror();
   const [enabled, setEnabled] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -29,6 +31,11 @@ export function useCompanionAutoApprove() {
     }).finally(() => { if (current === generation.current) setLoading(false); });
     return () => { generation.current++; };
   }, []);
+  React.useEffect(() => {
+    if (mirror?.autoApprove == null) return;
+    generation.current++;
+    setEnabled(mirror.autoApprove); setLoading(false); setError('');
+  }, [mirror?.autoApprove]);
   const toggle = React.useCallback(async () => {
     if (loading || writing.current) return;
     writing.current = true;
@@ -41,7 +48,7 @@ export function useCompanionAutoApprove() {
       if (current === generation.current) setError(error instanceof Error ? error.message : String(error));
     } finally {
       writing.current = false;
-      if (current === generation.current) setSaving(false);
+      setSaving(false);
     }
   }, [enabled, loading]);
   return { enabled, loading, saving, error, toggle };

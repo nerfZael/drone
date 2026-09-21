@@ -1,6 +1,7 @@
 import { CompanionScreen } from '@drone/assistant-chat';
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
+import { useMobileCompanionMirror } from './use-mobile-companion-mirror';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
@@ -675,6 +676,39 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     effectiveStatus !== 'idle' || live.hasStarted || liveArmed || live.status === 'error' || checkingVoiceMode;
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
+
+  useMobileCompanionMirror({
+    schedule: live.schedule,
+    deviceId: live.hasStarted && available && targetCapability?.operations.includes('mirror.publish')
+      ? live.targetDeviceId : '',
+    read: () => {
+      const selected = proposalStore.selected;
+      const latest = proposalStore.history[proposalStore.history.length - 1];
+      return {
+        status: effectiveStatus, liveStatus: live.status, captions: live.captions,
+        reply: state.reply, error: live.error || proposalActionError || state.error,
+        proposal: selected?.visible ? selected.proposal : null,
+        // The store version also changes when the phone selects a different document.
+        proposalRevision: proposalStore.getSnapshot(), proposalExecuting: Boolean(proposalStore.executingId),
+        proposalExecution: selected?.execution ?? null,
+        proposalDefaultRepoPath: selected?.context?.defaultRepoPath ?? '',
+        lastExecution: latest ? { proposal: latest.entry.proposal, execution: latest.execution,
+          defaultRepoPath: latest.entry.context?.defaultRepoPath ?? '' } : null,
+      };
+    },
+    act: (command) => {
+      if (command.action !== 'approve' && command.action !== 'discard') throw new Error('Unknown proposal action.');
+      const target = workspaceTargetRef.current;
+      if (!live.hasStarted || !target?.reachable || target.targetDeviceId !== live.targetDeviceId) throw new Error('The phone changed Hubs or disconnected.');
+      if (proposalStore.executingId) throw new Error('The proposal is already being applied.');
+      const selected = proposalStore.selected;
+      if (!selected?.visible || command.proposalRevision !== proposalStore.getSnapshot()) throw new Error('The proposal changed. Review the latest version.');
+      if (command.action === 'discard') { proposalStore.discard(selected.id, String(selected.revision)); return; }
+      if (selected.execution || ['starting', 'recording', 'transcribing', 'working'].includes(controller.getSnapshot().status)) throw new Error('This proposal is not ready to apply.');
+      void executeProposal({ targetId: selected.id, baseRevision: String(selected.revision) })
+        .catch((error) => setProposalActionError(error instanceof Error ? error.message : String(error)));
+    },
+  });
 
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({

@@ -4,7 +4,7 @@ import { useMesh } from '../mesh/MeshContext';
 
 /** The preference belongs to the selected Hub, shared with desktop Companion. */
 export function useMobileCompanionAutoApproveSettings(deviceId: string) {
-  const { request } = useMesh();
+  const { request, subscribe } = useMesh();
   const [stored, setStored] = React.useState({ deviceId: '', enabled: false });
   const enabled = stored.deviceId === deviceId && stored.enabled;
   const setEnabled = (enabled: boolean) => setStored({ deviceId, enabled });
@@ -32,6 +32,14 @@ export function useMobileCompanionAutoApproveSettings(deviceId: string) {
     if (deviceId) void load().catch(() => undefined);
     return () => { generation.current++; };
   }, [deviceId, load]);
+  React.useEffect(() => {
+    if (!deviceId) return;
+    return subscribe('companion', 'auto-approve.settings.changed', (event) => {
+      if (event.sourceDeviceId !== deviceId || typeof event.payload?.enabled !== 'boolean') return;
+      generation.current++;
+      setEnabled(event.payload.enabled); setLoading(false); setError('');
+    });
+  }, [deviceId, subscribe]);
   const save = React.useCallback(async (enabled: boolean) => {
     if (!deviceId || loading || writing.current) return;
     writing.current = true;

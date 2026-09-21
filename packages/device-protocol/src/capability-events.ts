@@ -25,6 +25,9 @@ const POLICIES: Readonly<Record<string, CapabilityEventPolicy>> = {
     maxPayloadBytes: 4 * 1024,
     maxEventsPerMinute: 60,
   },
+  'companion\0mirror.command': { requiredOperation: 'run.start', maxPayloadBytes: 4096, maxEventsPerMinute: 120 },
+  'companion\0mirror.settings.changed': { requiredOperation: 'run.start', maxPayloadBytes: 4096, maxEventsPerMinute: 120 },
+  'companion\0auto-approve.settings.changed': { requiredOperation: 'auto-approve.settings.get', maxPayloadBytes: 4096, maxEventsPerMinute: 120 },
   'companion\0live.event': {
     requiredOperation: 'live.start',
     maxPayloadBytes: 128 * 1024,

@@ -11,6 +11,8 @@ import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { CompanionRunSession } from './companion-run-session';
 import type { CompanionRuntime } from './companion-runtime';
 import { CompanionLiveSocket } from './CompanionLiveSocket';
+import { CompanionMirrorSocket } from './CompanionMirrorSocket';
+import type { CompanionMirrorService } from './CompanionMirrorService';
 
 const MAX_CLIENT_PAYLOAD_BYTES = 30 * 1024 * 1024;
 
@@ -21,19 +23,20 @@ function messageText(data: RawData): string {
   return data.toString('utf8');
 }
 
-export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSocketServer {
+export function createCompanionWebSocketServer(runtime: CompanionRuntime, mirrors?: CompanionMirrorService): WebSocketServer {
   const server = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_PAYLOAD_BYTES });
   const owners = new Map<string, WebSocket>();
   server.on('connection', (socket: WebSocket, _request: http.IncomingMessage) => {
     let session: CompanionRunSession | null = null;
     let cleanedUp = false;
     let live: CompanionLiveSocket | null = null;
+    let mirror: CompanionMirrorSocket | null = null;
 
     const send = (payload: unknown) => {
       if (socket.readyState !== WebSocket.OPEN) return;
       try {
-        // Bound PCM output when a desktop client stops draining its socket.
-        if (live && socket.bufferedAmount > 1_000_000) { socket.terminate(); return; }
+        // Bound streamed audio and mirrored snapshots when a desktop stops draining its socket.
+        if ((live || mirror) && socket.bufferedAmount > 1_000_000) { socket.terminate(); return; }
         socket.send(JSON.stringify(payload));
       } catch {
         // The socket can close after the ready-state check.
@@ -48,6 +51,13 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         send({ type: 'error', error: 'Invalid Companion message.' });
         return;
       }
+      if (String(message?.type).startsWith('mirror_')) {
+        if (!mirrors || session || live) return;
+        mirror ??= new CompanionMirrorSocket(mirrors, send);
+        mirror.handle(message as unknown as Record<string, unknown>);
+        return;
+      }
+      if (mirror) return;
       if (String(message?.type).startsWith('live_')) {
         if (session) return;
         live ??= new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry });
@@ -165,6 +175,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       if (cleanedUp) return;
       cleanedUp = true;
       live?.close();
+      mirror?.close();
       void session?.close('Companion browser disconnected').catch(() => undefined);
     };
     socket.once('close', cleanup);
