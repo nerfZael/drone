@@ -1,5 +1,5 @@
 import React from 'react';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test, spyOn } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { Root } from 'react-dom/client';
 import type { CompanionEditorTarget } from '../src/droneHub/files/CompanionEditorFiles';
@@ -292,4 +292,35 @@ test('Read shortcut preserves grants and refreshes the new drone after an in-fli
   await settle();
   expect(posted[1].revision).toBe('1');
   expect(access.defaultTargetId).toBe(container.id);
+});
+
+test('saving Companion text keeps the editor open until explicitly closed', async () => {
+  const { createRoot } = await import('react-dom/client');
+  const { flushSync } = await import('react-dom');
+  const { CompanionTextEditor } = await import('../src/droneHub/companion/CompanionTextEditor');
+  const editorModule = await import('../src/droneHub/chat/ChatComposerEditor');
+  const editorStub = spyOn(editorModule, 'ChatComposerEditor').mockImplementation(() => <textarea />);
+  try {
+  let saves = 0, closes = 0;
+  function App() {
+    const [dirty, setDirty] = React.useState(true);
+    return <CompanionTextEditor id="prompt" title="Companion system prompt"
+      content="Updated instructions" maxChars={50000} loading={false} saving={false}
+      error="" dirty={dirty} onChange={() => {}} load={async () => {}}
+      save={async () => { saves++; setDirty(false); return true; }}
+      onClose={() => { closes++; }} />;
+  }
+  const node = document.createElement('div');
+  document.body.append(node);
+  root = createRoot(node);
+  flushSync(() => root!.render(<App />));
+  const button = (text: string) => Array.from(node.querySelectorAll('button')).find(b => b.textContent === text)!;
+  button('Save').click();
+  await settle();
+  expect(saves).toBe(1);
+  expect(closes).toBe(0);
+  expect(node.querySelector('[role="dialog"]')).not.toBeNull();
+  button('Close').click();
+  expect(closes).toBe(1);
+  } finally { editorStub.mockRestore(); }
 });

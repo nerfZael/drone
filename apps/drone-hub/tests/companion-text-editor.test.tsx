@@ -9,12 +9,12 @@ const props = {
   onChange() {}, onClose() {}, save: async () => true, load: async () => {},
 };
 
-test('an initially empty instructions document opens an editable dialog with Save and Discard', () => {
+test('an initially empty instructions document opens an editable dialog with Save and Close', () => {
   const html = renderToStaticMarkup(<CompanionTextEditor {...props} />);
   expect(html).toContain('role="dialog"');
   expect(html).toContain('aria-label="Edit Companion instructions"');
   expect(html).toContain('>Save</button>');
-  expect(html).toContain('>Discard</button>');
+  expect(html).toContain('>Close</button>');
   expect(html).not.toMatch(/<button[^>]* disabled=""[^>]*>Save<\/button>/);
 });
 

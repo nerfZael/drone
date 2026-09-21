@@ -145,3 +145,25 @@ test('settings save is atomic with the fit check and new prompts cannot race it'
     expect((runtime as any).changingSettings).toBe(false);
   });
 });
+
+
+test('settings save during an active reply preserves its snapshot and defers its model fit check', async () => {
+  await isolated(async () => {
+    await writeCompanionSettings(DEFAULT_COMPANION_SETTINGS);
+    const context = { runId: 'active', settings: DEFAULT_COMPANION_SETTINGS };
+    const checked: string[] = [];
+    const runtime = Object.create(CompanionRuntime.prototype) as CompanionRuntime;
+    Object.assign(runtime, {
+      contexts: new Map([['companion:active', context]]),
+      activeRunIds: new Set(['active']), changingSettings: false,
+      host: { ensureModelFits: async (id: string) => { checked.push(id); } },
+    });
+    await runtime.updateSettings({ ...DEFAULT_COMPANION_SETTINGS, systemPrompt: 'Updated instructions' });
+    expect((await readCompanionSettings()).systemPrompt).toBe('Updated instructions');
+    expect(context.settings).toBe(DEFAULT_COMPANION_SETTINGS);
+    await runtime.updateSettings({ ...DEFAULT_COMPANION_SETTINGS, provider: 'openai' });
+    expect((await readCompanionSettings()).provider).toBe('openai');
+    expect(checked).toEqual([]);
+    expect(context.settings.provider).toBe('codex');
+  });
+});

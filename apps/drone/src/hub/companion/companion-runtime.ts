@@ -150,11 +150,14 @@ export class CompanionRuntime {
   }
 
   async updateSettings(value: unknown): Promise<void> {
-    if (this.changingSettings || this.activeRunIds.size) throw new Error('Wait for the Companion reply to finish before changing settings.');
+    if (this.changingSettings) throw new Error('Companion settings are already being saved. Please retry when it finishes.');
     this.changingSettings = true;
     try {
       await writeCompanionSettings(value, async (settings) => {
         for (const [threadId, context] of this.contexts) {
+          // Active replies retain their settings snapshot. Check model fit when
+          // the next reply picks up the saved settings, once the thread is idle.
+          if (this.activeRunIds.has(context.runId)) continue;
           if (context.settings.provider !== settings.provider || context.settings.model !== settings.model) {
             await this.host.ensureModelFits(threadId, settings);
           }

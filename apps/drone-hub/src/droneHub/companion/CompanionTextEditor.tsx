@@ -29,9 +29,9 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
       panelRef.current?.focus();
     } else onClose();
   };
-  const saveAndClose = async () => {
+  const saveChanges = async () => {
     if (content === undefined || tooLong || saving || loading || conflict) return;
-    if (!dirty || await save()) onClose();
+    if (!dirty || await save()) setNotice(false);
   };
 
   return (
@@ -72,7 +72,7 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
               initialSelection={{ start: 0, end: 0 }}
               onChange={(text) => { onChange(text); setNotice(false); }}
               onSelectionChange={() => {}}
-              onSendQueued={() => void saveAndClose()}
+              onSendQueued={() => void saveChanges()}
               ariaLabel={`Edit ${title}`}
               maxHeight="40dvh"
             />
@@ -84,8 +84,8 @@ export function CompanionTextEditor({ id, title, description, content, maxChars,
           <span role="status" className="mr-auto text-[var(--muted)]">{saving ? 'Saving…' : notice ? 'Save or discard your changes to close.' : dirty ? 'Unsaved changes' : 'No changes'}</span>
           {!loading && content === undefined ? <button type="button" onClick={() => void load()}>Retry</button> : null}
           {conflict ? <button type="button" disabled={saving || loading} onClick={() => void load()}>Discard draft and load latest</button> : null}
-          <button type="button" disabled={saving || loading} onClick={onClose} className="rounded border border-[var(--border-subtle)] px-3 py-1.5 text-[var(--fg)] disabled:opacity-40">Discard</button>
-          <button type="button" disabled={loading || saving || content === undefined || tooLong || conflict} onClick={() => void saveAndClose()} className="rounded bg-[var(--accent)] px-3 py-1.5 text-[var(--accent-contrast)] disabled:opacity-40">Save</button>
+          <button type="button" disabled={saving || loading} onClick={onClose} className="rounded border border-[var(--border-subtle)] px-3 py-1.5 text-[var(--fg)] disabled:opacity-40">{dirty ? 'Discard' : 'Close'}</button>
+          <button type="button" disabled={loading || saving || content === undefined || tooLong || conflict} onClick={() => void saveChanges()} className="rounded bg-[var(--accent)] px-3 py-1.5 text-[var(--accent-contrast)] disabled:opacity-40">Save</button>
         </footer>
       </section>
     </>
