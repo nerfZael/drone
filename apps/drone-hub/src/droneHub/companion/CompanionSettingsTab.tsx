@@ -7,6 +7,7 @@ import { AssistantToolsPanel } from '../assistant/AssistantSettingsPanels';
 import type { AssistantToolSummary } from '../assistant/assistant-types';
 import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
 import { useCompanion } from './CompanionContext';
+import { CompanionMirrorSettings } from './CompanionMirrorSettings';
 import {
   changeCompanionProvider,
   isCompanionModelSelectionValid,
@@ -84,6 +85,7 @@ export function CompanionSettingsTab({ settings, speech }: {
   return (
     <div className="max-w-3xl space-y-5">
       <CompanionShortcutSettings />
+      <CompanionMirrorSettings />
       {live ? <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <UiSegmentedControl label="Companion voice mode" value={!live.enabled ? 'normal' : live.mode ?? 'live'}
           options={[{ value: 'normal', label: 'Normal' }, { value: 'live', label: 'Live voice' }, { value: 'jev', label: 'Jev voice' }]}

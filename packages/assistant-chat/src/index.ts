@@ -45,3 +45,4 @@ export * from './companion-live-timing.js';
 export * from './CompanionScreen.js';
 
 export * from './companion-reflex/index.js';
+export type { CompanionMirrorSnapshot, CompanionMirrorSession, CompanionMirrorCommand, CompanionMirrorState } from './companion-mirror.js';

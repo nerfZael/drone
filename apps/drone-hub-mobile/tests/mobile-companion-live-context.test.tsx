@@ -15,11 +15,12 @@ let autoApprove = false;
 let rejectSettings = false;
 let recorded = 0;
 let nextId = 0;
+let notifyLive = () => {};
 let backend: ((prompt: string, signal: AbortSignal) => Promise<string>) | null = null;
 const calls: { operation: string; payload: any }[] = [];
 const listeners = new Set<(event: any) => void>();
 const live: any = { hasStarted: false, status: 'idle', error: '', captions: '', targetDeviceId: '',
-  start: async (id: string, _name: string, run: typeof backend) => { live.hasStarted = true; live.status = 'listening'; live.targetDeviceId = id; backend = run; },
+  start: async (id: string, _name: string, run: typeof backend) => { live.hasStarted = true; live.status = 'listening'; live.targetDeviceId = id; backend = run; notifyLive(); },
   pause: () => { live.status = 'paused'; }, resume: async () => { live.status = 'listening'; },
   stop: () => { live.status = 'idle'; }, reset: () => { live.hasStarted = false; live.status = 'idle'; }, toggleMute() {} };
 const voice = {
@@ -51,12 +52,13 @@ const mesh = {
     return {};
   },
   subscribe: (_capability: string, _event: string, listener: (event: any) => void) => {
-    listeners.add(listener); return () => listeners.delete(listener);
+    const filtered = (event: any) => { if (!event.event || event.event === _event) listener(event); };
+    listeners.add(filtered); return () => listeners.delete(filtered);
   },
 };
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => mesh }));
 mock.module('../src/local-assistant/MobileChatVoiceRecorderContext', () => ({ useSharedMobileChatVoiceRecorder: () => voice }));
-mock.module('../src/local-assistant/use-mobile-companion-live', () => ({ useMobileCompanionLive: (_coordinator: unknown, _controller: unknown, callbacks: typeof headsetCallbacks) => { headsetCallbacks = callbacks; return live; } }));
+mock.module('../src/local-assistant/use-mobile-companion-live', () => ({ useMobileCompanionLive: (_coordinator: unknown, _controller: unknown, callbacks: typeof headsetCallbacks) => { const [, refresh] = React.useReducer((value: number) => value + 1, 0); notifyLive = refresh; headsetCallbacks = callbacks; return live; } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => `id-${++nextId}` }));
 // Keep the renderer on the app's React instance in this multi-version workspace.
 const rendererRequire = createRequire(import.meta.resolve('react-test-renderer'));
@@ -429,6 +431,89 @@ async function proposalTool(request: any, callId: string, revision: string, name
     await tick();
   });
 }
+
+test('desktop mirror approvals validate the current phone revision and execute only once', async () => {
+  let executions = 0;
+  const executedTitles: string[] = [];
+  let finish!: () => void;
+  const originalRequest = mesh.request;
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    const value = await originalRequest(...args);
+    return args[2] === 'mirror.settings.get' || args[2] === 'mirror.publish' ? { enabled: true } : value;
+  };
+  const h = await harness(false, async (proposal) => {
+    executions++; executedTitles.push(proposal.title);
+    await new Promise<void>((resolve) => { finish = resolve; });
+    return { ok: true, operations: [] };
+  });
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    await h.refresh();
+    const abort = new AbortController();
+    let reply!: Promise<string>;
+    await act(async () => { reply = backend!('Create a group', abort.signal); await tick(); });
+    const request = calls.find((call) => call.operation === 'run.start')!.payload;
+    await proposalTool(request, 'mirror-draft', '0', 'Review');
+    const second = (await liveTool(request, 'mirror-second', 'create_proposal', { title: 'Second' })).result;
+    await liveTool(request, 'mirror-second-patch', 'apply_proposal_patch', {
+      targetId: second.targetId, baseRevision: '0',
+      content: JSON.stringify({ version: 1, title: 'Second', operations: [{ id: 'second', type: 'create_group', name: 'Second' }] }),
+    });
+    await act(async () => { emitRun(request, { type: 'reply', reply: 'Ready' }); emitRun(request, { type: 'status', status: 'completed' }); });
+    await reply;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    let publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
+    expect(publication.snapshot.proposal.operations[0].name).toBe('Review');
+    const click = (commandId: string, proposalRevision: number, sourceDeviceId = 'hub', action = 'approve') => {
+      for (const listener of listeners) listener({ sourceDeviceId, event: 'mirror.command', payload: {
+        sessionId: publication.sessionId, commandId, proposalRevision, action, expiresAt: Date.now() + 10_000,
+      } });
+    };
+    await act(async () => { click('foreign', 1, 'another-hub'); click('stale', 0); await tick(); });
+    expect(executions).toBe(0);
+    expect(calls.find((call) => call.operation === 'mirror.result' && call.payload.commandId === 'stale')!.payload)
+      .toMatchObject({ ok: false, error: 'The proposal changed. Review the latest version.' });
+    await act(async () => { h.context().selectProposal(second.targetId); });
+    // Both documents have revision 1: switching documents must invalidate the old mirror approval too.
+    await act(async () => { click('selection-stale', publication.snapshot.proposalRevision); await tick(); });
+    expect(executions).toBe(0);
+    expect(calls.find((call) => call.operation === 'mirror.result' && call.payload.commandId === 'selection-stale')!.payload.ok).toBe(false);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
+    const revision = publication.snapshot.proposalRevision;
+    await act(async () => { click('valid', revision); click('duplicate', revision); click('valid', revision); await tick(); });
+    expect(executions).toBe(1);
+    expect(h.context().proposalExecuting).toBe(true);
+    await act(async () => { finish(); await tick(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    const completed = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload.snapshot;
+    expect(executedTitles).toEqual(['Second']);
+    expect(completed.proposal.title).toBe('Create group');
+    expect(completed.lastExecution.execution.ok).toBe(true);
+    expect(live.status).toBe('listening');
+    await act(async () => { click('late', 1); await tick(); });
+    expect(executions).toBe(1);
+  } finally { finish?.(); await h.cleanup(); mesh.request = originalRequest; }
+});
+
+test('phone auto-approve immediately follows a host setting event without restarting Live', async () => {
+  const h = await harness();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    const sendSetting = (value: boolean, sourceDeviceId = 'hub') => {
+      for (const listener of listeners) listener({ sourceDeviceId, event: 'auto-approve.settings.changed', payload: { enabled: value } });
+    };
+    await act(async () => { sendSetting(true, 'other-hub'); });
+    expect(h.context().autoApproveSettings.enabled).toBe(false);
+    await act(async () => { sendSetting(true); });
+    expect(h.context().autoApproveSettings.enabled).toBe(true);
+    await act(async () => { sendSetting(false); });
+    expect(h.context().autoApproveSettings.enabled).toBe(false);
+    expect(live.status).toBe('listening');
+  } finally { await h.cleanup(); }
+});
 
 test('mobile restores auto-approval after remount and keeps the saved value when a write fails', async () => {
   let h = await harness();

@@ -608,3 +608,33 @@ test('Live uses the controls clock to dispatch a background backend task without
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });
+
+test('mirror timers use native ticks once and survive native controls closing', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let now = 0; const clock = new MobileLiveClock(() => now, () => () => {});
+  controlSchedule = clock.schedule;
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  let ticks = 0;
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'Done'); });
+    live.schedule(() => { ticks++; }, 10);
+    now = 20; clock.tick();
+    expect(ticks).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ticks).toBe(1);
+    live.schedule(() => { ticks++; }, 10);
+    clock.close(); // Releasing native controls cancels their own pending tasks.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ticks).toBe(2);
+    const cancel = live.schedule(() => { ticks++; }, 10); cancel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ticks).toBe(2);
+  } finally {
+    controlSchedule = undefined;
+    await act(async () => { root?.unmount(); }); clock.close();
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});

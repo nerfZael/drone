@@ -322,6 +322,7 @@ import { createFileRevisionWatcher } from './file-revision-watch';
 import { createWorkspaceEventsWebSocketServer } from './workspace-events-websocket-server';
 import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
+import { CompanionMirrorService } from './companion/CompanionMirrorService';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerDesktopEventRoutes } from './routes/desktop-event-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
@@ -4383,11 +4384,14 @@ async function startDroneHubApiServerWithLifecycle(
     buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,
     telemetry: companionTelemetry,
   });
-  const companionWss = createCompanionWebSocketServer(companionRuntime);
+  const companionMirrors = new CompanionMirrorService((event, payload, operation, deviceId) =>
+    deviceMesh.broadcastCapabilityEvent('companion', event, payload, operation, deviceId ? [deviceId] : undefined));
+  const companionWss = createCompanionWebSocketServer(companionRuntime, companionMirrors);
   deviceMesh.registerCapability(
-    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces),
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces, companionMirrors),
   );
   registerBackgroundResource('Companion runtime', () => companionRuntime.close());
+  registerBackgroundResource('Companion mirrors', async () => companionMirrors.close());
   registerBackgroundResource('device mesh assistant changes', async () => {
     unsubscribeDeviceMeshAssistantChanges();
   });
@@ -5605,7 +5609,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime);
+  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {

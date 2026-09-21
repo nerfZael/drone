@@ -12,6 +12,7 @@ import type { CompanionWorkspaceService } from '../companion/companion-workspace
 import type { CompanionRuntime } from '../companion/companion-runtime';
 import { CompanionLiveSocket } from '../companion/CompanionLiveSocket';
 import { CompanionLiveMeshSessions } from './CompanionLiveMeshSessions';
+import type { CompanionMirrorService } from '../companion/CompanionMirrorService';
 import type { CapabilityHandler } from './device-mesh-types';
 
 type CompanionMeshSession = {
@@ -45,6 +46,7 @@ export function createCompanionCapability(
   runtime: CompanionRuntime,
   broadcast: BroadcastEvent,
   workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save' | 'current'>,
+  mirrors?: CompanionMirrorService,
 ): CapabilityHandler {
   const live = new CompanionLiveMeshSessions({
     createSocket: send => new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry }),
@@ -75,6 +77,7 @@ export function createCompanionCapability(
   };
 
   const closeDeviceSessions = async (deviceId: string) => {
+    mirrors?.disconnect(deviceId);
     live.revokeDevice(deviceId);
     const session = sessionsByDeviceId.get(deviceId);
     if (session) await cancelSession(session, false);
@@ -85,6 +88,15 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+      if (operation.startsWith('mirror.')) {
+        if (!mirrors) throw new Error('Companion mirroring is unavailable.');
+        if (operation === 'mirror.settings.get') return mirrors.settings();
+        if (operation === 'mirror.publish') return mirrors.publish(sourceDeviceId, context.sourceDevice.name, payload);
+        if (operation === 'mirror.close') mirrors.remove(sourceDeviceId, requiredText(payload.sessionId, 'sessionId'));
+        else if (operation === 'mirror.result') mirrors.result(sourceDeviceId, payload);
+        else throw new Error('Unsupported mirror operation.');
+        return { ok: true };
+      }
       if (operation === 'model.settings.get' || operation === 'model.settings.update') {
         if (operation === 'model.settings.update') {
           await writeCompanionSettings({
@@ -98,7 +110,11 @@ export function createCompanionCapability(
         return { settings: { provider: settings.provider, model: settings.model, thinkingLevel: settings.thinkingLevel }, models, credentials };
       }
       if (operation === 'auto-approve.settings.get') return readCompanionAutoApproveSettings();
-      if (operation === 'auto-approve.settings.update') return writeCompanionAutoApproveSettings(payload);
+      if (operation === 'auto-approve.settings.update') {
+        const settings = await writeCompanionAutoApproveSettings(payload);
+        await mirrors?.autoApproveChanged(settings);
+        return settings;
+      }
       if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload, context.liveAudio);
 
       if (operation === 'workspaces.list' || operation === 'workspaces.update' || operation === 'workspaces.current') {
