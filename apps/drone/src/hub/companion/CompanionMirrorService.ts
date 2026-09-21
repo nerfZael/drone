@@ -182,6 +182,7 @@ function validateSnapshot(value: unknown): CompanionMirrorSnapshot {
   }
   if (snapshot.voiceControls !== undefined && typeof snapshot.voiceControls !== 'boolean' ||
       snapshot.muted !== undefined && typeof snapshot.muted !== 'boolean' ||
+      snapshot.recordingPaused !== undefined && typeof snapshot.recordingPaused !== 'boolean' ||
       snapshot.screenMarkdown !== undefined && typeof snapshot.screenMarkdown !== 'string' ||
       snapshot.reviewNotice !== undefined && typeof snapshot.reviewNotice !== 'string' ||
       snapshot.selectedProposalId != null && typeof snapshot.selectedProposalId !== 'string') throw new Error('Invalid mirror review.');

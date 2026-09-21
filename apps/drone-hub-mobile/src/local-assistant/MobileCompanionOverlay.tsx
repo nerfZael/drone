@@ -38,6 +38,8 @@ import MicOff from 'lucide-react-native/icons/mic-off';
 import Pause from 'lucide-react-native/icons/pause';
 import Play from 'lucide-react-native/icons/play';
 import Square from 'lucide-react-native/icons/square';
+import Send from 'lucide-react-native/icons/send';
+import Trash2 from 'lucide-react-native/icons/trash-2';
 import X from 'lucide-react-native/icons/x';
 import Zap from 'lucide-react-native/icons/zap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -117,7 +119,7 @@ function HeaderButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled, ...(pressed !== undefined ? { selected: pressed } : {}) }}
+      accessibilityState={{ disabled: disabled || loading, ...(pressed !== undefined ? { selected: pressed } : {}) }}
       disabled={disabled || loading}
       hitSlop={4}
       onPress={onPress}
@@ -131,7 +133,7 @@ function HeaderButton({
       {loading ? (
         <ActivityIndicator color={headerTone[tone].color} size="small" />
       ) : (
-        <Icon color={headerTone[tone].color} size={15} strokeWidth={2.1} />
+        <Icon color={headerTone[tone].color} size={18} strokeWidth={2.1} />
       )}
     </Pressable>
   );
@@ -345,39 +347,6 @@ export function MobileCompanionOverlay() {
           } satisfies MobileCompanionMenuItem,
         ]
       : []),
-    ...(recording
-      ? [
-          {
-            id: 'finish-recording',
-            section: 'Voice',
-            icon: Square,
-            label: 'Finish recording and send',
-            tone: 'success',
-            onPress: () => void companion.toggle(),
-          } satisfies MobileCompanionMenuItem,
-          {
-            id: 'pause-recording',
-            section: 'Voice',
-            icon: companion.recordingPaused ? Play : Pause,
-            label: companion.recordingPaused ? 'Resume recording' : 'Pause recording',
-            tone: companion.recordingPaused ? 'accent' : 'neutral',
-            keepOpen: true,
-            onPress: companion.toggleRecordingPause,
-          } satisfies MobileCompanionMenuItem,
-        ]
-      : []),
-    ...((recording || (voiceBusy && !liveActive && !companion.checkingVoiceMode))
-      ? [
-          {
-            id: 'discard-recording',
-            section: 'Voice',
-            icon: X,
-            label: 'Discard recording',
-            tone: 'danger',
-            onPress: () => void companion.discardRecording(),
-          } satisfies MobileCompanionMenuItem,
-        ]
-      : []),
     ...(active
       ? [
           {
@@ -402,6 +371,17 @@ export function MobileCompanionOverlay() {
           } satisfies MobileCompanionMenuItem,
         ]
       : []),
+    {
+      id: 'auto-approve',
+      section: 'Proposals',
+      icon: Zap,
+      label: `Auto-approve proposals ${autoApprove.enabled ? 'on' : 'off'}`,
+      selected: autoApprove.enabled,
+      tone: autoApprove.enabled ? 'success' : 'neutral',
+      disabled: !companion.available || !autoApprove.supported || companion.proposalExecuting,
+      loading: autoApprove.loading || autoApprove.saving,
+      onPress: () => void autoApprove.save(!autoApprove.enabled),
+    },
     {
       id: 'workspaces',
       section: 'Workspace',
@@ -449,89 +429,6 @@ export function MobileCompanionOverlay() {
         style={[styles.sheet, { maxHeight, marginBottom }, sheetStyle]}
       >
         <View style={styles.sheetInner}>
-          <GestureDetector gesture={dragGesture}>
-            <View
-              style={styles.header}
-              accessibilityActions={[{ name: 'expand', label: 'Expand Companion' }, { name: 'collapse', label: 'Collapse Companion' }]}
-              onAccessibilityAction={(event) => resize(event.nativeEvent.actionName === 'collapse')}
-            >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={active ? 'Working — show tool activity' : 'Show Companion activity'}
-                accessibilityState={{ expanded: activityExpanded }}
-                hitSlop={8}
-                onPress={() => { resize(false); setContextTooltipOpen(false); setActivityExpanded((value) => !value); }}
-                style={({ pressed }) => [styles.dotButton, pressed && styles.pressed]}
-              >
-                {active ? (
-                  <ActivityIndicator color={colors.accent} size="small" />
-                ) : (
-                  <View style={[styles.dot, statusDotStyle(status, liveActive, companion.recordingPaused)]} />
-                )}
-              </Pressable>
-              <View style={styles.headline}>
-                {companion.transcript ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
-                    accessibilityState={{ expanded: transcriptExpanded }}
-                    onPress={() => { resize(false); setTranscriptExpanded((value) => !value); }}
-                  >
-                    <Text numberOfLines={!collapsed && !composerFocused && transcriptExpanded ? undefined : 1} style={styles.transcript}>
-                      {companion.transcript}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.title, status === 'error' && styles.titleError]}>
-                    {headlineLabel(companion)}
-                  </Text>
-                )}
-              </View>
-              <ChatSubscriptionIndicator companion subscriptions={companion.subscriptions ?? []} />
-              {liveActive ? (
-                <HeaderButton
-                  label={live.muted ? 'Unmute microphone' : 'Mute microphone'}
-                  tone={live.muted ? 'danger' : 'neutral'}
-                  pressed={live.muted}
-                  onPress={live.toggleMute}
-                  icon={live.muted ? MicOff : Mic}
-                />
-              ) : null}
-              {liveSettings.enabled || liveActive || livePaused ? (
-                <HeaderButton
-                  label={liveActive ? 'Stop live voice; submitted work continues' : 'Start live voice'}
-                  tone={liveActive ? 'danger' : 'accent'}
-                  disabled={!liveActive && !livePaused && (liveBusy || voiceBusy || recording || !companion.available)}
-                  onPress={() => void companion.toggle()}
-                  icon={liveActive ? Square : Play}
-                />
-              ) : null}
-              <HeaderButton
-                label={`Auto-approve proposals ${autoApprove.enabled ? 'on' : 'off'}`}
-                tone={autoApprove.enabled ? 'success' : 'neutral'}
-                pressed={autoApprove.enabled}
-                disabled={!companion.available || !autoApprove.supported || companion.proposalExecuting}
-                loading={autoApprove.loading || autoApprove.saving}
-                onPress={() => void autoApprove.save(!autoApprove.enabled)}
-                icon={Zap}
-              />
-              <HeaderButton
-                label="Companion options"
-                onPress={() => { Keyboard.dismiss(); setMenuOpen(true); }}
-                icon={Ellipsis}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={active ? 'Stop Companion' : 'Close Companion'}
-                hitSlop={8}
-                onPress={dismiss}
-                style={({ pressed }) => [styles.closeButton, pressed && styles.ghostPressed]}
-              >
-                <X color={colors.muted} size={17} strokeWidth={2.2} />
-              </Pressable>
-            </View>
-          </GestureDetector>
-
           {showBody ? (
             <ScrollView
               style={styles.body}
@@ -721,6 +618,113 @@ export function MobileCompanionOverlay() {
               ) : null}
             </ScrollView>
           ) : null}
+
+          <GestureDetector gesture={dragGesture}>
+            <View
+              style={styles.header}
+              accessibilityActions={[{ name: 'expand', label: 'Expand Companion' }, { name: 'collapse', label: 'Collapse Companion' }]}
+              onAccessibilityAction={(event) => resize(event.nativeEvent.actionName === 'collapse')}
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={active ? 'Working — show tool activity' : 'Show Companion activity'}
+                accessibilityState={{ expanded: activityExpanded }}
+                hitSlop={8}
+                onPress={() => { resize(false); setContextTooltipOpen(false); setActivityExpanded((value) => !value); }}
+                style={({ pressed }) => [styles.dotButton, pressed && styles.pressed]}
+              >
+                {active ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <View style={[styles.dot, statusDotStyle(status, liveActive, companion.recordingPaused)]} />
+                )}
+              </Pressable>
+              <View style={styles.headline}>
+                {companion.transcript ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
+                    accessibilityState={{ expanded: transcriptExpanded }}
+                    onPress={() => { resize(false); setTranscriptExpanded((value) => !value); }}
+                  >
+                    <Text numberOfLines={!collapsed && !composerFocused && transcriptExpanded ? undefined : 1} style={styles.transcript}>
+                      {companion.transcript}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.title, status === 'error' && styles.titleError]}>
+                    {headlineLabel(companion)}
+                  </Text>
+                )}
+              </View>
+              <ChatSubscriptionIndicator companion subscriptions={companion.subscriptions ?? []} />
+              {liveActive ? (
+                <HeaderButton
+                  label={live.muted ? 'Unmute microphone' : 'Mute microphone'}
+                  tone={live.muted ? 'danger' : 'neutral'}
+                  pressed={live.muted}
+                  onPress={live.toggleMute}
+                  icon={live.muted ? MicOff : Mic}
+                />
+              ) : null}
+              {!recording && (liveSettings.enabled || liveActive || livePaused) ? (
+                <HeaderButton
+                  label={liveActive ? 'Stop live voice; submitted work continues' : 'Start live voice'}
+                  tone={liveActive ? 'danger' : 'accent'}
+                  disabled={!liveActive && !livePaused && (liveBusy || voiceBusy || recording || !companion.available)}
+                  onPress={() => void companion.toggle()}
+                  icon={liveActive ? Square : Play}
+                />
+              ) : null}
+              {recording ? (
+                <>
+                  <HeaderButton
+                    label="Finish recording and send"
+                    tone="success"
+                    onPress={() => void companion.toggle()}
+                    icon={Send}
+                  />
+                  <HeaderButton
+                    label={companion.recordingPaused ? 'Resume recording' : 'Pause recording'}
+                    tone={companion.recordingPaused ? 'accent' : 'neutral'}
+                    onPress={companion.toggleRecordingPause}
+                    icon={companion.recordingPaused ? Play : Pause}
+                  />
+                </>
+              ) : null}
+              {recording ? (
+                <HeaderButton
+                  label="Discard recording"
+                  tone="danger"
+                  onPress={() => void companion.discardRecording()}
+                  icon={Trash2}
+                />
+              ) : null}
+              {!recording && !voiceBusy && !active && !liveSettings.enabled && !liveActive && !livePaused ? (
+                <HeaderButton
+                  label="Start recording"
+                  tone="accent"
+                  disabled={!companion.available}
+                  onPress={() => void companion.toggle()}
+                  icon={Mic}
+                />
+              ) : null}
+              <HeaderButton
+                label="Companion options"
+                onPress={() => { Keyboard.dismiss(); setMenuOpen(true); }}
+                icon={Ellipsis}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close Companion"
+                hitSlop={8}
+                onPress={dismiss}
+                style={({ pressed }) => [styles.closeButton, pressed && styles.ghostPressed]}
+              >
+                <X color={colors.muted} size={17} strokeWidth={2.2} />
+              </Pressable>
+            </View>
+          </GestureDetector>
         </View>
       </Animated.View>
       <MobileCompanionMenu visible={menuOpen} items={menuItems} onClose={closeMenu}>
@@ -777,8 +781,8 @@ const styles = StyleSheet.create({
   titleError: { color: colors.danger },
   transcript: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17 },
   headerButton: {
-    width: 30,
-    height: 30,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
@@ -794,7 +798,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   body: { flexGrow: 0, flexShrink: 1 },
-  bodyContent: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10, gap: 10 },
+  bodyContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2, gap: 10 },
   activity: { gap: 2 },
   activitySummary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, paddingBottom: 4 },
   contextUsage: { alignItems: 'center', justifyContent: 'center', width: 28, height: 28, marginLeft: 'auto' },

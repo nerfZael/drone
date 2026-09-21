@@ -45,8 +45,8 @@ export function MobileCompanionLiveSettingsCard() {
           disabled={companion.headsetShortcut.loading || companion.headsetShortcut.saving}
           onValueChange={(enabled) => { void companion.headsetShortcut.save(enabled); }} />
       </View>
-      <Text style={styles.copy}>Off by default. Uses the Hub selected in Drone Hub, with Live voice enabled below. Your headset button starts Companion and Live even when Companion is closed, another app is open, or your phone is locked. While Live is running, the button pauses it.</Text>
-      <Text style={styles.copy}>Keeps a notification available; the microphone stays off until you start Live. Reopen Drone after a restart or force-stop. Other media apps may receive the headset button while they are active. End voice in the notification turns this shortcut off.</Text>
+      <Text style={styles.copy}>Off by default. Uses the selected Hub and its voice mode, even while your phone is locked. In Normal mode, tap to record or send. Hold and release: 0.3 seconds pauses/resumes, 0.8 seconds cancels, and 1.3 seconds clears context and closes Companion. Holds require a headset that sends button-down and button-up events. In Live mode, the button starts or pauses Live voice.</Text>
+      <Text style={styles.copy}>Keeps a notification available; the microphone stays off until you start recording or Live voice. Reopen Drone after a restart or force-stop. Other media apps may receive the headset button while they are active. End voice in the notification turns this shortcut off.</Text>
       {companion.headsetShortcut.enabled ? <Text style={styles.copy}>{companion.live.shortcutArmed ? 'Headset shortcut ready' : 'Headset shortcut is not ready'}</Text> : null}
       {companion.headsetShortcut.error ? <>
         <ErrorBanner message={companion.headsetShortcut.error} />

@@ -47,6 +47,9 @@ function RemoteSession({ session }: { session: CompanionMirrorSession }) {
         <button type="button" disabled={disabled || session.status !== 'working'} onClick={() => void act('stop_turn')} className="rounded border px-2 py-1 text-xs disabled:opacity-40">Stop Companion turn</button>
         <p className="w-full text-xs text-[var(--muted)]">Pause releases the microphone; resume starts a new voice connection. End voice leaves backend work running. Stop Companion turn ends voice and cancels backend work.</p>
       </div> : null}
+      {!session.voiceControls && ['starting', 'recording', 'transcribing'].includes(session.status) ? <p role="status" className="text-xs text-[var(--muted)]">
+        {session.status === 'starting' ? 'Starting recording on phone…' : session.status === 'transcribing' ? 'Transcribing recording…' : session.recordingPaused ? 'Recording paused on phone' : 'Recording on phone…'}
+      </p> : null}
       {session.status === 'working' ? <p role="status" className="text-xs text-[var(--muted)]">Companion is working…</p> : null}
       <label className="flex items-center gap-2 text-xs">
         <input type="checkbox" checked={autoApprove.enabled} disabled={!connected || autoApprove.loading || autoApprove.saving}

@@ -40,7 +40,7 @@ class LiveVoiceService : Service() {
     }
     if (intent?.action == TOGGLE) {
       if (intent.getStringExtra("sessionId") == sessionId) {
-        LiveVoiceSession.mediaControls?.let { it.command(if (it.isPlaying()) "pause" else "play") }
+        LiveVoiceSession.mediaControls?.let { it.command(if (it.isNormalRecording()) "toggle" else if (it.isPlaying()) "pause" else "play") }
       }
       return START_NOT_STICKY
     }
@@ -94,17 +94,25 @@ class LiveVoiceService : Service() {
     }
     val controls = LiveVoiceSession.mediaControls
     val playing = controls?.isPlaying() != false
+    val normal = controls?.isNormalRecording() == true
+    val recordingState = controls?.recordingState()
+    val normalTitle = when (recordingState) {
+      "normal-recording" -> "Companion recording"
+      "normal-paused" -> "Companion recording paused"
+      "normal-busy" -> "Companion processing voice"
+      else -> "Companion headset ready"
+    }
     @Suppress("DEPRECATION")
     val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
-    builder.setContentTitle(if (playing) "Live Companion" else "Live Companion paused")
-      .setContentText(if (playing) "Headset button pauses voice" else "Microphone off · Press play for a new Live session")
+    builder.setContentTitle(if (normal) normalTitle else if (playing) "Live Companion" else "Live Companion paused")
+      .setContentText(if (normal) "Tap to record/send · Hold to pause, cancel, or reset" else if (playing) "Headset button pauses voice" else "Microphone off · Press play for a new Live session")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(open)
       .setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false)
       .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_TRANSPORT)
     if (controls != null) {
       builder.addAction(Notification.Action.Builder(
         if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-        if (playing) "Pause" else "Start", action(TOGGLE)).build())
+        if (normal) (if (recordingState == "normal-recording" || recordingState == "normal-paused") "Send" else "Record") else if (playing) "Pause" else "Start", action(TOGGLE)).build())
       builder.setStyle(Notification.MediaStyle().setMediaSession(controls.session.sessionToken).setShowActionsInCompactView(0))
     }
     builder.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "End voice", action(STOP)).build())

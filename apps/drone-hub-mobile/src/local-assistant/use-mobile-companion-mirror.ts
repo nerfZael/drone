@@ -33,7 +33,7 @@ export function useMobileCompanionMirror(input: Input): void {
     const seen = new Set<string>();
     const send = (operation: string, payload: Record<string, unknown>) => request(deviceId, 'companion', operation, payload);
     const publish = async (force = false) => {
-      if (disposed || !enabled) return;
+      if (disposed || !enabled || current.current.deviceId !== deviceId) return;
       if (publishing) { dirty = true; return; }
       const snapshot = boundedSnapshot(current.current.read());
       const serialized = JSON.stringify(snapshot);
@@ -69,7 +69,7 @@ export function useMobileCompanionMirror(input: Input): void {
     });
     const unsubscribeCommands = subscribe('companion', 'mirror.command', async (event) => {
       const command = event.payload as CompanionMirrorCommand;
-      if (disposed || !enabled || event.sourceDeviceId !== deviceId || command?.sessionId !== sessionId ||
+      if (disposed || !enabled || current.current.deviceId !== deviceId || event.sourceDeviceId !== deviceId || command?.sessionId !== sessionId ||
         typeof command.commandId !== 'string' || seen.has(command.commandId)) return;
       seen.add(command.commandId);
       if (seen.size > 64) seen.delete(seen.values().next().value!);

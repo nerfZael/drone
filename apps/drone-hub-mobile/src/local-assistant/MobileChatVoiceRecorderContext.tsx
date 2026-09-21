@@ -23,7 +23,7 @@ type MobileChatVoiceRecorderContextValue = {
   getError(): string;
   setError: React.Dispatch<React.SetStateAction<string>>;
   getRecordingSession(): MobileRecordedVoiceSession;
-  startRecording(owner: MobileRecordedVoiceSessionOwner): Promise<boolean>;
+  startRecording(owner: MobileRecordedVoiceSessionOwner, options?: { backgroundServiceArmed: boolean }): Promise<boolean>;
   toggleRecordingPause(owner: MobileRecordedVoiceSessionOwner): void;
   discardRecording(owner: MobileRecordedVoiceSessionOwner): Promise<void>;
   finishRecording(owner: MobileRecordedVoiceSessionOwner): Promise<MobileVoiceRecordingClip | null>;

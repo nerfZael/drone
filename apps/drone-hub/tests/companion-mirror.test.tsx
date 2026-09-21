@@ -107,6 +107,15 @@ test('desktop mirrors proposals, routes clicks, synchronizes auto-approve, and k
     expect(button('Pause voice').disabled).toBe(true);
     expect(button('Second proposal · draft').disabled).toBe(true);
 
+    const normal = { ...session, liveStatus: 'idle', status: 'recording', voiceControls: false, recordingPaused: true };
+    await act(async () => { socket.receive({ type: 'mirror_state', enabled: true, sessions: [normal] }); });
+    expect(element.textContent).toContain('Companion on My phone');
+    expect(element.textContent).toContain('Recording paused on phone');
+    expect(element.querySelector('[aria-label="Phone voice controls"]')).toBeNull();
+    await act(async () => { socket.receive({ type: 'mirror_state', enabled: true, sessions: [{ ...normal, status: 'completed' }] }); });
+    expect(element.textContent).toContain('Ready to apply');
+    expect(button('Apply proposal').disabled).toBe(false);
+
   } finally {
     await act(async () => root.unmount()); await dom.happyDOM.close();
     for (const [key, descriptor] of previous) {

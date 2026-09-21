@@ -6,6 +6,7 @@ export type CompanionMirrorSnapshot = {
   /** Optional additions let older phones keep publishing approval-only mirrors. */
   voiceControls?: boolean;
   muted?: boolean;
+  recordingPaused?: boolean;
   screenMarkdown?: string;
   proposals?: ProposalSummary[];
   selectedProposalId?: string | null;

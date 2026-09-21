@@ -9,7 +9,7 @@ import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-micro
 let appStateListener: ((state: string) => void) | null = null;
 let prepareAudio: () => Promise<void> = async () => {};
 const connections: Array<{ options: any; closed: number; sent: Record<string, unknown>[] }> = [];
-let mediaAction: ((action: 'play' | 'pause' | 'stop' | 'end') => void) | undefined;
+let mediaAction: ((action: import('../src/local-assistant/mobile-live-controls').LiveMediaAction) => void) | undefined;
 let controlsReleased = 0;
 let controlSchedule: MobileLiveClock['schedule'] | undefined;
 const cues: string[] = [];
@@ -457,7 +457,7 @@ test('opt-in shortcut arms without capture, opens Live while locked, and survive
     await act(async () => { live.reset(); });
     expect(live.hasStarted).toBe(false); expect(live.shortcutArmed).toBe(true);
     expect(controlsReleased).toBe(releases);
-    expect(controlStates.at(-1)).toBe('paused');
+    expect(controlStates.at(-1)).toBe('normal-idle');
     await act(async () => { mediaAction?.('play'); });
     expect(connections).toHaveLength(count + 2); expect(live.status).toBe('listening');
     await act(async () => { mediaAction?.('pause'); });
@@ -635,6 +635,36 @@ test('mirror timers use native ticks once and survive native controls closing', 
   } finally {
     controlSchedule = undefined;
     await act(async () => { root?.unmount(); }); clock.close();
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('normal headset gestures route only to the armed recorder and stop routing after End', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const actions: string[] = [];
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator, undefined, {
+    start: async () => {}, ended: () => { actions.push('end'); },
+    recordingAction: async (action) => { actions.push(action); },
+  }); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.setHeadsetShortcut(true); });
+    await act(async () => {
+      mediaAction?.('recording-tap'); mediaAction?.('recording-hold');
+      mediaAction?.('recording-cancel'); mediaAction?.('recording-reset');
+    });
+    expect(actions).toEqual(['recording-tap', 'recording-hold', 'recording-cancel', 'recording-reset']);
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    await act(async () => { mediaAction?.('recording-reset'); });
+    expect(actions).toHaveLength(4); // A stale Normal event cannot reset Live.
+    await act(async () => { mediaAction?.('end'); mediaAction?.('recording-tap'); });
+    expect(actions.at(-1)).toBe('end'); expect(actions).toHaveLength(5);
+  } finally {
+    await act(async () => root?.unmount()); platform.OS = 'ios';
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });

@@ -33,7 +33,7 @@ mock.module('react-native-reanimated', () => ({
   withTiming: (value: unknown) => value,
 }));
 mock.module('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-for (const icon of ['audio-lines', 'captions', 'ellipsis', 'folder', 'folder-open', 'mic', 'mic-off', 'pause', 'play', 'square', 'x', 'zap']) {
+for (const icon of ['audio-lines', 'captions', 'ellipsis', 'folder', 'folder-open', 'mic', 'mic-off', 'pause', 'play', 'square', 'send', 'trash-2', 'x', 'zap']) {
   mock.module(`lucide-react-native/icons/${icon}`, () => ({ default: () => null }));
 }
 for (const name of ['MobileCompanionScreenPanel', 'MobileCompanionModelPicker', 'NativeMarkdown', 'MobileCompanionMenu', 'MobileCompanionProposal', 'MobileCompanionWorkspaceModal']) {

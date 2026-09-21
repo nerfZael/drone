@@ -7,7 +7,7 @@ import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-pr
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 import type { MobileCompanionWorkspaceTarget } from '../src/local-assistant/MobileCompanionContext';
 
-let headsetCallbacks: { start(): Promise<void>; ended(): void };
+let headsetCallbacks: { start(): Promise<void>; ended(): void; recordingAction(action: import('../src/local-assistant/mobile-live-controls').RecordingHeadsetAction): Promise<void> };
 mock.module('../src/local-assistant/use-mobile-companion-headset-shortcut', () => ({ useMobileCompanionHeadsetShortcut: () => ({ enabled: false, ended() {} }) }));
 let enabled = false;
 let voiceMode = 'live';
@@ -433,7 +433,7 @@ async function proposalTool(request: any, callId: string, revision: string, name
   });
 }
 
-test('desktop mirror approvals validate the current phone revision and execute only once', async () => {
+for (const mode of ['live', 'normal'] as const) test(`${mode} desktop mirror approvals validate the current phone revision and execute only once`, async () => {
   let executions = 0;
   const executedTitles: string[] = [];
   let finish!: () => void;
@@ -448,12 +448,18 @@ test('desktop mirror approvals validate the current phone revision and execute o
     return { ok: true, operations: [] };
   });
   try {
-    enabled = true;
-    await act(async () => { await h.context().toggle(); });
-    await h.refresh();
+    if (mode === 'live') {
+      enabled = true;
+      await act(async () => { await h.context().toggle(); });
+      await h.refresh();
+    }
     const abort = new AbortController();
-    let reply!: Promise<string>;
-    await act(async () => { reply = backend!('Create a group', abort.signal); await tick(); });
+    let reply: Promise<string> | undefined;
+    await act(async () => {
+      if (mode === 'live') reply = backend!('Create a group', abort.signal);
+      else await h.context().submitText('Create a group');
+      await tick();
+    });
     const request = calls.find((call) => call.operation === 'run.start')!.payload;
     await proposalTool(request, 'mirror-draft', '0', 'Review');
     const second = (await liveTool(request, 'mirror-second', 'create_proposal', { title: 'Second' })).result;
@@ -466,6 +472,7 @@ test('desktop mirror approvals validate the current phone revision and execute o
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
     let publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
     expect(publication.snapshot.proposal.operations[0].name).toBe('Review');
+    if (mode === 'normal') expect(publication.snapshot.captions).toBe('Create a group');
     const click = (commandId: string, proposalRevision: number, sourceDeviceId = 'hub', action = 'approve', targetId?: string) => {
       for (const listener of listeners) listener({ sourceDeviceId, event: 'mirror.command', payload: {
         sessionId: publication.sessionId, commandId, proposalRevision, action, targetId, expiresAt: Date.now() + 10_000,
@@ -495,9 +502,12 @@ test('desktop mirror approvals validate the current phone revision and execute o
     expect(completed.lastExecution.execution.ok).toBe(true);
     expect(completed.history).toHaveLength(1);
     expect(completed.proposals).toHaveLength(1);
-    expect(live.status).toBe('listening');
+    expect(live.status).toBe(mode === 'live' ? 'listening' : 'idle');
+    expect(completed.voiceControls).toBe(mode === 'live');
     await act(async () => { click('late', 1); await tick(); });
     expect(executions).toBe(1);
+    await act(async () => { await h.context().close(); });
+    expect(calls.filter(call => call.operation === 'mirror.close').at(-1)?.payload.sessionId).toBe(publication.sessionId);
   } finally { finish?.(); await h.cleanup(); mesh.request = originalRequest; }
 });
 
@@ -559,10 +569,11 @@ test('Companion toggle stops only Live and keeps the overlay available for heads
 });
 
 
-test('headset shortcut opens closed Companion directly in Live without switching the Hub preference', async () => {
+test('headset shortcut honors Live preference without changing it', async () => {
   const h = await harness();
   try {
     expect(h.context().overlayOpen).toBe(false);
+    enabled = true;
     calls.length = 0;
     await act(async () => { await headsetCallbacks.start(); });
     await h.refresh();
@@ -570,7 +581,7 @@ test('headset shortcut opens closed Companion directly in Live without switching
     expect(live.status).toBe('listening');
     expect(live.targetDeviceId).toBe('hub');
     expect(recorded).toBe(0);
-    expect(calls.some((call) => call.operation.startsWith('live.settings'))).toBe(false);
+    expect(calls.some((call) => call.operation === 'live.settings.update')).toBe(false);
     await act(async () => { await h.context().close(); });
     await h.refresh();
     expect(h.context().overlayOpen).toBe(false);
@@ -585,7 +596,8 @@ test('headset shortcut refuses to take a microphone from another voice feature',
   try {
     voice.session = { kind: 'continuous', status: 'recording', microphoneAvailable: false };
     await h.refresh();
-    await expect(headsetCallbacks.start()).rejects.toThrow('Another voice feature');
+    await act(async () => { await headsetCallbacks.start(); });
+    expect(h.context().error).toContain('Continuous voice is already using');
     expect(live.status).toBe('idle');
   } finally { voice.session = previous; await h.cleanup(); }
 });
@@ -997,4 +1009,214 @@ test('large mirror snapshots disclose omissions and never send a truncated appro
   expect(snapshot.proposal.operations[0].message).toHaveLength(80_000);
   const small = { ...snapshot, captions: 'Hi', history: [], proposal: { ...proposal, operations: [{ ...proposal.operations[0], message: 'Hello' }] } };
   expect(boundedSnapshot(small)).toEqual(small);
+});
+
+
+test('normal headset taps record/send, holds pause/resume, cancel discards, and reset closes context', async () => {
+  const h = await harness();
+  const previous = { ...voice };
+  let sent = 0;
+  let discarded = 0;
+  try {
+    live.shortcutArmed = true;
+    live.updateRecordingControls = async () => {};
+    voice.startRecording = async (_owner?: string, options?: { backgroundServiceArmed: boolean }) => {
+      expect(options?.backgroundServiceArmed).toBe(true);
+      recorded++;
+      voice.session = { kind: 'companion', status: 'recording', microphoneAvailable: false };
+      return true;
+    };
+    Object.assign(voice, { toggleRecordingPause: () => {
+      voice.session = { ...voice.session, status: voice.session.status === 'paused' ? 'recording' : 'paused' };
+    } });
+    voice.stopRecordingForTranscript = async () => { sent++; voice.session = previous.session; return ''; };
+    voice.discardRecording = async () => { discarded++; voice.session = previous.session; };
+    const gesture = async (action: Parameters<typeof headsetCallbacks.recordingAction>[0]) => {
+      await act(async () => { await headsetCallbacks.recordingAction(action); });
+      await h.refresh();
+    };
+    await gesture('recording-tap');
+    expect(recorded).toBe(1); expect(h.context().recordingPaused).toBe(false);
+    await gesture('recording-hold');
+    expect(h.context().recordingPaused).toBe(true);
+    await gesture('recording-pause'); // A route-loss pause must not resume a paused recorder.
+    expect(h.context().recordingPaused).toBe(true);
+    await gesture('recording-resume');
+    expect(h.context().recordingPaused).toBe(false);
+    await gesture('recording-resume');
+    expect(h.context().recordingPaused).toBe(false);
+    await gesture('recording-hold');
+    await gesture('recording-tap'); // Send also works while paused.
+    expect(sent).toBe(1); expect(recorded).toBe(1);
+    await gesture('recording-tap');
+    await gesture('recording-cancel');
+    expect(discarded).toBe(1); expect(sent).toBe(1);
+    expect(h.context().overlayOpen).toBe(true);
+    await gesture('recording-tap');
+    await gesture('recording-reset');
+    expect(h.context().overlayOpen).toBe(false);
+    expect(h.context().reply).toBe(''); expect(h.context().transcript).toBe('');
+    expect(sent).toBe(1);
+  } finally {
+    Object.assign(voice, previous); live.shortcutArmed = false;
+    await h.cleanup();
+  }
+});
+
+
+for (const source of ['headset', 'toolbar'] as const) test(`${source} discard rejects a late transcript and does not submit it`, async () => {
+  const h = await harness();
+  const previous = { ...voice };
+  let resolve!: (text: string) => void;
+  let pending!: Promise<void>;
+  try {
+    live.shortcutArmed = true;
+    live.updateRecordingControls = async () => {};
+    voice.session = { kind: 'companion', status: 'recording', microphoneAvailable: false };
+    voice.stopRecordingForTranscript = async () => new Promise<string>(done => { resolve = done; });
+    voice.discardRecording = async () => { voice.session = previous.session; };
+    await h.refresh();
+    voice.session = { kind: 'companion', status: 'recording', microphoneAvailable: false };
+    await h.refresh();
+    calls.length = 0;
+    await act(async () => { pending = source === 'headset' ? headsetCallbacks.recordingAction('recording-tap') : h.context().toggle(); });
+    await act(async () => {
+      if (source === 'headset') await headsetCallbacks.recordingAction('recording-cancel');
+      else await h.context().discardRecording();
+    });
+    await act(async () => { resolve('Do not submit this'); await pending; });
+    expect(calls.some(call => call.operation === 'run.start' || call.operation === 'run.message')).toBe(false);
+    expect(h.context().transcript).toBe('');
+  } finally {
+    Object.assign(voice, previous); live.shortcutArmed = false;
+    await h.cleanup();
+  }
+});
+
+test('ending headset controls during preference lookup prevents late recording startup', async () => {
+  const h = await harness();
+  const originalRequest = mesh.request;
+  let resolve!: (value: any) => void;
+  let pending!: Promise<void>;
+  let delayed = false;
+  try {
+    live.shortcutArmed = true;
+    live.updateRecordingControls = async () => {};
+    await h.refresh();
+    mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+      if (args[2] === 'live.settings.get' && !delayed) {
+        delayed = true;
+        return await new Promise(done => { resolve = done; });
+      }
+      return originalRequest(...args);
+    };
+    await act(async () => { pending = headsetCallbacks.recordingAction('recording-tap'); });
+    expect(resolve).toBeDefined();
+    await act(async () => { headsetCallbacks.ended(); resolve({ enabled: false }); await pending; });
+    expect(recorded).toBe(0); expect(live.status).toBe('idle');
+  } finally {
+    mesh.request = originalRequest; live.shortcutArmed = false;
+    await h.cleanup();
+  }
+});
+
+
+test('normal recordings publish a mirror before any Live session has started', async () => {
+  const originalRequest = mesh.request;
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    const value = await originalRequest(...args);
+    return args[2] === 'mirror.settings.get' || args[2] === 'mirror.publish' ? { enabled: true } : value;
+  };
+  const h = await harness();
+  const previous = voice.session;
+  try {
+    voice.session = { kind: 'companion', status: 'recording', microphoneAvailable: false };
+    await h.refresh();
+    expect(live.hasStarted).toBe(false);
+    let publication = calls.filter(call => call.operation === 'mirror.publish').at(-1)?.payload;
+    expect(publication?.snapshot).toMatchObject({ status: 'recording', liveStatus: 'idle', voiceControls: false, recordingPaused: false });
+    voice.session = { ...voice.session, status: 'paused' };
+    await h.refresh();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+    publication = calls.filter(call => call.operation === 'mirror.publish').at(-1)?.payload;
+    expect(publication?.snapshot.recordingPaused).toBe(true);
+  } finally {
+    voice.session = previous;
+    await h.cleanup(); mesh.request = originalRequest;
+  }
+});
+
+
+test('switching from Live to normal text replaces stale Live mirror captions and controls', async () => {
+  const originalRequest = mesh.request;
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    const value = await originalRequest(...args);
+    return args[2] === 'mirror.settings.get' || args[2] === 'mirror.publish' ? { enabled: true } : value;
+  };
+  const h = await harness();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    live.captions = 'Old Live transcript';
+    await h.refresh();
+    expect(live.hasStarted).toBe(true);
+    await act(async () => { await h.context().submitText('New normal message'); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+    const published = calls.filter(call => call.operation === 'mirror.publish').at(-1)?.payload.snapshot;
+    expect(published).toMatchObject({ voiceControls: false, liveStatus: 'idle', captions: 'New normal message' });
+  } finally {
+    live.captions = ''; await h.cleanup(); mesh.request = originalRequest;
+  }
+});
+
+test('closing Companion stops the microphone before waiting for Hub cancellation', async () => {
+  const originalRequest = mesh.request;
+  const originalDiscard = voice.discardRecording;
+  let release!: () => void;
+  let discarded = false;
+  let closing: Promise<void> | undefined;
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    if (args[2] === 'run.cancel') await new Promise<void>(resolve => { release = resolve; });
+    return originalRequest(...args);
+  };
+  voice.discardRecording = async () => { discarded = true; };
+  const h = await harness();
+  try {
+    await act(async () => { await h.context().submitText('Start work'); });
+    discarded = false;
+    await act(async () => { closing = h.context().close(); });
+    expect(release).toBeDefined();
+    expect(discarded).toBe(true);
+    await act(async () => { release(); await closing; });
+  } finally {
+    release?.(); await closing;
+    await h.cleanup();
+    mesh.request = originalRequest; voice.discardRecording = originalDiscard;
+  }
+});
+
+test('cancelled normal conversation is not mirrored to a different Hub when switching targets', async () => {
+  const originalRequest = mesh.request;
+  const originalCapabilities = mesh.profile.capabilitiesByDevice;
+  const published: { deviceId: string; snapshot: any }[] = [];
+  mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+    const result = await originalRequest(...args);
+    if (args[2] === 'mirror.publish') published.push({ deviceId: args[0], snapshot: args[3].snapshot });
+    return args[2] === 'mirror.settings.get' || args[2] === 'mirror.publish' ? { enabled: true } : result;
+  };
+  const h = await harness();
+  try {
+    await act(async () => { await h.context().submitText('Private to first Hub'); });
+    await act(async () => { await h.context().cancel(); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+    expect(published.some(item => item.deviceId === 'hub' && item.snapshot.captions === 'Private to first Hub')).toBe(true);
+    mesh.profile.capabilitiesByDevice = { ...originalCapabilities, 'other-hub': [COMPANION_CAPABILITY] } as typeof originalCapabilities;
+    h.switchHub();
+    await h.refresh();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+    expect(published.filter(item => item.deviceId === 'other-hub')).toEqual([]);
+    expect(h.context().overlayOpen).toBe(false);
+  } finally {
+    await h.cleanup(); mesh.request = originalRequest; mesh.profile.capabilitiesByDevice = originalCapabilities;
+  }
 });

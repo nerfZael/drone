@@ -113,7 +113,7 @@ class LiveVoiceModule : Module() {
       // Register paused without claiming audio focus, opening SCO, or starting capture.
       LiveVoiceSession.mediaControls = LiveMediaControls(context, id, { action ->
         sendEvent("mediaControl", mapOf("id" to id, "action" to action))
-      }, initialState = "paused", onTick = { sendEvent("controlTick", mapOf("id" to id)) })
+      }, initialState = "normal-idle", onTick = { sendEvent("controlTick", mapOf("id" to id)) })
       LiveVoiceSession.refreshNotification?.invoke()
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("updateControls") { id: String, state: String ->

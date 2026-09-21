@@ -4,8 +4,10 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Crypto from 'expo-crypto';
 import { startMobileLiveBackground } from './mobile-live-background';
 
-export type LiveMediaAction = 'play' | 'pause' | 'stop' | 'end';
-export type LiveMediaState = 'connecting' | 'recording' | 'paused';
+export type RecordingHeadsetAction = 'recording-tap' | 'recording-hold' | 'recording-cancel' | 'recording-reset' | 'recording-pause' | 'recording-resume';
+export type LiveMediaAction = 'play' | 'pause' | 'stop' | 'end' | RecordingHeadsetAction;
+export type NormalRecordingControlState = 'normal-idle' | 'normal-recording' | 'normal-paused' | 'normal-busy';
+export type LiveMediaState = 'connecting' | 'recording' | 'paused' | NormalRecordingControlState;
 type NativeControls = {
   armControls(id: string): Promise<void>;
   armStandbyControls?(id: string): Promise<void>;

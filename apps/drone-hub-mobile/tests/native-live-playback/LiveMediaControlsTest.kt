@@ -254,7 +254,75 @@ private fun hangupCueUsesHeadsetMediaAfterRouteRelease() {
   println("Physical call hangup plays the stop cue only on the same headset's media route after teardown; no microphone, speaker fallback, or stale resume cue")
 }
 
+private fun normalRecordingGestures() {
+  val context = Context()
+  val actions = mutableListOf<String>()
+  val controls = LiveMediaControls(context, "normal", actions::add, initialState = "normal-idle")
+  fun key(action: Int, held: Long = 0, repeat: Int = 0, cancelled: Boolean = false, down: Long = 100) {
+    controls.session.callback!!.onMediaButtonEvent(Intent(extras = mapOf(
+      Intent.EXTRA_KEY_EVENT to KeyEvent(action, KeyEvent.KEYCODE_HEADSETHOOK, repeat, down, down + held, cancelled))))
+  }
+  try {
+    check(!controls.isPlaying() && context.audioManager.focusRequests == 0)
+    for ((duration, expected) in listOf(0L to "recording-tap", 299L to "recording-tap",
+        300L to "recording-hold", 799L to "recording-hold", 800L to "recording-cancel",
+        1299L to "recording-cancel", 1300L to "recording-reset", 5000L to "recording-reset")) {
+      actions.clear()
+      key(KeyEvent.ACTION_DOWN)
+      key(KeyEvent.ACTION_DOWN, duration, repeat = 1)
+      check(actions.isEmpty()) { "A hold must not execute intermediate actions before release" }
+      key(KeyEvent.ACTION_UP, duration)
+      key(KeyEvent.ACTION_UP, duration)
+      check(actions == listOf(expected)) { "$duration ms: $actions" }
+    }
+    actions.clear()
+    key(KeyEvent.ACTION_DOWN); key(KeyEvent.ACTION_UP, 2000, cancelled = true)
+    key(KeyEvent.ACTION_DOWN); key(KeyEvent.ACTION_UP, 2000, down = 200)
+    check(actions.isEmpty())
+    // A missing release must not swallow every future physical press.
+    key(KeyEvent.ACTION_DOWN, down = 100)
+    key(KeyEvent.ACTION_DOWN, down = 300)
+    key(KeyEvent.ACTION_UP, held = 100, down = 300)
+    check(actions == listOf("recording-tap"))
+    actions.clear()
+    controls.update("normal-paused")
+    controls.session.callback!!.onPlay()
+    check(actions == listOf("recording-resume")) { "System Play must resume, not send a paused recording" }
+    actions.clear()
+    controls.update("normal-recording")
+    check(controls.isPlaying() && context.audioManager.focusRequests == 0)
+    key(KeyEvent.ACTION_DOWN)
+    controls.update("normal-paused") // State acknowledgements within Normal do not lose the hold.
+    key(KeyEvent.ACTION_UP, 400)
+    check(actions == listOf("recording-hold"))
+    controls.update("normal-recording")
+    val oldAudio = LivePcmAudio({}, { error(it) })
+    oldAudio.start()
+    val oldTrack = AudioTrack.latest
+    oldTrack.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+    controls.stopAudio(oldAudio)
+    controls.pauseForHeadsetDisconnect()
+    check(oldTrack.released) { "A pending Live stop cue must also be silenced in Normal mode" }
+    check(actions.last() == "recording-pause")
+    controls.update("normal-idle")
+    controls.command("toggle")
+    check(actions.last() == "recording-tap")
+    actions.clear()
+    key(KeyEvent.ACTION_DOWN)
+    controls.update("connecting") // Switching modes invalidates a pending recording gesture.
+    key(KeyEvent.ACTION_UP, 2000)
+    check(actions.isEmpty())
+    controls.update("normal-idle")
+    key(KeyEvent.ACTION_DOWN)
+    controls.close()
+    key(KeyEvent.ACTION_UP, 2000)
+    check(actions.isEmpty())
+  } finally { controls.close() }
+  println("Normal headset gestures execute only on release, respect thresholds, ignore repeats/cancelled/stale events, and preserve Live mode")
+}
+
 fun main() {
+  normalRecordingGestures()
   hangupCueUsesHeadsetMediaAfterRouteRelease()
   stoppedCueKeepsHeadsetOutput()
   controlClockRunsWhilePausedAndStopsOnClose()

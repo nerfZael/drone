@@ -96,6 +96,7 @@ export function useMobileChatVoiceRecorder({
     status: 'idle',
   });
   const sessionRef = React.useRef(session);
+  const backgroundServiceRecording = React.useRef(false);
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const startPromiseRef = React.useRef<Promise<void> | null>(null);
@@ -113,6 +114,7 @@ export function useMobileChatVoiceRecorder({
   const setStatusValue = React.useCallback(
     (status: MobileVoiceRecordingStatus) => {
       if (status === 'idle') {
+        backgroundServiceRecording.current = false;
         setSessionValue({ kind: 'idle', status });
       } else if (sessionRef.current.kind !== 'idle') {
         setSessionValue({ ...sessionRef.current, status });
@@ -255,7 +257,7 @@ export function useMobileChatVoiceRecorder({
   );
 
   const startRecordingOperation = React.useCallback(
-    async (owner: MobileRecordedVoiceSessionOwner) => {
+    async (owner: MobileRecordedVoiceSessionOwner, options?: { backgroundServiceArmed: boolean }) => {
       if (sessionRef.current.kind !== 'idle') return;
       const microphoneLease = microphoneCoordinator.acquire(owner);
       if (!microphoneLease) {
@@ -272,6 +274,7 @@ export function useMobileChatVoiceRecorder({
         return;
       }
       microphoneLeaseRef.current = microphoneLease;
+      backgroundServiceRecording.current = owner === 'companion' && Platform.OS === 'android' && options?.backgroundServiceArmed === true;
       setSessionValue({ kind: owner, status: 'starting' });
       const generation = generationRef.current + 1;
       generationRef.current = generation;
@@ -286,7 +289,7 @@ export function useMobileChatVoiceRecorder({
           );
         }
         if (generationRef.current !== generation || !mountedRef.current) return;
-        const permission = await ensureMobileRecordingPermission({
+        const permission = backgroundServiceRecording.current ? await getRecordingPermissionsAsync() : await ensureMobileRecordingPermission({
           getPermission: getRecordingPermissionsAsync,
           requestPermission: requestRecordingPermissionsAsync,
         });
@@ -298,9 +301,9 @@ export function useMobileChatVoiceRecorder({
               : 'Microphone permission was denied.',
           );
         }
-        await ensureBackgroundRecordingPermission();
+        if (!backgroundServiceRecording.current) await ensureBackgroundRecordingPermission();
         if (generationRef.current !== generation || !mountedRef.current) return;
-        if (!(await waitForAppForeground())) {
+        if (!backgroundServiceRecording.current && !(await waitForAppForeground())) {
           throw new Error('Voice recording was cancelled when the app left the foreground.');
         }
         if (generationRef.current !== generation || !mountedRef.current) return;
@@ -318,7 +321,7 @@ export function useMobileChatVoiceRecorder({
         }
         const uri = recorder.uri;
         recordingUriRef.current = uri;
-        if (!(await waitForAppForeground())) {
+        if (!backgroundServiceRecording.current && !(await waitForAppForeground())) {
           throw new Error('Voice recording was cancelled when the app left the foreground.');
         }
         if (generationRef.current !== generation || !mountedRef.current) {
@@ -345,9 +348,9 @@ export function useMobileChatVoiceRecorder({
   );
 
   const startRecording = React.useCallback(
-    async (owner: MobileRecordedVoiceSessionOwner) => {
+    async (owner: MobileRecordedVoiceSessionOwner, options?: { backgroundServiceArmed: boolean }) => {
       if (startPromiseRef.current || sessionRef.current.kind !== 'idle') return false;
-      const promise = startRecordingOperation(owner);
+      const promise = startRecordingOperation(owner, options);
       startPromiseRef.current = promise;
       try {
         await promise;
@@ -361,12 +364,12 @@ export function useMobileChatVoiceRecorder({
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') return;
+      if (nextState === 'active' || backgroundServiceRecording.current) return;
       const interruptedStatus = sessionRef.current.status;
       const interruptedOwner = sessionRef.current.kind;
       // The native background audio session keeps active and paused recordings
       // alive through screen lock. Startup synchronizes itself with foreground
-      // state, while network transcription remains foreground-only/cancellable.
+      // state; only an armed headset session may also transcribe in the background.
       if (interruptedOwner !== 'idle' && shouldCancelMobileVoiceWhenInactive(interruptedStatus)) {
         void discardRecording(interruptedOwner).then(() => {
           if (mountedRef.current) {

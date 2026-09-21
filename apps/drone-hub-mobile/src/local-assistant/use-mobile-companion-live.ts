@@ -6,7 +6,7 @@ import { CompanionLiveConversation, companionLiveReconnectDelay, connectCompanio
 import { useMesh } from '../mesh/MeshContext';
 import { MobileCompanionLiveConnection } from './MobileCompanionLiveConnection';
 import { openMobileLiveAudio, prepareMobileLiveAudio } from './openMobileLiveAudio';
-import { openMobileLiveControls, type MobileLiveControls, type LiveMediaAction } from './mobile-live-controls';
+import { openMobileLiveControls, type MobileLiveControls, type LiveMediaAction, type RecordingHeadsetAction, type NormalRecordingControlState } from './mobile-live-controls';
 import type { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 
 type State = { hasStarted: boolean; capturing: boolean; status: 'idle' | 'connecting' | 'listening' | 'paused' | 'error'; error: string; captions: string;
@@ -15,7 +15,7 @@ type Session = { connection: MobileCompanionLiveConnection; conversation: Compan
 type Target = { id: string; name: string; run: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; muted: boolean };
 
 export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCoordinator, controller?: CompanionClientController,
-  shortcutCallbacks?: { start(): Promise<void>; ended(): void }) {
+  shortcutCallbacks?: { start(): Promise<void>; ended(): void; recordingAction?(action: RecordingHeadsetAction): Promise<void> }) {
   const mesh = useMesh();
   const [state, setState] = React.useState<State>(EMPTY);
   const active = React.useRef<Session | null>(null);
@@ -57,7 +57,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     endConnection(); target.current = null;
     const old = keepControls.current ? null : controls.current;
     if (old) controls.current = null;
-    if (keepControls.current) void controls.current?.update('paused').catch(() => undefined);
+    if (keepControls.current) void controls.current?.update('normal-idle').catch(() => undefined);
     cleanup.current = cleanup.current.then(async () => {
       if (!old) return;
       await old.release();
@@ -265,8 +265,22 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     const previous = target.current;
     if (previous) await start(previous.id, previous.name, previous.run);
   }, [start]);
+  const updateRecordingControls = React.useCallback(async (state: NormalRecordingControlState) => {
+    if (keepControls.current && !target.current && !active.current && !preparing.current) {
+      await controls.current?.update(state);
+    }
+  }, []);
   mediaAction.current = (action) => {
-    if (action === 'play') {
+    if (action.startsWith('recording-')) {
+      if (!keepControls.current || !controls.current || target.current || active.current || preparing.current) return;
+      const current = controls.current;
+      void shortcut.current?.recordingAction?.(action as RecordingHeadsetAction).catch((error) => {
+        if (controls.current !== current || active.current || preparing.current) return;
+        void current.update('normal-idle').catch(() => undefined);
+        setState((value) => ({ ...value, status: 'error', error: error instanceof Error ? error.message : 'Could not control Companion recording.' }));
+      });
+    }
+    else if (action === 'play') {
       if (target.current) void resume();
       else if (keepControls.current && controls.current) {
         const current = controls.current;
@@ -296,7 +310,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     cancelNative = controls.current?.schedule(fire, delayMs) ?? (() => {});
     return () => { fired = true; cancelFallback(); cancelNative(); };
   }, []);
-  return { ...state, shortcutArmed, setHeadsetShortcut, start, stop, reset, pause, resume, toggleMute, schedule };
+  return { ...state, shortcutArmed, setHeadsetShortcut, updateRecordingControls, start, stop, reset, pause, resume, toggleMute, schedule };
 }
 
 const EMPTY: State = { hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };

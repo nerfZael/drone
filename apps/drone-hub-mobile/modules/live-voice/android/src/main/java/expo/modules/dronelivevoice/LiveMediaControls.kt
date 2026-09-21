@@ -30,6 +30,9 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       handler.postDelayed(this, 250)
     }
   }
+  private var normalRecording = false
+  private var normalState = "normal-idle"
+  private var recordingPress: Pair<Int, Long>? = null
   private var playing = true
   private var closed = false
   private var skipStoppedCue = false
@@ -78,6 +81,27 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       override fun onMediaButtonEvent(intent: Intent): Boolean {
         @Suppress("DEPRECATION")
         val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+        if (closed) return false
+        if (normalRecording && event.keyCode in listOf(KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK)) {
+          if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            recordingPress = Pair(event.keyCode, event.downTime)
+          } else if (event.action == KeyEvent.ACTION_UP) {
+            val press = recordingPress
+            recordingPress = null
+            if (press != null && press.first == event.keyCode && press.second == event.downTime && !event.isCanceled) {
+              // Match desktop defaults. Only release executes the strongest reached action.
+              val held = (event.eventTime - press.second).coerceAtLeast(0)
+              emit(when {
+                held >= 1300 -> "recording-reset"
+                held >= 800 -> "recording-cancel"
+                held >= 300 -> "recording-hold"
+                else -> "recording-tap"
+              })
+            }
+          }
+          return true
+        }
         val action = when (event.keyCode) {
           // Headsets may emit PLAY while active, or PAUSE after we have stopped,
           // while their cached state catches up. Each physical press is a toggle;
@@ -123,6 +147,20 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   }
 
   fun command(action: String) {
+    if (closed) return
+    if (normalRecording && action != "end") {
+      recordingPress = null
+      when (action) {
+        "play" -> when (normalState) {
+          "normal-idle" -> emit("recording-tap")
+          "normal-paused" -> emit("recording-resume")
+        }
+        "pause" -> if (normalState == "normal-recording") emit("recording-pause")
+        "stop" -> emit("recording-cancel")
+        "toggle" -> emit("recording-tap")
+      }
+      return
+    }
     if (closed || action == "play" && playing || action == "pause" && !playing) return
     if (action != "play") {
       // Publish paused before potentially blocking cleanup, so AVRCP sees the next press as play.
@@ -139,6 +177,18 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
 
   fun update(state: String) {
     if (closed || state == "recording" && !playing) return
+    val normal = state.startsWith("normal-")
+    if (normal != normalRecording) recordingPress = null
+    normalRecording = normal
+    if (normal) {
+      normalState = state
+      playing = state == "normal-recording" || state == "normal-busy"
+      // Expo's recorder owns audio focus and routing in Normal voice mode.
+      releaseFocus()
+      publishPlaybackState()
+      LiveVoiceSession.refreshNotification?.invoke()
+      return
+    }
     playing = state != "paused"
     session.setPlaybackToLocal(AudioAttributes.Builder()
       .setUsage(if (playing) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
@@ -178,14 +228,18 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   }
 
   fun isPlaying() = playing
+  fun isNormalRecording() = normalRecording
+  fun recordingState() = normalState
 
   fun hasVoiceModeSettled(): Boolean = Build.VERSION.SDK_INT < 31 ||
     voiceModeSince?.let { SystemClock.elapsedRealtime() - it >= 750 } == true
 
   fun pauseForHeadsetDisconnect() {
+    recordingPress = null
     // A stop acknowledgement can still be rendering after we publish paused.
     // HFP/SCO disconnect signals must silence it before the track falls back.
     stoppedAudio?.stop(); stoppedAudio = null
+    if (normalRecording) { command("pause"); return }
     // During a queued resume the previous route can still be disconnecting.
     // It must not cancel the new intent before its microphone has started.
     if (closed || !playing || LiveVoiceSession.stopAudio == null) return
@@ -232,6 +286,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   fun close() {
     if (closed) return
     closed = true
+    recordingPress = null
     handler.removeCallbacks(tick)
     if (receiverRegistered) { context.unregisterReceiver(routeReceiver); receiverRegistered = false }
     if (Build.VERSION.SDK_INT >= 31) communicationListener?.let { audioManager.removeOnCommunicationDeviceChangedListener(it) }

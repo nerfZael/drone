@@ -26,6 +26,7 @@ import {
   type CompanionToolActivity,
 } from '@drone/assistant-chat';
 
+import type { RecordingHeadsetAction } from './mobile-live-controls';
 import { useMobileCompanionHeadsetShortcut } from './use-mobile-companion-headset-shortcut';
 import { useMobileCompanionLive } from './use-mobile-companion-live';
 import { useMesh } from '../mesh/MeshContext';
@@ -135,6 +136,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
   const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
+  const [keepOpenAfterDiscard, setKeepOpenAfterDiscard] = React.useState(false);
   const preparingVoice = React.useRef(false);
   const companionVoiceActive = voice.session.kind === 'companion';
   const controllerRef = React.useRef<CompanionClientController | null>(null);
@@ -142,9 +144,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     controllerRef.current = new CompanionClientController({ createId: Crypto.randomUUID });
   }
   const controller = controllerRef.current;
-  const headsetCallbacks = React.useRef({ start: async () => {}, ended: () => {} });
+  const headsetCallbacks = React.useRef({ start: async () => {}, ended: () => {}, recordingAction: async (_action: RecordingHeadsetAction) => {} });
+  const headsetTapPending = React.useRef(false);
+  const recordingGeneration = React.useRef(0);
   const live = useMobileCompanionLive(voice.microphoneCoordinator, controller, {
     start: () => headsetCallbacks.current.start(), ended: () => headsetCallbacks.current.ended(),
+    recordingAction: (action) => headsetCallbacks.current.recordingAction(action),
   });
   const headsetShortcut = useMobileCompanionHeadsetShortcut(live.setHeadsetShortcut);
   const liveActive = live.status === 'connecting' || live.status === 'listening';
@@ -346,18 +351,18 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   );
 
   const cancel = React.useCallback(async () => {
+    recordingGeneration.current++;
     live.stop();
-    await controller.cancel();
-    await voice.discardRecording('companion');
+    await Promise.all([controller.cancel(), voice.discardRecording('companion')]);
   }, [controller, live.stop, voice.discardRecording]);
 
   const close = React.useCallback(async () => {
     screen.clear();
     live.reset();
     if (proposalExecutingRef.current) return;
+    setKeepOpenAfterDiscard(false);
     activeTargetDeviceIdRef.current = '';
-    await controller.close();
-    await voice.discardRecording('companion');
+    await Promise.all([controller.close(), voice.discardRecording('companion')]);
     proposalStore.clear();
     setProposalActionError('');
 
@@ -375,7 +380,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     ) {
       void close();
     }
-  }, [close, hasOperations, proposalExecuting, targetRevision]);
+  }, [close, hasOperations, proposalExecuting, targetRevision, target?.targetDeviceId, target?.reachable]);
 
   const run = React.useCallback(
     async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveScope?: MobileLiveScope) => {
@@ -446,10 +451,6 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       return waitForCompanionReply(controller, () => run(prompt, telemetry, undefined, liveScope), signal);
     });
   }, [available, unavailableReason, targetCapability, live.start, voice, controller, run]);
-  headsetCallbacks.current = { start: async () => {
-    if (preparingVoice.current) throw new Error('Companion is already preparing voice.');
-    await startLive();
-  }, ended: headsetShortcut.ended };
 
   const startAssistantVoiceImpl = async (signal: AbortSignal) => {
     if (signal.aborted) return;
@@ -501,7 +502,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         return { ok: false, error: 'Companion is already working.' };
       }
       if (status === 'cancelled' || status === 'error') await close();
-      live.stop();
+      live.reset();
       await run(text);
       const next = controller.getSnapshot();
       if (next.status === 'error') {
@@ -509,10 +510,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       }
       return { ok: true };
     },
-    [available, close, companionVoiceActive, controller, live.stop, run, unavailableReason],
+    [available, close, companionVoiceActive, controller, live.reset, run, unavailableReason],
   );
 
-  const toggle = React.useCallback(async () => {
+  const toggle = React.useCallback(async (options?: { backgroundServiceArmed: boolean }) => {
+    const recordingToken = recordingGeneration.current;
+    const recordingCancelled = () => recordingToken !== recordingGeneration.current;
     if (liveActive) { live.pause(); return; }
     if (live.status === 'paused') { await live.resume(); return; }
     if (preparingVoice.current) return;
@@ -530,7 +533,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const transcriptionStartedAt = performance.now();
       const text = await voice.stopRecordingForTranscript('companion');
       const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
-      if (!controller.isCurrent(token)) return;
+      if (recordingCancelled() || !controller.isCurrent(token)) return;
       if (!text.trim()) {
         controller.reportVoiceError(voice.getError());
         return;
@@ -562,7 +565,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       setCheckingVoiceMode(true);
       try {
         const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown; mode?: unknown };
-        if (!controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
+        if (recordingCancelled() || !controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
         if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
         if (preference.enabled && preference.mode === 'jev') throw new Error('This Hub uses JEV voice. Choose Normal or Live voice in Companion settings; mobile does not support JEV.');
         if (preference.enabled) {
@@ -570,12 +573,13 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
           return;
         }
       } catch (error) {
-        if (controller.isCurrent(token)) controller.reportVoiceError(error instanceof Error ? error.message : 'Could not start Live voice.');
+        if (!recordingCancelled() && controller.isCurrent(token)) controller.reportVoiceError(error instanceof Error ? error.message : 'Could not start Live voice.');
         return;
       } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
     }
-    const started = await voice.startRecording('companion');
-    if (!controller.isCurrent(token)) return;
+    live.reset();
+    const started = await voice.startRecording('companion', options);
+    if (recordingCancelled() || !controller.isCurrent(token)) return;
     if (!started) {
       controller.reportVoiceError(
         voice.getError() || 'The microphone could not start. Check microphone and Groq settings.',
@@ -589,7 +593,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
-    liveActive, live.status, live.resume, startLive, live.pause, mesh.request, targetCapability,
+    liveActive, live.status, live.resume, live.reset, startLive, live.pause, mesh.request, targetCapability,
   ]);
 
   const companionRecording =
@@ -630,9 +634,43 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
 
   const discardRecording = React.useCallback(async () => {
     if (!companionVoiceActive) return;
+    recordingGeneration.current++;
+    setKeepOpenAfterDiscard(true);
     await voice.discardRecording('companion');
     controller.resetIfNoSession();
   }, [companionVoiceActive, controller, voice]);
+
+  // The armed foreground service keeps JS and microphone access available while locked.
+  const headsetTap = async () => {
+    if (headsetTapPending.current) return;
+    headsetTapPending.current = true;
+    try { await toggle({ backgroundServiceArmed: live.shortcutArmed }); }
+    finally { headsetTapPending.current = false; }
+  };
+  headsetCallbacks.current = {
+    start: headsetTap,
+    ended: () => { recordingGeneration.current++; headsetShortcut.ended(); void voice.discardRecording('companion'); },
+    recordingAction: async (action) => {
+      if (action === 'recording-tap') await headsetTap();
+      else if (action === 'recording-reset') { recordingGeneration.current++; await close(); }
+      else if (action === 'recording-cancel') {
+        recordingGeneration.current++;
+        if (companionVoiceActive) await discardRecording();
+        else await cancel();
+      } else if (action === 'recording-hold' || (action === 'recording-pause' && voice.session.status === 'recording') ||
+        (action === 'recording-resume' && voice.session.status === 'paused')) {
+        toggleRecordingPause();
+      }
+    },
+  };
+  const recordingControlState = companionVoiceActive
+    ? voice.session.status === 'recording' ? 'normal-recording'
+      : voice.session.status === 'paused' ? 'normal-paused' : 'normal-busy'
+    : checkingVoiceMode ? 'normal-busy' : 'normal-idle';
+  React.useEffect(() => {
+    if (!live.shortcutArmed || liveArmed) return;
+    void live.updateRecordingControls(recordingControlState).catch(() => undefined);
+  }, [live.shortcutArmed, live.updateRecordingControls, liveArmed, recordingControlState]);
 
   const readAppContext = React.useCallback(
     () => workspaceTargetRef.current?.getAppContext() ?? null,
@@ -655,15 +693,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [companionVoiceActive, controller, voice.error, voice.session.status]);
 
   React.useEffect(() => {
-    if (!liveArmed && !checkingVoiceMode && (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle')) {
-      activeTargetDeviceIdRef.current = '';
-    }
-    const active = state.status === 'working' || liveArmed || live.shortcutArmed;
+    const active = state.status === 'working' || companionVoiceActive || liveArmed || live.shortcutArmed;
     mesh.setBackgroundActivityRequired(active);
     return () => {
       if (active) mesh.setBackgroundActivityRequired(false);
     };
-  }, [mesh.setBackgroundActivityRequired, state.status, liveArmed, live.shortcutArmed, checkingVoiceMode]);
+  }, [mesh.setBackgroundActivityRequired, state.status, companionVoiceActive, liveArmed, live.shortcutArmed, checkingVoiceMode]);
 
   React.useEffect(
     () => () => {
@@ -676,26 +711,29 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
 
   const effectiveStatus = resolveMobileCompanionVoiceStatus(state.status, voice.session);
   const overlayOpen =
-    effectiveStatus !== 'idle' || live.hasStarted || liveArmed || live.status === 'error' || checkingVoiceMode;
+    keepOpenAfterDiscard || effectiveStatus !== 'idle' || live.hasStarted || liveArmed || live.status === 'error' || checkingVoiceMode;
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 
+  const mirrorDeviceId = overlayOpen && available && targetCapability?.operations.includes('mirror.publish')
+    ? activeTargetDeviceIdRef.current || target?.targetDeviceId || '' : '';
+
   useMobileCompanionMirror({
     schedule: live.schedule,
-    deviceId: live.hasStarted && available && targetCapability?.operations.includes('mirror.publish')
-      ? live.targetDeviceId : '',
+    deviceId: mirrorDeviceId === target?.targetDeviceId ? mirrorDeviceId : '',
     read: () => {
       const selected = proposalStore.selected;
       const latest = proposalStore.history[proposalStore.history.length - 1];
       return {
-        voiceControls: true, muted: live.muted, screenMarkdown: screenSnapshot.markdown,
+        voiceControls: live.hasStarted, muted: live.muted, screenMarkdown: screenSnapshot.markdown,
+        recordingPaused: companionVoiceActive && voice.session.status === 'paused',
         proposals: proposalStore.listPending(), selectedProposalId: proposalStore.selectedId,
         history: proposalStore.history.map(item => ({ proposal: item.entry.proposal, execution: item.execution,
           defaultRepoPath: item.entry.context?.defaultRepoPath ?? '' })),
         subscriptions: (state.subscriptions ?? []).map(item => ({ id: item.id, label: presentedChatSubscriptionResourceLabel(item),
           intent: presentedChatSubscriptionDisplayIntent(item.intent, state.subscriptions ?? []), status: item.status })),
         activity: state.activity.map(item => ({ callId: item.callId, label: companionToolActivityLabel(item), status: item.status, error: item.error })),
-        status: effectiveStatus, liveStatus: live.status, captions: live.captions,
+        status: effectiveStatus, liveStatus: live.status, captions: live.hasStarted ? live.captions : state.transcript,
         reply: state.reply, error: live.error || proposalActionError || state.error,
         proposal: selected?.visible ? selected.proposal : null,
         // The store version also changes when the phone selects a different document.
@@ -708,7 +746,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     },
     act: async (command) => {
       const target = workspaceTargetRef.current;
-      if (!live.hasStarted || !target?.reachable || target.targetDeviceId !== live.targetDeviceId) throw new Error('The phone changed Hubs or disconnected.');
+      if (!mirrorDeviceId || !target?.reachable || target.targetDeviceId !== mirrorDeviceId) throw new Error('The phone changed Hubs or disconnected.');
       if (command.action === 'end_voice') { live.stop(); return; }
       if (command.action === 'stop_turn') { await cancel(); return; }
       if (command.action === 'pause') {
