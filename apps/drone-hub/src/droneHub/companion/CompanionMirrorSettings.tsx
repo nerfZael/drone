@@ -12,7 +12,7 @@ export function CompanionMirrorSettings() {
     </label>
     <p className="mt-1 text-xs text-[var(--muted)]">
       {mirror.saving ? 'Saving…' : !mirror.connected ? 'Connecting to Companion…'
-        : 'Saved immediately for this Hub. Show a phone’s Live conversation and control proposals here while voice stays on the phone. Hiding the panel keeps the conversation running.'}
+        : 'Saved immediately for this Hub. Review a phone’s Live conversation, control its microphone and voice session, and manage proposals here. Audio stays on the phone. Hiding the panel keeps the conversation running.'}
     </p>
     {mirror.connected && mirror.enabled && mirror.sessions.length === 0
       ? <p className="mt-2 text-xs text-[var(--muted)]">Waiting for a remote Live session. The phone app must also support mirroring.</p> : null}

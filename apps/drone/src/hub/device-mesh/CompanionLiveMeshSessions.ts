@@ -5,6 +5,7 @@ import { companionLiveSettingsResponse, readCompanionLiveSettings, writeCompanio
 
 type Session = { audio?: LiveAudioEndpoint; id: string; socket: Pick<CompanionLiveSocket, 'handle' | 'close'>; events: Promise<void>; audioEvents: Promise<void>; queuedBytes: number; congested: boolean };
 type Options = {
+  settingsChanged?(settings: { enabled: boolean; mode: 'live' | 'jev' }): Promise<void>;
   emit(deviceId: string, payload: Record<string, unknown>): Promise<void>;
   createSocket?(send: (message: unknown) => void): Session['socket'];
 };
@@ -14,15 +15,19 @@ export class CompanionLiveMeshSessions {
   private sessions = new Map<string, Session>();
   private retired = new Map<string, Set<string>>();
   private closed = false;
+  private accessGeneration = new Map<string, number>();
 
   constructor(private readonly options: Options) {}
 
   async invoke(deviceId: string, operation: string, payload: Record<string, unknown>, audio?: LiveAudioEndpoint): Promise<unknown> {
     if (this.closed) throw new Error('Companion is shutting down.');
-    if (operation === 'live.settings.get') return { enabled: (await readCompanionLiveSettings()).enabled };
-    if (operation === 'live.settings.update') return {
-      enabled: (await writeCompanionLiveSettings({ enabled: payload.enabled })).enabled,
-    };
+    if (operation === 'live.settings.get' || operation === 'live.settings.update') {
+      if (payload.mode !== undefined && payload.mode !== 'live') throw new Error('Mobile supports Normal and Live voice.');
+      const settings = operation === 'live.settings.get' ? await readCompanionLiveSettings()
+        : await writeCompanionLiveSettings({ enabled: payload.enabled, ...(payload.mode === 'live' ? { mode: 'live' } : {}) });
+      if (operation === 'live.settings.update') await this.options.settingsChanged?.(settings);
+      return { enabled: settings.enabled, mode: settings.mode };
+    }
     if (operation === 'live.prompt.get') return companionLiveSettingsResponse(await readCompanionLiveSettings());
     if (operation === 'live.prompt.update') return companionLiveSettingsResponse(await writeCompanionLiveSettings({
       systemPrompt: payload.systemPrompt,
@@ -36,6 +41,12 @@ export class CompanionLiveMeshSessions {
       return { ok: true };
     }
     if (operation === 'live.start') {
+      const generation = this.accessGeneration.get(deviceId) ?? 0;
+      const settings = await readCompanionLiveSettings();
+      if (generation !== (this.accessGeneration.get(deviceId) ?? 0)) { audio?.close(); return { accepted: false }; }
+      if (this.closed) { audio?.close(); throw new Error('Companion is shutting down.'); }
+      session = this.sessions.get(deviceId);
+      if (settings.enabled && settings.mode === 'jev') { audio?.close(); throw new Error('This Hub uses JEV voice, which mobile does not support. Choose Normal or Live voice in mobile Companion settings.'); }
       if (payload.audioTransport !== undefined && payload.audioTransport !== LIVE_AUDIO_TRANSPORT) throw new Error('Unsupported Live audio transport; update the mobile app and Hub');
       if (payload.audioTransport === LIVE_AUDIO_TRANSPORT && !audio) throw new Error('Live audio streaming is unavailable');
       if (this.retired.get(deviceId)?.has(id)) { audio?.close(); return { accepted: false }; }
@@ -84,6 +95,7 @@ export class CompanionLiveMeshSessions {
   }
 
   revokeDevice(deviceId: string): void {
+    this.accessGeneration.set(deviceId, (this.accessGeneration.get(deviceId) ?? 0) + 1);
     this.sessions.get(deviceId)?.socket.close();
     this.sessions.get(deviceId)?.audio?.close();
     this.sessions.delete(deviceId);

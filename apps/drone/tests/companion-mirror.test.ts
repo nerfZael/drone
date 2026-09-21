@@ -31,7 +31,7 @@ async function harness(run: (h: {
 test('mirroring is opt-in, persisted, and discoverable by a desktop joining later', async () => {
   await harness(async (h) => {
     expect(await h.publish()).toEqual({ enabled: false });
-    expect(h.views.at(-2)).toMatchObject({ type: 'mirror_state', enabled: false, sessions: [] });
+    expect(h.views[0]).toMatchObject({ type: 'mirror_state', enabled: false, sessions: [] });
     await h.service.setEnabled(true); await h.publish();
     const late: any[] = [];
     const unsubscribe = await h.service.subscribe((view) => late.push(view));
@@ -124,5 +124,50 @@ test('mesh publishes bind identity to the authenticated phone and disconnect on 
     await capability.accessChanged?.('phone');
     expect(h.views.at(-1).sessions[0].connected).toBe(false);
     await capability.close?.();
+  });
+});
+
+test('voice controls work without a proposal and do not depend on changing proposal revisions', async () => {
+  await harness(async h => {
+    await h.service.setEnabled(true);
+    await h.publish(1, 'session', { voiceControls: true, proposal: null, proposalExecuting: true, status: 'working' });
+    for (const action of ['mute', 'unmute', 'pause', 'resume', 'end_voice', 'stop_turn']) {
+      const pending = h.command({ action, proposalRevision: 0 });
+      const command = h.events.at(-1).payload;
+      expect(command.action).toBe(action);
+      h.service.result('phone', { ...command, ok: true });
+      await pending;
+    }
+    await h.publish(2, 'session', { voiceControls: false });
+    await expect(h.command({ action: 'pause' })).rejects.toThrow('Update the phone');
+  });
+});
+
+test('review snapshots retain screen, history and proposal selection; stale selections are rejected', async () => {
+  await harness(async h => {
+    await h.service.setEnabled(true);
+    const review = {
+      screenMarkdown: '**Here is the result**',
+      proposals: [{ targetId: 'second', title: 'Second', revision: '1', status: 'draft' as const, operationCount: 1, defaultRepoPath: '/repo' }],
+      history: [{ proposal: snapshot.proposal!, execution: { ok: true, operations: [] }, defaultRepoPath: '/repo' }],
+    };
+    await h.publish(1, 'session', review);
+    expect(h.views.at(-1).sessions[0]).toMatchObject(review);
+    await expect(h.command({ action: 'select_proposal', targetId: 'missing' })).rejects.toThrow('no longer pending');
+    await expect(h.command({ action: 'select_proposal', targetId: 'second', proposalRevision: 0 })).rejects.toThrow('changed');
+    const pending = h.command({ action: 'select_proposal', targetId: 'second' });
+    const command = h.events.at(-1).payload;
+    expect(command).toMatchObject({ action: 'select_proposal', targetId: 'second' });
+    h.service.result('phone', { ...command, ok: true }); await pending;
+    await expect(h.publish(2, 'session', { history: [{ ...review.history[0], execution: { ok: true, operations: [{ id: 'bad', status: 'unknown' }] } }] as any })).rejects.toThrow('execution');
+  });
+});
+
+
+test('voice mode changes reach desktop and phone settings even when mirroring is disabled', async () => {
+  await harness(async h => {
+    await h.service.liveSettingsChanged({ enabled: true, mode: 'live' });
+    expect(h.views.at(-1)).toEqual({ type: 'mirror_live_settings', enabled: true, mode: 'live' });
+    expect(h.events.at(-1)).toMatchObject({ event: 'live.settings.changed', payload: { enabled: true, mode: 'live' }, operation: 'live.settings.get' });
   });
 });

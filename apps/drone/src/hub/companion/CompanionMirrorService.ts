@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { parseCompanionProposalText, type CompanionMirrorCommand, type CompanionMirrorSession, type CompanionMirrorSnapshot } from '@drone/assistant-chat';
 import { getHubSettingsRepository } from '../../host/hub-settings-repository';
+import { readCompanionLiveSettings } from './companion-live-settings';
 import { readCompanionAutoApproveSettings } from './companion-auto-approve-settings';
 
 type Entry = { view: CompanionMirrorSession; sequence: number };
@@ -42,11 +43,18 @@ export class CompanionMirrorService {
 
   async subscribe(listener: (message: unknown) => void): Promise<() => void> {
     await this.settings();
-    const autoApprove = await readCompanionAutoApproveSettings();
+    const [autoApprove, voice] = await Promise.all([readCompanionAutoApproveSettings(), readCompanionLiveSettings()]);
     this.listeners.add(listener);
     listener(this.state());
     listener({ type: 'mirror_auto_approve', ...autoApprove });
+    listener({ type: 'mirror_live_settings', enabled: voice.enabled, mode: voice.mode });
     return () => this.listeners.delete(listener);
+  }
+
+  async liveSettingsChanged(settings: { enabled: boolean; mode: 'live' | 'jev' }): Promise<void> {
+    const preference = { enabled: settings.enabled, mode: settings.mode };
+    for (const listener of this.listeners) listener({ type: 'mirror_live_settings', ...preference });
+    await this.emit('live.settings.changed', preference, 'live.settings.get');
   }
 
   async autoApproveChanged(settings: { enabled: boolean }): Promise<void> {
@@ -100,12 +108,22 @@ export class CompanionMirrorService {
     const entry = this.entries.get(deviceId);
     if (!this.enabled || !entry?.view.connected || entry.view.sessionId !== sessionId) throw new Error('The remote Companion is disconnected.');
     const view = entry.view;
-    if (input.action !== 'approve' && input.action !== 'discard') throw new Error('Unknown mirror action.');
-    if (view.pending || view.proposalExecuting) throw new Error('A proposal action is already in progress.');
-    if (!view.proposal || input.proposalRevision !== view.proposalRevision) throw new Error('The proposal changed. Review the latest version.');
-    if (input.action === 'approve' && (view.proposalExecution || ['starting', 'recording', 'transcribing', 'working'].includes(view.status))) throw new Error('This proposal is not ready to apply.');
+    const action = input.action as CompanionMirrorCommand['action'];
+    if (!['approve', 'discard', 'select_proposal', 'mute', 'unmute', 'pause', 'resume', 'end_voice', 'stop_turn'].includes(action)) throw new Error('Unknown mirror action.');
+    if (view.pending) throw new Error('A remote action is already in progress.');
+    if (['approve', 'discard', 'select_proposal'].includes(action)) {
+      if (view.proposalExecuting) throw new Error('A proposal action is already in progress.');
+      if (input.proposalRevision !== view.proposalRevision) throw new Error('The proposal changed. Review the latest version.');
+      if (action === 'select_proposal') {
+        if (!view.proposals?.some(item => item.targetId === input.targetId)) throw new Error('The proposal is no longer pending.');
+      } else {
+        if (!view.proposal) throw new Error('The proposal changed. Review the latest version.');
+        if (action === 'approve' && (view.proposalExecution || ['starting', 'recording', 'transcribing', 'working'].includes(view.status))) throw new Error('This proposal is not ready to apply.');
+      }
+    } else if (!view.voiceControls) throw new Error('Update the phone app to control its voice session.');
     const command: CompanionMirrorCommand = {
-      commandId: randomUUID(), sessionId, action: input.action,
+      commandId: randomUUID(), sessionId, action,
+      ...(action === 'select_proposal' ? { targetId: requiredId(input.targetId) } : {}),
       proposalRevision: view.proposalRevision, expiresAt: Date.now() + 10_000,
     };
     await new Promise<void>((resolve, reject) => {
@@ -155,11 +173,28 @@ function validateSnapshot(value: unknown): CompanionMirrorSnapshot {
     ![snapshot.captions, snapshot.reply, snapshot.error, snapshot.proposalDefaultRepoPath].every((text) => typeof text === 'string')) {
     throw new Error('Invalid mirror snapshot.');
   }
+  if (snapshot.history !== undefined && !Array.isArray(snapshot.history)) throw new Error('Invalid mirror history.');
   if (snapshot.proposal) parseCompanionProposalText(JSON.stringify(snapshot.proposal));
-  for (const execution of [snapshot.proposalExecution, snapshot.lastExecution?.execution]) {
+  for (const execution of [snapshot.proposalExecution, snapshot.lastExecution?.execution, ...(snapshot.history ?? []).map(item => item.execution)]) {
     if (execution && (typeof execution.ok !== 'boolean' || !Array.isArray(execution.operations) ||
       execution.operations.some((operation) => !operation || typeof operation.id !== 'string' ||
         !['completed', 'failed', 'skipped'].includes(operation.status)))) throw new Error('Invalid mirror execution.');
+  }
+  if (snapshot.voiceControls !== undefined && typeof snapshot.voiceControls !== 'boolean' ||
+      snapshot.muted !== undefined && typeof snapshot.muted !== 'boolean' ||
+      snapshot.screenMarkdown !== undefined && typeof snapshot.screenMarkdown !== 'string' ||
+      snapshot.reviewNotice !== undefined && typeof snapshot.reviewNotice !== 'string' ||
+      snapshot.selectedProposalId != null && typeof snapshot.selectedProposalId !== 'string') throw new Error('Invalid mirror review.');
+  if (snapshot.proposals && (!Array.isArray(snapshot.proposals) || snapshot.proposals.some(item =>
+    !item || typeof item.targetId !== 'string' || typeof item.title !== 'string' || typeof item.status !== 'string'))) throw new Error('Invalid mirror proposals.');
+  if (snapshot.subscriptions && (!Array.isArray(snapshot.subscriptions) || snapshot.subscriptions.some(item =>
+    !item || ![item.id, item.label, item.intent, item.status].every(value => typeof value === 'string')))) throw new Error('Invalid mirror subscriptions.');
+  if (snapshot.activity && (!Array.isArray(snapshot.activity) || snapshot.activity.some(item =>
+    !item || typeof item.callId !== 'string' || typeof item.label !== 'string' || typeof item.status !== 'string' ||
+    item.error !== undefined && typeof item.error !== 'string'))) throw new Error('Invalid mirror activity.');
+  for (const item of snapshot.history ?? []) {
+    parseCompanionProposalText(JSON.stringify(item.proposal));
+    if (!item.execution || typeof item.defaultRepoPath !== 'string') throw new Error('Invalid mirror history.');
   }
   if (snapshot.lastExecution) {
     parseCompanionProposalText(JSON.stringify(snapshot.lastExecution.proposal));

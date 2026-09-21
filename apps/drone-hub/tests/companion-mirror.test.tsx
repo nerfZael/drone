@@ -85,6 +85,28 @@ test('desktop mirrors proposals, routes clicks, synchronizes auto-approve, and k
     expect(button('Apply proposal').disabled).toBe(false);
     await act(async () => { element.querySelector('input')!.click(); });
     expect(writes.at(-1)).toEqual({ url: '/api/settings/companion/mirror', body: { enabled: false } });
+    const extended = { ...session, voiceControls: true, muted: false, screenMarkdown: 'Display on both devices',
+      proposals: [{ targetId: 'second', title: 'Second proposal', status: 'draft' }], selectedProposalId: 'first',
+      history: [{ proposal: session.proposal, execution: { ok: true, operations: [] }, defaultRepoPath: '/repo' }],
+      activity: [{ callId: 'read', label: 'Read workspace', status: 'completed' }] };
+    await act(async () => { socket.receive({ type: 'mirror_state', enabled: true, sessions: [extended] }); });
+    expect(element.textContent).toContain('Display on both devices');
+    expect(element.textContent).toContain('Execution history (1)');
+    expect(element.textContent).toContain('Read workspace');
+    for (const [label, action, targetId] of [
+      ['Mute microphone', 'mute'], ['Pause voice', 'pause'], ['End voice', 'end_voice'],
+      ['Second proposal · draft', 'select_proposal', 'second'],
+    ]) {
+      await act(async () => button(label!).click());
+      const command = socket.sent.at(-1);
+      expect(command).toMatchObject({ action, ...(targetId ? { targetId } : {}) });
+      await act(async () => { socket.receive({ type: 'mirror_result', requestId: command.requestId, ok: true }); });
+    }
+    await act(async () => { socket.receive({ type: 'mirror_state', enabled: true, sessions: [{ ...extended, connected: false }] }); });
+    expect(button('Mute microphone').disabled).toBe(true);
+    expect(button('Pause voice').disabled).toBe(true);
+    expect(button('Second proposal · draft').disabled).toBe(true);
+
   } finally {
     await act(async () => root.unmount()); await dom.happyDOM.close();
     for (const [key, descriptor] of previous) {

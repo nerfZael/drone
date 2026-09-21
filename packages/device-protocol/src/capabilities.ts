@@ -120,7 +120,7 @@ export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.up
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: ['model.settings.get', 'model.settings.update', ...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result'],
+  operations: ['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update', 'model.settings.get', 'model.settings.update', ...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result'],
 };
 
 export function isGranted(

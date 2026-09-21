@@ -52,6 +52,7 @@ export function registerCompanionRoutes(
     try {
       const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
       const settings = await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionLiveSettings(body));
+      await mirrors?.liveSettingsChanged(settings);
       json(200, { ok: true, ...companionLiveSettingsResponse(settings) });
     }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }

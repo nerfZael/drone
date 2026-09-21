@@ -6,7 +6,7 @@ import { useMesh } from '../mesh/MeshContext';
 type Input = {
   deviceId: string;
   read(): CompanionMirrorSnapshot;
-  act(command: CompanionMirrorCommand): void;
+  act(command: CompanionMirrorCommand): void | Promise<void>;
   schedule?(callback: () => void, delayMs: number): () => void;
 };
 
@@ -67,7 +67,7 @@ export function useMobileCompanionMirror(input: Input): void {
       enabled = event.payload.enabled;
       if (enabled) void publish(true);
     });
-    const unsubscribeCommands = subscribe('companion', 'mirror.command', (event) => {
+    const unsubscribeCommands = subscribe('companion', 'mirror.command', async (event) => {
       const command = event.payload as CompanionMirrorCommand;
       if (disposed || !enabled || event.sourceDeviceId !== deviceId || command?.sessionId !== sessionId ||
         typeof command.commandId !== 'string' || seen.has(command.commandId)) return;
@@ -76,7 +76,7 @@ export function useMobileCompanionMirror(input: Input): void {
       let error: string | undefined;
       try {
         if (!Number.isFinite(command.expiresAt) || command.expiresAt < Date.now()) throw new Error('The approval request expired. Try again.');
-        current.current.act(command);
+        await current.current.act(command);
       } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
       // Send the current execution flag/revision before acknowledging the click.
       void publish(true).finally(() => send('mirror.result', {
@@ -98,14 +98,26 @@ export function useMobileCompanionMirror(input: Input): void {
   React.useEffect(() => { publishRef.current?.(); });
 }
 
-function boundedSnapshot(snapshot: CompanionMirrorSnapshot): CompanionMirrorSnapshot {
-  const recent = (text: string) => text.length > 12_000 ? `…\n${text.slice(-12_000)}` : text;
-  const next = { ...snapshot, captions: recent(snapshot.captions), reply: recent(snapshot.reply), error: snapshot.error.slice(0, 2_000) };
-  // Conservative UTF-8 bound leaves room for signed mesh envelopes. Never truncate a proposal being approved.
-  if (JSON.stringify(next).length > 60_000) next.lastExecution = null;
-  if (JSON.stringify(next).length > 60_000) {
+export function boundedSnapshot(snapshot: CompanionMirrorSnapshot): CompanionMirrorSnapshot {
+  const next = { ...snapshot, error: snapshot.error.slice(0, 2_000), history: snapshot.history ? [...snapshot.history] : undefined };
+  const notices: string[] = [];
+  const size = () => JSON.stringify(next).length;
+  // Conservatively allow four UTF-8 bytes per character plus the signed mesh envelope.
+  const limit = 59_000; // Reserve space for omission notices.
+  if (size() > limit) next.lastExecution = null; // Already present in history on updated clients.
+  for (const key of ['captions', 'reply'] as const) {
+    if (size() > limit && next[key].length > 12_000) { next[key] = `…\n${next[key].slice(-12_000)}`; notices.push(`Only recent ${key === 'captions' ? 'voice transcript' : 'reply text'} is shown.`); }
+  }
+  if (size() > limit && next.activity?.length) { next.activity = []; notices.push('Activity is too large to mirror; review it on the phone.'); }
+  while (size() > limit && next.history?.length) { next.history.shift(); }
+  if (next.history?.length !== snapshot.history?.length) notices.push('Older executions are omitted; review them on the phone.');
+  if (size() > limit) {
     next.proposal = null; next.proposalExecution = null;
     next.error = 'This proposal is too large to mirror. Review and approve it on the phone.';
+    notices.push(next.error);
   }
+  if (size() > limit) { next.proposals = []; notices.push('The proposal list is too large to mirror; review it on the phone.'); }
+  if (size() > limit && next.subscriptions?.length) { next.subscriptions = []; notices.push('Subscriptions are too large to mirror; review them on the phone.'); }
+  if (notices.length) next.reviewNotice = notices.join(' ');
   return next;
 }

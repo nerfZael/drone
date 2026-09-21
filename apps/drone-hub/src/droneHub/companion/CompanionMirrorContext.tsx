@@ -1,19 +1,21 @@
 import React from 'react';
-import type { CompanionMirrorSession, CompanionMirrorState } from '@drone/assistant-chat';
+import type { CompanionMirrorCommand, CompanionMirrorSession, CompanionMirrorState } from '@drone/assistant-chat';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 
 type MirrorContext = CompanionMirrorState & {
+  liveSettingsVersion: number;
   connected: boolean;
   saving: boolean;
   error: string;
   autoApprove: boolean | null;
   setEnabled(enabled: boolean): Promise<void>;
-  command(session: CompanionMirrorSession, action: 'approve' | 'discard'): Promise<void>;
+  command(session: CompanionMirrorSession, action: CompanionMirrorCommand['action'], targetId?: string): Promise<void>;
 };
 const Context = React.createContext<MirrorContext | null>(null);
 
 export function CompanionMirrorProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<CompanionMirrorState>({ enabled: false, sessions: [] });
+  const [liveSettingsVersion, setLiveSettingsVersion] = React.useState(0);
   const [connected, setConnected] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -39,6 +41,7 @@ export function CompanionMirrorProvider({ children }: { children: React.ReactNod
           window.clearTimeout(timeout);
           setState({ enabled: message.enabled, sessions: message.sessions }); setConnected(true); setConnectionError('');
         } else if (message.type === 'mirror_auto_approve' && typeof message.enabled === 'boolean') setAutoApprove(message.enabled);
+        else if (message.type === 'mirror_live_settings') setLiveSettingsVersion(value => value + 1);
         else if (message.type === 'mirror_result') pending.current.get(message.requestId)?.finish(message.ok ? undefined : message.error || 'Could not control the remote Companion.');
         else if (message.type === 'mirror_error') { setConnectionError(message.error); active.close(); }
       };
@@ -71,7 +74,7 @@ export function CompanionMirrorProvider({ children }: { children: React.ReactNod
     finally { writing.current = false; setSaving(false); }
   };
 
-  const command = async (session: CompanionMirrorSession, action: 'approve' | 'discard') => {
+  const command = async (session: CompanionMirrorSession, action: CompanionMirrorCommand['action'], targetId?: string) => {
     const active = socket.current;
     if (!connected || active?.readyState !== WebSocket.OPEN) throw new Error('Companion mirror is disconnected.');
     const requestId = crypto.randomUUID();
@@ -84,12 +87,12 @@ export function CompanionMirrorProvider({ children }: { children: React.ReactNod
       };
       pending.current.set(requestId, { finish });
       try { active.send(JSON.stringify({ type: 'mirror_command', requestId, deviceId: session.deviceId,
-        sessionId: session.sessionId, proposalRevision: session.proposalRevision, action })); }
+        sessionId: session.sessionId, proposalRevision: session.proposalRevision, action, targetId })); }
       catch (reason) { finish(String(reason)); }
     });
   };
 
-  return <Context.Provider value={{ ...state, connected, saving, error: error || connectionError, autoApprove, setEnabled, command }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ ...state, liveSettingsVersion, connected, saving, error: error || connectionError, autoApprove, setEnabled, command }}>{children}</Context.Provider>;
 }
 
 export function useCompanionMirror() { return React.useContext(Context); }
