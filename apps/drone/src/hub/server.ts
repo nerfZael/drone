@@ -315,6 +315,7 @@ import {
 } from './terminal-websocket-upgrade';
 import { CompanionRuntime } from './companion/companion-runtime';
 import { CompanionWorkspaceService } from './companion/companion-workspaces';
+import { registerRecordingRoutes } from './recordings/registerRecordingRoutes';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { registerReflexRoutes } from './reflex/reflex-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
@@ -5629,6 +5630,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
+  registerRecordingRoutes(apiRouter);
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {

@@ -1,3 +1,4 @@
+import { protectCompanionTranscripts } from './protectCompanionTranscripts';
 import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion-attachments';
 import { hostWorkspaceId, hostWorkspaceRoot } from '../assistant/host-workspaces';
 import crypto from 'node:crypto';
@@ -359,11 +360,11 @@ export class CompanionWorkspaceService {
       });
     }
     // Companion's own workspace needs no grant: it is always readable and writable, never executable.
-    if (homeRoot) targets.push(new blip.LocalWorkspaceTarget({
+    if (homeRoot) targets.push(protectCompanionTranscripts(new blip.LocalWorkspaceTarget({
       id: COMPANION_HOME_TARGET_ID, label: 'Companion home (your own persistent files; uploads/ holds what the user attached)',
       workspaceRoot: await ensureCompanionHome(homeRoot),
       permissionMode: 'workspace-write', profile: 'no-shell-workspace-write',
-    }));
+    }), homeRoot));
     if (!targets.length) return [];
     const targetCatalog = new blip.WorkspaceTargetCatalog(
       targets,

@@ -491,6 +491,7 @@ export function useDroneHubLifecycleEffects({
         return runCompanionProposalShortcut();
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
+      toggleDesktopRecording: () => { window.dispatchEvent(new CustomEvent('drone-hub:toggle-desktop-recording')); return true; },
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       toggleSidebarCollapsed: () => {
         toggleSidebarCollapsedManually();

@@ -29,6 +29,7 @@ export const DRONE_HUB_SHORTCUT_ACTION_IDS = [
   'toggleCompanion',
   'applyCompanionProposal',
   'toggleVoiceClipboardRecording',
+  'toggleDesktopRecording',
   'markSelectedDronesUnread',
   'toggleSidebarCollapsed',
   'toggleRightPanelWidth',

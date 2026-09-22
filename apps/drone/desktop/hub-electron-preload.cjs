@@ -62,6 +62,15 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  async desktopRecording(action, options) {
+    try { return await ipcRenderer.invoke('drone-hub:desktop-recording', action, options); }
+    catch (error) {
+      if (String(error?.message || error).includes("No handler registered for 'drone-hub:desktop-recording'")) {
+        throw new Error('Desktop recording needs the updated desktop app. Fully quit and reopen Drone Hub; reloading the UI is not enough.');
+      }
+      throw error;
+    }
+  },
   async captureCompanion(mode) {
     try {
       return await ipcRenderer.invoke('drone-hub:companion-capture', mode);
