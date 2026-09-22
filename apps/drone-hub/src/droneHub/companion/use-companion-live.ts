@@ -1,6 +1,5 @@
-import { useCompanionMirror } from './CompanionMirrorContext';
+import { useCompanionLiveSettingsStore, type CompanionLiveSettingsStore } from './companion-live-settings-store';
 import { useCompanionJev } from './use-companion-jev';
-import { observeRequest } from '../request-diagnostics';
 import React from 'react';
 import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionAutonomy, type CompanionClientController, type CompanionSenseSources } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
@@ -22,55 +21,22 @@ type LiveState = {
   backendModel: string;
   workspaceLabel: string;
 };
-type LiveSettings = {
-  enabled: boolean;
-  mode?: 'live' | 'jev';
-  jevSystemPrompt?: string;
-  jevDecisionIntervalMs?: number;
-  autonomy?: CompanionAutonomy;
-  brain?: boolean;
-  defaultJevSystemPrompt?: string;
-  systemPrompt: string;
-  defaultSystemPrompt: string;
-  maxSystemPromptChars: number;
-};
 type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; workspaceLabel: string; announcement?: string };
 type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
-export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout, selected = true) {
-  const [jevDecisionIntervalMs, setJevDecisionIntervalMs] = React.useState(250);
-  const liveSettingsVersion = useCompanionMirror()?.liveSettingsVersion;
-  const [mode, setMode] = React.useState<'live' | 'jev'>('live');
-  const modeRef = React.useRef(mode);
-  const [jevSystemPrompt, setJevSystemPrompt] = React.useState('');
-  const [defaultJevSystemPrompt, setDefaultJevSystemPrompt] = React.useState('');
-  const [autonomy, setAutonomy] = React.useState<CompanionAutonomy>('off');
-  const [brain, setBrain] = React.useState(false);
+export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout, selected = true, sharedSettings?: CompanionLiveSettingsStore) {
+  const settingsStore = useCompanionLiveSettingsStore(sharedSettings);
+  const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
+  const { mode, enabled, resolved, loading, saving, settingsError, systemPrompt, defaultSystemPrompt, maxSystemPromptChars,
+    jevDecisionIntervalMs, jevSystemPrompt, defaultJevSystemPrompt, autonomy, brain } = settings;
+  const modeRef = React.useMemo(() => ({ get current() { return settingsStore.getSnapshot().mode; } }), [settingsStore]);
+  const enabledRef = React.useMemo(() => ({ get current() { return settingsStore.getSnapshot().enabled; } }), [settingsStore]);
   const jev = useCompanionJev(jevDecisionIntervalMs, jevSystemPrompt || defaultJevSystemPrompt, { autonomy, brain });
-  const acceptMode = (result: LiveSettings) => {
-    setJevDecisionIntervalMs(result.jevDecisionIntervalMs ?? 250);
-    setAutonomy(result.autonomy ?? 'off'); setBrain(result.brain === true);
-    modeRef.current = result.mode ?? 'live'; setMode(modeRef.current);
-    setJevSystemPrompt(result.jevSystemPrompt ?? ''); setDefaultJevSystemPrompt(result.defaultJevSystemPrompt ?? '');
-  };
-  const [enabled, setEnabled] = React.useState(false);
-  const [resolved, setResolved] = React.useState(false);
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
-  const [settingsError, setSettingsError] = React.useState('');
-  const [systemPrompt, setSystemPrompt] = React.useState('');
-  const [defaultSystemPrompt, setDefaultSystemPrompt] = React.useState('');
-  const [maxSystemPromptChars, setMaxSystemPromptChars] = React.useState(0);
   const [state, setState] = React.useState<LiveState>(EMPTY_STATE);
   const active = React.useRef<LiveSession | null>(null);
   const pendingCleanup = React.useRef<Promise<void> | undefined>(undefined);
   const mounted = React.useRef(true);
-  const selectedRef = React.useRef(selected);
-  selectedRef.current = selected;
   const pageActive = React.useRef(true);
-  const writing = React.useRef(false);
-  const enabledRef = React.useRef(false);
-  const settingsGeneration = React.useRef(0);
   const desiredTarget = React.useRef<LiveTarget | null>(null);
   const desiredMuted = React.useRef(false);
   const reconnectAttempt = React.useRef(0);
@@ -105,113 +71,39 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     if (mounted.current) setState(EMPTY_STATE);
   }, [stop, jev.reset]);
 
-  const load = React.useCallback(async () => {
-    if (writing.current) return;
-    const generation = ++settingsGeneration.current;
-    try {
-      const result = await settingsRequest();
-      if (!mounted.current || !selectedRef.current || writing.current || generation !== settingsGeneration.current) return;
-      if ((result.mode ?? 'live') !== modeRef.current) stop();
-      acceptMode(result);
-      enabledRef.current = result.enabled;
-      setEnabled(result.enabled);
-      setSystemPrompt(result.systemPrompt);
-      setDefaultSystemPrompt(result.defaultSystemPrompt);
-      setMaxSystemPromptChars(result.maxSystemPromptChars);
-      setResolved(true);
-      setSettingsError('');
-      if (!result.enabled) stop();
-    } catch (error) {
-      if (mounted.current && selectedRef.current && generation === settingsGeneration.current) setSettingsError(error instanceof Error ? error.message : 'Could not load Live voice setting.');
-    } finally { if (mounted.current && selectedRef.current && generation === settingsGeneration.current) setLoading(false); }
-  }, [stop]);
-
-  React.useEffect(() => { if (selected && liveSettingsVersion) void load(); }, [selected, liveSettingsVersion, load]);
-
   React.useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; stop(); };
   }, [stop]);
-
   React.useEffect(() => {
-    if (!selected) {
-      setLoading(true);
-      setResolved(false);
-      return;
-    }
-    const refresh = () => void load();
-    window.addEventListener('focus', refresh);
+    if (!selected) return;
     const leave = () => { pageActive.current = false; stop(); };
     const show = () => { pageActive.current = true; };
     window.addEventListener('pagehide', leave);
     window.addEventListener('pageshow', show);
     return () => {
-      settingsGeneration.current++;
-      window.removeEventListener('focus', refresh);
       window.removeEventListener('pagehide', leave);
       window.removeEventListener('pageshow', show);
       stop();
     };
-  }, [load, stop, selected]);
-  // Switching slots invalidates cached preferences. If selection happened during
-  // a save, refresh after it settles instead of leaving this slot loading forever.
-  React.useEffect(() => { if (selected && !saving && (loading || !resolved)) void load(); }, [selected, saving, load]);
+  }, [stop, selected]);
+  React.useEffect(() => {
+    let previous = settingsStore.getSnapshot();
+    return settingsStore.subscribe(() => {
+      const next = settingsStore.getSnapshot();
+      if (next.mode !== previous.mode || (previous.enabled && !next.enabled)) stop();
+      previous = next;
+    });
+  }, [settingsStore, stop]);
 
   const toggleEnabled = React.useCallback(async () => {
-    if (loading || writing.current) return;
-    writing.current = true;
-    settingsGeneration.current += 1;
-    setSaving(true);
-    setSettingsError('');
-    try {
-      const result = await settingsRequest({ enabled: !enabledRef.current });
-      if (!mounted.current) return;
-      if ((result.mode ?? 'live') !== modeRef.current) stop();
-      acceptMode(result);
-      enabledRef.current = result.enabled;
-      setEnabled(result.enabled);
-      setSystemPrompt(result.systemPrompt);
-      setDefaultSystemPrompt(result.defaultSystemPrompt);
-      setMaxSystemPromptChars(result.maxSystemPromptChars);
-      setResolved(true);
-      if (!result.enabled) stop();
-      return result.enabled;
-    } catch (error) {
-      if (mounted.current) setSettingsError(error instanceof Error ? error.message : 'Could not save Live voice setting.');
-    } finally {
-      writing.current = false;
-      if (mounted.current) setSaving(false);
-    }
-  }, [loading, stop]);
-
-  const saveSystemPrompt = React.useCallback(async (nextSystemPrompt: string) => {
-    if (writing.current) return false;
-    writing.current = true;
-    const generation = ++settingsGeneration.current;
-    setSaving(true);
-    setSettingsError('');
-    try {
-      const result = await settingsRequest({ systemPrompt: nextSystemPrompt });
-      if (!mounted.current || generation !== settingsGeneration.current) return false;
-      if ((result.mode ?? 'live') !== modeRef.current) stop();
-      acceptMode(result);
-      enabledRef.current = result.enabled;
-      setEnabled(result.enabled);
-      setSystemPrompt(result.systemPrompt);
-      setDefaultSystemPrompt(result.defaultSystemPrompt);
-      setMaxSystemPromptChars(result.maxSystemPromptChars);
-      if (!result.enabled) stop();
-      return true;
-    } catch (error) {
-      if (mounted.current && generation === settingsGeneration.current) {
-        setSettingsError(error instanceof Error ? error.message : 'Could not save Live voice system prompt.');
-      }
-      return false;
-    } finally {
-      writing.current = false;
-      if (mounted.current) setSaving(false);
-    }
-  }, [stop]);
+    const current = settingsStore.getSnapshot();
+    if (current.loading || current.saving) return;
+    return (await settingsStore.save({ enabled: !current.enabled }))?.enabled;
+  }, [settingsStore]);
+  const saveSystemPrompt = React.useCallback(async (systemPrompt: string) => {
+    return Boolean(await settingsStore.save({ systemPrompt }));
+  }, [settingsStore]);
 
   const scheduleReconnect = React.useCallback((target: LiveTarget) => {
     if (!mounted.current || desiredTarget.current !== target) return;
@@ -364,58 +256,19 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, [stop]);
 
   const saveVoiceMode = async (next: 'normal' | 'live' | 'jev') => {
-    if (writing.current || loading) return;
-    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
+    const current = settingsStore.getSnapshot();
+    if (current.loading || current.saving) return;
     stop();
-    try {
-      const result = await settingsRequest({ enabled: next !== 'normal', mode: next === 'jev' ? 'jev' : 'live' });
-      if (!mounted.current) return;
-      acceptMode(result); enabledRef.current = result.enabled; setEnabled(result.enabled);
-    } catch { setSettingsError('Could not save voice mode.'); }
-    finally { writing.current = false; if (mounted.current) setSaving(false); }
+    await settingsStore.save({ enabled: next !== 'normal', mode: next === 'jev' ? 'jev' : 'live' }, 'Could not save voice mode.');
   };
-  const saveJevSystemPrompt = async (prompt: string) => {
-    if (writing.current) return false;
-    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
-    try {
-      const result = await settingsRequest({ jevSystemPrompt: prompt });
-      if (!mounted.current) return false;
-      acceptMode(result); return true;
-    } catch { setSettingsError('Could not save Jev instructions.'); return false; }
-    finally { writing.current = false; if (mounted.current) setSaving(false); }
-  };
-
-  const saveJevDecisionInterval = async (intervalMs: number) => {
-    if (writing.current) return false;
-    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
-    try {
-      const result = await settingsRequest({ jevDecisionIntervalMs: intervalMs });
-      if (!mounted.current) return false;
-      acceptMode(result); return true;
-    } catch { setSettingsError('Could not save Jev decision interval. Use 50–10000 milliseconds.'); return false; }
-    finally { writing.current = false; if (mounted.current) setSaving(false); }
-  };
-
-  const saveAutonomy = async (next: CompanionAutonomy) => {
-    if (writing.current) return false;
-    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
-    try {
-      const result = await settingsRequest({ autonomy: next });
-      if (!mounted.current) return false;
-      acceptMode(result); return true;
-    } catch { setSettingsError('Could not save the autonomy level.'); return false; }
-    finally { writing.current = false; if (mounted.current) setSaving(false); }
-  };
-  const saveBrain = async (next: boolean) => {
-    if (writing.current) return false;
-    writing.current = true; settingsGeneration.current += 1; setSaving(true); setSettingsError('');
-    try {
-      const result = await settingsRequest({ brain: next });
-      if (!mounted.current) return false;
-      acceptMode(result); return true;
-    } catch { setSettingsError('Could not save the brain setting.'); return false; }
-    finally { writing.current = false; if (mounted.current) setSaving(false); }
-  };
+  const saveJevSystemPrompt = async (jevSystemPrompt: string) => Boolean(
+    await settingsStore.save({ jevSystemPrompt }, 'Could not save Jev instructions.'));
+  const saveJevDecisionInterval = async (jevDecisionIntervalMs: number) => Boolean(
+    await settingsStore.save({ jevDecisionIntervalMs }, 'Could not save Jev decision interval. Use 50–10000 milliseconds.'));
+  const saveAutonomy = async (autonomy: CompanionAutonomy) => Boolean(
+    await settingsStore.save({ autonomy }, 'Could not save the autonomy level.'));
+  const saveBrain = async (brain: boolean) => Boolean(
+    await settingsStore.save({ brain }, 'Could not save the brain setting.'));
 
   return {
     ...state,
@@ -438,7 +291,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     maxSystemPromptChars,
     toggleEnabled,
     saveSystemPrompt,
-    load,
+    load: settingsStore.load,
     start,
     stop,
     reset,
@@ -452,31 +305,6 @@ const EMPTY_STATE: LiveState = {
   announcing: false,
   hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
-
-async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt' | 'mode' | 'jevSystemPrompt' | 'jevDecisionIntervalMs' | 'autonomy' | 'brain'>>): Promise<LiveSettings> {
-  const url = '/api/settings/companion/live-voice';
-  const init: RequestInit = {
-    signal: AbortSignal.timeout(10_000),
-    ...(update === undefined ? {} : {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update),
-    }),
-  };
-  const diagnostic = observeRequest(url, init);
-  const headers = new Headers(init.headers);
-  if (diagnostic) headers.set('x-drone-client-request-id', diagnostic.requestId);
-  try {
-    const response = await fetch(url, { ...init, headers });
-    diagnostic?.response(response);
-    if (!response.ok) throw new Error(`Could not ${update === undefined ? 'load' : 'save'} Live voice setting (${response.status}).`);
-    const value = await response.json();
-    if (!value || typeof value.enabled !== 'boolean' || typeof value.systemPrompt !== 'string' ||
-      typeof value.defaultSystemPrompt !== 'string' || typeof value.maxSystemPromptChars !== 'number') {
-      throw new Error('Invalid Live voice setting response.');
-    }
-    diagnostic?.finish();
-    return value;
-  } catch (error) { diagnostic?.fail(error); throw error; }
-}
 
 function scheduleTimeout(callback: () => void, delayMs: number): () => void {
   const timer = setTimeout(callback, delayMs);

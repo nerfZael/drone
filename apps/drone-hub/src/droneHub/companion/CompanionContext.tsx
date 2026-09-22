@@ -1,3 +1,4 @@
+import { useCompanionLiveSettingsStore, type CompanionLiveSettingsStore } from './companion-live-settings-store';
 import type { CompanionImageAttachment } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { setCompanionClipboard } from './companion-clipboard';
@@ -132,6 +133,7 @@ type CompanionContextValue = CompanionSessionValue & {
 const CompanionContext = React.createContext<CompanionContextValue | null>(null);
 
 type SharedRecording = {
+  liveSettings: CompanionLiveSettingsStore;
   voice: ReturnType<typeof useChatVoiceRecorder>;
   workspace: React.MutableRefObject<{ workspace: CapturedCompanionWorkspace | null } | null>;
   activeSlot: React.MutableRefObject<number>;
@@ -273,7 +275,7 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
   }, [addAttachment]);
 
   const voice = shared.voice;
-  const live = useCompanionLive(controller, undefined, active);
+  const live = useCompanionLive(controller, undefined, active, shared.liveSettings);
   const [switchingVoice, setSwitchingVoice] = React.useState(false);
   const switchingVoiceRef = React.useRef(false);
   const voiceStatusRef = React.useRef(voice.status);
@@ -866,11 +868,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const voice = useChatVoiceRecorder({ onError, microphoneOwner: 'companion', backgroundTranscription: true });
   const autoApprove = useCompanionAutoApprove();
+  const liveSettings = useCompanionLiveSettingsStore();
   const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');
   const startGeneration = React.useRef(0);
   const liveStartMuted = React.useRef(false);
   const microphoneCleanup = React.useRef<Promise<void> | null>(null);
-  const shared = { voice, workspace, activeSlot, autoApprove, panelVisibility, setPanelVisibility, microphoneCleanup, startGeneration, liveStartMuted };
+  const shared = { liveSettings, voice, workspace, activeSlot, autoApprove, panelVisibility, setPanelVisibility, microphoneCleanup, startGeneration, liveStartMuted };
   // Fixed hook order keeps each slot's controller, subscriptions and in-flight callbacks
   // alive when another slot is selected. Unused slots never open a transport.
   const values = [

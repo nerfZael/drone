@@ -95,7 +95,7 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     expect(live.systemPrompt).toBe('Speak brightly.');
     await act(async () => { await live.saveVoiceMode('normal'); });
     expect(live.enabled).toBe(false);
-    // A save may finish after its session was deselected. Reopening must refresh
+    // A save may finish after its session was deselected. Reopening must retain
     // the shared preference and must never retain a stale `saving` flag.
     for (const reopenBeforeCompletion of [false, true]) {
       delaySave = true;

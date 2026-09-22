@@ -187,7 +187,6 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.status === 'idle') {
       setExpanded(false);
-      setMenuOpen(false);
       setTranscriptExpanded(false);
       setHistoryOpen(false);
     }
@@ -197,6 +196,7 @@ export function CompanionOverlay() {
   }, [companion?.proposalHistory.length]);
   const visible = Boolean(companion && (companion.shortcutHint || (companion.panelVisibility !== 'closed' &&
     (companion.panelVisibility === 'open' || companion.status !== 'idle' || companion.live?.hasStarted || panelOpen))));
+  React.useEffect(() => { if (!visible) setMenuOpen(false); }, [visible]);
   const recording = !companion?.live?.announcing && (companion?.status === 'recording' || companion?.live?.capturing === true);
   const companionWindow = useCompanionWindowHost(visible, recording);
   const speech = useCompanionSpeechMute(visible);
