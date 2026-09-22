@@ -40,7 +40,7 @@ describe('Companion proposal card', () => {
     expect(html).toContain('>repo</span>');
     expect(html).not.toContain('/workspace/repo');
     expect(html).not.toContain('Ungrouped');
-    expect(html).toContain('Preview full initial message and group path for Reviewer');
+    expect(html).not.toContain('Preview full initial message');
     expect(html).toContain('Review.');
     expect(html).toContain('Check tests.');
     expect(html).toContain('Apply proposal');
@@ -51,7 +51,7 @@ describe('Companion proposal card', () => {
     expect(html).toContain('text-[var(--fg)]');
   });
 
-  test('shows a compact message preview with a focusable full-message hover target', () => {
+  test('shows a compact message preview with explicit expansion and no hover target', () => {
     const message = `Please approve PR #749 and confirm that the refactor is ready to merge. ${'Include the requested confirmation. '.repeat(5)}`;
     const html = renderToStaticMarkup(
       <CompanionProposalCard
@@ -84,7 +84,8 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Review Prompt and Shot Architecture');
     expect(html).toContain(message);
     expect(html).not.toContain('drone-uuid');
-    expect(html).toContain('Preview full message to Review Prompt and Shot Architecture');
+    expect(html).not.toContain('Preview full message');
+    expect(html).toContain('aria-label="Expand proposal"');
     expect(html).not.toContain('Show full message');
     expect(html).toContain('text-[var(--accent-fg)]');
   });

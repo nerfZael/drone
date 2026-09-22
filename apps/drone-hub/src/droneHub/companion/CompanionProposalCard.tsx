@@ -1,7 +1,6 @@
 import { useCompanionWindow } from './companion-window';
 import React from 'react';
 import { CompanionOperationHeadline } from './CompanionOperationHeadline';
-import { Tooltip } from 'radix-ui';
 import {
   companionProposalOperationLabel,
   companionProposalOperationDetails,
@@ -101,10 +100,6 @@ function ProposalOperationMarker({
   );
 }
 
-type HoverableProposalOperation = Extract<
-  CompanionProposalOperation,
-  { type: 'send_message' | 'create_drone' }
->;
 type CreateDroneOperation = Extract<CompanionProposalOperation, { type: 'create_drone' }>;
 
 function proposalLocation(
@@ -223,73 +218,6 @@ function creationDetailRowsFromSettings(
     ['Approval policy', show(settings.approvalPolicy, capitalize)],
   ];
   return rows.flatMap(([label, value]) => (value === null ? [] : [{ label, value }]));
-}
-
-function ProposalOperationHoverCard({
-  operation,
-  defaultRepoPath,
-  droneLabel,
-  children,
-}: {
-  operation: HoverableProposalOperation;
-  defaultRepoPath: string;
-  droneLabel(droneId: string): string;
-  children: React.ReactElement;
-}) {
-  const companionWindow = useCompanionWindow();
-  const createLocation = operation.type === 'create_drone'
-    ? proposalLocation(operation, defaultRepoPath)
-    : null;
-  const title = operation.type === 'send_message'
-    ? `Message to ${droneLabel(operation.droneId)} / ${operation.chatName ?? 'default'}`
-    : companionProposalOperationLabel(operation);
-  const content = operation.type === 'send_message' ? operation.message : operation.prompt;
-
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
-      <Tooltip.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
-        <Tooltip.Content
-          // Beside the card in the app. The floating window is only as wide as the card, so there the
-          // preview goes where the window grows: above a bar low on the screen, below a high one.
-          side={companionWindow.detached ? (companionWindow.flow === 'down' ? 'bottom' : 'top') : 'left'}
-          align="center"
-          sideOffset={companionWindow.detached ? 6 : 10}
-          collisionPadding={companionWindow.detached ? 8 : 12}
-          className="z-[200] max-h-[min(32rem,var(--radix-tooltip-content-available-height),calc(100vh-1.5rem))] w-[min(28rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] p-3 text-left shadow-[var(--edge-highlight),var(--shadow-menu)]"
-        >
-          <div className="text-xs font-[var(--weight-semibold)] text-[var(--fg)]">{title}</div>
-          {createLocation ? (
-            <dl className="mt-2 space-y-2 text-[11px]">
-              <div>
-                <dt className="font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
-                  Group path
-                </dt>
-                <dd className="mt-0.5 break-all text-[var(--fg-secondary)]">
-                  {createLocation.groupPath}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
-                  Repository
-                </dt>
-                <dd className="mt-0.5 break-all text-[var(--fg-secondary)]">
-                  {createLocation.repository}
-                </dd>
-              </div>
-            </dl>
-          ) : null}
-          <div className="mt-2 text-[11px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
-            {operation.type === 'send_message' ? 'Full message' : 'Full initial message'}
-          </div>
-          <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--fg-secondary)]">
-            {content}
-          </div>
-          <Tooltip.Arrow className="fill-[var(--border-subtle)]" />
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  );
 }
 
 function Pill({ tone = 'neutral', title, children }: { tone?: UiBadgeTone; title?: string; children: React.ReactNode }) {
@@ -505,11 +433,7 @@ function ProposalOperationList({
             className="relative block w-full min-w-0 appearance-none rounded-sm bg-transparent p-0 pr-5 text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             aria-expanded={detailsExpanded}
             aria-controls={detailsId}
-            aria-label={`${
-              isCreateDrone
-                ? `Preview full initial message and group path for ${operation.name || 'new drone'}; `
-                : ''
-            }${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
+            aria-label={`${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
             onClick={() => toggleOperationDetails(operation.id)}
           >
             {summaryContent}
@@ -529,17 +453,7 @@ function ProposalOperationList({
             </svg>
           </button>
         ) : (
-          <div
-            className="min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-            tabIndex={!full && (isMessage || isCreateDrone) ? 0 : undefined}
-            aria-label={full
-              ? undefined
-              : isMessage
-                ? `Preview full message to ${droneLabel(operation.droneId)}`
-                : isCreateDrone
-                  ? `Preview full initial message and group path for ${operation.name || 'new drone'}`
-                  : undefined}
-          >
+          <div className="min-w-0">
             {summaryContent}
           </div>
         );
@@ -559,18 +473,7 @@ function ProposalOperationList({
               ) : null}
             </div>
             <div className="min-w-0 flex-1 pt-0.5">
-              {/* The dialog already shows everything, so the hover preview only serves the compact card. */}
-              {!full && (isMessage || isCreateDrone) ? (
-                <ProposalOperationHoverCard
-                  operation={operation}
-                  defaultRepoPath={defaultRepoPath}
-                  droneLabel={droneLabel}
-                >
-                  {summary}
-                </ProposalOperationHoverCard>
-              ) : (
-                summary
-              )}
+              {summary}
               {details.length > 0 && detailsExpanded ? (
                 <dl
                   id={detailsId}
@@ -786,7 +689,7 @@ export function CompanionProposalCard({
   );
 
   return (
-    <Tooltip.Provider delayDuration={250} skipDelayDuration={100}>
+    <>
       <aside
         id={historyDetails ? 'companion-proposal-history' : undefined}
         className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:w-[22rem] min-[1100px]:w-[26rem]"
@@ -885,6 +788,6 @@ export function CompanionProposalCard({
       >
         <ProposalOperationList {...listProps} full idPrefix="proposal-dialog-operation-details" />
       </UiDialog>
-    </Tooltip.Provider>
+    </>
   );
 }
