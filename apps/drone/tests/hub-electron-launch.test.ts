@@ -89,7 +89,7 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain('desktopStaticUiServer.url');
   });
 
-  test('finishes closing the desktop proxy before Electron quits', () => {
+  test('finishes recording and closes the desktop proxy before Electron quits', () => {
     const mainSource = readFileSync(
       new URL('../desktop/hub-electron-main.cjs', import.meta.url),
       'utf8',
@@ -99,7 +99,7 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain('event.preventDefault()');
     expect(mainSource).toContain("process.on('unhandledRejection'");
     expect(mainSource).toContain('isQuitting && isExpectedDesktopShutdownError(reason)');
-    expect(mainSource).toContain('desktopCleanupPromise = staticUiServer.close()');
+    expect(mainSource).toContain('desktopCleanupPromise = desktopRecordings.close().finally(() => staticUiServer?.close())');
     expect(mainSource).toContain('desktopCleanupComplete = true;\n        app.quit();');
   });
 
@@ -231,7 +231,7 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain("process.platform === 'linux'");
     expect(mainSource).toContain("titleBarStyle: 'hidden'");
     expect(mainSource).toContain("color: '#171d27'");
-    expect(preloadSource).toContain("if (process.platform === 'linux') return;");
+    expect(preloadSource).toContain("if (process.platform === 'linux' || window.location.href === 'about:blank') return;");
   });
 
   test('uses Hub chrome colors for a reserved draggable title bar on other platforms', () => {

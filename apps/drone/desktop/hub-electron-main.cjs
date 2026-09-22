@@ -25,6 +25,10 @@ const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
 const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 
 let mainWindow = null;
+let recordingConnection = null;
+const desktopRecordings = require('./hub-desktop-recordings.cjs').installDesktopRecordings({
+  ipcMain, getWindow: () => mainWindow, getConnection: () => recordingConnection,
+});
 require('./hub-electron-notifications.cjs').registerDesktopNotifications({
   ipcMain, BrowserWindow, screen, shell, getWindow: () => mainWindow,
 });
@@ -600,6 +604,10 @@ function startHub() {
           diagnostics.setUiBuild({ buildId: version.buildId, buildTime: version.buildTime });
         } catch { /* The renderer also reports its compiled build id. */ }
         if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
+        recordingConnection = {
+          apiUrl: `http://${apiHost.includes(':') ? `[${apiHost}]` : apiHost}:${apiPort}`,
+          apiToken: fs.readFileSync(tokenPath, 'utf8').trim(),
+        };
         await desktopGlobalShortcuts?.close();
         desktopGlobalShortcuts = connectDesktopGlobalShortcuts({
           globalShortcut,
@@ -684,13 +692,13 @@ if (!hasSingleInstanceLock) {
     isQuitting = true;
     void desktopGlobalShortcuts?.close();
     desktopGlobalShortcuts = null;
-    if (desktopCleanupComplete || !desktopStaticUiServer) return;
+    if (desktopCleanupComplete) return;
     event.preventDefault();
     if (desktopCleanupPromise) return;
     installDesktopShutdownRejectionHandler();
     const staticUiServer = desktopStaticUiServer;
     desktopStaticUiServer = null;
-    desktopCleanupPromise = staticUiServer.close()
+    desktopCleanupPromise = desktopRecordings.close().finally(() => staticUiServer?.close())
       .catch((error) => {
         process.stderr.write(`Failed to close the Drone Hub desktop proxy: ${error?.stack || error}\n`);
       })

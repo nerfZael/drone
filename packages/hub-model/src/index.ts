@@ -7,3 +7,5 @@ export { WorkspaceLoadDiagnostics, type WorkspaceLoadRecord } from './workspace-
 export { readWorkspaceFileFirst } from './path-navigation';
 export { WINDOW_LAYOUT_SLOTS, validateWindowLayoutPreset, type WindowLayoutSlot } from './window-layout-presets';
 export { diagnosticOperation, normalizeRequestDiagnostic, type RequestDiagnostic } from './request-diagnostics';
+
+export * from './desktop-recordings';

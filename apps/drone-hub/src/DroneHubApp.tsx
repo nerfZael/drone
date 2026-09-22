@@ -1,4 +1,6 @@
 import React from 'react';
+import { DesktopRecordings } from './droneHub/recordings/DesktopRecordings';
+import { CompanionHomeFiles } from './droneHub/companion/companion-home-files';
 import { QuickActionDialog } from './droneHub/app/QuickActionDialog';
 import { RecorderCompanionProvider } from './droneHub/dictation/RecorderCompanionContext';
 import { FrontendUpdatePrompt } from './FrontendUpdatePrompt';
@@ -45,7 +47,7 @@ function LocalDroneHubAppContent() {
     mobileAutoCollapsedRef.current = true;
     setSidebarCollapsed(true);
   }, [isMobileViewport, setSidebarCollapsed, sidebarCollapsed]);
-  const sidebar = <DroneSidebar {...sidebarProps} />;
+  const sidebar = <DroneSidebar {...sidebarProps} headerAccessory={<><DesktopRecordings />{sidebarProps.headerAccessory}</>} />;
   const workspace = <DroneHubWorkspaceContent {...workspaceContentProps} />;
   return (
     <DroneHubDndProvider>
@@ -83,7 +85,13 @@ function DroneHubAppContent() {
   }, [readingDensityMode]);
 
   return selectedDeviceId && selfDeviceId && selectedDeviceId !== selfDeviceId ? (
-    <RemoteDeviceWorkspace />
+    <>
+      <RemoteDeviceWorkspace />
+      <div className="fixed right-3 top-12 z-[110] rounded border border-[var(--border)] bg-[var(--panel)]">
+        <DesktopRecordings />
+      </div>
+      <CompanionHomeFiles />
+    </>
   ) : (
     <LocalDroneHubAppContent />
   );

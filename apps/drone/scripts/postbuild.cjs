@@ -135,6 +135,8 @@ async function ensureBlipBundleDependenciesBuilt(root) {
 async function copyDroneHubElectronMain(root) {
   for (const filename of [
     'hub-electron-main.cjs',
+    'hub-desktop-recordings.cjs',
+    'hub-audio-capture.cjs',
     'hub-electron-chat-windows.cjs',
     'hub-electron-notifications.cjs',
     'hub-notification-preload.cjs',

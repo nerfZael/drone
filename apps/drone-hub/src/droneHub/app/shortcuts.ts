@@ -162,6 +162,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
   },
   {
+    id: 'toggleDesktopRecording',
+    label: 'Record desktop audio and microphone',
+    description: 'Starts or stops a desktop recording and saves its transcript in Companion HomeFiles. Requires the Linux desktop app.',
+  },
+  {
     id: 'markSelectedDronesUnread',
     label: 'Mark selected drones unread',
     description: 'Marks the selected chat(s) unread, or the active chat for each selected drone, so unread indicators are shown.',
@@ -247,6 +252,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleCompanion: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   applyCompanionProposal: { key: 'capslock', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: null,
+  toggleDesktopRecording: null,
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'd', mod: false, ctrl: true, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: null,
@@ -513,6 +519,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleCompanion: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleCompanion),
     applyCompanionProposal: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.applyCompanionProposal),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
+    toggleDesktopRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleDesktopRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
     toggleRightPanelWidth: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth),

@@ -44,7 +44,8 @@ export async function transcribeAudioWithGroq(opts: {
   quality?: GroqTranscriptionQuality;
   language?: string | null;
   prompt?: string | null;
-}): Promise<{ text: string; model: string }> {
+  segmentTimestamps?: boolean;
+}): Promise<{ text: string; model: string; segments?: Array<{ start: number; end: number; text: string }> }> {
   const audio = opts.audio;
   if (!Buffer.isBuffer(audio) || audio.length === 0) {
     throw new Error('Audio payload is empty.');
@@ -63,7 +64,8 @@ export async function transcribeAudioWithGroq(opts: {
   const model = GROQ_TRANSCRIPTION_MODELS[quality];
   form.append('file', new Blob([audioBytes], { type: mimeType }), audioFilenameForMime(mimeType));
   form.append('model', model);
-  form.append('response_format', 'json');
+  form.append('response_format', opts.segmentTimestamps ? 'verbose_json' : 'json');
+  if (opts.segmentTimestamps) form.append('timestamp_granularities[]', 'segment');
   form.append('temperature', '0');
   const language = String(opts.language ?? '').trim();
   if (language) form.append('language', language.slice(0, 35));
@@ -93,6 +95,16 @@ export async function transcribeAudioWithGroq(opts: {
   }
 
   const text = String(data?.text ?? '').trim();
-  if (!text) throw new Error('GROQ returned an empty transcription.');
+  if (!text && !opts.segmentTimestamps) throw new Error('GROQ returned an empty transcription.');
+  if (opts.segmentTimestamps) {
+    if (!Array.isArray(data?.segments)) throw new Error('GROQ returned no timestamped segments.');
+    const segments = data.segments.filter((segment: any) => Number(segment.no_speech_prob ?? 0) < 0.8).map((segment: any) => {
+      if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.start < 0 || segment.end < segment.start || typeof segment.text !== 'string') {
+        throw new Error('GROQ returned an invalid transcript segment.');
+      }
+      return { start: segment.start, end: segment.end, text: segment.text.trim() };
+    }).filter((segment: { text: string }) => segment.text);
+    return { text, model, segments };
+  }
   return { text, model };
 }
