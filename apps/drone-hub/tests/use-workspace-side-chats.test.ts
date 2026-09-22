@@ -27,6 +27,13 @@ test('returning to a drone does not revive a previous visit’s request or clear
     await settle();
     expect(harness.render('A').sideChats).toMatchObject([{ checkpointId: 'new' }]);
     expect(harness.render('A').busy).toBeNull();
+    // The drone board gets the side chat beside its source as soon as it exists.
+    expect(harness.boardPlacements.at(-1)).toEqual([
+      'A',
+      'main',
+      harness.render('A').sideChats[0].name,
+      { sideChat: true },
+    ]);
     const result = harness.render('A');
     expect(result.focusRequest).toEqual({ droneId: 'A', chatName: result.sideChats[0].name });
     expect(harness.render('A').focusRequest).toBe(result.focusRequest);
@@ -109,6 +116,7 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, do
   const effects: (() => void)[] = [];
   const requests: ReturnType<typeof Promise.withResolvers<any>>[] = [];
   const bodies: unknown[] = [];
+  const boardPlacements: unknown[][] = [];
   const confirmation = Promise.withResolvers<boolean>();
   const useMemo = (factory: () => any, deps: any[]) => {
     const index = cursor++;
@@ -181,6 +189,10 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, do
             return pending.promise;
           },
         };
+      if (name === '../canvas/drone-board')
+        return { placeClonedChatOnDroneBoard: (...args: unknown[]) => void boardPlacements.push(args) };
+      if (name === '../canvas/use-drone-canvas-store')
+        return { useDroneCanvasStore: { getState: () => ({ dropOptimisticBoardMembers: () => {} }) } };
       throw new Error(`Unexpected import: ${name}`);
     },
     exports,
@@ -190,6 +202,7 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, do
   return {
     requests,
     bodies,
+    boardPlacements,
     confirmation,
     stateWrites: () => writes,
     render(droneId: string) {

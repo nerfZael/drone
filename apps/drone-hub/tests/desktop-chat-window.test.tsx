@@ -112,7 +112,7 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     expect(dom.document.querySelector('[role="menu"]')).toBeNull();
     const findAction = (label: string) => [...child.document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((item) => item.textContent?.startsWith(label))!;
-    expect(findAction('Fork into side chat').disabled).toBe(true);
+    expect(findAction('Clone to side chat').disabled).toBe(true);
     expect(findAction('Clone chat').textContent).toContain('Ctrl/Cmd+Shift+K');
     await act(async () => { findAction('Clone chat').click(); });
     expect(cloned).toEqual([expect.objectContaining({ droneId: 'drone', chatName: 'chat' })]);
@@ -124,13 +124,13 @@ test('desktop menu opens an additional view without moving the Hub chat or navig
     checkpoint.dataset.sideChatCheckpointId = 'desktop-answer';
     child.document.querySelector('.dh-floating-chat')!.appendChild(checkpoint);
     await rightClick(checkpoint);
-    expect(findAction('Fork into side chat').disabled).toBe(false);
+    expect(findAction('Clone to side chat').disabled).toBe(false);
     await act(async () => setSideChatBusy('drone', true));
-    expect(findAction('Fork into side chat').disabled).toBe(true);
-    expect(findAction('Fork into side chat').textContent).toContain('already in progress');
+    expect(findAction('Clone to side chat').disabled).toBe(true);
+    expect(findAction('Clone to side chat').textContent).toContain('already in progress');
     await act(async () => setSideChatBusy('drone', false));
-    expect(findAction('Fork into side chat').disabled).toBe(false);
-    await act(async () => { findAction('Fork into side chat').click(); });
+    expect(findAction('Clone to side chat').disabled).toBe(false);
+    await act(async () => { findAction('Clone to side chat').click(); });
     expect(forks).toEqual([{ droneId: 'drone', target: { sourceChatName: 'chat', checkpointId: 'desktop-answer' } }]);
     await act(async () => { child.document.body.dispatchEvent(new child.KeyboardEvent('keydown', {
       key: 'f', bubbles: true, cancelable: true,

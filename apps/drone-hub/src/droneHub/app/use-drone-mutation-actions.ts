@@ -230,6 +230,7 @@ export function useDroneMutationActions({
         if (nodeIdsToRemove.length > 0) {
           canvasState.removeNodes(nodeIdsToRemove);
         }
+        canvasState.removeDroneBoards([droneId]);
         return true;
       } catch (e: any) {
         const msg = e?.message ?? String(e);

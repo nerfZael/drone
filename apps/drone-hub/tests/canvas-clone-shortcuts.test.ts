@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import {
-  buildOptimisticChatCloneCanvasNodes,
-  buildOptimisticCloneCanvasNodes,
   cloneCanvasDronesById,
   collectCloneableChatsFromCanvasSelection,
   collectCloneableDroneIdsFromCanvasSelection,
   collectCloneSourceNodeIdByDroneId,
+  planCanvasPastePositions,
+  runWithConcurrency,
 } from '../src/droneHub/canvas/clone-shortcuts';
 import type { DroneSummary } from '../src/droneHub/types';
 
@@ -74,70 +74,53 @@ describe('canvas clone shortcut helpers', () => {
     });
   });
 
-  test('builds optimistic clone nodes in source order with stable offsets', () => {
-    const optimistic = buildOptimisticCloneCanvasNodes({
-      copiedDroneIdsRaw: ['alpha', 'beta', 'missing'],
-      cloneResultsRaw: [
-        { sourceDroneId: 'alpha', cloneDroneId: 'alpha-copy', cloneDroneName: 'alpha-copy' },
-        { sourceDroneId: 'beta', cloneDroneId: 'beta-copy', cloneDroneName: 'beta-copy' },
-      ],
-      sourceNodeIdByDroneId: {
-        alpha: createCanvasDroneNodeId('alpha'),
-        beta: createCanvasDroneNodeId('beta'),
-      },
-      nodesById: {
-        [createCanvasDroneNodeId('alpha')]: { x: 100, y: 200 },
-        [createCanvasDroneNodeId('beta')]: { x: 300, y: 400 },
-      },
-      cloneOffsetXPx: 44,
-      cloneOffsetYPx: 34,
-    });
+  const alphaNode = createCanvasChatNodeId('alpha', 'review');
+  const betaNode = createCanvasChatNodeId('alpha', 'plan');
+  const boundsById = {
+    [alphaNode]: { x: 100, y: 100, width: 100, height: 40 },
+    [betaNode]: { x: 300, y: 200, width: 100, height: 40 },
+  };
 
-    expect(optimistic.nodes).toEqual([
-      {
-        droneId: createCanvasDroneNodeId('alpha-copy'),
-        label: 'alpha-copy',
-        x: 144,
-        y: 234,
-      },
-      {
-        droneId: createCanvasDroneNodeId('beta-copy'),
-        label: 'beta-copy',
-        x: 388,
-        y: 468,
-      },
-    ]);
-    expect(optimistic.optimisticDroneNameById).toEqual({
-      'alpha-copy': 'alpha-copy',
-      'beta-copy': 'beta-copy',
+  test('pastes a group centred on the cursor and keeps its shape', () => {
+    const positions = planCanvasPastePositions({
+      sourceNodeIds: [alphaNode, betaNode, 'not-on-the-board'],
+      boundsById,
+      anchor: { x: 1250, y: 670 },
+      fallbackOffset: { x: 44, y: 34 },
+    });
+    // The group spans (100,100)-(400,240), centre (250,170): everything shifts by (1000,500).
+    expect(positions).toEqual({
+      [alphaNode]: { x: 1100, y: 600 },
+      [betaNode]: { x: 1300, y: 700 },
     });
   });
 
-  test('collects and places chat clones without treating them as drone clones', () => {
-    const sourceNodeId = createCanvasChatNodeId('alpha', 'review');
-    const sources = collectCloneableChatsFromCanvasSelection([
-      createCanvasDroneNodeId('alpha'),
-      sourceNodeId,
-    ]);
-    expect(sources).toEqual([
-      { nodeId: sourceNodeId, droneId: 'alpha', chatName: 'review' },
-    ]);
+  test('steps aside when the cursor is over the copied cards or unknown', () => {
+    const offset = { [alphaNode]: { x: 144, y: 134 }, [betaNode]: { x: 344, y: 234 } };
+    const base = { sourceNodeIds: [alphaNode, betaNode], boundsById, fallbackOffset: { x: 44, y: 34 } };
+    expect(planCanvasPastePositions({ ...base, anchor: { x: 250, y: 170 } })).toEqual(offset);
+    expect(planCanvasPastePositions({ ...base, anchor: null })).toEqual(offset);
+  });
 
+  test('clones a group in parallel without exceeding the limit', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const done: number[] = [];
+    await runWithConcurrency([1, 2, 3, 4, 5, 6, 7], 3, async (item) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      done.push(item);
+    });
+    expect(peak).toBe(3);
+    expect(done.sort()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  test('collects chat cards without treating them as drone clones', () => {
+    const sourceNodeId = createCanvasChatNodeId('alpha', 'review');
     expect(
-      buildOptimisticChatCloneCanvasNodes({
-        sources,
-        cloneResults: [{ sourceNodeId, chatName: 'untitled' }],
-        nodesById: { [sourceNodeId]: { x: 80, y: 120 } },
-        cloneOffsetXPx: 44,
-        cloneOffsetYPx: 34,
-      }),
-    ).toEqual([
-      {
-        droneId: createCanvasChatNodeId('alpha', 'untitled'),
-        label: 'untitled',
-        x: 124,
-        y: 154,
-      },
-    ]);
+      collectCloneableChatsFromCanvasSelection([createCanvasDroneNodeId('alpha'), sourceNodeId]),
+    ).toEqual([{ nodeId: sourceNodeId, droneId: 'alpha', chatName: 'review' }]);
   });
 });

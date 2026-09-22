@@ -452,7 +452,7 @@ test('review identifies side forks, group destinations, moved chats and preserve
     ] }} defaultRepoPath="/repo" execution={null} executing={false} companionStatus="completed"
     onExecute={() => {}} onDiscard={() => {}}
     historyDetails={{ startedAt: 1000, completedAt: 2000, autoApproved: false, onBack: () => {} }} />);
-  expect(html).toContain('Fork as side chat');
+  expect(html).toContain('Clone to side chat');
   expect(html).toContain('Latest available checkpoint when applied');
   expect(html).toContain('Work/Tests');
   expect(html).toContain('api, review');

@@ -14,10 +14,10 @@ export function ChatMessageActions({
   const scope = React.useContext(SideChatForkContext);
   const [error, setError] = React.useState<string | null>(null);
   const label = !scope?.supported
-    ? 'Message forks are not supported for this agent'
+    ? 'Cloning from a message is not supported for this agent'
     : scope.busy
       ? 'Side chat operation in progress'
-      : 'Fork into a side chat through this answer';
+      : 'Clone to side chat through this answer';
   return (
     <div className="relative flex items-center gap-1">
       <ChatMessageCopyAction text={text} position="hover-rail" />

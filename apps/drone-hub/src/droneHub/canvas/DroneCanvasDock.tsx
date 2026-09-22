@@ -42,11 +42,11 @@ import {
   sortChatNodeIdsForDestructiveDelete,
 } from './chat-node-utils';
 import {
-  buildOptimisticChatCloneCanvasNodes,
-  buildOptimisticCloneCanvasNodes,
   collectCloneableChatsFromCanvasSelection,
   collectCloneableDroneIdsFromCanvasSelection,
   collectCloneSourceNodeIdByDroneId,
+  planCanvasPastePositions,
+  runWithConcurrency,
   type CanvasChatCloneSource,
 } from './clone-shortcuts';
 import {
@@ -54,9 +54,13 @@ import {
   MAX_CANVAS_SCALE,
   MIN_CANVAS_SCALE,
   clampCanvasScale,
+  getCanvasBoardActions,
   isCanvasDraftNodeId,
+  selectCanvasBoard,
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
+import { OPTIMISTIC_MEMBER_TTL_MS, buildDroneBoardMembers, planDroneBoardPlacements } from './drone-board';
+import { focusSideChat } from '../app/side-chat-events';
 import {
   measureRectInWorldSpace,
   type CanvasRect,
@@ -64,26 +68,27 @@ import {
 import {
   buildCanvasRelationshipEdges,
 } from './relationship-edges';
+import {
+  CHAT_NODE_HEIGHT_PX,
+  NODE_HEIGHT_PX,
+  NODE_MIN_WIDTH_PX,
+  getNodeHeightPx,
+  getNodeWidthPx,
+} from './node-metrics';
 
-const NODE_HEIGHT_PX = 54;
-const CHAT_NODE_HEIGHT_PX = 38;
 const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
 const DOT_GRID_MAX_OPACITY = 0.34;
 const DOT_GRID_MIN_OPACITY = 0.08;
-const NODE_MIN_WIDTH_PX = 96;
-const NODE_MAX_WIDTH_PX = 560;
-const NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX = 7.2;
-const NODE_SECONDARY_TEXT_WIDTH_ESTIMATE_PX = 5.8;
-const NODE_HORIZONTAL_PADDING_PX = 24;
 const MIN_DRAFT_SPAWN_COUNT = 1;
 const MAX_DRAFT_SPAWN_COUNT = 24;
 const SPAWN_COLLISION_MARGIN_PX = 12;
 const SPAWN_OFFSET_RINGS = 7;
 const CLONE_OFFSET_X_PX = 44;
 const CLONE_OFFSET_Y_PX = 34;
+const CHAT_PASTE_CONCURRENCY = 4;
 
 type SelectionBox = {
   left: number;
@@ -227,22 +232,6 @@ function createDraftNodeId(): string {
   return `${DRAFT_CANVAS_NODE_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getNodeHeightPx(nodeIdRaw: string): number {
-  return parseCanvasChatNodeId(nodeIdRaw) ? CHAT_NODE_HEIGHT_PX : NODE_HEIGHT_PX;
-}
-
-function getNodeWidthPx(labelRaw: string, secondaryLabelRaw?: string): number {
-  const primaryLabel = String(labelRaw ?? '').trim();
-  const secondaryLabel = String(secondaryLabelRaw ?? '').trim();
-  const primaryWidth = Math.ceil(primaryLabel.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX);
-  const secondaryWidth = Math.ceil(secondaryLabel.length * NODE_SECONDARY_TEXT_WIDTH_ESTIMATE_PX);
-  const contentWidth = Math.max(primaryWidth, secondaryWidth);
-  return Math.max(
-    NODE_MIN_WIDTH_PX,
-    Math.min(NODE_MAX_WIDTH_PX, contentWidth + NODE_HORIZONTAL_PADDING_PX),
-  );
-}
-
 function clampDraftSpawnCount(valueRaw: number): number {
   const value = Number.isFinite(valueRaw) ? Math.round(valueRaw) : MIN_DRAFT_SPAWN_COUNT;
   return Math.max(MIN_DRAFT_SPAWN_COUNT, Math.min(MAX_DRAFT_SPAWN_COUNT, value));
@@ -337,6 +326,7 @@ function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): Rea
 }
 
 export function DroneCanvasDock({
+  boardDrone,
   droneById,
   droneNameById,
   sidebarSelectedChatNodeId,
@@ -353,6 +343,7 @@ export function DroneCanvasDock({
   onDeleteChat,
   onCloneChat,
   onCloneDrone,
+  onCreateChat,
   spawnAgentMenuEntries,
   spawnAgentKey,
   onSpawnAgentKeyChange,
@@ -366,6 +357,8 @@ export function DroneCanvasDock({
   createGroup,
   onCreateGroupChange,
 }: {
+  /** The open drone. Its board shows all of its chats without dragging them in. */
+  boardDrone?: DroneSummary | null;
   droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
   sidebarSelectedChatNodeId?: string | null;
@@ -406,10 +399,12 @@ export function DroneCanvasDock({
   onCloneChat?: (
     droneId: string,
     chatName: string,
+    opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onCloneDrone?: (
     drone: DroneSummary,
   ) => Promise<{ ok: boolean; droneId?: string; droneName?: string }> | { ok: boolean; droneId?: string; droneName?: string };
+  onCreateChat?: (droneId: string) => Promise<boolean>;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   spawnAgentKey: string;
   onSpawnAgentKeyChange: (next: string) => void;
@@ -423,15 +418,36 @@ export function DroneCanvasDock({
   createGroup: string;
   onCreateGroupChange: (next: string) => void;
 }) {
+  const { scope, setScope } = useDroneCanvasStore(
+    useShallow((s) => ({ scope: s.scope, setScope: s.setScope })),
+  );
+  const boardDroneId = scope === 'drone' ? String(boardDrone?.id ?? '').trim() || null : null;
+  const droneScope = Boolean(boardDroneId);
   const {
     nodesByDroneId,
-    nodeOrder,
-    selectedDroneIds,
+    nodeOrder: storedNodeOrder,
+    selectedDroneIds: storedSelectedDroneIds,
     draftPromptByNodeId,
     draftRepoLabelByNodeId,
     panX,
     panY,
     scale,
+  } = useDroneCanvasStore(
+    useShallow((s) => {
+      const board = selectCanvasBoard(s, boardDroneId);
+      return {
+        nodesByDroneId: board.nodesByDroneId,
+        nodeOrder: board.nodeOrder,
+        selectedDroneIds: board.selectedDroneIds,
+        draftPromptByNodeId: board.draftPromptByNodeId,
+        draftRepoLabelByNodeId: board.draftRepoLabelByNodeId,
+        panX: board.panX,
+        panY: board.panY,
+        scale: board.scale,
+      };
+    }),
+  );
+  const {
     upsertNodes,
     moveNodes,
     removeNodes,
@@ -444,30 +460,87 @@ export function DroneCanvasDock({
     setPan,
     setViewport,
     resetViewport,
-  } = useDroneCanvasStore(
-    useShallow((s) => ({
-      nodesByDroneId: s.nodesByDroneId,
-      nodeOrder: s.nodeOrder,
-      selectedDroneIds: s.selectedDroneIds,
-      draftPromptByNodeId: s.draftPromptByNodeId,
-      draftRepoLabelByNodeId: s.draftRepoLabelByNodeId,
-      panX: s.panX,
-      panY: s.panY,
-      scale: s.scale,
-      upsertNodes: s.upsertNodes,
-      moveNodes: s.moveNodes,
-      removeNodes: s.removeNodes,
-      replaceNodeId: s.replaceNodeId,
-      setDraftPromptForNode: s.setDraftPromptForNode,
-      setDraftRepoLabelForNode: s.setDraftRepoLabelForNode,
-      setSelectedDroneIds: s.setSelectedDroneIds,
-      toggleSelectedDroneId: s.toggleSelectedDroneId,
-      clearSelection: s.clearSelection,
-      setPan: s.setPan,
-      setViewport: s.setViewport,
-      resetViewport: s.resetViewport,
-    })),
+  } = React.useMemo(() => getCanvasBoardActions(boardDroneId), [boardDroneId]);
+  const optimisticMembers = useDroneCanvasStore((s) =>
+    boardDroneId ? s.optimisticMembersByDroneId[boardDroneId] : undefined,
   );
+  const boardChats = boardDrone?.chats;
+  const boardSideChats = boardDrone?.sideChats;
+  const boardChatCloneSources = boardDrone?.chatCloneSources;
+  // The summary object is rebuilt on every refresh; the key tracks only the
+  // parts membership depends on, and is not recomputed while dragging.
+  const boardMemberKey = React.useMemo(
+    () =>
+      droneScope
+        ? JSON.stringify([
+            boardChats ?? [],
+            (boardSideChats ?? []).map((chat) => [chat.name, chat.sourceChatName]),
+            boardChatCloneSources ?? {},
+            optimisticMembers ?? [],
+          ])
+        : '',
+    [boardChatCloneSources, boardChats, boardSideChats, droneScope, optimisticMembers],
+  );
+  const boardMembers = React.useMemo(
+    () => (droneScope ? buildDroneBoardMembers(boardDrone, optimisticMembers) : []),
+    // The summary is rebuilt on every refresh; only its chat list matters here.
+    [boardDroneId, boardMemberKey],
+  );
+  const forkSourceNodeIdByNodeId = React.useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const member of boardMembers) {
+      if (member.sourceNodeId) out[member.nodeId] = member.sourceNodeId;
+    }
+    return out;
+  }, [boardMembers]);
+  // Used on both boards, so it is keyed on its own inputs rather than the
+  // drone-board member key (which is empty on the global board).
+  const sideChatNodeIds = React.useMemo(
+    () =>
+      new Set(
+        [
+          ...(boardSideChats ?? []).map((chat) => chat.name),
+          ...(optimisticMembers ?? []).filter((member) => member.sideChat).map((member) => member.chatName),
+        ].map((chatName) => createCanvasChatNodeId(String(boardDrone?.id ?? ''), chatName)),
+      ),
+    [boardDrone?.id, boardSideChats, optimisticMembers],
+  );
+  React.useEffect(() => {
+    if (!boardDroneId || !optimisticMembers?.length) return;
+    const confirmed = new Set([...(boardDrone?.chats ?? []), ...(boardDrone?.sideChats ?? []).map((chat) => chat.name)]);
+    const settled = optimisticMembers.filter((member) => confirmed.has(member.chatName)).map((member) => member.chatName);
+    if (settled.length > 0) useDroneCanvasStore.getState().dropOptimisticBoardMembers(boardDroneId, settled);
+    // A chat that never shows up in a summary leaves the board once its grace period ends.
+    const pending = optimisticMembers.filter((member) => !confirmed.has(member.chatName));
+    if (pending.length === 0) return;
+    const nextExpiry = Math.min(...pending.map((member) => member.addedAt + OPTIMISTIC_MEMBER_TTL_MS));
+    const timer = setTimeout(() => {
+      const expired = pending
+        .filter((member) => member.addedAt + OPTIMISTIC_MEMBER_TTL_MS <= Date.now())
+        .map((member) => member.chatName);
+      if (expired.length > 0) useDroneCanvasStore.getState().dropOptimisticBoardMembers(boardDroneId, expired);
+    }, Math.max(0, nextExpiry - Date.now()));
+    return () => clearTimeout(timer);
+    // Keyed like boardMembers: the summary object is rebuilt on every refresh.
+  }, [boardDroneId, boardMemberKey]);
+
+  // Stored positions outlive a chat briefly (renames land in two steps), so a
+  // drone board renders members only instead of pruning the store.
+  const boardMemberIds = React.useMemo(
+    () => (droneScope ? new Set(boardMembers.map((member) => member.nodeId)) : null),
+    [boardMembers, droneScope],
+  );
+  const nodeOrder = React.useMemo(
+    () => (boardMemberIds ? storedNodeOrder.filter((nodeId) => boardMemberIds.has(nodeId)) : storedNodeOrder),
+    [boardMemberIds, storedNodeOrder],
+  );
+  // A chat deleted elsewhere (or an optimistic card that expired) must not stay
+  // selected: the message bar and prompt sending act on the selection.
+  const selectedDroneIds = React.useMemo(() => {
+    if (!boardMemberIds) return storedSelectedDroneIds;
+    const kept = storedSelectedDroneIds.filter((nodeId) => boardMemberIds.has(nodeId));
+    return kept.length === storedSelectedDroneIds.length ? storedSelectedDroneIds : kept;
+  }, [boardMemberIds, storedSelectedDroneIds]);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const worldLayerRef = React.useRef<HTMLDivElement | null>(null);
   const lineageMarkerId = React.useId();
@@ -483,6 +556,11 @@ export function DroneCanvasDock({
   const copiedSourceNodeIdByDroneIdRef = React.useRef<Record<string, string>>({});
   const copiedChatSourcesRef = React.useRef<CanvasChatCloneSource[]>([]);
   const suppressNodeClickRef = React.useRef(false);
+  const cursorClientPointRef = React.useRef<{ x: number; y: number } | null>(null);
+  const lastPasteRef = React.useRef<{ x: number; y: number; count: number } | null>(null);
+  const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
+  const viewRef = React.useRef({ panX, panY, scale });
+  viewRef.current = { panX, panY, scale };
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
@@ -599,8 +677,10 @@ export function DroneCanvasDock({
       fallbackNodeBoundsById,
       fleetParentIdByDroneId,
       fleetAssignedIdsByDroneId,
+      forkSourceNodeIdByNodeId,
     });
   }, [
+    forkSourceNodeIdByNodeId,
     fallbackNodeBoundsById,
     chatNodesByDroneId,
     droneNodeByDroneId,
@@ -773,7 +853,9 @@ export function DroneCanvasDock({
         const nextChatName = String(result.chatName ?? newName).trim() || newName;
         const nextNodeId = createCanvasChatNodeId(chatRef.droneId, nextChatName);
         if (nextNodeId && nextNodeId !== droneId) {
-          replaceNodeId(droneId, nextNodeId, nextChatName);
+          // The chat may sit on both the global board and its drone's board.
+          getCanvasBoardActions(null).replaceNodeId(droneId, nextNodeId, nextChatName);
+          getCanvasBoardActions(chatRef.droneId).replaceNodeId(droneId, nextNodeId, nextChatName);
         } else {
           const node = nodesByDroneId[droneId];
           if (node) upsertNodes([{ droneId, label: nextChatName, x: node.x, y: node.y }]);
@@ -793,7 +875,6 @@ export function DroneCanvasDock({
     inlineRenamingDroneId,
     nodesByDroneId,
     onRenameChat,
-    replaceNodeId,
     setMessageError,
     upsertNodes,
   ]);
@@ -823,6 +904,7 @@ export function DroneCanvasDock({
           if (errorText) setMessageError(errorText);
           return;
         }
+        useDroneCanvasStore.getState().dropOptimisticBoardMembers(chatRef.droneId, [chatRef.chatName]);
         if (result.deletedDrone) {
           const toRemove = nodeOrder.filter((candidateId) => {
             const ref = parseCanvasChatNodeId(candidateId);
@@ -948,6 +1030,32 @@ export function DroneCanvasDock({
     createDraftAtWorldPoint(centerWorld.x, centerWorld.y);
   }, [createDraftAtWorldPoint, panX, panY, scale]);
 
+  const createChatAtWorldPoint = React.useCallback(
+    (worldX: number, worldY: number) => {
+      if (!boardDroneId || !onCreateChat) return;
+      pendingChatPlacementRef.current = {
+        x: Math.round(worldX - NODE_MIN_WIDTH_PX / 2),
+        y: Math.round(worldY - CHAT_NODE_HEIGHT_PX / 2),
+      };
+      void onCreateChat(boardDroneId).then((ok) => {
+        if (!ok) pendingChatPlacementRef.current = null;
+      });
+    },
+    [boardDroneId, onCreateChat],
+  );
+
+  const requestNewNodeNearViewportCenter = React.useCallback(() => {
+    if (!droneScope) {
+      createDraftNearViewportCenter();
+      return;
+    }
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const center = screenToWorldPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, panX, panY, scale);
+    createChatAtWorldPoint(center.x, center.y);
+  }, [createChatAtWorldPoint, createDraftNearViewportCenter, droneScope, panX, panY, scale]);
+
   const removeDraftNodeIfEmpty = React.useCallback(
     (draftNodeIdRaw: string) => {
       const draftNodeId = String(draftNodeIdRaw ?? '').trim();
@@ -959,6 +1067,31 @@ export function DroneCanvasDock({
     },
     [draftPromptByNodeId, removeNodes],
   );
+
+  React.useEffect(() => {
+    if (!droneScope) return;
+    const anyPlaced = boardMembers.some((member) => nodesByDroneId[member.nodeId]);
+    let rootAnchor = pendingChatPlacementRef.current;
+    const viewport = viewportRef.current;
+    if (!rootAnchor && anyPlaced && viewport) {
+      // Later arrivals land where the user is looking, not at the board origin.
+      const rect = viewport.getBoundingClientRect();
+      const view = viewRef.current;
+      const center = screenToWorldPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+        rect,
+        view.panX,
+        view.panY,
+        view.scale,
+      );
+      rootAnchor = { x: center.x - NODE_MIN_WIDTH_PX / 2, y: center.y - CHAT_NODE_HEIGHT_PX / 2 };
+    }
+    const planned = planDroneBoardPlacements({ members: boardMembers, nodesById: nodesByDroneId, rootAnchor });
+    if (planned.length === 0) return;
+    if (planned.some((node) => !forkSourceNodeIdByNodeId[node.droneId])) pendingChatPlacementRef.current = null;
+    upsertNodes(planned);
+  }, [boardMembers, droneScope, forkSourceNodeIdByNodeId, nodesByDroneId, upsertNodes]);
 
   React.useEffect(() => {
     if (selectedDroneIds.length > 0) return;
@@ -1599,10 +1732,12 @@ export function DroneCanvasDock({
         }
         const chatRef = parseCanvasChatNodeId(droneId);
         if (!chatRef) return;
+        // A side chat usually lives in a floating window; bring that forward instead of replacing the main chat.
+        if (sideChatNodeIds.has(droneId) && focusSideChat(chatRef.droneId, chatRef.chatName)) return;
         onActivateChat?.(chatRef.droneId, chatRef.chatName);
       }
     },
-    [focusViewportElement, onActivateChat, setSelectedDroneIds, toggleSelectedDroneId],
+    [focusViewportElement, onActivateChat, setSelectedDroneIds, sideChatNodeIds, toggleSelectedDroneId],
   );
 
   const onNodeDoubleClick = React.useCallback(
@@ -1680,9 +1815,13 @@ export function DroneCanvasDock({
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const worldPoint = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
+      if (droneScope) {
+        createChatAtWorldPoint(worldPoint.x, worldPoint.y);
+        return;
+      }
       createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false });
     },
-    [createDraftAtWorldPoint, inlineRenamingDroneId, panX, panY, scale],
+    [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, inlineRenamingDroneId, panX, panY, scale],
   );
 
   const onWheel = React.useCallback(
@@ -1697,6 +1836,8 @@ export function DroneCanvasDock({
   const { setNodeRef: setCanvasDropNodeRef } = useDroppable({
     id: 'canvas-drop',
     data: { type: 'canvas-drop' },
+    // A drone board already holds every chat it can show.
+    disabled: droneScope,
   });
   const setViewportNodeRef = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -1711,12 +1852,13 @@ export function DroneCanvasDock({
       const activeData = parseDroneHubDragData(event.active.data.current);
       const overType = String(event.over?.data.current?.type ?? '').trim();
       const acceptsCanvasDrop =
-        activeData?.type === 'sidebar-drone' ||
-        activeData?.type === 'sidebar-pinned-drone' ||
-        activeData?.type === 'sidebar-chat';
+        !droneScope &&
+        (activeData?.type === 'sidebar-drone' ||
+          activeData?.type === 'sidebar-pinned-drone' ||
+          activeData?.type === 'sidebar-chat');
       setDragOverCanvas(Boolean(acceptsCanvasDrop && overType === 'canvas-drop'));
     },
-    [],
+    [droneScope],
   );
 
   React.useEffect(() => {
@@ -1728,7 +1870,7 @@ export function DroneCanvasDock({
       const activeData = parseDroneHubDragData(event.active.data.current);
       const overType = String(event.over?.data.current?.type ?? '').trim();
       setDragOverCanvas(false);
-      if (overType !== 'canvas-drop') return;
+      if (droneScope || overType !== 'canvas-drop') return;
       const ids = draggedCanvasNodeIdsFromData(activeData);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
@@ -1760,7 +1902,7 @@ export function DroneCanvasDock({
       );
       setSelectedDroneIds(ids);
     },
-    [effectiveDroneNameById, panX, panY, scale, setSelectedDroneIds, upsertNodes],
+    [droneScope, effectiveDroneNameById, panX, panY, scale, setSelectedDroneIds, upsertNodes],
   );
 
   useDndMonitor({
@@ -1822,63 +1964,98 @@ export function DroneCanvasDock({
     const copiedChats = copiedChatSourcesRef.current.slice();
     if (copiedDroneIds.length === 0 && copiedChats.length === 0) return;
     const sourceNodeIdByDroneId = { ...copiedSourceNodeIdByDroneIdRef.current };
+
+    // Paste lands under the cursor, or mid-view when the cursor is elsewhere.
+    const viewport = viewportRef.current;
+    let anchor: { x: number; y: number } | null = null;
+    if (viewport) {
+      const rect = viewport.getBoundingClientRect();
+      const cursor = cursorClientPointRef.current;
+      anchor = screenToWorldPoint(
+        cursor?.x ?? rect.left + rect.width / 2,
+        cursor?.y ?? rect.top + rect.height / 2,
+        rect,
+        panX,
+        panY,
+        scale,
+      );
+    }
+    // Pasting again in the same spot steps aside instead of stacking clones exactly on top of each other.
+    const lastPaste = lastPasteRef.current;
+    const repeat =
+      anchor && lastPaste && Math.hypot(anchor.x - lastPaste.x, anchor.y - lastPaste.y) < CLONE_OFFSET_X_PX
+        ? lastPaste.count + 1
+        : 0;
+    if (anchor) lastPasteRef.current = { x: anchor.x, y: anchor.y, count: repeat };
+    const positionBySourceNodeId = planCanvasPastePositions({
+      sourceNodeIds: [
+        ...copiedDroneIds.map((droneId) => sourceNodeIdByDroneId[droneId] ?? ''),
+        ...copiedChats.map((source) => source.nodeId),
+      ],
+      boundsById: fallbackNodeBoundsById,
+      anchor: anchor
+        ? { x: anchor.x + repeat * CLONE_OFFSET_X_PX, y: anchor.y + repeat * CLONE_OFFSET_Y_PX }
+        : null,
+      fallbackOffset: { x: CLONE_OFFSET_X_PX * (repeat + 1), y: CLONE_OFFSET_Y_PX * (repeat + 1) },
+    });
+
     void (async () => {
-      const cloneResults: Array<{ sourceDroneId: string; cloneDroneId?: string | null; cloneDroneName?: string | null }> = [];
-      if (onCloneDrone) {
-        for (const raw of copiedDroneIds) {
-          const sourceDroneId = String(raw ?? '').trim();
-          if (!sourceDroneId) continue;
+      const pastedNodeIds: string[] = [];
+      // Drone clones are heavy (each builds a runtime), so they stay sequential.
+      const cloneDrones = async () => {
+        if (!onCloneDrone) return;
+        for (const sourceDroneId of copiedDroneIds) {
           const drone = droneById[sourceDroneId];
-          if (!drone) continue;
+          const position = positionBySourceNodeId[sourceNodeIdByDroneId[sourceDroneId] ?? ''];
+          if (!drone || !position) continue;
           const result = await onCloneDrone(drone);
-          if (!result?.ok) continue;
-          cloneResults.push({
-            sourceDroneId,
-            cloneDroneId: result.droneId ?? null,
-            cloneDroneName: result.droneName ?? null,
+          const cloneDroneId = String(result?.droneId ?? '').trim();
+          const nodeId = result?.ok && cloneDroneId ? createCanvasDroneNodeId(cloneDroneId) : '';
+          if (!nodeId) continue;
+          const label = String(result.droneName ?? '').trim() || cloneDroneId;
+          if (result.droneName) setOptimisticDroneNameById((prev) => ({ ...prev, [cloneDroneId]: label }));
+          upsertNodes([{ droneId: nodeId, label, ...position }]);
+          pastedNodeIds.push(nodeId);
+        }
+      };
+      const cloneChats = () =>
+        runWithConcurrency(copiedChats, CHAT_PASTE_CONCURRENCY, async (source) => {
+          const position = positionBySourceNodeId[source.nodeId];
+          if (!onCloneChat || !position) return;
+          const result = await onCloneChat(source.droneId, source.chatName, {
+            // Opening every clone of a group would flip the main chat once per card.
+            select: copiedChats.length === 1,
+            // On a drone board the clone handler owns the card, so it appears the moment the clone exists.
+            ...(boardDroneId === source.droneId ? { boardPosition: position } : {}),
           });
-        }
-      }
-      const optimistic = buildOptimisticCloneCanvasNodes({
-        copiedDroneIdsRaw: copiedDroneIds,
-        cloneResultsRaw: cloneResults,
-        sourceNodeIdByDroneId,
-        nodesById: nodesByDroneId,
-        cloneOffsetXPx: CLONE_OFFSET_X_PX,
-        cloneOffsetYPx: CLONE_OFFSET_Y_PX,
-      });
-      if (Object.keys(optimistic.optimisticDroneNameById).length > 0) {
-        setOptimisticDroneNameById((prev) => ({ ...prev, ...optimistic.optimisticDroneNameById }));
-      }
-      const chatCloneResults: Array<{ sourceNodeId: string; chatName?: string | null }> = [];
-      if (onCloneChat) {
-        for (const source of copiedChats) {
-          const result = await onCloneChat(source.droneId, source.chatName);
-          if (!result?.ok) continue;
-          chatCloneResults.push({ sourceNodeId: source.nodeId, chatName: result.chatName ?? null });
-        }
-      }
-      const chatNodes = buildOptimisticChatCloneCanvasNodes({
-        sources: copiedChats,
-        cloneResults: chatCloneResults,
-        nodesById: nodesByDroneId,
-        cloneOffsetXPx: CLONE_OFFSET_X_PX,
-        cloneOffsetYPx: CLONE_OFFSET_Y_PX,
-      });
-      const pastedNodes = [...optimistic.nodes, ...chatNodes];
-      if (pastedNodes.length > 0) {
-        upsertNodes(pastedNodes);
-        setSelectedDroneIds(pastedNodes.map((node) => node.droneId));
-      }
+          const nodeId = result?.ok && result.chatName ? createCanvasChatNodeId(source.droneId, result.chatName) : '';
+          if (!nodeId || !result.chatName) return;
+          if (boardDroneId !== source.droneId) upsertNodes([{ droneId: nodeId, label: result.chatName, ...position }]);
+          pastedNodeIds.push(nodeId);
+        });
+      await Promise.all([cloneDrones(), cloneChats()]);
+      if (pastedNodeIds.length > 0) setSelectedDroneIds(pastedNodeIds);
     })();
-  }, [droneById, nodesByDroneId, onCloneChat, onCloneDrone, setSelectedDroneIds, upsertNodes]);
+  }, [
+    boardDroneId,
+    droneById,
+    fallbackNodeBoundsById,
+    onCloneChat,
+    onCloneDrone,
+    panX,
+    panY,
+    scale,
+    setSelectedDroneIds,
+    upsertNodes,
+  ]);
 
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const targetIsEditable = isEditableElement(event.target);
       if (targetIsEditable) return;
 
-      if (isShortcutMatch(createDraftShortcutBinding, event.nativeEvent)) {
+      // On a drone board the create-drone shortcut keeps its app-wide meaning.
+      if (!droneScope && isShortcutMatch(createDraftShortcutBinding, event.nativeEvent)) {
         event.preventDefault();
         event.stopPropagation();
         createDraftNearViewportCenter();
@@ -1963,6 +2140,8 @@ export function DroneCanvasDock({
 
         event.preventDefault();
         event.stopPropagation();
+        // A drone board always shows all of its chats, so there is no card to remove.
+        if (droneScope) return;
         cancelActivePointerInteractions();
         removeNodes(selectedDroneIds);
         setMessageDraft('');
@@ -1974,6 +2153,7 @@ export function DroneCanvasDock({
       closeMessageBar,
       copySelectedCanvasNodesForClone,
       createDraftShortcutBinding,
+      droneScope,
       messageBarExpanded,
       nodeOrder,
       openMessageBar,
@@ -2007,15 +2187,35 @@ export function DroneCanvasDock({
       className="h-full w-full"
     >
         <UiPanelToolbar aria-label="Canvas controls" className="px-3 py-2">
-          <UiToolbarIconButton
-            onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
-            label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
-            icon={<IconTune className="h-3.5 w-3.5" />}
-            tone="accent"
-            active={canvasControlsExpanded}
-            title={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
-            aria-expanded={canvasControlsExpanded}
-          />
+          {boardDrone ? (
+            <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
+              <UiToolbarButton
+                pressed={droneScope}
+                onClick={() => setScope('drone')}
+                title="Every chat of this drone, laid out for you. New, cloned and side chats appear on their own."
+              >
+                This drone
+              </UiToolbarButton>
+              <UiToolbarButton
+                pressed={!droneScope}
+                onClick={() => setScope('global')}
+                title="One board shared across drones. Drag drones and chats in from the sidebar."
+              >
+                Global
+              </UiToolbarButton>
+            </div>
+          ) : null}
+          {droneScope ? null : (
+            <UiToolbarIconButton
+              onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
+              label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
+              icon={<IconTune className="h-3.5 w-3.5" />}
+              tone="accent"
+              active={canvasControlsExpanded}
+              title={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
+              aria-expanded={canvasControlsExpanded}
+            />
+          )}
           <div className="flex min-w-0 flex-1 items-center gap-1">
             <UiToolbarButton
               pressed={showCanvasLastMessagePreviews}
@@ -2036,7 +2236,7 @@ export function DroneCanvasDock({
             </span>
           </div>
         </UiPanelToolbar>
-        {canvasControlsExpanded ? (
+        {canvasControlsExpanded && !droneScope ? (
           <UiPanelToolbar
             aria-label="Canvas creation defaults"
             className="flex-wrap overflow-visible px-3 py-2"
@@ -2155,6 +2355,12 @@ export function DroneCanvasDock({
         className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onKeyDown={onViewportKeyDown}
         onMouseDown={onCanvasMouseDown}
+        onMouseMove={(event) => {
+          cursorClientPointRef.current = { x: event.clientX, y: event.clientY };
+        }}
+        onMouseLeave={() => {
+          cursorClientPointRef.current = null;
+        }}
         onDoubleClick={onCanvasDoubleClick}
         onContextMenu={(event) => event.preventDefault()}
         onWheel={onWheel}
@@ -2234,7 +2440,15 @@ export function DroneCanvasDock({
                   strokeWidth={edge.variant === 'chat-owner' ? '2' : edge.variant === 'assigned' ? '1.5' : '1.8'}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeDasharray={edge.variant === 'chat-owner' ? '2 5' : edge.variant === 'assigned' ? '7 5' : undefined}
+                  strokeDasharray={
+                    edge.variant === 'chat-owner'
+                      ? '2 5'
+                      : edge.variant === 'assigned'
+                        ? '7 5'
+                        : edge.variant === 'chat-fork'
+                          ? '4 4'
+                          : undefined
+                  }
                   markerEnd={`url(#${
                     edge.variant === 'chat-owner'
                       ? chatOwnerMarkerId
@@ -2463,7 +2677,7 @@ export function DroneCanvasDock({
             if (messageError) setMessageError(null);
           }}
           onInputBlur={onMessageInputBlur}
-          onRequestNewDraft={createDraftNearViewportCenter}
+          onRequestNewDraft={requestNewNodeNearViewportCenter}
           onSend={() => {
             void sendCanvasPrompt();
           }}
@@ -2472,8 +2686,10 @@ export function DroneCanvasDock({
         {nodes.length === 0 ? (
           <UiPaneState
             kind="empty"
-            title="Drone Canvas"
-            description={
+            title={droneScope ? 'Drone board' : 'Drone Canvas'}
+            description={droneScope ? (
+              <span className="block">This drone has no chats yet. Double-click to create one.</span>
+            ) : (
               <>
                 <span className="block">Drag drones or chats from the sidebar and drop them here.</span>
                 <span className="mt-1 block">
@@ -2489,7 +2705,7 @@ export function DroneCanvasDock({
                   Copy/paste clones chat cards as chats and drone cards as drones.
                 </span>
               </>
-            }
+            )}
             className="pointer-events-none absolute inset-0"
           />
         ) : null}

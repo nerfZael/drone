@@ -579,6 +579,7 @@ import { createFilesystemRuntime } from './filesystem-runtime';
 import {
   isDraftChatEntry,
   isDraftDroneEntry,
+  resolveChatCloneSources,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
 import { mergeNativeBusyChatNames } from './native-drone-summary';
@@ -5179,8 +5180,18 @@ async function startDroneHubApiServerWithLifecycle(
       Boolean(String(d?.repo?.seededAt ?? '').trim());
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
+    const chatCloneSources = resolveChatCloneSources(d.chats);
     const sideChats = Object.entries(d.chats ?? {}).flatMap(([name, entry]: [string, any]) =>
-      entry?.visibility === 'side-chat' ? [{ name, ...entry.sideChatOrigin, agent: inferChatAgent(entry, d) }] : [],
+      entry?.visibility === 'side-chat'
+        ? [
+            {
+              name,
+              ...entry.sideChatOrigin,
+              ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
+              agent: inferChatAgent(entry, d),
+            },
+          ]
+        : [],
     );
     const workflowChatSet = new Set([...workflowChats, ...sideChats.map((chat) => chat.name)]);
     const pendingBusyChats = droneId
@@ -5274,6 +5285,7 @@ async function startDroneHubApiServerWithLifecycle(
       chats,
       workflowChats,
       sideChats,
+      chatCloneSources,
       unreadChats,
       chatReadStates,
       draftChats,

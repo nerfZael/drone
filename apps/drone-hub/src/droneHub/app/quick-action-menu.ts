@@ -14,7 +14,7 @@ export const QUICK_ACTIONS: readonly QuickAction[] = [
     { key: 'q', label: 'Root drone', action: 'createDraftDrone' },
     { key: 'w', label: 'Drone in group', action: 'createDraftDroneInCurrentGroup' },
     { key: 'e', label: 'New chat', action: 'createDroneChat' },
-    { key: 'r', label: 'Fork chat', action: 'createSideChat' },
+    { key: 'r', label: 'Clone to side chat', action: 'createSideChat' },
     { key: 't', label: 'Clone chat', action: 'cloneDroneChat' },
     { key: 'a', label: 'New drone group', action: 'createDraftGroup' },
     { key: 's', label: 'New chat group', action: 'createChatGroup' },

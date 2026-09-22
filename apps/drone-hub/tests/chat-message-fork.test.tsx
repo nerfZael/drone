@@ -14,7 +14,7 @@ describe('message fork actions', () => {
     const html = renderScoped(
       <ChatMessageActions text="An earlier answer" checkpointId="earlier" />,
     );
-    expect(html).toContain('aria-label="Fork into a side chat through this answer"');
+    expect(html).toContain('aria-label="Clone to side chat through this answer"');
     expect(html).toContain('data-fork-checkpoint-id="earlier"');
     expect(html.indexOf('aria-label="Copy message"')).toBeLessThan(
       html.indexOf('data-fork-checkpoint-id'),
@@ -43,7 +43,7 @@ describe('message fork actions', () => {
     const html = renderScoped(<ChatMessageActions text="Answer" checkpointId="answer" />, {
       supported: false,
     });
-    expect(html).toContain('Message forks are not supported for this agent');
+    expect(html).toContain('Cloning from a message is not supported for this agent');
     expect(html.match(/disabled=""/g)).toHaveLength(1);
   });
 

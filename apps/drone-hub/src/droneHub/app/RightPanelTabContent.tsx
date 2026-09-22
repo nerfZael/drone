@@ -162,7 +162,9 @@ type RightPanelTabContentProps = {
   onCloneCanvasChat: (
     droneId: string,
     chatName: string,
+    opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onCreateCanvasChat: (droneId: string) => Promise<boolean>;
   canvasSpawnAgentMenuEntries: UiMenuSelectEntry[];
   canvasSpawnAgentKey: string;
   onCanvasSpawnAgentKeyChange: (next: string) => void;
@@ -280,6 +282,7 @@ export function RightPanelTabContent({
   onDeleteCanvasChat,
   onCloneCanvasDrone,
   onCloneCanvasChat,
+  onCreateCanvasChat,
   canvasSpawnAgentMenuEntries,
   canvasSpawnAgentKey,
   onCanvasSpawnAgentKeyChange,
@@ -446,6 +449,7 @@ export function RightPanelTabContent({
         <PaneModule tab={tab} load={loadDroneCanvasDock}>
           {(DroneCanvasDock) => (
             <DroneCanvasDock
+              boardDrone={drone}
               droneById={droneById}
               droneNameById={droneNameById}
               sidebarSelectedChatNodeId={currentCanvasChatNodeId}
@@ -462,6 +466,7 @@ export function RightPanelTabContent({
               onDeleteChat={onDeleteCanvasChat}
               onCloneChat={onCloneCanvasChat}
               onCloneDrone={onCloneCanvasDrone}
+              onCreateChat={onCreateCanvasChat}
               spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
               spawnAgentKey={canvasSpawnAgentKey}
               onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}

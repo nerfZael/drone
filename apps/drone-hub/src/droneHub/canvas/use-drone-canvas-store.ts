@@ -18,7 +18,7 @@ export type DroneCanvasNode = {
   y: number;
 };
 
-type DroneCanvasState = {
+export type DroneCanvasBoard = {
   nodesByDroneId: Record<string, DroneCanvasNode>;
   nodeOrder: string[];
   selectedDroneIds: string[];
@@ -27,6 +27,9 @@ type DroneCanvasState = {
   panX: number;
   panY: number;
   scale: number;
+};
+
+type DroneCanvasBoardActions = {
   upsertNodes: (nodes: Array<{ droneId: string; label: string; x: number; y: number }>) => void;
   moveNode: (droneId: string, x: number, y: number) => void;
   moveNodes: (nodes: Array<{ droneId: string; x: number; y: number }>) => void;
@@ -44,10 +47,74 @@ type DroneCanvasState = {
   resetViewport: () => void;
 };
 
-type DroneCanvasPersistedState = Pick<
-  DroneCanvasState,
-  'nodesByDroneId' | 'nodeOrder' | 'draftPromptByNodeId' | 'draftRepoLabelByNodeId' | 'panX' | 'panY' | 'scale'
->;
+/** `drone` shows every chat of the open drone; `global` is the hand-curated board shared across drones. */
+export type DroneCanvasScope = 'global' | 'drone';
+
+/**
+ * A chat this client just created. It joins its drone's board at once instead
+ * of waiting for the next drone summary, and is dropped once the summary has it.
+ */
+export type OptimisticBoardMember = {
+  chatName: string;
+  sourceChatName: string;
+  sideChat: boolean;
+  addedAt: number;
+};
+
+type BoardReducer = (board: DroneCanvasBoard) => DroneCanvasBoard;
+
+// The top-level board is the global canvas. Boards in `droneBoards` belong to
+// one drone each; `null` addresses the global board.
+type DroneCanvasState = DroneCanvasBoard &
+  DroneCanvasBoardActions & {
+    droneBoards: Record<string, DroneCanvasBoard>;
+    scope: DroneCanvasScope;
+    setScope: (scope: DroneCanvasScope) => void;
+    optimisticMembersByDroneId: Record<string, OptimisticBoardMember[]>;
+    addOptimisticBoardMember: (droneId: string, member: OptimisticBoardMember) => void;
+    dropOptimisticBoardMembers: (droneId: string, chatNames: string[]) => void;
+    applyToBoard: (boardDroneId: string | null, reducer: BoardReducer) => void;
+    removeDroneBoards: (droneIds: string[]) => void;
+  };
+
+type DroneCanvasPersistedBoard = Omit<DroneCanvasBoard, 'selectedDroneIds'>;
+type DroneCanvasPersistedState = DroneCanvasPersistedBoard & {
+  droneBoards: Record<string, DroneCanvasPersistedBoard>;
+  scope: DroneCanvasScope;
+};
+
+const BOARD_KEYS = [
+  'nodesByDroneId',
+  'nodeOrder',
+  'selectedDroneIds',
+  'draftPromptByNodeId',
+  'draftRepoLabelByNodeId',
+  'panX',
+  'panY',
+  'scale',
+] as const;
+
+export const EMPTY_CANVAS_BOARD: DroneCanvasBoard = Object.freeze({
+  nodesByDroneId: {},
+  nodeOrder: [],
+  selectedDroneIds: [],
+  draftPromptByNodeId: {},
+  draftRepoLabelByNodeId: {},
+  panX: 32,
+  panY: 32,
+  scale: 1,
+});
+
+function pickBoard(source: DroneCanvasBoard): DroneCanvasBoard {
+  const out = {} as Record<string, unknown>;
+  for (const key of BOARD_KEYS) out[key] = source[key];
+  return out as DroneCanvasBoard;
+}
+
+export function selectCanvasBoard(state: DroneCanvasState, boardDroneId: string | null): DroneCanvasBoard {
+  if (!boardDroneId) return state;
+  return state.droneBoards[boardDroneId] ?? EMPTY_CANVAS_BOARD;
+}
 
 function roundCoord(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -109,7 +176,7 @@ function normalizeNodeOrder(value: unknown, nodesByDroneId: Record<string, Drone
   return out;
 }
 
-function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
+function normalizePersistedBoard(value: unknown): DroneCanvasPersistedBoard {
   const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const nodesByDroneId = normalizeNodesByDroneId(raw.nodesByDroneId);
   const rawDraftPromptByNodeId =
@@ -147,6 +214,20 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
     panY: roundCoord(Number(raw.panY ?? 32)),
     scale: clampCanvasScale(Number(raw.scale ?? 1)),
   };
+}
+
+function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const rawDroneBoards =
+    raw.droneBoards && typeof raw.droneBoards === 'object' && !Array.isArray(raw.droneBoards)
+      ? (raw.droneBoards as Record<string, unknown>)
+      : {};
+  const droneBoards: Record<string, DroneCanvasPersistedBoard> = {};
+  for (const [rawId, rawBoard] of Object.entries(rawDroneBoards)) {
+    const droneId = String(rawId ?? '').trim();
+    if (droneId) droneBoards[droneId] = normalizePersistedBoard(rawBoard);
+  }
+  return { ...normalizePersistedBoard(raw), droneBoards, scope: raw.scope === 'global' ? 'global' : 'drone' };
 }
 
 function areStringArraysEqual(a: string[], b: string[]): boolean {
@@ -242,278 +323,343 @@ const canvasPersistStorage: StateStorage = (() => {
   };
 })();
 
-export const useDroneCanvasStore = create<DroneCanvasState>()(
-  persist(
-    (set) => ({
-      nodesByDroneId: {},
-      nodeOrder: [],
-      selectedDroneIds: [],
-      draftPromptByNodeId: {},
-      draftRepoLabelByNodeId: {},
+function toPersistedBoard(board: DroneCanvasBoard): DroneCanvasPersistedBoard {
+  const { selectedDroneIds: _selected, ...persisted } = pickBoard(board);
+  return persisted;
+}
+
+type BoardReducers = {
+  [K in keyof DroneCanvasBoardActions]: (...args: Parameters<DroneCanvasBoardActions[K]>) => BoardReducer;
+};
+
+// Board logic is pure so the same actions serve the global board and every drone board.
+const boardReducers: BoardReducers = {
+  upsertNodes: (nodes) => (state) => {
+    if (!Array.isArray(nodes) || nodes.length === 0) return state;
+    const nextById = { ...state.nodesByDroneId };
+    const nextOrder = state.nodeOrder.slice();
+    let touched = false;
+
+    for (const candidate of nodes) {
+      const droneId = String(candidate?.droneId ?? '').trim();
+      if (!droneId) continue;
+      const label = String(candidate?.label ?? '').trim() || droneId;
+      const x = roundCoord(candidate?.x ?? 0);
+      const y = roundCoord(candidate?.y ?? 0);
+      const previous = nextById[droneId];
+      if (!previous) {
+        nextOrder.push(droneId);
+        touched = true;
+      } else if (previous.label === label && previous.x === x && previous.y === y) {
+        continue;
+      } else {
+        touched = true;
+      }
+      nextById[droneId] = { droneId, label, x, y };
+    }
+
+    if (!touched) return state;
+    return {
+      ...state,
+      nodesByDroneId: nextById,
+      nodeOrder: normalizeNodeOrder(nextOrder, nextById),
+      selectedDroneIds: normalizeSelection(state.selectedDroneIds, nextById),
+    };
+  },
+  moveNode: (droneId, x, y) => (state) => {
+    const id = String(droneId ?? '').trim();
+    if (!id) return state;
+    const previous = state.nodesByDroneId[id];
+    if (!previous) return state;
+    const nextX = roundCoord(x);
+    const nextY = roundCoord(y);
+    if (previous.x === nextX && previous.y === nextY) return state;
+    return {
+      ...state,
+      nodesByDroneId: {
+        ...state.nodesByDroneId,
+        [id]: { ...previous, x: nextX, y: nextY },
+      },
+    };
+  },
+  moveNodes: (nodes) => (state) => {
+    if (!Array.isArray(nodes) || nodes.length === 0) return state;
+    let nextById: Record<string, DroneCanvasNode> | null = null;
+    const sourceById = state.nodesByDroneId;
+    for (const candidate of nodes) {
+      const id = String(candidate?.droneId ?? '').trim();
+      if (!id) continue;
+      const previous = (nextById ?? sourceById)[id];
+      if (!previous) continue;
+      const nextX = roundCoord(candidate?.x ?? previous.x);
+      const nextY = roundCoord(candidate?.y ?? previous.y);
+      if (previous.x === nextX && previous.y === nextY) continue;
+      if (!nextById) nextById = { ...sourceById };
+      nextById[id] = { ...previous, x: nextX, y: nextY };
+    }
+    if (!nextById) return state;
+    return { ...state, nodesByDroneId: nextById };
+  },
+  removeNodes: (droneIds) => (state) => {
+    const removeSet = new Set(normalizeSelection(droneIds, state.nodesByDroneId));
+    if (removeSet.size === 0) return state;
+    const nextById: Record<string, DroneCanvasNode> = { ...state.nodesByDroneId };
+    const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+    const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
+    let draftPromptChanged = false;
+    let draftRepoLabelChanged = false;
+    for (const droneId of removeSet) {
+      delete nextById[droneId];
+      if (Object.prototype.hasOwnProperty.call(nextDraftPromptByNodeId, droneId)) {
+        delete nextDraftPromptByNodeId[droneId];
+        draftPromptChanged = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(nextDraftRepoLabelByNodeId, droneId)) {
+        delete nextDraftRepoLabelByNodeId[droneId];
+        draftRepoLabelChanged = true;
+      }
+    }
+    const nextOrder = state.nodeOrder.filter((droneId) => !removeSet.has(droneId));
+    const nextSelected = state.selectedDroneIds.filter((droneId) => !removeSet.has(droneId));
+    return {
+      ...state,
+      nodesByDroneId: nextById,
+      nodeOrder: nextOrder,
+      selectedDroneIds: nextSelected,
+      draftPromptByNodeId: draftPromptChanged ? nextDraftPromptByNodeId : state.draftPromptByNodeId,
+      draftRepoLabelByNodeId: draftRepoLabelChanged
+        ? nextDraftRepoLabelByNodeId
+        : state.draftRepoLabelByNodeId,
+    };
+  },
+  replaceNodeId: (oldDroneId, newDroneId, label) => (state) => {
+    const oldId = String(oldDroneId ?? '').trim();
+    const nextId = String(newDroneId ?? '').trim();
+    if (!oldId || !nextId) return state;
+    const oldNode = state.nodesByDroneId[oldId];
+    if (!oldNode) return state;
+    const nextLabel = String(label ?? '').trim() || oldNode.label;
+    const nextNode: DroneCanvasNode = {
+      droneId: nextId,
+      label: nextLabel,
+      x: oldNode.x,
+      y: oldNode.y,
+    };
+    const nextById = { ...state.nodesByDroneId };
+    delete nextById[oldId];
+    nextById[nextId] = nextNode;
+    const rawOrder = state.nodeOrder.map((id) => (id === oldId ? nextId : id));
+    const nextOrder = normalizeNodeOrder(rawOrder, nextById);
+    const rawSelected = state.selectedDroneIds.map((id) => (id === oldId ? nextId : id));
+    const nextSelected = normalizeSelection(rawSelected, nextById);
+    const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+    const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
+    delete nextDraftPromptByNodeId[oldId];
+    delete nextDraftRepoLabelByNodeId[oldId];
+    return {
+      ...state,
+      nodesByDroneId: nextById,
+      nodeOrder: nextOrder,
+      selectedDroneIds: nextSelected,
+      draftPromptByNodeId: nextDraftPromptByNodeId,
+      draftRepoLabelByNodeId: nextDraftRepoLabelByNodeId,
+    };
+  },
+  setDraftPromptForNode: (droneId, prompt) => (state) => {
+    const id = String(droneId ?? '').trim();
+    if (!id || !state.nodesByDroneId[id] || !isCanvasDraftNodeId(id)) return state;
+    const nextPrompt = String(prompt ?? '');
+    const prevPrompt = String(state.draftPromptByNodeId[id] ?? '');
+    if (prevPrompt === nextPrompt) return state;
+    const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+    if (nextPrompt) nextDraftPromptByNodeId[id] = nextPrompt;
+    else delete nextDraftPromptByNodeId[id];
+    return {
+      ...state,
+      draftPromptByNodeId: nextDraftPromptByNodeId,
+    };
+  },
+  setDraftRepoLabelForNode: (droneId, repoLabel) => (state) => {
+    const id = String(droneId ?? '').trim();
+    if (!id || !state.nodesByDroneId[id] || !isCanvasDraftNodeId(id)) return state;
+    const nextRepoLabel = String(repoLabel ?? '').trim();
+    const prevRepoLabel = String(state.draftRepoLabelByNodeId[id] ?? '');
+    if (prevRepoLabel === nextRepoLabel) return state;
+    const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
+    if (nextRepoLabel) nextDraftRepoLabelByNodeId[id] = nextRepoLabel;
+    else delete nextDraftRepoLabelByNodeId[id];
+    return {
+      ...state,
+      draftRepoLabelByNodeId: nextDraftRepoLabelByNodeId,
+    };
+  },
+  syncNodeLabels: (droneNameById) => (state) => {
+    if (!droneNameById || typeof droneNameById !== 'object') return state;
+    let changed = false;
+    const nextById = { ...state.nodesByDroneId };
+    for (const id of state.nodeOrder) {
+      const current = nextById[id];
+      if (!current) continue;
+      const nextLabel = String(droneNameById[id] ?? '').trim() || current.label;
+      if (nextLabel === current.label) continue;
+      nextById[id] = { ...current, label: nextLabel };
+      changed = true;
+    }
+    if (!changed) return state;
+    return { ...state, nodesByDroneId: nextById };
+  },
+  setSelectedDroneIds: (next) => (state) => {
+    const normalized = normalizeSelection(resolveNext(state.selectedDroneIds, next), state.nodesByDroneId);
+    if (areStringArraysEqual(state.selectedDroneIds, normalized)) return state;
+    return {
+      ...state,
+      selectedDroneIds: normalized,
+    };
+  },
+  toggleSelectedDroneId: (droneId) => (state) => {
+    const id = String(droneId ?? '').trim();
+    if (!id || !state.nodesByDroneId[id]) return state;
+    const selected = state.selectedDroneIds;
+    return selected.includes(id)
+      ? { ...state, selectedDroneIds: selected.filter((x) => x !== id) }
+      : { ...state, selectedDroneIds: [...selected, id] };
+  },
+  clearSelection: () => (state) => {
+    if (state.selectedDroneIds.length === 0) return state;
+    return { ...state, selectedDroneIds: [] };
+  },
+  setPan: (panX, panY) => (state) => {
+    const nextPanX = roundCoord(panX);
+    const nextPanY = roundCoord(panY);
+    if (state.panX === nextPanX && state.panY === nextPanY) return state;
+    return {
+      ...state,
+      panX: nextPanX,
+      panY: nextPanY,
+    };
+  },
+  setScale: (scale) => (state) => {
+    const nextScale = clampCanvasScale(scale);
+    if (state.scale === nextScale) return state;
+    return {
+      ...state,
+      scale: nextScale,
+    };
+  },
+  setViewport: (panX, panY, scale) => (state) => {
+    const nextPanX = roundCoord(panX);
+    const nextPanY = roundCoord(panY);
+    const nextScale = clampCanvasScale(scale);
+    if (state.panX === nextPanX && state.panY === nextPanY && state.scale === nextScale) return state;
+    return {
+      ...state,
+      panX: nextPanX,
+      panY: nextPanY,
+      scale: nextScale,
+    };
+  },
+  resetViewport: () => (state) => {
+    if (state.panX === 32 && state.panY === 32 && state.scale === 1) return state;
+    return {
+      ...state,
       panX: 32,
       panY: 32,
       scale: 1,
-      upsertNodes: (nodes) =>
-        set((state) => {
-          if (!Array.isArray(nodes) || nodes.length === 0) return state;
-          const nextById = { ...state.nodesByDroneId };
-          const nextOrder = state.nodeOrder.slice();
-          let touched = false;
+    };
+  },
+};
 
-          for (const candidate of nodes) {
-            const droneId = String(candidate?.droneId ?? '').trim();
-            if (!droneId) continue;
-            const label = String(candidate?.label ?? '').trim() || droneId;
-            const x = roundCoord(candidate?.x ?? 0);
-            const y = roundCoord(candidate?.y ?? 0);
-            const previous = nextById[droneId];
-            if (!previous) {
-              nextOrder.push(droneId);
-              touched = true;
-            } else if (previous.label === label && previous.x === x && previous.y === y) {
-              continue;
-            } else {
-              touched = true;
-            }
-            nextById[droneId] = { droneId, label, x, y };
+function bindBoardActions(
+  applyToBoard: DroneCanvasState['applyToBoard'],
+  boardDroneId: string | null,
+): DroneCanvasBoardActions {
+  const out = {} as Record<string, (...args: unknown[]) => void>;
+  for (const [name, reducer] of Object.entries(boardReducers)) {
+    out[name] = (...args: unknown[]) =>
+      applyToBoard(boardDroneId, (reducer as (...a: unknown[]) => BoardReducer)(...args));
+  }
+  return out as unknown as DroneCanvasBoardActions;
+}
+
+// Bound per-board actions, reused across renders; a board removed with its drone drops its entry.
+const boardActionsByDroneId = new Map<string, DroneCanvasBoardActions>();
+
+export const useDroneCanvasStore = create<DroneCanvasState>()(
+  persist(
+    (set) => {
+      const applyToBoard: DroneCanvasState['applyToBoard'] = (boardDroneIdRaw, reducer) =>
+        set((state) => {
+          const boardDroneId = String(boardDroneIdRaw ?? '').trim();
+          if (!boardDroneId) {
+            const board = pickBoard(state);
+            const next = reducer(board);
+            return next === board ? state : { ...state, ...pickBoard(next) };
           }
-
-          if (!touched) return state;
-          return {
+          const board = state.droneBoards[boardDroneId] ?? EMPTY_CANVAS_BOARD;
+          const next = reducer(board);
+          if (next === board) return state;
+          return { ...state, droneBoards: { ...state.droneBoards, [boardDroneId]: pickBoard(next) } };
+        });
+      return {
+        ...pickBoard(EMPTY_CANVAS_BOARD),
+        droneBoards: {},
+        scope: 'drone',
+        setScope: (scope) => set((state) => (state.scope === scope ? state : { ...state, scope })),
+        optimisticMembersByDroneId: {},
+        addOptimisticBoardMember: (droneId, member) =>
+          set((state) => ({
             ...state,
-            nodesByDroneId: nextById,
-            nodeOrder: normalizeNodeOrder(nextOrder, nextById),
-            selectedDroneIds: normalizeSelection(state.selectedDroneIds, nextById),
-          };
-        }),
-      moveNode: (droneId, x, y) =>
-        set((state) => {
-          const id = String(droneId ?? '').trim();
-          if (!id) return state;
-          const previous = state.nodesByDroneId[id];
-          if (!previous) return state;
-          const nextX = roundCoord(x);
-          const nextY = roundCoord(y);
-          if (previous.x === nextX && previous.y === nextY) return state;
-          return {
-            ...state,
-            nodesByDroneId: {
-              ...state.nodesByDroneId,
-              [id]: { ...previous, x: nextX, y: nextY },
+            optimisticMembersByDroneId: {
+              ...state.optimisticMembersByDroneId,
+              [droneId]: [
+                ...(state.optimisticMembersByDroneId[droneId] ?? []).filter(
+                  (existing) => existing.chatName !== member.chatName,
+                ),
+                member,
+              ],
             },
-          };
-        }),
-      moveNodes: (nodes) =>
-        set((state) => {
-          if (!Array.isArray(nodes) || nodes.length === 0) return state;
-          let nextById: Record<string, DroneCanvasNode> | null = null;
-          const sourceById = state.nodesByDroneId;
-          for (const candidate of nodes) {
-            const id = String(candidate?.droneId ?? '').trim();
-            if (!id) continue;
-            const previous = (nextById ?? sourceById)[id];
-            if (!previous) continue;
-            const nextX = roundCoord(candidate?.x ?? previous.x);
-            const nextY = roundCoord(candidate?.y ?? previous.y);
-            if (previous.x === nextX && previous.y === nextY) continue;
-            if (!nextById) nextById = { ...sourceById };
-            nextById[id] = { ...previous, x: nextX, y: nextY };
-          }
-          if (!nextById) return state;
-          return { ...state, nodesByDroneId: nextById };
-        }),
-      removeNodes: (droneIds) =>
-        set((state) => {
-          const removeSet = new Set(normalizeSelection(droneIds, state.nodesByDroneId));
-          if (removeSet.size === 0) return state;
-          const nextById: Record<string, DroneCanvasNode> = { ...state.nodesByDroneId };
-          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
-          const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
-          let draftPromptChanged = false;
-          let draftRepoLabelChanged = false;
-          for (const droneId of removeSet) {
-            delete nextById[droneId];
-            if (Object.prototype.hasOwnProperty.call(nextDraftPromptByNodeId, droneId)) {
-              delete nextDraftPromptByNodeId[droneId];
-              draftPromptChanged = true;
+          })),
+        dropOptimisticBoardMembers: (droneId, chatNames) =>
+          set((state) => {
+            const current = state.optimisticMembersByDroneId[droneId];
+            if (!current) return state;
+            const remaining = current.filter((member) => !chatNames.includes(member.chatName));
+            if (remaining.length === current.length) return state;
+            const optimisticMembersByDroneId = { ...state.optimisticMembersByDroneId };
+            if (remaining.length > 0) optimisticMembersByDroneId[droneId] = remaining;
+            else delete optimisticMembersByDroneId[droneId];
+            return { ...state, optimisticMembersByDroneId };
+          }),
+        applyToBoard,
+        ...bindBoardActions(applyToBoard, null),
+        removeDroneBoards: (droneIds) =>
+          set((state) => {
+            // A deleted drone takes its board and any cards still waiting for a summary with it.
+            const ids = (Array.isArray(droneIds) ? droneIds : []).filter(
+              (id) => state.droneBoards[id] || state.optimisticMembersByDroneId[id],
+            );
+            if (ids.length === 0) return state;
+            const droneBoards = { ...state.droneBoards };
+            const optimisticMembersByDroneId = { ...state.optimisticMembersByDroneId };
+            for (const id of ids) {
+              delete droneBoards[id];
+              delete optimisticMembersByDroneId[id];
+              boardActionsByDroneId.delete(id);
             }
-            if (Object.prototype.hasOwnProperty.call(nextDraftRepoLabelByNodeId, droneId)) {
-              delete nextDraftRepoLabelByNodeId[droneId];
-              draftRepoLabelChanged = true;
-            }
-          }
-          const nextOrder = state.nodeOrder.filter((droneId) => !removeSet.has(droneId));
-          const nextSelected = state.selectedDroneIds.filter((droneId) => !removeSet.has(droneId));
-          return {
-            ...state,
-            nodesByDroneId: nextById,
-            nodeOrder: nextOrder,
-            selectedDroneIds: nextSelected,
-            draftPromptByNodeId: draftPromptChanged ? nextDraftPromptByNodeId : state.draftPromptByNodeId,
-            draftRepoLabelByNodeId: draftRepoLabelChanged
-              ? nextDraftRepoLabelByNodeId
-              : state.draftRepoLabelByNodeId,
-          };
-        }),
-      replaceNodeId: (oldDroneId, newDroneId, label) =>
-        set((state) => {
-          const oldId = String(oldDroneId ?? '').trim();
-          const nextId = String(newDroneId ?? '').trim();
-          if (!oldId || !nextId) return state;
-          const oldNode = state.nodesByDroneId[oldId];
-          if (!oldNode) return state;
-          const nextLabel = String(label ?? '').trim() || oldNode.label;
-          const nextNode: DroneCanvasNode = {
-            droneId: nextId,
-            label: nextLabel,
-            x: oldNode.x,
-            y: oldNode.y,
-          };
-          const nextById = { ...state.nodesByDroneId };
-          delete nextById[oldId];
-          nextById[nextId] = nextNode;
-          const rawOrder = state.nodeOrder.map((id) => (id === oldId ? nextId : id));
-          const nextOrder = normalizeNodeOrder(rawOrder, nextById);
-          const rawSelected = state.selectedDroneIds.map((id) => (id === oldId ? nextId : id));
-          const nextSelected = normalizeSelection(rawSelected, nextById);
-          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
-          const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
-          delete nextDraftPromptByNodeId[oldId];
-          delete nextDraftRepoLabelByNodeId[oldId];
-          return {
-            ...state,
-            nodesByDroneId: nextById,
-            nodeOrder: nextOrder,
-            selectedDroneIds: nextSelected,
-            draftPromptByNodeId: nextDraftPromptByNodeId,
-            draftRepoLabelByNodeId: nextDraftRepoLabelByNodeId,
-          };
-        }),
-      setDraftPromptForNode: (droneId, prompt) =>
-        set((state) => {
-          const id = String(droneId ?? '').trim();
-          if (!id || !state.nodesByDroneId[id] || !isCanvasDraftNodeId(id)) return state;
-          const nextPrompt = String(prompt ?? '');
-          const prevPrompt = String(state.draftPromptByNodeId[id] ?? '');
-          if (prevPrompt === nextPrompt) return state;
-          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
-          if (nextPrompt) nextDraftPromptByNodeId[id] = nextPrompt;
-          else delete nextDraftPromptByNodeId[id];
-          return {
-            ...state,
-            draftPromptByNodeId: nextDraftPromptByNodeId,
-          };
-        }),
-      setDraftRepoLabelForNode: (droneId, repoLabel) =>
-        set((state) => {
-          const id = String(droneId ?? '').trim();
-          if (!id || !state.nodesByDroneId[id] || !isCanvasDraftNodeId(id)) return state;
-          const nextRepoLabel = String(repoLabel ?? '').trim();
-          const prevRepoLabel = String(state.draftRepoLabelByNodeId[id] ?? '');
-          if (prevRepoLabel === nextRepoLabel) return state;
-          const nextDraftRepoLabelByNodeId = { ...state.draftRepoLabelByNodeId };
-          if (nextRepoLabel) nextDraftRepoLabelByNodeId[id] = nextRepoLabel;
-          else delete nextDraftRepoLabelByNodeId[id];
-          return {
-            ...state,
-            draftRepoLabelByNodeId: nextDraftRepoLabelByNodeId,
-          };
-        }),
-      syncNodeLabels: (droneNameById) =>
-        set((state) => {
-          if (!droneNameById || typeof droneNameById !== 'object') return state;
-          let changed = false;
-          const nextById = { ...state.nodesByDroneId };
-          for (const id of state.nodeOrder) {
-            const current = nextById[id];
-            if (!current) continue;
-            const nextLabel = String(droneNameById[id] ?? '').trim() || current.label;
-            if (nextLabel === current.label) continue;
-            nextById[id] = { ...current, label: nextLabel };
-            changed = true;
-          }
-          if (!changed) return state;
-          return { ...state, nodesByDroneId: nextById };
-        }),
-      setSelectedDroneIds: (next) =>
-        set((state) => {
-          const normalized = normalizeSelection(resolveNext(state.selectedDroneIds, next), state.nodesByDroneId);
-          if (areStringArraysEqual(state.selectedDroneIds, normalized)) return state;
-          return {
-            ...state,
-            selectedDroneIds: normalized,
-          };
-        }),
-      toggleSelectedDroneId: (droneId) =>
-        set((state) => {
-          const id = String(droneId ?? '').trim();
-          if (!id || !state.nodesByDroneId[id]) return state;
-          const selected = state.selectedDroneIds;
-          return selected.includes(id)
-            ? { ...state, selectedDroneIds: selected.filter((x) => x !== id) }
-            : { ...state, selectedDroneIds: [...selected, id] };
-        }),
-      clearSelection: () =>
-        set((state) => {
-          if (state.selectedDroneIds.length === 0) return state;
-          return { ...state, selectedDroneIds: [] };
-        }),
-      setPan: (panX, panY) =>
-        set((state) => {
-          const nextPanX = roundCoord(panX);
-          const nextPanY = roundCoord(panY);
-          if (state.panX === nextPanX && state.panY === nextPanY) return state;
-          return {
-            ...state,
-            panX: nextPanX,
-            panY: nextPanY,
-          };
-        }),
-      setScale: (scale) =>
-        set((state) => {
-          const nextScale = clampCanvasScale(scale);
-          if (state.scale === nextScale) return state;
-          return {
-            ...state,
-            scale: nextScale,
-          };
-        }),
-      setViewport: (panX, panY, scale) =>
-        set((state) => {
-          const nextPanX = roundCoord(panX);
-          const nextPanY = roundCoord(panY);
-          const nextScale = clampCanvasScale(scale);
-          if (state.panX === nextPanX && state.panY === nextPanY && state.scale === nextScale) return state;
-          return {
-            ...state,
-            panX: nextPanX,
-            panY: nextPanY,
-            scale: nextScale,
-          };
-        }),
-      resetViewport: () =>
-        set((state) => {
-          if (state.panX === 32 && state.panY === 32 && state.scale === 1) return state;
-          return {
-            ...state,
-            panX: 32,
-            panY: 32,
-            scale: 1,
-          };
-        }),
-    }),
+            return { ...state, droneBoards, optimisticMembersByDroneId };
+          }),
+      };
+    },
     {
       name: DRONE_CANVAS_STORAGE_KEY,
       version: 3,
       storage: createJSONStorage(() => canvasPersistStorage),
       partialize: (state): DroneCanvasPersistedState => ({
-        nodesByDroneId: state.nodesByDroneId,
-        nodeOrder: state.nodeOrder,
-        draftPromptByNodeId: state.draftPromptByNodeId,
-        draftRepoLabelByNodeId: state.draftRepoLabelByNodeId,
-        panX: state.panX,
-        panY: state.panY,
-        scale: state.scale,
+        ...toPersistedBoard(state),
+        scope: state.scope,
+        droneBoards: Object.fromEntries(
+          Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
+        ),
       }),
       merge: (persistedState, currentState) => {
         const persisted = normalizePersistedState(persistedState);
@@ -521,11 +667,31 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
           ...currentState,
           ...persisted,
           selectedDroneIds: [],
+          droneBoards: Object.fromEntries(
+            Object.entries(persisted.droneBoards).map(([droneId, board]) => [
+              droneId,
+              { ...board, selectedDroneIds: [] },
+            ]),
+          ),
         };
       },
     },
   ),
 );
+
+export function getCanvasBoardActions(boardDroneIdRaw: string | null): DroneCanvasBoardActions {
+  const boardDroneId = String(boardDroneIdRaw ?? '').trim();
+  if (!boardDroneId) return useDroneCanvasStore.getState();
+  let actions = boardActionsByDroneId.get(boardDroneId);
+  if (!actions) {
+    actions = bindBoardActions(
+      (id, reducer) => useDroneCanvasStore.getState().applyToBoard(id, reducer),
+      boardDroneId,
+    );
+    boardActionsByDroneId.set(boardDroneId, actions);
+  }
+  return actions;
+}
 
 export { MIN_CANVAS_SCALE, MAX_CANVAS_SCALE, clampCanvasScale };
 export { DRAFT_CANVAS_NODE_PREFIX, isCanvasDraftNodeId };

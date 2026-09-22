@@ -7,7 +7,7 @@ import {
 export type CanvasRelationshipEdge = {
   key: string;
   path: string;
-  variant: 'lineage' | 'assigned' | 'chat-owner';
+  variant: 'lineage' | 'assigned' | 'chat-owner' | 'chat-fork';
 };
 
 type RelationshipCanvasNode = {
@@ -22,6 +22,8 @@ type BuildCanvasRelationshipEdgesParams = {
   fallbackNodeBoundsById: Record<string, CanvasRect>;
   fleetParentIdByDroneId: Record<string, string>;
   fleetAssignedIdsByDroneId: Record<string, string[]>;
+  /** Canvas node id of a forked chat -> canvas node id of the chat it branched from. */
+  forkSourceNodeIdByNodeId?: Record<string, string>;
 };
 
 export function buildCanvasRelationshipEdges({
@@ -32,6 +34,7 @@ export function buildCanvasRelationshipEdges({
   fallbackNodeBoundsById,
   fleetParentIdByDroneId,
   fleetAssignedIdsByDroneId,
+  forkSourceNodeIdByNodeId = {},
 }: BuildCanvasRelationshipEdgesParams): CanvasRelationshipEdge[] {
   const edges: CanvasRelationshipEdge[] = [];
 
@@ -81,6 +84,18 @@ export function buildCanvasRelationshipEdges({
         variant: 'assigned',
       });
     }
+  }
+
+  for (const [forkNodeId, sourceNodeId] of Object.entries(forkSourceNodeIdByNodeId)) {
+    const source = renderedNodeBoundsById[sourceNodeId] ?? fallbackNodeBoundsById[sourceNodeId];
+    const target = renderedNodeBoundsById[forkNodeId] ?? fallbackNodeBoundsById[forkNodeId];
+    if (!source || !target) continue;
+    const { startX, startY, endX, endY } = resolveLineageEndpoint(source, target);
+    edges.push({
+      key: `${sourceNodeId}|>${forkNodeId}`,
+      path: buildLineagePath(startX, startY, endX, endY),
+      variant: 'chat-fork',
+    });
   }
 
   return edges;

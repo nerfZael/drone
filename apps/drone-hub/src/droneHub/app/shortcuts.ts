@@ -48,7 +48,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'alignFloatingChats',
     label: 'Align floating chats',
-    description: 'Restores floating forks to their default size, arranged from bottom right upward, then left.',
+    description: 'Restores floating side chats to their default size, arranged from bottom right upward, then left.',
   },
   {
     id: 'createDraftDroneInCurrentGroup',
@@ -63,17 +63,17 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'cloneDroneChat',
     label: 'Clone focused chat',
-    description: 'Clones the focused chat and opens the clone; falls back to the main chat.',
+    description: 'Clones the focused chat into the sidebar and opens the clone, even while it is running; falls back to the main chat.',
   },
   {
     id: 'createSideChat',
-    label: 'Open side chat',
-    description: 'Opens a floating branch at the current chat’s last completed assistant answer, even while it is running.',
+    label: 'Clone to side chat',
+    description: 'Clones the current chat up to its last completed assistant answer into a floating side chat, even while it is running.',
   },
   {
     id: 'toggleSideChatMain',
-    label: 'Move fork between main and floating chat',
-    description: 'Opens the focused fork as the main chat, or returns it to its floating window.',
+    label: 'Move side chat between main and floating chat',
+    description: 'Opens the focused side chat as the main chat, or returns it to its floating window.',
   },
   {
     id: 'toggleSelectedDronePinned',

@@ -36,7 +36,12 @@ import {
 } from './onboarding/control';
 import { copyText } from './droneHub/app/clipboard';
 import { clientTimeZone } from './droneHub/app/client-time-zone';
-import { isCanvasDraftNodeId, useDroneCanvasStore } from './droneHub/canvas/use-drone-canvas-store';
+import {
+  getCanvasBoardActions,
+  isCanvasDraftNodeId,
+  useDroneCanvasStore,
+} from './droneHub/canvas/use-drone-canvas-store';
+import { placeClonedChatOnDroneBoard } from './droneHub/canvas/drone-board';
 import {
   WHITEBOARD_OPEN_EVENT,
   writeActiveWhiteboardId,
@@ -258,6 +263,7 @@ type DroneDeleteConfirmState = {
 
 const DRONE_DELETE_CONCURRENCY = 4;
 const OPTIMISTIC_DRONE_RENAME_TIMEOUT_MS = 15_000;
+const UNTITLED_CHAT_CLAIM_TTL_MS = 60_000;
 
 export type DroneHubAppModel = {
   quickActionDialogProps: import('./droneHub/app/QuickActionDialog').QuickActionDialogProps;
@@ -717,6 +723,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return Boolean(ref && droneIdSet.has(ref.droneId));
       });
       if (nodeIdsToRemove.length > 0) canvasState.removeNodes(nodeIdsToRemove);
+      canvasState.removeDroneBoards(droneIds);
     },
     [setSidebarChatOrderByDrone, setSidebarDroneOrderByGroup, setSidebarNodeOrderByParent],
   );
@@ -4311,6 +4318,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               useDroneCanvasStore
                 .getState()
                 .replaceNodeId(oldCanvasNodeId, newCanvasNodeId, candidate);
+              getCanvasBoardActions(droneId).replaceNodeId(oldCanvasNodeId, newCanvasNodeId, candidate);
             }
             setSidebarChatOrderByDrone((prev) => {
               const currentOrder = prev[droneId];
@@ -4467,6 +4475,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedDrone,
     ],
   );
+  // name -> when it was claimed. A claim normally ends when the drone summary
+  // lists the chat; one renamed or deleted before that would otherwise hold its
+  // name for the whole session, so claims also expire on their own.
+  const claimedUntitledChatNamesRef = React.useRef(new Map<string, Map<string, number>>());
+  // Names the drone summary does not list yet but are already spoken for: chats
+  // this client is creating (a canvas group paste) and drafts it has opened.
+  // Both creation paths pick "Untitled N" from the same pool, so both consult this.
+  const reserveUntitledChatNames = React.useCallback((latestDrone: DroneSummary): { claimed: Map<string, number>; unavailable: string[] } => {
+    const claimed = claimedUntitledChatNamesRef.current.get(latestDrone.id) ?? new Map<string, number>();
+    claimedUntitledChatNamesRef.current.set(latestDrone.id, claimed);
+    for (const name of latestDrone.chats ?? []) claimed.delete(name);
+    const now = Date.now();
+    for (const [name, at] of claimed) {
+      if (now - at > UNTITLED_CHAT_CLAIM_TTL_MS) claimed.delete(name);
+    }
+    const draftNames = [...newDraftChatsRef.current.values()]
+      .filter((tracked) => tracked.droneId === latestDrone.id)
+      .map((tracked) => tracked.chatName);
+    return { claimed, unavailable: [...(latestDrone.chats ?? []), ...claimed.keys(), ...draftNames] };
+  }, []);
   const createUntitledDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -4478,11 +4506,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const latestDrone = droneByIdRef.current[drone.id] ?? drone;
-      const unavailableChatNames = [...(latestDrone.chats ?? [])];
+      // Several chats can be created in one drone at once (a canvas group paste).
+      // Claiming a name before the request keeps them from all asking for the same one.
+      const { claimed, unavailable: unavailableChatNames } = reserveUntitledChatNames(latestDrone);
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const candidate = suggestNextDroneChatName(unavailableChatNames);
+        claimed.set(candidate, Date.now());
         const created = await createDroneChat(latestDrone, candidate, opts);
+        // A created chat stays claimed until the drone summary lists it.
         if (created.ok) return { ok: true, chatName: candidate, error: null };
+        claimed.delete(candidate);
         const createError = String(created.error ?? '').trim();
         if (!/already exists/i.test(createError)) {
           return { ok: false, error: createError || 'The new chat could not be created.' };
@@ -4491,7 +4524,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       return { ok: false, error: 'Could not find an available untitled chat name.' };
     },
-    [createDroneChat],
+    [createDroneChat, reserveUntitledChatNames],
   );
   const cloningChatKeysRef = React.useRef(new Set<string>());
   const [cloningChatKeys, setCloningChatKeys] = React.useState<Record<string, true>>({});
@@ -4499,6 +4532,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       droneIdRaw: string,
       sourceChatNameRaw: string,
+      opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const sourceChatName = String(sourceChatNameRaw ?? '').trim() || 'default';
@@ -4514,9 +4548,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const result = await createUntitledDroneChat(drone, {
           copyFromChat: sourceChatName,
           mode: 'fork',
+          ...(opts?.select === false ? { select: false } : {}),
         });
         if (!result.ok) {
           showShortcutToast(result.error || 'The chat could not be cloned.', 'Clone chat failed');
+        } else if (result.chatName) {
+          placeClonedChatOnDroneBoard(droneId, sourceChatName, result.chatName, {
+            position: opts?.boardPosition,
+          });
         }
         return result;
       } finally {
@@ -4621,13 +4660,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const createDraftDroneChat = React.useCallback(async (drone: DroneSummary): Promise<boolean> => {
     const latestDrone = droneByIdRef.current[drone.id] ?? drone;
-    const reservedChatNames = [...newDraftChatsRef.current.values()]
-      .filter((tracked) => tracked.droneId === latestDrone.id)
-      .map((tracked) => tracked.chatName);
-    const chatName = suggestNextDroneChatName([
-      ...(latestDrone.chats ?? []),
-      ...reservedChatNames,
-    ]);
+    const chatName = suggestNextDroneChatName(reserveUntitledChatNames(latestDrone).unavailable);
     let configuration: NewChatConfiguration;
     try {
       configuration = resolveNewChatConfiguration(latestDrone);
@@ -4709,6 +4742,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deleteAbandonedDraftChat,
     rememberStartupSeed,
     removeOptimisticDraftChat,
+    reserveUntitledChatNames,
     resolveNewChatConfiguration,
     selectDroneChat,
     showShortcutToast,
@@ -5383,6 +5417,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onDeleteCanvasChat={deleteCanvasChat}
           onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
+          onCreateCanvasChat={(droneId) => createChatForTarget({ droneId })}
           canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
           canvasSpawnAgentKey={spawnAgentKey}
           onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
@@ -5530,6 +5565,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       deleteCanvasChat,
       cloneDroneChat,
       cloneDroneWithoutSelection,
+      createChatForTarget,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
       droneById,

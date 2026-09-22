@@ -51,6 +51,8 @@ export type DroneSummary = {
     checkpointId: string;
     agent: { kind: string; id?: string };
   }>;
+  /** Chat name -> the chat it was cloned from, for sidebar clones and side chats alike. */
+  chatCloneSources?: Record<string, string>;
   unreadChats?: string[];
   chatReadStates?: Record<
     string,

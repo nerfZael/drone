@@ -1,9 +1,4 @@
-import {
-  createCanvasChatNodeId,
-  createCanvasDroneNodeId,
-  parseCanvasChatNodeId,
-  parseCanvasDroneNodeId,
-} from '../app/app-config';
+import { parseCanvasChatNodeId, parseCanvasDroneNodeId } from '../app/app-config';
 import type { DroneSummary } from '../types';
 
 const DRAFT_CANVAS_NODE_PREFIX = 'draft:';
@@ -51,54 +46,57 @@ export function collectCloneSourceNodeIdByDroneId(selectedNodeIdsRaw: string[]):
   return out;
 }
 
-export function buildOptimisticCloneCanvasNodes(args: {
-  copiedDroneIdsRaw: string[];
-  cloneResultsRaw: Array<{ sourceDroneId: string; cloneDroneId?: string | null; cloneDroneName?: string | null }>;
-  sourceNodeIdByDroneId: Record<string, string>;
-  nodesById: Record<string, { x: number; y: number } | undefined>;
-  cloneOffsetXPx: number;
-  cloneOffsetYPx: number;
-}): {
-  nodes: Array<{ droneId: string; label: string; x: number; y: number }>;
-  optimisticDroneNameById: Record<string, string>;
-} {
-  const copiedDroneIds = Array.isArray(args.copiedDroneIdsRaw) ? args.copiedDroneIdsRaw : [];
-  const cloneResults = Array.isArray(args.cloneResultsRaw) ? args.cloneResultsRaw : [];
-  const cloneResultBySourceDroneId = new Map<string, { cloneDroneId: string; cloneDroneName: string }>();
-  for (const candidate of cloneResults) {
-    const sourceDroneId = String(candidate?.sourceDroneId ?? '').trim();
-    const cloneDroneId = String(candidate?.cloneDroneId ?? '').trim();
-    if (!sourceDroneId || !cloneDroneId) continue;
-    cloneResultBySourceDroneId.set(sourceDroneId, {
-      cloneDroneId,
-      cloneDroneName: String(candidate?.cloneDroneName ?? '').trim(),
-    });
+type PasteRect = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where each copied card's clone lands, keyed by the source card. The group
+ * keeps its shape and is centred on `anchor` (the cursor, or the middle of the
+ * view). An anchor on top of the sources would hide the clones behind them, so
+ * that case falls back to a diagonal offset, as does a missing anchor.
+ */
+export function planCanvasPastePositions(args: {
+  sourceNodeIds: string[];
+  boundsById: Record<string, PasteRect | undefined>;
+  anchor: { x: number; y: number } | null;
+  fallbackOffset: { x: number; y: number };
+}): Record<string, { x: number; y: number }> {
+  const sources: Array<{ nodeId: string; rect: PasteRect }> = [];
+  for (const raw of Array.isArray(args.sourceNodeIds) ? args.sourceNodeIds : []) {
+    const nodeId = String(raw ?? '').trim();
+    const rect = nodeId ? args.boundsById[nodeId] : undefined;
+    if (rect && !sources.some((source) => source.nodeId === nodeId)) sources.push({ nodeId, rect });
   }
-
-  const nodes: Array<{ droneId: string; label: string; x: number; y: number }> = [];
-  const optimisticDroneNameById: Record<string, string> = {};
-  let cloneIndex = 0;
-
-  for (const raw of copiedDroneIds) {
-    const sourceDroneId = String(raw ?? '').trim();
-    if (!sourceDroneId) continue;
-    const result = cloneResultBySourceDroneId.get(sourceDroneId);
-    if (!result) continue;
-    const sourceNodeId = String(args.sourceNodeIdByDroneId[sourceDroneId] ?? '').trim();
-    const sourceNode = sourceNodeId ? args.nodesById[sourceNodeId] : null;
-    const cloneNodeId = createCanvasDroneNodeId(result.cloneDroneId);
-    if (!sourceNode || !cloneNodeId) continue;
-    cloneIndex += 1;
-    nodes.push({
-      droneId: cloneNodeId,
-      label: result.cloneDroneName || result.cloneDroneId,
-      x: sourceNode.x + args.cloneOffsetXPx * cloneIndex,
-      y: sourceNode.y + args.cloneOffsetYPx * cloneIndex,
-    });
-    if (result.cloneDroneName) optimisticDroneNameById[result.cloneDroneId] = result.cloneDroneName;
+  if (sources.length === 0) return {};
+  const left = Math.min(...sources.map(({ rect }) => rect.x));
+  const top = Math.min(...sources.map(({ rect }) => rect.y));
+  const right = Math.max(...sources.map(({ rect }) => rect.x + rect.width));
+  const bottom = Math.max(...sources.map(({ rect }) => rect.y + rect.height));
+  const anchor = args.anchor;
+  const centred = anchor && !(anchor.x >= left && anchor.x <= right && anchor.y >= top && anchor.y <= bottom);
+  const dx = centred ? anchor.x - (left + right) / 2 : args.fallbackOffset.x;
+  const dy = centred ? anchor.y - (top + bottom) / 2 : args.fallbackOffset.y;
+  const out: Record<string, { x: number; y: number }> = {};
+  for (const { nodeId, rect } of sources) {
+    out[nodeId] = { x: Math.round((rect.x + dx) * 10) / 10, y: Math.round((rect.y + dy) * 10) / 10 };
   }
+  return out;
+}
 
-  return { nodes, optimisticDroneNameById };
+/** Runs `task` over `items` with at most `limit` in flight, so a group paste is fast without flooding the hub. */
+export async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next];
+      next += 1;
+      await task(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
 }
 
 export type CanvasChatCloneSource = {
@@ -118,37 +116,4 @@ export function collectCloneableChatsFromCanvasSelection(
     out.push({ nodeId, droneId: chatRef.droneId, chatName: chatRef.chatName });
   }
   return out;
-}
-
-export function buildOptimisticChatCloneCanvasNodes(args: {
-  sources: CanvasChatCloneSource[];
-  cloneResults: Array<{ sourceNodeId: string; chatName?: string | null }>;
-  nodesById: Record<string, { x: number; y: number } | undefined>;
-  cloneOffsetXPx: number;
-  cloneOffsetYPx: number;
-}): Array<{ droneId: string; label: string; x: number; y: number }> {
-  const resultBySourceNodeId = new Map<string, string>();
-  for (const result of Array.isArray(args.cloneResults) ? args.cloneResults : []) {
-    const sourceNodeId = String(result?.sourceNodeId ?? '').trim();
-    const chatName = String(result?.chatName ?? '').trim();
-    if (sourceNodeId && chatName) resultBySourceNodeId.set(sourceNodeId, chatName);
-  }
-
-  const nodes: Array<{ droneId: string; label: string; x: number; y: number }> = [];
-  let cloneIndex = 0;
-  for (const source of Array.isArray(args.sources) ? args.sources : []) {
-    const chatName = resultBySourceNodeId.get(source.nodeId);
-    const sourceNode = args.nodesById[source.nodeId];
-    if (!chatName || !sourceNode) continue;
-    const nodeId = createCanvasChatNodeId(source.droneId, chatName);
-    if (!nodeId) continue;
-    cloneIndex += 1;
-    nodes.push({
-      droneId: nodeId,
-      label: chatName,
-      x: sourceNode.x + args.cloneOffsetXPx * cloneIndex,
-      y: sourceNode.y + args.cloneOffsetYPx * cloneIndex,
-    });
-  }
-  return nodes;
 }

@@ -15,7 +15,7 @@ export const ChatContextActionsContext = React.createContext<ChatContextActions 
 function forkDisabledReason(scope: HTMLElement, checkpointId: string | undefined, droneId: string): string | undefined {
   const availability = scope.querySelector<HTMLElement>('[data-chat-fork-supported]')
     ?? scope.parentElement?.querySelector<HTMLElement>(':scope > [data-chat-fork-supported]');
-  if (availability?.dataset.chatForkSupported === 'false') return 'Forking is not supported for this agent.';
+  if (availability?.dataset.chatForkSupported === 'false') return 'Cloning to a side chat is not supported for this agent.';
   if (useSideChatBusyStore.getState().busy[droneId] ?? (availability?.dataset.chatForkBusy === 'true')) return 'A side chat operation is already in progress.';
   if (!checkpointId) return 'Wait for a completed assistant answer.';
 }
@@ -37,7 +37,7 @@ export function chatActionMenuItems(
     { id: 'create-chat', label: 'New chat', shortcut: shortcut('createDroneChat'), onSelect: () => actions.createChat(target) },
     { id: 'clone-chat', label: 'Clone chat', shortcut: shortcut('cloneDroneChat'), onSelect: () => actions.cloneChat(target) },
     {
-      id: 'fork-side-chat', label: 'Fork into side chat', shortcut: shortcut('createSideChat'),
+      id: 'fork-side-chat', label: 'Clone to side chat', shortcut: shortcut('createSideChat'),
       disabled: Boolean(disabledReason), disabledReason,
       onSelect: () => {
         if (!forkDisabledReason(scope, checkpointId, target.droneId) && checkpointId) requestSideChat(target.droneId, { sourceChatName: target.chatName, checkpointId });

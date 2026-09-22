@@ -1,8 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 
-import { summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
+import { resolveChatCloneSources, summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
 
 describe('drone summary helpers', () => {
+  test('resolves clone sources by chat ID so renames keep the link and deleted sources drop out', () => {
+    expect(
+      resolveChatCloneSources({
+        'renamed-source': { id: 'source-id' },
+        clone: { id: 'clone-id', cloneOrigin: { sourceChatName: 'old-name', sourceChatId: 'source-id' } },
+        'clone-of-clone': { id: 'c2', cloneOrigin: { sourceChatName: 'clone', sourceChatId: 'clone-id' } },
+        'kept-side-chat': { id: 'k1', sideChatOrigin: { sourceChatName: 'clone', checkpointId: 'answer-1' } },
+        orphan: { id: 'o1', cloneOrigin: { sourceChatName: 'deleted', sourceChatId: 'gone' } },
+      }),
+    ).toEqual({
+      clone: 'renamed-source',
+      'clone-of-clone': 'clone',
+      'kept-side-chat': 'clone',
+    });
+  });
+
   test('includes canonical native-chat messages in drone activity', () => {
     expect(
       summarizeDroneActivity(

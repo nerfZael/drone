@@ -410,14 +410,14 @@ export function useDroneHubLifecycleEffects({
           unavailable.createSideChat = 'Needs a completed assistant answer';
         }
         if (!focusedSideChatMainControl()) {
-          unavailable.toggleSideChatMain = 'Select an available fork';
+          unavailable.toggleSideChatMain = 'Select an available side chat';
         }
         if (!document.querySelector('[data-main-workspace-chat]')?.closest('[data-drone-workspace-root]')
           ?.querySelector('.dv-resize-container [data-side-chat-name]')) {
           unavailable.alignFloatingChats = 'No floating chats to align';
         }
         const sourceChatName = scope?.dataset.chatName ?? activeSide?.dataset.sideChatName ?? selectedChat;
-        quickActions.open(unavailable, sourceChatName ? { createSideChat: `Fork “${sourceChatName}”` } : {});
+        quickActions.open(unavailable, sourceChatName ? { createSideChat: `Clone “${sourceChatName}” to side chat` } : {});
         return true;
       },
       openHome: () => {

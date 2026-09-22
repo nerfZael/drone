@@ -2581,7 +2581,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Clone drone chat',
       description:
-        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to create a temporary side chat at the latest available checkpoint. Ordinary clones require the source chat to be stopped. Side chats require a supported agent and usable checkpoint, and cannot be drafts.',
+        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to put the clone in a temporary side chat instead of the sidebar; the operation is otherwise the same. The clone ends at the last completed answer of the source. Side chats and running sources require that checkpoint (a supported agent with a completed answer); an idle source without one is cloned whole instead. Side chats cannot be drafts.',
       inputSchema: {
         drone: z.string().trim().min(1),
         sourceChat: z.string().trim().min(1).describe('Source chat name.'),

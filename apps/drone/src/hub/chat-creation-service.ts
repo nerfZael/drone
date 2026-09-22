@@ -73,6 +73,13 @@ export type DroneChatCreationDependencies = {
   };
 };
 
+const CHECKPOINT_UNAVAILABLE_PATTERN =
+  /no completed assistant answer|currently supported for|no provider checkpoint id|codex session is not available|native checkpoint cloning is not available/i;
+
+function isCheckpointUnavailableError(error: unknown): boolean {
+  return CHECKPOINT_UNAVAILABLE_PATTERN.test(String((error as any)?.message ?? error ?? ''));
+}
+
 function queuedOriginMatches(chat: any, origin: QueuedChatOrigin | undefined): boolean {
   if (!origin) return false;
   const actionId = String(origin.actionId ?? '').trim();
@@ -99,8 +106,8 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       throw new Error(`unsupported chat creation mode: ${String(input.creationMode ?? '')}`);
     }
     const sourceChatName = String(input.sourceChatName ?? '').trim();
-    if (input.checkpointId && !input.sideChat)
-      throw new Error('A checkpoint requires side chat creation');
+    if (input.checkpointId && input.creationMode !== 'clone-history')
+      throw new Error('A checkpoint requires cloning a source chat');
     if (input.creationMode === 'empty' && sourceChatName) {
       throw new Error('empty chat creation cannot specify a source chat');
     }
@@ -116,46 +123,58 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       ? deps.readChatFromStore({ droneId: input.droneId, chatName: sourceChatName }).chat
       : null;
     let checkpoint: ReturnType<typeof completedChatCheckpoint> | undefined;
-    if (input.sideChat) {
-      if (input.creationMode !== 'clone-history' || !sourceBeforeCreate) {
-        throw new Error('Side chat creation requires an existing source chat');
-      }
+    if (input.sideChat && (input.creationMode !== 'clone-history' || !sourceBeforeCreate)) {
+      throw new Error('Side chat creation requires an existing source chat');
+    }
+    const sourceRunning =
+      input.creationMode === 'clone-history' &&
+      Boolean(sourceBeforeCreate) &&
+      ((input.droneEntry?.busyChats ?? []).includes(sourceChatName) ||
+        hasBlockingPendingPrompt(sourceBeforeCreate.pendingPrompts, sourceBeforeCreate.turns));
+    // A clone is one operation whether it lands in the sidebar or a side chat:
+    // it ends at the source's last completed answer, so an unfinished or failed
+    // tail is never carried over. Side chats, message clones and running sources
+    // depend on that cut. An idle sidebar clone prefers it too, but falls back to
+    // copying the whole chat when no checkpoint exists (no completed answer yet,
+    // an agent without checkpoint support, answers older than checkpoint IDs).
+    const resolveCheckpoint = async (): Promise<NonNullable<typeof checkpoint>> => {
       const agent = deps.inferChatAgent(sourceBeforeCreate, input.droneEntry);
       if (agent.kind === 'native') {
         if (!deps.captureNativeChatCheckpoint)
           throw new Error('Native checkpoint cloning is not available');
-        checkpoint = {
+        return {
           turns: [],
           checkpointId:
             input.checkpointId ?? (await deps.captureNativeChatCheckpoint(sourceBeforeCreate.id)),
         };
-      } else if (
-        agent.kind === 'builtin' && ['codex', 'claude', 'opencode'].includes(agent.id ?? '')
-      ) {
-        checkpoint = completedChatCheckpoint(sourceBeforeCreate, input.checkpointId);
+      }
+      if (agent.kind === 'builtin' && ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) {
+        const resolved = completedChatCheckpoint(sourceBeforeCreate, input.checkpointId);
         if (agent.id === 'codex') {
           if (!createChatForkOrigin(sourceBeforeCreate, sourceChatName, 'codex')) {
             throw new Error('The source Codex session is not available for checkpoint cloning');
           }
-        } else if (checkpoint.providerCheckpoint?.agentId !== agent.id) {
+        } else if (resolved.providerCheckpoint?.agentId !== agent.id) {
           throw new Error(
             'This answer has no provider checkpoint ID. Complete a new answer in the source chat after updating, then open a side chat.',
           );
         }
-      } else {
-        throw new Error(
-          'Checkpoint side chats are currently supported for the built-in agent, Codex, Claude Code, and OpenCode',
-        );
+        return resolved;
       }
-    }
-    if (input.creationMode === 'clone-history' && sourceBeforeCreate && !checkpoint) {
-      const sourceBusy = (input.droneEntry?.busyChats ?? []).includes(sourceChatName);
-      const sourceHasBlockingPrompts = hasBlockingPendingPrompt(
-        sourceBeforeCreate.pendingPrompts,
-        sourceBeforeCreate.turns,
+      throw new Error(
+        sourceRunning && !input.sideChat && !input.checkpointId
+          ? 'Stop this chat before cloning it: cloning a running chat is currently supported for the built-in agent, Codex, Claude Code, and OpenCode'
+          : 'Checkpoint side chats are currently supported for the built-in agent, Codex, Claude Code, and OpenCode',
       );
-      if (sourceBusy || sourceHasBlockingPrompts) {
-        throw new Error('Stop this chat before cloning it');
+    };
+    if (input.creationMode === 'clone-history' && sourceBeforeCreate) {
+      const checkpointRequired = Boolean(input.sideChat || input.checkpointId || sourceRunning);
+      try {
+        checkpoint = await resolveCheckpoint();
+      } catch (error) {
+        // Only "this chat has no usable checkpoint" degrades to a whole copy;
+        // a failing runtime or store must not quietly change what the clone is.
+        if (checkpointRequired || !isCheckpointUnavailableError(error)) throw error;
       }
     }
 
@@ -223,9 +242,17 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
           }
           if (input.draft) entry.draft = true;
           if (input.queuedOrigin) entry.queuedChatOrigin = input.queuedOrigin;
-          if (checkpoint) {
+          if (input.sideChat && checkpoint) {
             entry.visibility = 'side-chat';
             entry.sideChatOrigin = { sourceChatName, checkpointId: checkpoint.checkpointId };
+          }
+          if (input.creationMode === 'clone-history' && source) {
+            const sourceChatId = String(source.id ?? '').trim();
+            entry.cloneOrigin = {
+              sourceChatName,
+              ...(sourceChatId ? { sourceChatId } : {}),
+              ...(checkpoint ? { checkpointId: checkpoint.checkpointId } : {}),
+            };
           }
           return entry;
         },

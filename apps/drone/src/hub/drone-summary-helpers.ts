@@ -6,6 +6,30 @@ function parseIsoOrZero(raw: unknown): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+/**
+ * Chat name -> the chat it was cloned from. The stored source ID wins over the
+ * stored name so a renamed source keeps its clones; a deleted source drops out.
+ */
+export function resolveChatCloneSources(chats: unknown): Record<string, string> {
+  const entries = chats && typeof chats === 'object' ? (Object.entries(chats) as Array<[string, any]>) : [];
+  const nameById = new Map<string, string>();
+  for (const [chatName, entry] of entries) {
+    const id = String(entry?.id ?? '').trim();
+    if (id) nameById.set(id, chatName);
+  }
+  const known = new Set(entries.map(([chatName]) => chatName));
+  const out: Record<string, string> = {};
+  for (const [chatName, entry] of entries) {
+    // A side chat kept before clones recorded their origin only has sideChatOrigin.
+    const origin = entry?.cloneOrigin ?? entry?.sideChatOrigin;
+    const byId = nameById.get(String(origin?.sourceChatId ?? '').trim());
+    const byName = String(origin?.sourceChatName ?? '').trim();
+    const source = byId ?? (known.has(byName) ? byName : '');
+    if (source && source !== chatName) out[chatName] = source;
+  }
+  return out;
+}
+
 export function summarizeDroneActivity(
   entry: any,
   canonicalMessageAtByChatId?: ReadonlyMap<string, string>,

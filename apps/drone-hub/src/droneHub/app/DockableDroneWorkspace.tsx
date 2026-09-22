@@ -666,7 +666,7 @@ function WorkspaceHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
   if (chatName === ctx.mainChatName && ctx.displacedMainChatName) {
     return <div className="dh-chat-window-actions" role="toolbar" aria-label="Main chat controls">
       <button type="button" data-side-chat-move={ctx.displacedMainChatName} className="dh-chat-window-action"
-        title="Restore as main chat and return the fork to this window" aria-label="Restore as main chat"
+        title="Restore as main chat and return the side chat to this window" aria-label="Restore as main chat"
         onPointerDown={(event) => event.stopPropagation()} onClick={ctx.onRestoreMainChat}>
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 15l6-6M9 9h6v6" /></svg>
       </button>
@@ -1103,7 +1103,7 @@ export function DockableDroneWorkspace({
         // Validate drone-specific chat/file references before closing anything.
         for (const panel of Object.values(layout.panels)) {
           if (panel.contentComponent === 'sideChat' && !sideChatsRef.current.some(chat => chat.name === panel.params?.chatName)) {
-            throw new Error('This preset contains a docked fork that is not available in this drone.');
+            throw new Error('This preset contains a docked side chat that is not available in this drone.');
           }
         }
         const fileHost = fileWindowsRef.current;

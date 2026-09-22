@@ -3,6 +3,8 @@ import { setSideChatBusy } from './side-chat-busy-store';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
+import { placeClonedChatOnDroneBoard } from '../canvas/drone-board';
+import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 import { OPEN_SIDE_CHAT_EVENT, consumePendingSideChat, type OpenSideChatDetail } from './side-chat-events';
 
 export type WorkspaceSideChat = NonNullable<DroneSummary['sideChats']>[number];
@@ -101,6 +103,8 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         }),
       })
         .then((result) => {
+          // The board shows the side chat at once, beside its source, instead of waiting for the next summary.
+          placeClonedChatOnDroneBoard(drone.id, result.sideChatOrigin.sourceChatName, name, { sideChat: true });
           if (!workspace.active) return;
           const chat: WorkspaceSideChat = {
             name,
@@ -155,6 +159,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
           `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}${keep ? '/keep' : ''}`,
           { method: keep ? 'POST' : 'DELETE' },
         );
+        if (!keep) useDroneCanvasStore.getState().dropOptimisticBoardMembers(drone.id, [chatName]);
         if (!workspace.active) return;
         setLocal((previous) => ({
           droneId: drone.id,

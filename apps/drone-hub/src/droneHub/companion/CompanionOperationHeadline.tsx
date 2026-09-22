@@ -51,7 +51,7 @@ export function CompanionOperationHeadline({
     case 'create_chat':
       return <><Action kind="create">{operation.draft ? 'Create draft chat' : 'Create chat'}</Action> <Name>{operation.chatName}</Name> in <Name>{drone}</Name></>;
     case 'clone_chat':
-      return <><Action kind="clone">{operation.sideChat ? 'Fork as side chat' : 'Clone chat'}</Action> <Name>{operation.sourceChat}</Name> as <Name>{operation.chatName}</Name> in <Name>{drone}</Name></>;
+      return <><Action kind="clone">{operation.sideChat ? 'Clone to side chat' : 'Clone chat'}</Action> <Name>{operation.sourceChat}</Name> as <Name>{operation.chatName}</Name> in <Name>{drone}</Name></>;
     case 'delete_chat':
       return <><Action kind="delete">Delete chat</Action> <Name>{operation.chatName}</Name> from <Name>{drone}</Name></>;
     case 'rename_chat':
