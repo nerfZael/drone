@@ -93,7 +93,7 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
   writeClipboardText: (text) => ipcRenderer.invoke('drone-hub:clipboard-write-text', text),
   companionWindow: {
     control(action, size) {
-      if (['show', 'hide', 'close', 'attach', 'resize', 'focus-owner'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);
+      if (['show', 'hide', 'close', 'attach', 'resize', 'focus-owner', 'focus'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);
     },
     onClose(callback) {
       if (typeof callback !== 'function') return () => {};

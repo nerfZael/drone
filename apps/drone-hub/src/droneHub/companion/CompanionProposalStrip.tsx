@@ -18,7 +18,7 @@ export function CompanionProposalStrip({
   displayMode = 'summaries',
   onSelect,
 }: {
-  proposals: readonly ProposalSummary[];
+  proposals: readonly (ProposalSummary & { sessionSlot?: number })[];
   selectedId: string | null;
   selectedOpen?: boolean;
   edge?: 'top' | 'bottom';
@@ -47,7 +47,8 @@ export function CompanionProposalStrip({
         : 'flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent] [&::-webkit-scrollbar]:h-0.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--border)] [&::-webkit-scrollbar-track]:bg-transparent'}>
         {proposals.map((item, index) => {
           const selected = item.targetId === selectedId;
-          const label = `Proposal ${index + 1}: ${item.title}${proposalStatusSuffix(item.status)}`;
+          const origin = item.sessionSlot === undefined ? '' : `Session ${item.sessionSlot} · `;
+          const label = `${origin}Proposal ${index + 1}: ${item.title}${proposalStatusSuffix(item.status)}`;
           const tone = selected
             ? selectedOpen
               ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -69,6 +70,7 @@ export function CompanionProposalStrip({
                   : 'inline-flex h-6 min-w-6 items-center justify-center rounded-md border px-1.5 font-mono text-[11px] tabular-nums'
                 } transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] ${tone} ${item.status === 'executing' ? 'animate-pulse' : ''}`}
               >
+                {item.sessionSlot !== undefined ? <span className="mr-1 shrink-0 rounded border border-current px-1 font-mono text-[10px]" title={`Session ${item.sessionSlot}`}>S{item.sessionSlot}</span> : null}
                 {summaries ? (
                   <>
                     <span aria-hidden="true" className="w-4 shrink-0 text-right font-mono tabular-nums text-[var(--muted-dim)]">{index + 1}.</span>

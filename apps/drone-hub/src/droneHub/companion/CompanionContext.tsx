@@ -4,7 +4,8 @@ import { setCompanionClipboard } from './companion-clipboard';
 import { isCompanionPreviewable } from './companion-attachment-files';
 import { CompanionScreen, type CompanionSenseSources } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
-import { desktopCompanionSessionStore } from './companion-session-store';
+import { companionSessionStore, COMPANION_SLOTS, readCompanionSlots, writeCompanionSlots } from './companion-session-store';
+import { companionSessionShortcut } from './companion-session-shortcut';
 import { useCompanionAutoApprove } from './use-companion-auto-approve';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
@@ -61,7 +62,7 @@ type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
 export type PendingCompanionAttachment = CompanionImageAttachment & { id: string; path: string };
 
-type CompanionContextValue = {
+type CompanionSessionValue = {
   /** Pending captures and pasted text. Each is already saved in Companion home; the bytes stay here for previews only. */
   attachments: PendingCompanionAttachment[];
   removeAttachment(id: string): void;
@@ -71,10 +72,12 @@ type CompanionContextValue = {
   addAttachment(file: CompanionImageAttachment): Promise<void>;
   /** Show why a pasted or dropped file could not be attached. */
   reportAttachmentError(error: unknown): void;
+  reportVoiceError(message: string): void;
   screen: CompanionScreen;
   sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
   status: CompanionStatus;
+  working: boolean;
   recordingPaused: boolean;
   pendingTranscriptions: number;
   shortcutHint: CompanionHoldAction | null;
@@ -120,7 +123,25 @@ type CompanionContextValue = {
   toggleAutoApprove(): void;
 };
 
+type CompanionContextValue = CompanionSessionValue & {
+  activeSlot: number;
+  sessions: { slot: number; status: CompanionStatus; recordingPaused: boolean; working: boolean }[];
+  selectSession(slot: number, fromKeyboard?: boolean): void;
+  deleteSession(): Promise<void>;
+};
 const CompanionContext = React.createContext<CompanionContextValue | null>(null);
+
+type SharedRecording = {
+  voice: ReturnType<typeof useChatVoiceRecorder>;
+  workspace: React.MutableRefObject<{ workspace: CapturedCompanionWorkspace | null } | null>;
+  activeSlot: React.MutableRefObject<number>;
+  autoApprove: ReturnType<typeof useCompanionAutoApprove>;
+  microphoneCleanup: React.MutableRefObject<Promise<void> | null>;
+  startGeneration: React.MutableRefObject<number>;
+  liveStartMuted: React.MutableRefObject<boolean>;
+  panelVisibility: 'auto' | 'open' | 'closed';
+  setPanelVisibility: React.Dispatch<React.SetStateAction<'auto' | 'open' | 'closed'>>;
+};
 
 function newId(): string {
   return (
@@ -129,14 +150,15 @@ function newId(): string {
   );
 }
 
-export function CompanionProvider({ children }: { children: React.ReactNode }) {
+function useCompanionSession(slot: number, shared: SharedRecording): CompanionSessionValue {
+  const active = shared.activeSlot.current === slot;
   const [screen] = React.useState(() => new CompanionScreen());
   React.useEffect(() => () => screen.detach(), [screen]);
   const workspace = useCompanionWorkspace();
   const recorder = useRecorderCompanion();
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
-    controllerRef.current = new CompanionClientController({ createId: newId, sessionStore: desktopCompanionSessionStore });
+    controllerRef.current = new CompanionClientController({ createId: newId, sessionStore: companionSessionStore(slot) });
   }
   const controller = controllerRef.current;
   const state = React.useSyncExternalStore(
@@ -176,7 +198,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const proposalExecutingRef = React.useMemo(() => ({ get current() { return Boolean(proposalStore.executingId); } }), [proposalStore]);
   const [proposalExecutionProgress, setProposalExecutionProgress] = React.useState<CompanionProposalExecutionProgress | null>(null);
   const [proposalDroneNames, setProposalDroneNames] = React.useState<Readonly<Record<string, string>>>({});
-  const autoApproveSettings = useCompanionAutoApprove();
+  const autoApproveSettings = shared.autoApprove;
   const autoApprove = autoApproveSettings.enabled;
   // Keep proposals available for manual inspection in auto-approve mode.
   // Wait for settings before exposing drafts so unresolved settings cannot open a card.
@@ -189,14 +211,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setActionNotifications((items) => items.filter((item) => item.id !== id));
   }, []);
   const [proposalHistory, setProposalHistory] = React.useState<CompanionProposalHistoryEntry[]>([]);
+  const [pendingVoice, setPendingVoice] = React.useState(0);
   const voiceSubmissionGenerationRef = React.useRef(0);
   const voiceSubmissionQueueRef = React.useRef(Promise.resolve());
   const resettingRef = React.useRef(false);
   const [shortcutPress] = React.useState(() => new CompanionShortcutPress());
   const [shortcutHint, setShortcutHint] = React.useState<CompanionHoldAction | null>(null);
-  const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');
+  const { panelVisibility, setPanelVisibility } = shared;
   const lastLiveShortcutAtRef = React.useRef(0);
-  const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
+  const recordingWorkspaceRef = shared.workspace;
   // Every attachment is saved to Companion home as it is taken, so an instruction only names files
   // and neither their number nor their combined size can make it fail.
   const addAttachment = React.useCallback(async (file: CompanionImageAttachment) => {
@@ -231,7 +254,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const capture = async (event: Event) => {
       const mode = (event as CustomEvent).detail;
-      if ((mode !== 'region' && mode !== 'screen') || captureBusy.current) return;
+      if (shared.activeSlot.current !== slot || (mode !== 'region' && mode !== 'screen') || captureBusy.current) return;
       captureBusy.current = true;
       const generation = captureGeneration.current;
       try {
@@ -249,16 +272,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     return () => { captureGeneration.current++; window.removeEventListener('companion-capture', capture); };
   }, [addAttachment]);
 
-  const onVoiceError = React.useCallback(
-    (message: string) => controller.reportVoiceError(message),
-    [controller],
-  );
-  const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion', backgroundTranscription: true });
-  const live = useCompanionLive(controller);
+  const voice = shared.voice;
+  const live = useCompanionLive(controller, undefined, active);
   const [switchingVoice, setSwitchingVoice] = React.useState(false);
   const switchingVoiceRef = React.useRef(false);
   const voiceStatusRef = React.useRef(voice.status);
-  const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
   voiceStatusRef.current = voice.status;
 
   const close = React.useCallback(async (stopApplyingProposal = false) => {
@@ -273,6 +291,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setPanelVisibility('closed');
     voiceSubmissionQueueRef.current = Promise.resolve();
     voiceSubmissionGenerationRef.current += 1;
+    setPendingVoice(0);
     textSubmissionGenerationRef.current += 1;
     recordingWorkspaceRef.current = null;
     proposalStore.clear();
@@ -281,7 +300,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setActionNotifications([]);
     setProposalExecutionProgress(null);
     setProposalDroneNames({});
-    await Promise.all([controller.close(), voice.discardRecording()]);
+    await Promise.all([controller.close(), voice.discardRecording({ preserveTranscriptions: true })]);
   }, [controller, voice.discardRecording, live.reset]);
 
   const dismiss = React.useCallback(async () => {
@@ -290,13 +309,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setPanelVisibility('closed');
     if (live.mode === 'jev') live.stop(); else live.reset();
     voiceSubmissionGenerationRef.current += 1;
+    setPendingVoice(0);
     textSubmissionGenerationRef.current += 1;
     recordingWorkspaceRef.current = null;
     proposalStore.clear();
     setProposalExecutionProgress(null);
     setProposalActionError('');
     screen.clear();
-    const stopping = Promise.all([controller.cancel(), voice.discardRecording()]).then(() => {});
+    const stopping = Promise.all([controller.cancel(), voice.discardRecording({ preserveTranscriptions: true })]).then(() => {});
     voiceSubmissionQueueRef.current = stopping.catch(() => {});
     await stopping;
   }, [controller, live.reset, live.stop, live.mode, proposalStore, screen, shortcutPress, voice.discardRecording]);
@@ -306,6 +326,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     live.cancelPending();
     textSubmissionGenerationRef.current += 1;
     voiceSubmissionGenerationRef.current += 1;
+    setPendingVoice(0);
     voiceSubmissionQueueRef.current = Promise.resolve();
     void controller.cancel();
   }, [controller, live.cancelPending]);
@@ -322,7 +343,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     await voice.discardRecording({ preserveTranscriptions: true });
     controller.resetIfNoSession();
   }, [controller, shortcutPress, voice.discardRecording]);
-  discardVoiceRecordingRef.current = discardRecording;
 
   const proposalContext = (capturedWorkspace: CapturedCompanionWorkspace | null): CompanionProposalExecutionContext => {
     const appContext = capturedWorkspace?.getAppContext();
@@ -395,27 +415,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     return execution;
   }, [controller, proposalStore, workspace]);
 
-  React.useLayoutEffect(() => {
-    const cancelOnEscape = (event: KeyboardEvent) => {
-      if (document.querySelector('[data-quick-action-menu]')) return;
-      if (
-        !shouldCancelCompanionRecordingWithEscape({
-          key: event.key,
-          repeat: event.repeat,
-          isComposing: event.isComposing,
-          voiceStatus: voiceStatusRef.current,
-        })
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      void discardVoiceRecordingRef.current();
-    };
-    window.addEventListener('keydown', cancelOnEscape, { capture: true });
-    return () => window.removeEventListener('keydown', cancelOnEscape, { capture: true });
-  }, []);
 
   React.useEffect(
     () => () => {
@@ -496,7 +495,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const startLiveVoice = React.useCallback(async () => {
+      if (shared.activeSlot.current !== slot) return;
       const capturedWorkspace = captureWorkspace();
+      const generation = shared.startGeneration.current;
+      if (shared.microphoneCleanup.current) await shared.microphoneCleanup.current;
+      if (shared.activeSlot.current !== slot || generation !== shared.startGeneration.current) return;
       const context = capturedWorkspace?.getAppContext();
       const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
       // Senses for the reflex agent: backend progress from the controller snapshot, app context from the capture, and notes on screen.
@@ -518,11 +521,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         },
         notify: text => { void screen.execute({ action: 'show', markdown: text }); },
       };
+      const initiallyMuted = shared.liveStartMuted.current;
+      shared.liveStartMuted.current = false;
       await live.start(async (prompt, signal, telemetry) => {
         if (signal.aborted) throw new Error('Voice conversation ended.');
         if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
         return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace, telemetry), signal);
-      }, workspaceLabel, () => controller.cancel(), senses);
+      }, workspaceLabel, () => controller.cancel(), senses, initiallyMuted);
   }, [captureWorkspace, controller, live.start, run, screen]);
 
   const toggle = React.useCallback(async (finishForModeSwitch = false) => {
@@ -548,9 +553,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       const messageId = newId();
       const audioDurationMs = voice.durationMillis;
       const transcriptionStartedAt = performance.now();
-      const transcript = voice.stopRecordingForTranscript({ telemetryId: messageId }).then(text => ({
+      setPendingVoice(count => count + 1);
+      const transcript = voice.stopRecordingForTranscript({ telemetryId: messageId, onError: message => {
+        if (voiceSubmissionGenerationRef.current === voiceSubmissionGeneration) controller.reportVoiceError(message);
+      } }).then(text => ({
         text, transcriptionMs: Math.max(0, performance.now() - transcriptionStartedAt),
-      }));
+      })).finally(() => {
+        if (voiceSubmissionGenerationRef.current === voiceSubmissionGeneration) setPendingVoice(count => Math.max(0, count - 1));
+      });
       playCompanionRecordingCue('send');
       // Uploads can overlap; agent requests retain the order of the user's taps.
       const sending = voiceSubmissionQueueRef.current.then(async () => {
@@ -565,6 +575,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     // The recorder may have failed independently. Its synchronous status is
     // authoritative; a stale workspace reference must not prevent restarting.
     const capturedWorkspace = captureWorkspace();
+    const generation = shared.startGeneration.current;
+    if (shared.microphoneCleanup.current) await shared.microphoneCleanup.current;
+    if (shared.activeSlot.current !== slot || generation !== shared.startGeneration.current) return;
     const recording = { workspace: capturedWorkspace };
     recordingWorkspaceRef.current = recording;
     const started = await voice.startRecording();
@@ -673,10 +686,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       if (generation !== voiceSubmissionGenerationRef.current) return;
       const enabled = await live.toggleEnabled();
-      if (enabled === undefined || generation !== voiceSubmissionGenerationRef.current) return;
+      if (enabled === undefined || generation !== voiceSubmissionGenerationRef.current || shared.activeSlot.current !== slot) return;
       if (enabled) {
         await startLiveVoice();
       } else {
+        const startGeneration = shared.startGeneration.current;
+        await live.stop();
+        if (shared.microphoneCleanup.current) await shared.microphoneCleanup.current;
+        if (shared.activeSlot.current !== slot || startGeneration !== shared.startGeneration.current || generation !== voiceSubmissionGenerationRef.current) return;
         const recording = { workspace: captureWorkspace() };
         recordingWorkspaceRef.current = recording;
         const started = await voice.startRecording();
@@ -727,33 +744,35 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     () => () => {
       textSubmissionGenerationRef.current += 1;
       voiceSubmissionGenerationRef.current += 1;
-      recordingWorkspaceRef.current = null;
       void controller.suspend();
-      void voice.discardRecording();
     },
-    [controller, voice.discardRecording],
+    [controller],
   );
 
   const effectiveStatus: CompanionStatus =
-    switchingVoice ? 'starting' : voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status
+    switchingVoice ? 'starting' : active && voice.status === 'paused' ? 'recording'
+      : active && (voice.status === 'starting' || voice.status === 'recording') ? voice.status
+      : pendingVoice > 0 ? 'transcribing'
       : state.status === 'working' ? 'working'
       : live.status === 'connecting' ? 'starting'
       : live.status === 'listening' && state.status === 'idle' ? 'recording'
       : live.status === 'error' && state.status === 'idle' ? 'error'
       : state.status;
 
-  const value = React.useMemo<CompanionContextValue>(
+  const value = React.useMemo<CompanionSessionValue>(
     () => ({
       ...state,
       screen,
       attachments, removeAttachment, addTextAttachment, addAttachment, reportAttachmentError,
+      reportVoiceError: message => controller.reportVoiceError(message),
       sessionId: controller.getSessionId(),
       error: proposalActionError || state.error || autoApproveSettings.error,
       live,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
-      recordingPaused: live.enabled && live.mode === 'jev' ? live.muted : voice.status === 'paused',
-      pendingTranscriptions: voice.pendingTranscriptions ?? 0,
+      working: state.status === 'working' || proposalExecuting,
+      recordingPaused: live.enabled && (live.status === 'connecting' || live.status === 'listening') ? live.muted : active && voice.status === 'paused',
+      pendingTranscriptions: pendingVoice,
       shortcutHint,
       panelVisibility,
       dismiss,
@@ -796,9 +815,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleAutoApprove,
     }),
     [
-      attachments, removeAttachment, addTextAttachment, addAttachment, reportAttachmentError,
+      active, attachments, removeAttachment, addTextAttachment, addAttachment, reportAttachmentError,
       proposalStore, proposalStoreVersion, proposalActionError,
-      shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, voice.pendingTranscriptions,
+      shortcutHint, panelVisibility, dismiss, handleShortcut, resetContext, pendingVoice,
       close,
       live,
       autoApproveSettings.error,
@@ -831,6 +850,190 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
+  return value;
+}
+
+export function CompanionProvider({ children }: { children: React.ReactNode }) {
+  const [slots, setSlots] = React.useState(readCompanionSlots);
+  const slotsRef = React.useRef(slots);
+  slotsRef.current = slots;
+  const activeSlot = React.useRef(slots.active);
+  activeSlot.current = slots.active;
+  const workspace = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
+  const valuesRef = React.useRef<CompanionSessionValue[]>([]);
+  const onError = React.useCallback((message: string) => {
+    valuesRef.current[COMPANION_SLOTS.indexOf(activeSlot.current as typeof COMPANION_SLOTS[number])]?.reportVoiceError(message);
+  }, []);
+  const voice = useChatVoiceRecorder({ onError, microphoneOwner: 'companion', backgroundTranscription: true });
+  const autoApprove = useCompanionAutoApprove();
+  const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');
+  const startGeneration = React.useRef(0);
+  const liveStartMuted = React.useRef(false);
+  const microphoneCleanup = React.useRef<Promise<void> | null>(null);
+  const shared = { voice, workspace, activeSlot, autoApprove, panelVisibility, setPanelVisibility, microphoneCleanup, startGeneration, liveStartMuted };
+  // Fixed hook order keeps each slot's controller, subscriptions and in-flight callbacks
+  // alive when another slot is selected. Unused slots never open a transport.
+  const values = [
+    useCompanionSession(1, shared), useCompanionSession(2, shared),
+    useCompanionSession(3, shared), useCompanionSession(4, shared),
+    useCompanionSession(5, shared), useCompanionSession(6, shared),
+    useCompanionSession(7, shared), useCompanionSession(8, shared),
+    useCompanionSession(9, shared), useCompanionSession(0, shared),
+  ];
+  valuesRef.current = values;
+  const at = (slot: number) => valuesRef.current[COMPANION_SLOTS.indexOf(slot as typeof COMPANION_SLOTS[number])];
+  const selected = at(slots.active);
+  const pendingStart = React.useRef<number | null>(null);
+  const liveHandoff = React.useRef(false);
+  const cancelPendingStart = () => { pendingStart.current = null; startGeneration.current++; liveStartMuted.current = false; liveHandoff.current = false; };
+  const deleting = React.useRef(new Set<number>());
+  const saveSlots = (next: typeof slots) => {
+    slotsRef.current = next;
+    activeSlot.current = next.active;
+    setSlots(next);
+    writeCompanionSlots(next);
+  };
+  const ensureSlot = (slot: number) => {
+    const current = slotsRef.current;
+    saveSlots({ active: slot, slots: COMPANION_SLOTS.filter(id => id === slot || current.slots.includes(id)) });
+  };
+  const selectSession = (slot: number, fromKeyboard = false) => {
+    if (!COMPANION_SLOTS.includes(slot as typeof COMPANION_SLOTS[number]) || deleting.current.size > 0) return;
+    const previous = at(activeSlot.current);
+    const hidden = panelVisibility === 'closed' ||
+      (panelVisibility === 'auto' && previous.status === 'idle' && !previous.live.hasStarted);
+    const resumingLive = liveHandoff.current;
+    const wasMuted = resumingLive ? liveStartMuted.current : previous.live.muted;
+    const liveRecording = resumingLive || (!previous.live.announcing && (previous.live.status === 'connecting' || previous.live.status === 'listening'));
+    cancelPendingStart();
+    if (slot !== activeSlot.current) {
+      const cleanup = Promise.all([microphoneCleanup.current, previous.live.stop()]).then(() => {});
+      microphoneCleanup.current = cleanup;
+      void cleanup.then(() => { if (microphoneCleanup.current === cleanup) microphoneCleanup.current = null; });
+    }
+    // An open panel only selects (or stages an idle draft). Only a closed panel
+    // starts recording from a number key. Clear any delayed start from an earlier
+    // selection so a settings load cannot unexpectedly activate an idle draft.
+    // An already active live connection follows the selection by reconnecting.
+    pendingStart.current = (fromKeyboard && hidden) || ((slot !== activeSlot.current || resumingLive) && liveRecording) ? slot : null;
+    liveHandoff.current = pendingStart.current !== null && liveRecording;
+    liveStartMuted.current = Boolean(liveHandoff.current && wasMuted);
+    previous.handleShortcut({ phase: 'cancel' });
+    ensureSlot(slot);
+    setPanelVisibility('open');
+  };
+  React.useEffect(() => {
+    if (pendingStart.current !== slots.active || selected.live.loading || selected.live.saving) return;
+    pendingStart.current = null;
+    if (['starting', 'recording', 'paused'].includes(voice.status)) return;
+    const generation = startGeneration.current;
+    const slot = slots.active;
+    void Promise.resolve(microphoneCleanup.current).then(() => {
+      if (generation === startGeneration.current && activeSlot.current === slot) {
+        liveHandoff.current = false;
+        void at(slot).toggle();
+      }
+    });
+  }, [slots.active, selected.live.loading, selected.live.saving, selected.toggle, voice.status]);
+  const deleteSession = async () => {
+    const slot = activeSlot.current;
+    const target = at(slot);
+    if (target.proposalExecuting || deleting.current.has(slot)) return;
+    deleting.current.add(slot);
+    cancelPendingStart();
+    try {
+      await Promise.all([target.live.stop(), target.resetContext()]);
+      const current = slotsRef.current;
+      const remaining = current.slots.filter(id => id !== slot);
+      saveSlots({ slots: remaining, active: current.active === slot ? remaining[0] ?? 1 : current.active });
+      setPanelVisibility(remaining.length > 0 ? 'open' : 'closed');
+    } finally { deleting.current.delete(slot); }
+  };
+  React.useEffect(() => {
+    if (!slots.slots.includes(slots.active) && selected.panelVisibility === 'open' && deleting.current.size === 0) ensureSlot(slots.active);
+  }, [slots.active, slots.slots, selected.panelVisibility]);
+  const value: CompanionContextValue = {
+    ...selected,
+    activeSlot: slots.active,
+    sessions: slots.slots.map(slot => ({ slot, status: at(slot).status, recordingPaused: at(slot).recordingPaused,
+      working: at(slot).working })),
+    selectSession, deleteSession,
+    // Legacy proposals use the same target ID in every session. Only UI IDs are
+    // qualified; browser tools and the backend continue using their original IDs.
+    proposals: slots.slots.flatMap(slot => at(slot).proposals.map(proposal => ({ ...proposal, targetId: `${slot}:${proposal.targetId}`, sessionSlot: slot }))),
+    selectedProposalId: selected.selectedProposalId ? `${slots.active}:${selected.selectedProposalId}` : null,
+    selectProposal: id => {
+      const separator = id.indexOf(':');
+      const slot = Number(id.slice(0, separator));
+      if (separator < 0 || !slotsRef.current.slots.includes(slot)) return;
+      selectSession(slot);
+      at(slot).selectProposal(id.slice(separator + 1));
+    },
+    executeProposal: async (id, revision) => {
+      if (!id) return at(activeSlot.current).executeProposal(undefined, revision);
+      const separator = id.indexOf(':');
+      if (separator < 0) return at(activeSlot.current).executeProposal(id, revision);
+      const slot = Number(id.slice(0, separator));
+      if (slotsRef.current.slots.includes(slot)) await at(slot).executeProposal(id.slice(separator + 1), revision);
+    },
+    discardProposal: (id, revision) => {
+      if (!id) return at(activeSlot.current).discardProposal(undefined, revision);
+      const separator = id.indexOf(':');
+      if (separator < 0) return at(activeSlot.current).discardProposal(id, revision);
+      const slot = Number(id.slice(0, separator));
+      if (slotsRef.current.slots.includes(slot)) at(slot).discardProposal(id.slice(separator + 1), revision);
+    },
+    handleShortcut: event => {
+      if (deleting.current.size > 0) return;
+      if (event?.phase !== 'cancel' && event?.phase !== 'up') { cancelPendingStart(); ensureSlot(activeSlot.current); }
+      at(activeSlot.current).handleShortcut(event);
+    },
+    toggle: async () => { if (deleting.current.size > 0) return; cancelPendingStart(); ensureSlot(activeSlot.current); await at(activeSlot.current).toggle(); },
+    toggleLiveVoice: async () => { if (deleting.current.size > 0) return; cancelPendingStart(); ensureSlot(activeSlot.current); await at(activeSlot.current).toggleLiveVoice(); },
+    submitText: async prompt => { if (deleting.current.size > 0) return { ok: false, error: 'Companion is deleting a session. Please try again.' }; ensureSlot(activeSlot.current); return at(activeSlot.current).submitText(prompt); },
+    prepareTextSubmission: () => {
+      const slot = activeSlot.current;
+      ensureSlot(slot);
+      return at(slot).prepareTextSubmission();
+    },
+    dismiss: async () => { cancelPendingStart(); await at(activeSlot.current).dismiss(); },
+    close: async () => { cancelPendingStart(); await at(activeSlot.current).close(); },
+    resetContext: async () => { cancelPendingStart(); await at(activeSlot.current).resetContext(); },
+    discardRecording: async () => { cancelPendingStart(); await at(activeSlot.current).discardRecording(); },
+    stop: () => { cancelPendingStart(); at(activeSlot.current).stop(); },
+  };
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+  const voiceRef = React.useRef(voice);
+  voiceRef.current = voice;
+  React.useLayoutEffect(() => {
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (document.querySelector('[data-quick-action-menu]') || !shouldCancelCompanionRecordingWithEscape({
+        key: event.key, repeat: event.repeat, isComposing: event.isComposing, voiceStatus: voiceRef.current.status,
+      })) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      void valueRef.current.discardRecording();
+    };
+    window.addEventListener('keydown', cancelOnEscape, true);
+    return () => window.removeEventListener('keydown', cancelOnEscape, true);
+  }, []);
+  React.useEffect(() => () => {
+    startGeneration.current++;
+    pendingStart.current = null;
+    workspace.current = null;
+    void voiceRef.current.discardRecording();
+  }, []);
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const slot = companionSessionShortcut(event, useDroneHubUiStore.getState().shortcutBindings);
+      if (slot === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      valueRef.current.selectSession(slot, true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   return <CompanionContext.Provider value={value}>{children}</CompanionContext.Provider>;
 }
 

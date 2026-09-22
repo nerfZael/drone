@@ -27,6 +27,7 @@ import { useActiveComposer } from '../chat/ActiveComposerContext';
 import { isChatVoiceShortcutDoubleTap } from '../chat/chat-voice-shortcut';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
+import { COMPANION_WINDOW_SHORTCUT_CANCEL } from '../companion/companion-window-shortcuts';
 import { useCompanion } from '../companion/CompanionContext';
 import {
   COMPANION_SHORTCUT_DOUBLE_TAP_MS,
@@ -759,6 +760,7 @@ export function useDroneHubLifecycleEffects({
       runCompanionShortcut({ phase: 'cancel' });
     };
     window.addEventListener('blur', onBlur);
+    window.addEventListener(COMPANION_WINDOW_SHORTCUT_CANCEL, onBlur);
     document.addEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
     document.addEventListener('keyup', onKeyUpCapture, { capture: true });
     document.addEventListener('keydown', onKeyDown);
@@ -770,6 +772,7 @@ export function useDroneHubLifecycleEffects({
         capture: true,
       });
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener(COMPANION_WINDOW_SHORTCUT_CANCEL, onBlur);
       document.removeEventListener('keyup', onKeyUpCapture, { capture: true });
       document.removeEventListener('keydown', onKeyDown);
     };

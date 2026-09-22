@@ -15,14 +15,15 @@ test('Jev holds pause, resume, stop without resetting, restart on tap, and clear
   let starts = 0; let stops = 0; let resets = 0;
   const cues: string[] = [];
   const cueSpy = spyOn(cuesModule, 'playCompanionRecordingCue').mockImplementation(cue => { cues.push(cue); });
-  const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation(() => {
-    live = { ...useLive(), mode: 'jev', enabled: true, resolved: true, loading: false,
-      start: async () => { starts++; live.status = 'listening'; live.muted = false; },
-      stop: () => { stops++; live.status = 'idle'; live.muted = false; },
-      reset: () => { resets++; live.stop(); },
-      toggleMute: () => { live.muted = !live.muted; },
+  const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation((_controller, _schedule, selected = true) => {
+    const session = { ...useLive(), mode: 'jev', enabled: true, resolved: true, loading: false,
+      start: async () => { starts++; session.status = 'listening'; session.muted = false; },
+      stop: () => { stops++; session.status = 'idle'; session.muted = false; },
+      reset: () => { resets++; session.stop(); },
+      toggleMute: () => { session.muted = !session.muted; },
     };
-    return live;
+    if (selected) live = session;
+    return session;
   });
   let companion!: NonNullable<ReturnType<typeof useCompanion>>;
   function Harness() { companion = useCompanion()!; return null; }

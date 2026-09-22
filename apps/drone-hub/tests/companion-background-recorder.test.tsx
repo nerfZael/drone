@@ -98,7 +98,20 @@ test('a sent clip releases the microphone immediately; later clips and cancellat
     });
     expect(uploads[2].signal.aborted).toBe(true);
     expect(voice.status).toBe('recording');
-    expect(errors).toEqual([]);
+    const clipErrors: string[] = [];
+    let failedClip!: Promise<string>;
+    await act(async () => {
+      failedClip = voice.stopRecordingForTranscript({ onError: message => { if (message) clipErrors.push(message); } });
+      await voice.startRecording();
+    });
+    await act(async () => {
+      uploads[3].resolve(Response.json({ error: 'Clip upload failed' }, { status: 500 }));
+      expect(await failedClip).toBe('');
+    });
+    expect(clipErrors).toHaveLength(1);
+    expect(voice.status).toBe('recording');
+    expect(errors).toEqual([]); // A sent clip reports to its captured destination.
+
   } finally {
     await act(async () => { root.unmount(); });
     expect(browserMicrophoneCoordinator.getSnapshot()).toBe(null);

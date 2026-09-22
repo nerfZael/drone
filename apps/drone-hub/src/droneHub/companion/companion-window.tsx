@@ -23,7 +23,7 @@ export function useCompanionWindow() {
   return React.useContext(CompanionWindowContext);
 }
 
-export function useCompanionWindowHost(visible: boolean) {
+export function useCompanionWindowHost(visible: boolean, recording = false) {
   const bridge = typeof window === 'undefined' ? undefined : window.droneHubDesktop?.companionWindow;
   // Never change the portal target: moving this DOM node preserves the entire
   // React subtree, including editor drafts, selection, and proposal review state.
@@ -103,6 +103,26 @@ export function useCompanionWindowHost(visible: boolean) {
     restoreAttempted.current = true;
     if (useDroneHubUiStore.getState().companionWindowDetached) detach();
   }, [visible, bridge, host, detach]);
+
+  const wasRecording = React.useRef(false);
+  const pendingRecordingFocus = React.useRef(false);
+  React.useEffect(() => {
+    if (recording && !wasRecording.current) pendingRecordingFocus.current = true;
+    wasRecording.current = recording;
+    if (!recording) { pendingRecordingFocus.current = false; return; }
+    if (!visible || !host || !pendingRecordingFocus.current) return;
+    // Restoring the floating preference moves the portal before its state commits.
+    // Wait for that commit so the first recording focuses the destination window.
+    if (floatingRef.current && !floating) return;
+    pendingRecordingFocus.current = false;
+    if (bridge) bridge.control('focus');
+    else if (!host.ownerDocument.hasFocus()) host.ownerDocument.defaultView?.focus();
+    // Leave an already focused Companion input alone. Otherwise focus the bar so
+    // session numbers work immediately, even when recording began in a Hub editor.
+    if (!host.contains(host.ownerDocument.activeElement)) {
+      host.querySelector<HTMLElement>('aside[aria-label="Companion"]')?.focus({ preventScroll: true });
+    }
+  }, [recording, visible, host, bridge, floating]);
 
   const toggle = React.useCallback(() => {
     if (floatingRef.current) attach();

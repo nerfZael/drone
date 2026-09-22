@@ -12,6 +12,7 @@ import {
   migrateChatComposerShortcuts,
   migrateQuickActionShortcuts,
   migrateCompanionShortcut,
+  migrateCompanionSessionShortcuts,
   migrateFormerPullRequestsShortcut,
   sanitizeSingleShortcutBinding,
   sanitizeShortcutBindings,
@@ -545,9 +546,12 @@ export function migrateDroneHubUiPersistedState(
     migrated.pinnedSidebarCollapsed = normalizeBoolean(migrated.pinnedSidebarCollapsed);
   }
   delete (migrated as any).assistantThreadSidebarDockSide;
-  const migratedShortcutBindings = migrateLegacyShortcutBindings(migrated.shortcutBindings);
+  const migratedShortcutBindings = _version !== undefined && _version >= 21
+    ? migrated.shortcutBindings : migrateLegacyShortcutBindings(migrated.shortcutBindings);
   if (migratedShortcutBindings !== undefined) {
-    migrated.shortcutBindings = migratedShortcutBindings as ShortcutBindingMap;
+    migrated.shortcutBindings = (_version !== undefined && _version < 21
+      ? migrateCompanionSessionShortcuts(migratedShortcutBindings)
+      : migratedShortcutBindings) as ShortcutBindingMap;
   }
   const normalizedContexts = normalizeSpawnContextByRepoKey(
     (migrated as any).spawnContextByRepoKey,
@@ -1476,7 +1480,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 20,
+      version: 21,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
@@ -1536,9 +1540,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         companionShortcutDurations: state.companionShortcutDurations,
       }),
       merge: (persistedState, currentState) => {
-        const persisted = migrateDroneHubUiPersistedState(persistedState);
+        const persisted = migrateDroneHubUiPersistedState(persistedState, 21);
         const persistedRest = persisted;
-        const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
+        const migratedShortcutBindings = persisted.shortcutBindings;
         return {
           ...currentState,
           ...persistedRest,

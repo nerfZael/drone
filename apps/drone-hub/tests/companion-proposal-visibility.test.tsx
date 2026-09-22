@@ -115,12 +115,12 @@ for (const mode of ['auto', 'auto-failure', 'loading-auto', 'manual', 'loading-m
           content: JSON.stringify({ version: 1, title: 'Discard group', operations: [{ id: 'group', type: 'create_group', name: 'Later' }] }),
         });
         expectReview(true);
-        await act(async () => { companion.selectProposal(discardId); });
+        await act(async () => { companion.selectProposal(`1:${discardId}`); });
         await act(async () => {
           [...surface.querySelectorAll('button')].find(button => button.textContent === 'Discard')!.click();
         });
         expectReview(true);
-        expect(companion.selectedProposalId).toBe(targetId);
+        expect(companion.selectedProposalId).toBe(`1:${targetId}`);
         expect(executions).toBe(0);
       }
       const toggleProposal = async () => {

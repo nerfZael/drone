@@ -19,6 +19,10 @@ class Window extends EventEmitter {
   webContents = new Contents();
   destroyed = false;
   visible = false;
+  focused = false;
+  focusCalls = 0;
+  isFocused() { return this.focused; }
+  focus() { this.focused = true; this.focusCalls++; }
   bounds = { x: 1540, y: 1010, width: 464, height: 64 };
   getBounds() { return this.bounds; }
   setBounds(bounds: typeof this.bounds) { this.bounds = bounds; }
@@ -247,4 +251,31 @@ test('the clipboard bridge only writes text, only for the owner main frame, and 
   expect(written).toEqual(['git status']);
   owner.emit('closed');
   expect(handlers.size).toBe(0);
+});
+
+
+test('recording focus targets the floating Companion or docked owner, only on trusted requests', () => {
+  const owner = new Window();
+  const ipcMain = new EventEmitter();
+  installCompanionWindow({ owner, ipcMain, screen, shell: { openExternal: async () => {} }, isQuitting: () => false });
+  const focus = (sender = owner.webContents, senderFrame = owner.webContents.mainFrame) =>
+    ipcMain.emit('drone-hub:companion-window', { sender, senderFrame }, 'focus');
+  focus(owner.webContents, {});
+  expect(owner.focusCalls).toBe(0);
+  focus();
+  expect(owner.visible).toBe(true);
+  expect(owner.focusCalls).toBe(1);
+  focus();
+  expect(owner.focusCalls).toBe(1);
+  const child = new Window();
+  owner.webContents.emit('did-create-window', child, { frameName: 'drone-hub-companion' });
+  focus(child.webContents, child.webContents.mainFrame);
+  expect(child.focusCalls).toBe(0);
+  focus();
+  expect(child.visible).toBe(true);
+  expect(child.focusCalls).toBe(1);
+  expect(owner.focusCalls).toBe(1);
+  focus();
+  expect(child.focusCalls).toBe(1);
+  owner.destroy();
 });

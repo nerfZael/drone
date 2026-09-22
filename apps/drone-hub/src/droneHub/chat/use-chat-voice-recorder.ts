@@ -371,7 +371,7 @@ export function useChatVoiceRecorder({
   }, [setStatusValue]);
 
   const transcribeRecording = React.useCallback(
-    async (options?: { telemetryId?: string }): Promise<string> => {
+    async (options?: { telemetryId?: string; onError?: (message: string) => void }): Promise<string> => {
       const capture = captureRef.current;
       const transcriptionId = startIdRef.current + 1;
       startIdRef.current = transcriptionId;
@@ -384,7 +384,7 @@ export function useChatVoiceRecorder({
       setDurationMillis(recordingDurationMillis(capture));
       window.clearInterval(capture.durationTimer);
       setStatusValue('transcribing');
-      onError('');
+      (options?.onError ?? onError)('');
       const transcriptionAbort = new AbortController();
       transcriptionsRef.current.add(transcriptionAbort);
       setPendingTranscriptions(transcriptionsRef.current.size);
@@ -412,7 +412,7 @@ export function useChatVoiceRecorder({
         return transcriptionAbort.signal.aborted ? '' : text;
       } catch (err: any) {
         if (!transcriptionAbort.signal.aborted && (backgroundTranscription || startIdRef.current === transcriptionId)) {
-          onError(err?.message ?? String(err));
+          (options?.onError ?? onError)(err?.message ?? String(err));
         }
         return '';
       } finally {
@@ -427,7 +427,7 @@ export function useChatVoiceRecorder({
   );
 
   const stopRecordingForTranscript = React.useCallback(
-    async (options?: { telemetryId?: string }): Promise<string> => {
+    async (options?: { telemetryId?: string; onError?: (message: string) => void }): Promise<string> => {
       if (backgroundTranscription) return transcribeRecording(options);
       if (stopPromiseRef.current) return stopPromiseRef.current;
       const promise = transcribeRecording(options);

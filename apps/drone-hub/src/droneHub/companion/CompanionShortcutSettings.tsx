@@ -31,6 +31,13 @@ export function CompanionShortcutSettings() {
         Jev uses the same holds: pause/resume listening and decisions; stop listening while retaining the transcript (tap to restart); or stop and clear context.
         Release to act; holding longer never performs the shorter actions first.
       </p>
+      <p className="mt-2 text-xs text-[var(--muted)]">
+        Session keys: 1–9 and 0 create or select a conversation while Drone Hub or Companion is focused.
+        A closed Companion opens and starts recording. While open, numbers switch sessions or open
+        an idle draft without starting recording. Switching during dictation keeps the clip
+        and sends it to the session selected when you send. Text fields keep their number keys.
+        A number assigned manually in Shortcuts takes priority.
+      </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {fields.map(([key, label]) => (
           <label key={key} className="flex flex-col gap-1 text-xs text-[var(--fg)]">

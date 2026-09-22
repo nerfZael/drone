@@ -44,6 +44,7 @@ export function useCompanionJev(decisionIntervalMs = 250, seedInstructions = '',
     clearInterval(session?.displayTimer);
     if (session) cleanup.current = Promise.all([cleanup.current, session.connection.close()]).then(() => {});
     if (mounted.current) setState(previous => ({ ...previous, status: 'idle', capturing: false, queued: 0, muted: false, compiling: false }));
+    return cleanup.current;
   }, []);
   React.useEffect(() => {
     mounted.current = true;
@@ -51,7 +52,7 @@ export function useCompanionJev(decisionIntervalMs = 250, seedInstructions = '',
     return () => { mounted.current = false; window.removeEventListener('pagehide', stop); stop(); };
   }, [stop]);
 
-  const start = React.useCallback(async (runBackend: Backend, cancelBackend?: CancelBackend, senses?: CompanionSenseSources) => {
+  const start = React.useCallback(async (runBackend: Backend, cancelBackend?: CancelBackend, senses?: CompanionSenseSources, initiallyMuted = false) => {
     if (active.current) return;
     backend.current = { run: runBackend, cancel: cancelBackend, senses };
     const { autonomy, brain } = optionsRef.current;
@@ -130,13 +131,14 @@ export function useCompanionJev(decisionIntervalMs = 250, seedInstructions = '',
         else if (event.type === 'conversation.item.input_audio_transcription.completed' && typeof event.transcript === 'string') reflex.complete(event.transcript, itemId);
       },
     });
-    session = { connection, reflex, muted: false };
+    session = { connection, reflex, muted: initiallyMuted };
+    if (initiallyMuted) { connection.mute(true); reflex.pause(true); }
     active.current = session;
     if (mounted.current) { setTable(reflex.table); setInsight(reflex.insight()); }
     session.displayTimer = setInterval(() => {
       if (!session.muted && reflex.history.lastTranscriptAt !== undefined) { update({ captions: captions() }); refreshInsight(); }
     }, 50);
-    setState({ ...EMPTY, captions: captions(), hasStarted: true, status: 'connecting' });
+    setState({ ...EMPTY, captions: captions(), hasStarted: true, muted: initiallyMuted, status: 'connecting' });
     await cleanup.current;
     if (active.current === session) await connection.start();
   }, [stop]);

@@ -41,7 +41,7 @@ interface Window {
     /** Write-only; works while the Hub window is unfocused, unlike the web clipboard API. */
     writeClipboardText?(text: string): Promise<boolean>;
     companionWindow?: {
-      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize' | 'focus-owner', size?: CompanionWindowSize): void;
+      control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize' | 'focus-owner' | 'focus', size?: CompanionWindowSize): void;
       onClose(callback: () => void): () => void;
       onPlacement?(callback: (placement: CompanionWindowPlacement) => void): () => void;
     };

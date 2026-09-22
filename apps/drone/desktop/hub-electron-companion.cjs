@@ -152,6 +152,15 @@ function installCompanionWindow({ owner, ipcMain, shell, screen, isQuitting, ope
   });
   const control = (event, action, size) => {
     if (owner.isDestroyed() || event.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) return;
+    if (action === 'focus') {
+      const target = floating && !floating.isDestroyed() ? floating : owner;
+      if (!target.isFocused()) {
+        if (target.isMinimized()) target.restore();
+        target.show();
+        target.focus();
+      }
+      return;
+    }
     // Something the floating Companion pointed at opens in the main window.
     if (action === 'focus-owner') {
       if (owner.isMinimized()) owner.restore();

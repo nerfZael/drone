@@ -221,13 +221,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openQuickActions: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDrone: null,
   createDraftGroup: null,
   createChatGroup: null,
   alignFloatingChats: null,
-  createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDroneInCurrentGroup: null,
+  createDroneChat: null,
+  cloneDroneChat: null,
   createSideChat: null,
   toggleSideChatMain: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: null,
@@ -622,4 +622,15 @@ export function formatShortcutBinding(binding: ShortcutBinding | null | undefine
 export function shortcutBindingSignature(binding: ShortcutBinding | null | undefined): string {
   if (!binding) return '';
   return `${binding.mod ? 1 : 0}:${binding.ctrl ? 1 : 0}:${binding.meta ? 1 : 0}:${binding.alt ? 1 : 0}:${binding.shift ? 1 : 0}:${binding.key}`;
+}
+
+/** One-time upgrade: free the former default number keys, preserving custom bindings. */
+export function migrateCompanionSessionShortcuts(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const next = { ...value } as Record<string, unknown>;
+  for (const [action, key] of [['createDraftDrone', '1'], ['createDraftDroneInCurrentGroup', '2'], ['createDroneChat', '3'], ['cloneDroneChat', '4']]) {
+    const binding = sanitizeShortcutBinding(next[action], null);
+    if (binding?.key === key && !binding.mod && !binding.ctrl && !binding.meta && !binding.alt && !binding.shift) next[action] = null;
+  }
+  return next;
 }

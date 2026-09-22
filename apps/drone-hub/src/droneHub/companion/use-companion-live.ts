@@ -37,7 +37,7 @@ type LiveSettings = {
 type LiveTarget = { runBackend: (prompt: string, signal: AbortSignal, telemetry?: CompanionClientTelemetry) => Promise<string>; workspaceLabel: string; announcement?: string };
 type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 
-export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout) {
+export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout, selected = true) {
   const [jevDecisionIntervalMs, setJevDecisionIntervalMs] = React.useState(250);
   const liveSettingsVersion = useCompanionMirror()?.liveSettingsVersion;
   const [mode, setMode] = React.useState<'live' | 'jev'>('live');
@@ -65,6 +65,8 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   const active = React.useRef<LiveSession | null>(null);
   const pendingCleanup = React.useRef<Promise<void> | undefined>(undefined);
   const mounted = React.useRef(true);
+  const selectedRef = React.useRef(selected);
+  selectedRef.current = selected;
   const pageActive = React.useRef(true);
   const writing = React.useRef(false);
   const enabledRef = React.useRef(false);
@@ -82,7 +84,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, []);
 
   const stop = React.useCallback(() => {
-    jev.stop();
+    const jevCleanup = jev.stop();
     desiredTarget.current = null;
     desiredMuted.current = false;
     cancelReconnect();
@@ -92,8 +94,9 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     session?.replies?.stop();
     session?.abort.abort();
     session?.conversation.stop();
-    if (session) pendingCleanup.current = Promise.all([pendingCleanup.current, session.connection.close()]).then(() => undefined);
+    pendingCleanup.current = Promise.all([pendingCleanup.current, jevCleanup, session?.connection.close()]).then(() => undefined);
     if (mounted.current) setState((previous) => ({ ...previous, announcing: false, status: 'idle', capturing: false, error: '', muted: false, queued: 0, playbackBlocked: false }));
+    return pendingCleanup.current;
   }, [cancelReconnect, jev.stop]);
 
   const reset = React.useCallback(() => {
@@ -107,7 +110,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     const generation = ++settingsGeneration.current;
     try {
       const result = await settingsRequest();
-      if (!mounted.current || writing.current || generation !== settingsGeneration.current) return;
+      if (!mounted.current || !selectedRef.current || writing.current || generation !== settingsGeneration.current) return;
       if ((result.mode ?? 'live') !== modeRef.current) stop();
       acceptMode(result);
       enabledRef.current = result.enabled;
@@ -119,15 +122,23 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       setSettingsError('');
       if (!result.enabled) stop();
     } catch (error) {
-      if (mounted.current && generation === settingsGeneration.current) setSettingsError(error instanceof Error ? error.message : 'Could not load Live voice setting.');
-    } finally { if (mounted.current && generation === settingsGeneration.current) setLoading(false); }
+      if (mounted.current && selectedRef.current && generation === settingsGeneration.current) setSettingsError(error instanceof Error ? error.message : 'Could not load Live voice setting.');
+    } finally { if (mounted.current && selectedRef.current && generation === settingsGeneration.current) setLoading(false); }
   }, [stop]);
 
-  React.useEffect(() => { if (liveSettingsVersion) void load(); }, [liveSettingsVersion, load]);
+  React.useEffect(() => { if (selected && liveSettingsVersion) void load(); }, [selected, liveSettingsVersion, load]);
 
   React.useEffect(() => {
     mounted.current = true;
-    void load();
+    return () => { mounted.current = false; stop(); };
+  }, [stop]);
+
+  React.useEffect(() => {
+    if (!selected) {
+      setLoading(true);
+      setResolved(false);
+      return;
+    }
     const refresh = () => void load();
     window.addEventListener('focus', refresh);
     const leave = () => { pageActive.current = false; stop(); };
@@ -135,13 +146,16 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     window.addEventListener('pagehide', leave);
     window.addEventListener('pageshow', show);
     return () => {
-      mounted.current = false;
+      settingsGeneration.current++;
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pagehide', leave);
       window.removeEventListener('pageshow', show);
       stop();
     };
-  }, [load, stop]);
+  }, [load, stop, selected]);
+  // Switching slots invalidates cached preferences. If selection happened during
+  // a save, refresh after it settles instead of leaving this slot loading forever.
+  React.useEffect(() => { if (selected && !saving && (loading || !resolved)) void load(); }, [selected, saving, load]);
 
   const toggleEnabled = React.useCallback(async () => {
     if (loading || writing.current) return;
@@ -195,7 +209,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       return false;
     } finally {
       writing.current = false;
-      if (mounted.current && generation === settingsGeneration.current) setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   }, [stop]);
 
@@ -304,7 +318,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   };
 
   React.useEffect(() => {
-    if (!controller) return;
+    if (!controller || !selected) return;
     let previous = controller.getSnapshot();
     return controller.subscribe(() => {
       const next = controller.getSnapshot();
@@ -322,14 +336,14 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       desiredTarget.current = target;
       void startAttempt.current(target, false);
     });
-  }, [controller]);
+  }, [controller, selected]);
 
-  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string, cancelBackend?: () => Promise<void>, senses?: CompanionSenseSources) => {
-    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend, cancelBackend, senses); return; }
+  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string, cancelBackend?: () => Promise<void>, senses?: CompanionSenseSources, initiallyMuted = false) => {
+    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend, cancelBackend, senses, initiallyMuted); return; }
     if (active.current?.announcement) stop();
     if (active.current || !enabledRef.current || !pageActive.current) return;
     cancelReconnect();
-    desiredMuted.current = false;
+    desiredMuted.current = initiallyMuted;
     const target = { runBackend, workspaceLabel };
     desiredTarget.current = target;
     await startAttempt.current(target, false);
