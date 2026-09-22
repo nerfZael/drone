@@ -5,6 +5,7 @@ import { UiSpinner } from './Feedback';
 export type UiButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type UiButtonSize = 'small' | 'medium' | 'large';
 
+// Keyboard focus shows on the control's own border, in the variant's colour, not as a ring around it.
 const variantClassName: Record<UiButtonVariant, string> = {
   primary:
     'border-[var(--accent-muted)] bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))] text-[var(--accent-fg)] shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_1px_3px_var(--shadow-color)] hover:brightness-[1.07] enabled:active:brightness-[.96]',
@@ -13,7 +14,7 @@ const variantClassName: Record<UiButtonVariant, string> = {
   ghost:
     'border-transparent bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
   danger:
-    'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] shadow-[var(--edge-highlight)] hover:border-[var(--red)] hover:bg-[color-mix(in_srgb,var(--red-subtle)_78%,var(--red)_22%)] hover:shadow-[var(--edge-highlight),0_0_16px_-6px_var(--red)]',
+    'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] shadow-[var(--edge-highlight)] focus-visible:border-[var(--red)] hover:border-[var(--red)] hover:bg-[color-mix(in_srgb,var(--red-subtle)_78%,var(--red)_22%)] hover:shadow-[var(--edge-highlight),0_0_16px_-6px_var(--red)]',
 };
 
 const sizeClassName: Record<UiButtonSize, string> = {
@@ -56,7 +57,7 @@ export const UiButton = React.forwardRef<HTMLButtonElement, UiButtonProps>(funct
       disabled={unavailable}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center border transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed enabled:active:translate-y-px',
+        'inline-flex shrink-0 items-center justify-center border transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:border-[var(--accent)] disabled:cursor-not-allowed enabled:active:translate-y-px',
         variantClassName[variant],
         sizeClassName[size],
         loading ? 'opacity-75' : disabled ? 'opacity-40' : null,

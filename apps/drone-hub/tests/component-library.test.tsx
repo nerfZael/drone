@@ -74,7 +74,9 @@ describe('drone hub component library', () => {
     expect(html).toContain('dh-type-control');
     expect(html).toContain('dh-type-badge');
     expect(html).not.toContain('text-[var(--text-');
-    expect(html).toContain('focus-visible:ring-2');
+    // Keyboard focus is shown on the control's border, never as a ring around it.
+    expect(html).toContain('focus-visible:border-[var(--accent)]');
+    expect(html).not.toContain('focus-visible:ring-');
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('bg-[var(--green-subtle)]');
     expect(html).toContain('role="alert"');
