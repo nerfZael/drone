@@ -67,6 +67,8 @@ type UseDroneHubLifecycleEffectsArgs = {
   droneErrorModal: DroneErrorModalState | null;
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
   openHome: () => void;
+  navigateBack: () => boolean;
+  navigateForward: () => boolean;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openCurrentGroupDraftChatComposer: () => boolean;
   createDroneChatFromShortcut: () => Promise<boolean>;
@@ -131,6 +133,8 @@ export function useDroneHubLifecycleEffects({
   droneErrorModal,
   setDroneErrorModal,
   openHome,
+  navigateBack,
+  navigateForward,
   openDraftChatComposer,
   openCurrentGroupDraftChatComposer,
   createDroneChatFromShortcut,
@@ -420,6 +424,8 @@ export function useDroneHubLifecycleEffects({
         quickActions.open(unavailable, sourceChatName ? { createSideChat: `Clone “${sourceChatName}” to side chat` } : {});
         return true;
       },
+      navigateBack,
+      navigateForward,
       openHome: () => {
         openHome();
         return true;
@@ -693,6 +699,7 @@ export function useDroneHubLifecycleEffects({
       }
       if (e.repeat) return;
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
+      if (modalOpen && (matched?.id === 'navigateBack' || matched?.id === 'navigateForward')) return;
       if (matched?.id === 'openQuickActions' && (modalOpen || isEditableTarget(document.activeElement))) return;
       if (!captureRoot && isActiveGlobalShortcutMatch(e)) {
         e.preventDefault();
@@ -783,6 +790,8 @@ export function useDroneHubLifecycleEffects({
     cancelPendingRootVoiceStart,
     canApplyCompanionProposal,
     openHome,
+    navigateBack,
+    navigateForward,
     openDraftChatComposer,
     openCurrentGroupDraftChatComposer,
     createDroneChatFromShortcut,

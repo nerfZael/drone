@@ -114,6 +114,8 @@ import {
   resolveDroneDeleteTargetIds,
   type DroneSelectionClickOptions,
 } from './droneHub/app/drone-selection-helpers';
+import { useSelectionHistory } from './droneHub/app/use-selection-history';
+import { isSelectionHistoryEntryAvailable, type SelectionHistoryEntry } from './droneHub/app/selection-history';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import {
   buildCanvasChatDeleteConfirmation,
@@ -2008,6 +2010,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [setCollapsedGroups],
   );
+  const historyEntryAvailable = React.useCallback(({ droneId, chatName }: SelectionHistoryEntry) => {
+    const drone = sidebarDisplayDroneById[droneId];
+    return isSelectionHistoryEntryAvailable({ droneId, chatName }, drone);
+  }, [sidebarDisplayDroneById]);
+  const selectHistoryEntry = React.useCallback(({ droneId, chatName }: SelectionHistoryEntry) => {
+    const ownerRepoPath = String(sidebarDisplayDroneById[droneId]?.repoPath ?? '').trim();
+    if (activeRepoPath && ownerRepoPath !== activeRepoPath) setActiveRepoPath(ownerRepoPath);
+    expandGroupsForDroneIds([droneId]);
+    // Reopening the same selected chat can short-circuit the selection hook.
+    setAppView('workspace');
+    setSelectedGroupMultiChat(null);
+    selectDroneChat(droneId, chatName);
+  }, [activeRepoPath, setActiveRepoPath, sidebarDisplayDroneById, expandGroupsForDroneIds, setAppView, setSelectedGroupMultiChat, selectDroneChat]);
+  const { navigateBack, navigateForward } = useSelectionHistory({
+    droneId: appView !== 'workspace' || homeOpen || draftChat || selectedGroupMultiChat ? null : selectedDrone,
+    chatName: selectedChat,
+    ready: !dronesLoading && !dronesError,
+    available: historyEntryAvailable,
+    select: selectHistoryEntry,
+  });
   useDesktopNotifications();
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -5168,6 +5190,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droneErrorModal,
     setDroneErrorModal,
     openHome,
+    navigateBack,
+    navigateForward,
     openDraftChatComposer,
     openCurrentGroupDraftChatComposer,
     createDroneChatFromShortcut,

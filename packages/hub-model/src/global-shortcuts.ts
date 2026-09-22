@@ -1,6 +1,8 @@
 export const DRONE_HUB_SHORTCUT_ACTION_IDS = [
   'openQuickActions',
   'openHome',
+  'navigateBack',
+  'navigateForward',
   'createDraftDrone',
   'createDraftGroup',
   'createChatGroup',

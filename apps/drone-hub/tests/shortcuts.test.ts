@@ -14,12 +14,13 @@ import {
 } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
-  test('assigns D to fork promotion and moves default file dictation to Shift+D without taking custom bindings', () => {
+  test('retains the historical D migration to fork promotion and moves default file dictation to Shift+D without taking custom bindings', () => {
     const defaults = cloneDefaultShortcutBindings();
-    expect(defaults.toggleSideChatMain?.key).toBe('d');
-    expect(defaults.toggleSideChatMain?.shift).toBe(false);
+    defaults.toggleSideChatMain = { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false };
     const old = { ...defaults, toggleFileDictation: { ...defaults.toggleSideChatMain } } as Record<string, unknown>;
     delete old.toggleSideChatMain;
+    delete old.navigateBack;
+    delete old.navigateForward;
     expect(migrateChatComposerShortcuts(old)).toMatchObject({ toggleSideChatMain: defaults.toggleSideChatMain, toggleFileDictation: defaults.toggleFileDictation });
     old.toggleFileDictation = { ...defaults.toggleSideChatMain, key: 'k' };
     old.openHome = defaults.toggleSideChatMain;
