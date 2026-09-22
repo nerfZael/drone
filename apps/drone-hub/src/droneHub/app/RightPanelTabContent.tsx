@@ -427,7 +427,7 @@ export function RightPanelTabContent({
         <PaneModule tab={tab} load={loadDroneChatsDock}>
           {(DroneChatsDock) => chatsPaneOptions ? (
             <DroneChatsDock drone={drone} selectedChat={selectedChat} options={chatsPaneOptions} onDeleteChats={onDeleteCanvasChats} onSendToChats={onSendCanvasPrompt}
-              onCloneChat={onCloneCanvasChat} />
+              onCloneChat={onCloneCanvasChat} droneById={droneById} />
           ) : <UiPaneState kind="empty" title="Select a drone to view its chats." />}
         </PaneModule>
       );

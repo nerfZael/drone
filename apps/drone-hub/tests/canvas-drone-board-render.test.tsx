@@ -525,3 +525,65 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await dom.happyDOM.close();
   }
 });
+
+test('dragging a card onto the canvas composer references it in the message without moving it or changing recipients', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const sends: Array<{ targets: unknown; payload: any }> = [];
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => new Response(JSON.stringify({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } })),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 15));
+  const card = (chatName: string) => container.querySelector(`[data-drone-id="${alpha(chatName)}"]`) as unknown as Element;
+  const composer = () => container.querySelector('[data-selected-chats-composer]')!;
+  const board = () => selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha');
+  const mouse = async (type: string, x: number, y: number) => {
+    await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: y, bubbles: true })); });
+  };
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])} onSendCanvasPrompt={async (targets, payload) => {
+      sends.push({ targets, payload });
+      return { ok: true };
+    }} />));
+    await act(async () => { Simulate.click(card('default')); await settle(); });
+    // happy-dom has no layout: place the composer at 400–600 on both axes.
+    Object.defineProperty(composer(), 'getBoundingClientRect', { configurable: true,
+      value: () => ({ left: 400, right: 600, top: 400, bottom: 600, width: 200, height: 200, x: 400, y: 400 }) });
+    const planStart = board().nodesByDroneId[alpha('plan')];
+    await act(async () => Simulate.mouseDown(card('plan'), { button: 0, clientX: 10, clientY: 10 }));
+    await mouse('mousemove', 500, 500);
+    expect(composer().getAttribute('data-reference-drop-active')).toBe('true');
+    await mouse('mouseup', 500, 500);
+    expect(board().selectedDroneIds).toEqual([alpha('default')]);
+    expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: planStart.x, y: planStart.y });
+    expect(composer().textContent).toContain('1 referenced');
+    expect(composer().textContent).toContain('Chat in Alpha');
+
+    const input = container.querySelector('[data-canvas-message-bar] textarea')!;
+    await act(async () => Simulate.change(input as unknown as Element, { target: { value: 'Compare with this' } } as never));
+    await act(async () => { Simulate.keyDown(input as unknown as Element, { key: 'Enter', nativeEvent: new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) } as never); await settle(); });
+    expect(sends).toHaveLength(1);
+    expect(sends[0].targets).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
+    expect(sends[0].payload.prompt).toBe('Compare with this\n\nReferenced drones and chats:\n- Chat "plan" in drone "Alpha" (drone id: alpha, chat: plan)');
+    expect(composer().textContent).not.toContain('referenced');
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});

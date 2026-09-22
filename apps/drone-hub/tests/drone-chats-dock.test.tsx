@@ -295,8 +295,10 @@ test('Chats window broadcasts to selected rows with attachments and shortcuts wi
       }} /></ActiveComposerProvider>));
     await act(async () => { row('nested-chat').dispatchEvent(new dom.MouseEvent('click', { bubbles: true, ctrlKey: true })); await settle(); });
     expect(container.textContent).toContain('To default, nested-chat');
-    expect(container.textContent).toContain('Model: Unchanged');
+    // Like the agent chat, the model controls sit in the toolbar of the expanded composer.
+    expect(container.textContent).not.toContain('Model: Unchanged');
     await type('Hello both');
+    expect(container.textContent).toContain('Model: Unchanged');
     const modelButton = container.querySelector('[data-chat-composer-model-picker] > button')!;
     await press(modelButton as unknown as Element, 'Enter');
     expect(dom.document.activeElement).not.toBe(input());
@@ -345,5 +347,97 @@ test('Chats window broadcasts to selected rows with attachments and shortcuts wi
       else Reflect.deleteProperty(globalThis, name);
     }
     await dom.happyDOM.close();
+  }
+});
+
+test('dragging Chats rows onto the composer references them in the next message', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => new Response(JSON.stringify({ messages: [], pending: [] })),
+  })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const sends: Array<{ targets: unknown; prompt: string }> = [];
+  const row = (name: string) => container.querySelector(`button[data-chat-name="${name}"]`)! as unknown as Element;
+  const composer = () => container.querySelector('[data-selected-chats-composer]')! as unknown as Element;
+  try {
+    await act(async () => root.render(<ActiveComposerProvider><DroneChatsDock drone={drone} selectedChat="default"
+      options={{ sideChatNames: [], onSelectChat() {}, renderChat: () => null }}
+      onSendToChats={async (targets, payload) => { sends.push({ targets, prompt: payload.prompt }); return { ok: true }; }} /></ActiveComposerProvider>));
+    // Select two rows, then drag one of them: the drag carries both.
+    await act(async () => { Simulate.click(row('workflow')); });
+    await act(async () => { Simulate.click(row('side'), { ctrlKey: true }); });
+    const data = new Map<string, string>();
+    await act(async () => Simulate.dragStart(row('side'), { dataTransfer: { setData: (type: string, value: string) => data.set(type, value) } } as never));
+    const transfer = { types: [...data.keys()], getData: (type: string) => data.get(type) ?? '', files: [] };
+    await act(async () => Simulate.dragOver(composer(), { dataTransfer: transfer } as never));
+    await act(async () => Simulate.drop(composer(), { dataTransfer: transfer } as never));
+    expect(composer().textContent).toContain('2 referenced');
+    const input = container.querySelector('[data-selected-chats-composer] textarea')!;
+    await act(async () => Simulate.change(input as unknown as Element, { target: { value: 'Summarize these' } } as never));
+    await act(async () => { Simulate.keyDown(input as unknown as Element, { key: 'Enter', nativeEvent: new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) } as never); });
+    expect(sends.at(-1)?.prompt).toBe(['Summarize these', '', 'Referenced drones and chats:',
+      '- Chat "workflow" in drone "drone-1" (drone id: drone-1, chat: workflow)',
+      '- Chat "side" in drone "drone-1" (drone id: drone-1, chat: side)'].join('\n'));
+    expect(composer().textContent).not.toContain('referenced');
+  } finally {
+    await act(async () => root.unmount());
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
+  }
+});
+
+test('pasted text becomes a text attachment that can be inserted below the typed text', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => new Response(JSON.stringify({ messages: [], pending: [] })),
+  })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const input = () => container.querySelector('[data-selected-chats-composer] textarea')! as unknown as HTMLTextAreaElement;
+  const paste = async (text: string) => {
+    let prevented = false;
+    const clipboardData = { files: [], items: [], types: ['text/plain'], getData: (type: string) => type === 'text/plain' ? text : '' };
+    await act(async () => Simulate.paste(input() as unknown as Element, { clipboardData, preventDefault: () => { prevented = true; } } as never));
+    return prevented;
+  };
+  try {
+    await act(async () => root.render(<ActiveComposerProvider><DroneChatsDock drone={drone} selectedChat="default"
+      options={{ sideChatNames: [], onSelectChat() {}, renderChat: () => null }}
+      onSendToChats={async () => ({ ok: true })} /></ActiveComposerProvider>));
+    await act(async () => Simulate.change(input() as unknown as Element, { target: { value: 'Look at this:' } } as never));
+    expect(await paste('stack trace line 1\nline 2')).toBe(true);
+    expect(container.querySelector('[aria-label="Attachments"]')?.textContent).toContain('stack trace line 1');
+    expect(input().value).toBe('Look at this:');
+    const insert = container.querySelector('button[aria-label^="Insert pasted-text"]')!;
+    await act(async () => (insert as unknown as HTMLButtonElement).click());
+    expect(input().value).toBe('Look at this:\nstack trace line 1\nline 2');
+    expect(container.querySelector('[aria-label="Attachments"]')).toBeNull();
+    // Ctrl+Shift+V keeps the browser's own paste into the text.
+    await act(async () => Simulate.keyDown(input() as unknown as Element, { key: 'V', ctrlKey: true, shiftKey: true }));
+    expect(await paste('inline')).toBe(false);
+    expect(container.querySelector('[aria-label="Attachments"]')).toBeNull();
+    // Blank clipboard text is left to the browser.
+    expect(await paste('   ')).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
   }
 });

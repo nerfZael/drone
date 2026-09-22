@@ -63,7 +63,7 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
         onChange(choice.id === UNCHANGED ? rest : { ...rest, model: choice.id || null });
       },
     }} />
-    <label className="flex h-6 items-center gap-1 text-11 font-medium text-[var(--chat-composer-model-fg)]">Reasoning:
+    <label className="flex h-8 items-center px-1 gap-1 text-11 font-medium text-[var(--chat-composer-model-fg)]">Reasoning:
       <select aria-label="Reasoning override for selected chats" disabled={disabled}
         className="max-w-28 cursor-pointer bg-transparent text-11 font-medium text-[var(--chat-composer-model-fg)] outline-none hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
         value={value.reasoning === undefined ? UNCHANGED : value.reasoning ?? ''}

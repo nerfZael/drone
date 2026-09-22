@@ -6,7 +6,12 @@ import {
 export const CHAT_INPUT_MAX_IMAGES = CHAT_ATTACHMENT_POLICY.maxCount;
 export const CHAT_INPUT_MAX_BYTES_EACH = CHAT_ATTACHMENT_POLICY.maxBytesEach;
 export const CHAT_INPUT_MAX_BYTES_TOTAL = CHAT_ATTACHMENT_POLICY.maxBytesTotal;
-export const CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS = 50_000;
+
+/** A text attachment moved into the composer: added on its own line after any existing text, never replacing it. */
+export function appendTextToDraft(draft: string, text: string): string {
+  if (!draft.trim()) return text;
+  return `${draft.replace(/\n+$/, '')}\n${text}`;
+}
 
 export type DraftImageAttachment = {
   kind: 'image';

@@ -11,7 +11,8 @@ import { requestJson } from '../http';
 import { usePoll } from './hooks';
 import { allDroneChatNames, latestChatPreview, type ChatPreviewPayload } from './drone-chats-model';
 import { SidebarItemStateIndicator, sidebarChatDisplayState, sidebarDroneStateLabel } from '../overview/DroneCard';
-import { createCanvasChatNodeId } from './app-config';
+import { DRONE_CHAT_DND_MIME, createCanvasChatNodeId } from './app-config';
+import type { ComposerReference } from '../chat/composer-references';
 import { busyChatNodeIdsForDrone, droneChatRequiresApproval } from './chat-node-helpers';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { selectSidebarChatNodes } from './sidebar-chat-selection';
@@ -48,9 +49,10 @@ function ChatName({ drone, name, selected }: { drone: DroneSummary; name: string
   );
 }
 
-function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu }: {
+function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu, onDragStart }: {
   drone: DroneSummary; name: string; active: boolean; selected: boolean; onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onDragStart: (event: React.DragEvent<HTMLElement>) => void;
 }) {
   const droneId = drone.id;
   const { value, loading, error } = usePoll(
@@ -66,7 +68,7 @@ function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu }:
   );
   const preview = value ? latestChatPreview(value) : null;
   return (
-    <button type="button" onClick={onSelect} onContextMenu={onContextMenu} aria-pressed={selected} aria-current={active ? 'true' : undefined}
+    <button type="button" draggable onDragStart={onDragStart} onClick={onSelect} onContextMenu={onContextMenu} aria-pressed={selected} aria-current={active ? 'true' : undefined}
       data-chat-drone-id={droneId} data-chat-name={name}
       className={`relative col-span-2 grid w-full select-none grid-cols-subgrid items-center gap-x-3 rounded-[var(--radius-medium)] px-2 py-1.5 text-left text-12 focus-visible:outline focus-visible:outline-[var(--accent)] ${
         selected ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
@@ -89,8 +91,10 @@ function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu }:
   );
 }
 
-export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, onSendToChats, onCloneChat }: {
+export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, onSendToChats, onCloneChat, droneById }: {
   drone: DroneSummary; selectedChat: string; options: DroneChatsPaneOptions;
+  /** Names drones referenced from elsewhere, e.g. dragged in from the sidebar. */
+  droneById?: Record<string, DroneSummary>;
   onSendToChats?: CanvasSendPrompt;
   onCloneChat?: (droneId: string, chatName: string, opts?: { select?: boolean }) =>
     Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
@@ -188,6 +192,12 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
     if (!event.shiftKey) anchorRef.current = name;
     if (!additive && !event.shiftKey) options.onSelectChat(name);
   };
+  /** Dragging a selected row carries the whole selection, e.g. into the composer as references. */
+  const startRowDrag = (name: string, event: React.DragEvent<HTMLElement>) => {
+    const dragged = selectedNames.includes(name) ? selectedNames : [name];
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(dragged.map((chatName) => createCanvasChatNodeId(drone.id, chatName))));
+  };
   const openPasteMenu = (event: React.MouseEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest('[data-chat-name], [data-selected-chats-composer]')) return;
     event.preventDefault();
@@ -250,7 +260,7 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
         <div className="grid min-h-0 flex-1 grid-cols-[fit-content(160px)_minmax(0,1fr)] content-start gap-x-3 overflow-auto p-1.5" aria-label="Drone chats">
           {names.map((name) => <ChatListRow key={name} drone={drone} name={name} active={selectedChat === name}
             selected={selectedNames.includes(name)} onSelect={(event) => selectRow(name, event)}
-            onContextMenu={(event) => openMenu(name, event)} />)}
+            onContextMenu={(event) => openMenu(name, event)} onDragStart={(event) => startRowDrag(name, event)} />)}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
@@ -259,7 +269,8 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
           {names.map((name) => (
             <section key={name} aria-label={`Chat: ${name}`} data-chat-drone-id={drone.id} data-chat-name={name}
               className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--chat-background)]">
-              <button type="button" onClick={(event) => selectRow(name, event)} onContextMenu={(event) => openMenu(name, event)}
+              <button type="button" draggable onDragStart={(event) => startRowDrag(name, event)}
+                onClick={(event) => selectRow(name, event)} onContextMenu={(event) => openMenu(name, event)}
                 aria-pressed={selectedNames.includes(name)} title={`Open ${name} as main chat`}
                 className={`flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-12 ${selectedNames.includes(name) ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
                 <span className="min-w-0 flex-1"><ChatName drone={drone} name={name} selected={selectedChat === name} /></span>
@@ -271,15 +282,16 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
           </div>
         </div>
       )}
-      {onSendToChats ? <ChatsWindowComposer key={drone.id} drone={drone} selectedNames={selectedNames}
+      {onSendToChats ? <ChatsWindowComposer key={drone.id} drone={drone} droneById={droneById} selectedNames={selectedNames}
         onSendToChats={onSendToChats} expanded={composerExpanded}
         onExpand={() => setComposerExpanded(true)} onCollapse={() => setComposerExpanded(false)} /> : null}
     </div>
   );
 }
 
-function ChatsWindowComposer({ drone, selectedNames, onSendToChats, expanded, onExpand, onCollapse }: {
+function ChatsWindowComposer({ drone, droneById, selectedNames, onSendToChats, expanded, onExpand, onCollapse }: {
   drone: DroneSummary;
+  droneById?: Record<string, DroneSummary>;
   selectedNames: string[];
   onSendToChats: CanvasSendPrompt;
   expanded: boolean;
@@ -287,6 +299,7 @@ function ChatsWindowComposer({ drone, selectedNames, onSendToChats, expanded, on
   onCollapse: () => void;
 }) {
   const [draft, setDraft] = React.useState('');
+  const [references, setReferences] = React.useState<ComposerReference[]>([]);
   const [sending, setSending] = React.useState(false);
   const sendingRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -310,7 +323,8 @@ function ChatsWindowComposer({ drone, selectedNames, onSendToChats, expanded, on
   };
   return <SelectedChatsComposer surface="chats" selectionKey={`chats-window:${drone.id}`}
     selectedCount={selectedNames.length} selectedLabel={selectedNames.join(', ')}
-    targets={targets} droneById={{ [drone.id]: drone }}
+    targets={targets} droneById={{ ...droneById, [drone.id]: drone }}
     expanded={expanded} onExpand={onExpand} onCollapse={onCollapse}
-    sending={sending} draft={draft} onDraftChange={setDraft} error={error} onSend={send} />;
+    sending={sending} draft={draft} onDraftChange={setDraft} error={error} onSend={send}
+    references={references} onReferencesChange={setReferences} />;
 }

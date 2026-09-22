@@ -4062,9 +4062,3 @@ select:disabled optgroup {
   width: 1.875rem;
   height: 1.875rem;
 }
-
-[data-selected-chats-composer-meta] [data-chat-composer-model-picker] > button {
-  height: 1.5rem;
-  padding-left: .25rem;
-  padding-right: .25rem;
-}

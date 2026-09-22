@@ -22,6 +22,11 @@ import type { DroneSummary } from '../types';
 import { selectSidebarChatNodes } from '../app/sidebar-chat-selection';
 import { SidebarContextMenu } from '../app/SidebarContextMenu';
 import { chatClipboardHasContent, pastableClipboard, useChatClipboardStore } from '../app/chat-clipboard-store';
+import {
+  composerReferencesFromNodeIds,
+  mergeComposerReferences,
+  type ComposerReference,
+} from '../chat/composer-references';
 import { IconTune } from '../app/icons';
 import {
   createCanvasChatNodeId,
@@ -120,6 +125,8 @@ type NodeDragState = {
   startPositionsById: Record<string, { x: number; y: number }>;
   scale: number;
   moved: boolean;
+  /** Restored when the cards are dropped on the composer as references rather than moved. */
+  selectionBefore: string[];
 };
 
 type PanDragState = {
@@ -559,6 +566,13 @@ export function DroneCanvasDock({
     return kept.length === storedSelectedDroneIds.length ? storedSelectedDroneIds : kept;
   }, [boardMemberIds, storedSelectedDroneIds]);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
+  /** Whether a client point is over the visible message composer, which takes drops as references. */
+  const isOverMessageComposer = React.useCallback((clientX: number, clientY: number) => {
+    const composer = viewportRef.current?.querySelector<HTMLElement>('[data-selected-chats-composer]');
+    if (!composer || composer.hidden) return false;
+    const rect = composer.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }, []);
   const worldLayerRef = React.useRef<HTMLDivElement | null>(null);
   const lineageMarkerId = React.useId();
   const assignedMarkerId = React.useId();
@@ -589,6 +603,8 @@ export function DroneCanvasDock({
   const [canvasControlsExpanded, setCanvasControlsExpanded] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
+  const [messageReferences, setMessageReferences] = React.useState<ComposerReference[]>([]);
+  const [composerDropHover, setComposerDropHover] = React.useState(false);
   const [draftSpawnCount, setDraftSpawnCount] = React.useState('1');
   const [messageError, setMessageError] = React.useState<string | null>(null);
   const [messagePendingCount, setMessagePendingCount] = React.useState(0);
@@ -1246,7 +1262,9 @@ export function DroneCanvasDock({
           );
           if (movedDistance >= DRAG_MOVE_THRESHOLD_PX) nodeDrag.moved = true;
         }
-        if (nodeDrag.moved) {
+        const overComposer = nodeDrag.moved && isOverMessageComposer(event.clientX, event.clientY);
+        setComposerDropHover(overComposer);
+        if (nodeDrag.moved && !overComposer) {
           const draggedDroneIds = Array.from(
             new Set(
               nodeDrag.droneIds
@@ -1344,7 +1362,21 @@ export function DroneCanvasDock({
 
     const onWindowMouseUp = (event: MouseEvent) => {
       const nodeDrag = nodeDragRef.current;
-      if (nodeDrag?.moved) {
+      setComposerDropHover(false);
+      if (nodeDrag?.moved && isOverMessageComposer(event.clientX, event.clientY)) {
+        // Dropped on the composer: reference the cards in the message, leaving them and the recipients where they were.
+        suppressNodeClickRef.current = true;
+        moveNodes(nodeDrag.droneIds.flatMap((droneId) => {
+          const start = nodeDrag.startPositionsById[droneId];
+          return start ? [{ droneId, x: start.x, y: start.y }] : [];
+        }));
+        if (nodeDrag.selectionBefore.length) setSelectedDroneIds(nodeDrag.selectionBefore);
+        const references = composerReferencesFromNodeIds(nodeDrag.droneIds);
+        if (references.length) {
+          setMessageReferences((current) => mergeComposerReferences(current, references));
+          setMessageBarExpanded(true);
+        }
+      } else if (nodeDrag?.moved) {
         suppressNodeClickRef.current = true;
         const assignmentTarget = resolveCanvasAssignmentDropTarget(
           nodeDrag.droneIds,
@@ -1402,7 +1434,7 @@ export function DroneCanvasDock({
       window.removeEventListener('mousemove', onWindowMouseMove);
       window.removeEventListener('mouseup', onWindowMouseUp);
     };
-  }, [clearSelection, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
+  }, [clearSelection, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
 
   const applyZoomAt = React.useCallback(
     (nextScaleRaw: number, anchorClientX: number, anchorClientY: number) => {
@@ -1737,6 +1769,7 @@ export function DroneCanvasDock({
         startPositionsById,
         scale,
         moved: false,
+        selectionBefore: selectedDroneIds,
       };
       setDraggingNodeId(droneId);
       marqueeDragRef.current = null;
@@ -1909,6 +1942,9 @@ export function DroneCanvasDock({
       const overType = String(event.over?.data.current?.type ?? '').trim();
       setDragOverCanvas(false);
       if (droneScope || overType !== 'canvas-drop') return;
+      // The composer turns drops on it into references.
+      const activator = event.activatorEvent as PointerEvent | null;
+      if (activator && isOverMessageComposer(activator.clientX + event.delta.x, activator.clientY + event.delta.y)) return;
       const ids = draggedCanvasNodeIdsFromData(activeData);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
@@ -1940,7 +1976,7 @@ export function DroneCanvasDock({
       );
       setSelectedDroneIds(ids);
     },
-    [droneScope, effectiveDroneNameById, panX, panY, scale, setSelectedDroneIds, upsertNodes],
+    [droneScope, effectiveDroneNameById, isOverMessageComposer, panX, panY, scale, setSelectedDroneIds, upsertNodes],
   );
 
   useDndMonitor({
@@ -2785,6 +2821,9 @@ export function DroneCanvasDock({
             if (messageError) setMessageError(null);
           }}
           onSend={sendCanvasPrompt}
+          references={messageReferences}
+          onReferencesChange={setMessageReferences}
+          referenceDropActive={composerDropHover}
         />
 
         {nodes.length === 0 ? (

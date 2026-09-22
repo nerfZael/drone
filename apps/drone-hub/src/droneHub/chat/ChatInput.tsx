@@ -9,7 +9,7 @@ import { ChatComposerContext, type ChatComposerContextConfig } from './ChatCompo
 import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
 import { chatResponseStopVisible } from './chat-response-stop-visible';
 import {
-  CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS,
+  appendTextToDraft,
   blobToBase64,
   fileToBase64,
   filesFromClipboardData,
@@ -323,6 +323,8 @@ export function ChatInput({
   const attachmentsRef = React.useRef(attachments);
   const draftRevisionRef = React.useRef(0);
   const companionUndoRef = React.useRef<CompanionTextareaUndoSnapshot | null>(null);
+  // Ctrl/Cmd+Shift+V pastes text into the composer instead of attaching it.
+  const plainTextPasteRef = React.useRef(false);
   const composerLocked = Boolean(disabled);
   const composerLockedRef = React.useRef(composerLocked);
   composerLockedRef.current = composerLocked;
@@ -382,18 +384,6 @@ export function ChatInput({
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
-  const imageAttachmentCount = React.useMemo(
-    () => attachments.filter((attachment) => attachment.kind === 'image').length,
-    [attachments],
-  );
-  const textAttachmentCount = React.useMemo(
-    () => attachments.filter((attachment) => attachment.kind === 'text').length,
-    [attachments],
-  );
-  const fileAttachmentCount = React.useMemo(
-    () => attachments.filter((attachment) => attachment.kind === 'file').length,
-    [attachments],
-  );
   React.useEffect(() => {
     if (draftRef.current === draft) return;
     draftRef.current = draft;
@@ -783,6 +773,14 @@ export function ChatInput({
     }
   }
 
+  /** Moves a text attachment into the composer text, below whatever is already typed. */
+  function insertTextAttachment(id: string) {
+    const attachment = attachmentsRef.current.find((item) => item.id === id);
+    if (attachment?.kind !== 'text') return;
+    removeAttachment(id);
+    setDraft((current) => appendTextToDraft(current, attachment.text));
+  }
+
   function removeAttachment(id: string) {
     setAttachmentError(null);
     setComposerAttachments((prev) => {
@@ -914,11 +912,15 @@ export function ChatInput({
       return;
     }
     const pastedText = String(clipboardData.getData('text/plain') ?? '');
+    const plainTextPaste = plainTextPasteRef.current;
+    plainTextPasteRef.current = false;
+    // Pasted text arrives as an attachment; "Insert as text" on it, or Ctrl+Shift+V, puts it in the composer instead.
     if (
       options.allowTextAttachment &&
+      !plainTextPaste &&
       attachmentsOn &&
       !attachmentControlsLocked &&
-      pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS
+      pastedText.trim()
     ) {
       preventDefault();
       addPastedTextAttachment(pastedText);
@@ -1265,57 +1267,46 @@ export function ChatInput({
         >
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
-            <div className="px-3 pt-3">
-              <div className="text-caption text-[var(--muted-dim)]">
-                {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
-                {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
-                {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
-                {fileAttachmentCount > 0 ? ` • ${fileAttachmentCount} file${fileAttachmentCount === 1 ? '' : 's'}` : ''}
-              </div>
-              <div className="mt-2 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {attachments.map((a) => (
-                  <div key={a.id} className="relative flex-shrink-0">
-                    {a.kind === 'image' ? (
-                      <button type="button" aria-label={`View ${a.name}`} title="View full size" className="block cursor-zoom-in rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-                        onClick={(event) => setViewedAttachment({ attachment: { kind: 'image', name: a.name, src: a.previewUrl }, container: portalContainerOf(event.currentTarget) })}>
-                        <img
-                          src={a.previewUrl}
-                          alt={a.name}
-                          className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
-                        />
+            // Small tiles like the Companion's: no heading, one row, remove on hover.
+            <div aria-label="Attachments" className="flex gap-1.5 overflow-x-auto px-2.5 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {attachments.map((a) => {
+                const readable = draftAttachmentIsReadable(a);
+                const view = (target: HTMLElement) => setViewedAttachment({
+                  attachment: a.kind === 'image' ? { kind: 'image', name: a.name, src: a.previewUrl } : viewedDraftText(a),
+                  container: portalContainerOf(target),
+                });
+                return (
+                  <div key={a.id} className="group relative shrink-0">
+                    <button type="button" aria-label={`View ${a.name}`} title={`${a.name} · ${formatBytes(a.size)}`}
+                      disabled={a.kind !== 'image' && !readable}
+                      onClick={(event) => view(event.currentTarget)}
+                      className="block h-11 w-16 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] enabled:hover:border-[var(--accent-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                      {a.kind === 'image' ? (
+                        <img src={a.previewUrl} alt="" className="h-full w-full object-cover" />
+                      ) : a.kind === 'text' ? (
+                        <span aria-hidden="true" className="block h-full whitespace-pre-wrap break-all p-1 text-left font-mono text-[5px] leading-[6px] text-[var(--fg-secondary)]">{a.text.slice(0, 260)}</span>
+                      ) : (
+                        <span aria-hidden="true" className="flex h-full flex-col items-center justify-center gap-0.5 px-1">
+                          <span className="rounded border border-[var(--border-subtle)] px-1 text-[9px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)]">{/\.([a-z0-9]{1,5})$/i.exec(a.name)?.[1] ?? 'file'}</span>
+                          <span className="w-full truncate text-center text-[8px] text-[var(--muted)]">{a.name}</span>
+                        </span>
+                      )}
+                    </button>
+                    {a.kind === 'text' ? (
+                      <button type="button" aria-label={`Insert ${a.name} as text`} title="Insert as text, below anything already typed"
+                        disabled={attachmentControlsLocked} onClick={() => insertTextAttachment(a.id)}
+                        className="absolute bottom-0.5 left-0.5 flex h-4 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-1 text-[9px] leading-none text-[var(--accent)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100 disabled:cursor-not-allowed">
+                        Insert
                       </button>
-                    ) : (
-                      <div role={draftAttachmentIsReadable(a) ? 'button' : undefined} tabIndex={draftAttachmentIsReadable(a) ? 0 : undefined}
-                        title={draftAttachmentIsReadable(a) ? 'View contents' : undefined}
-                        onClick={draftAttachmentIsReadable(a) ? (event) => setViewedAttachment({ attachment: viewedDraftText(a), container: portalContainerOf(event.currentTarget) }) : undefined}
-                        onKeyDown={draftAttachmentIsReadable(a) ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setViewedAttachment({ attachment: viewedDraftText(a), container: portalContainerOf(event.currentTarget) }); } } : undefined}
-                        className={`min-h-[3.5rem] w-[11.25rem] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 ${draftAttachmentIsReadable(a) ? 'cursor-pointer hover:border-[var(--border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]' : ''}`}>
-                        <div
-                          className="text-9 uppercase tracking-wide text-[var(--muted-dim)]"
-                        >
-                          {a.kind === 'text' ? 'Text attachment' : 'File attachment'}
-                        </div>
-                        <div className="mt-1 truncate text-10 text-[var(--fg-secondary)]">{a.name}</div>
-                        <div className="mt-0.5 text-9 text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(a.id)}
-                      disabled={attachmentControlsLocked}
-                      className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-10 font-[var(--weight-bold)] flex items-center justify-center transition-all ${
-                        attachmentControlsLocked
-                          ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                          : 'bg-[var(--panel-raised)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red)]'
-                      }`}
-                      title={`Remove ${a.kind} attachment`}
-                      aria-label={`Remove ${a.kind} attachment`}
-                    >
-                      x
+                    ) : null}
+                    <button type="button" aria-label={`Remove ${a.name}`} title="Remove"
+                      disabled={attachmentControlsLocked} onClick={() => removeAttachment(a.id)}
+                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[11px] leading-none text-[var(--muted)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100 disabled:cursor-not-allowed">
+                      ×
                     </button>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           )}
 
@@ -1525,6 +1516,8 @@ export function ChatInput({
               }}
               onKeyDown={(event) => {
                 if ((event.nativeEvent as any)?.isComposing) return;
+                plainTextPasteRef.current =
+                  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'v';
                 const companionUndoValue = companionTextareaUndoValue(
                   companionUndoRef.current,
                   draftRef.current,
