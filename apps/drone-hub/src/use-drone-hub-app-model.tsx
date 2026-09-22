@@ -62,6 +62,7 @@ import type { DroneDeleteConfirmModalDrone } from './droneHub/app/DroneDeleteCon
 import type { DroneHubOverlaysProps } from './droneHub/app/DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorkspaceContent';
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
+import type { DroneChatsPaneOptions } from './droneHub/app/DroneChatsDock';
 import { DetachedFileWindow } from './droneHub/files/DetachedFileWindow';
 import { focusFilePanel } from './droneHub/app/file-tab-drag';
 import type { WorkspaceFileWindows } from './droneHub/app/DockableDroneWorkspace';
@@ -5371,7 +5372,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }), [defaultFsPathForCurrentDrone, openEditorFile, handleDetachedFileTabsChange, handleFileWindowClosed, openedEditorFileTabs, renderFileWindow]);
 
   const renderRightPanelTabContent = React.useCallback(
-    (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
+    (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey, chatsPaneOptions?: DroneChatsPaneOptions): React.ReactNode => {
       const terminalKey = terminalPaneStateKey(drone.id, paneKey);
       const terminalSessionsState = terminalKey
         ? (terminalSessionsByPane[terminalKey] ?? createTerminalPaneSessionsState())
@@ -5396,6 +5397,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
       return (
         <RightPanelTabContent
+          chatsPaneOptions={chatsPaneOptions}
           drone={previewDrone}
           tab={tab}
           paneKey={paneKey}

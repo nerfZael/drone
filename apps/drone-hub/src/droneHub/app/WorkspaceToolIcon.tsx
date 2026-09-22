@@ -37,6 +37,13 @@ export function WorkspaceToolIcon({
   className?: string;
 }) {
   switch (tab) {
+    case 'chats':
+      return (
+        <ActivityIcon tab={tab} className={className}>
+          <path d="M14 16H7l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6M7 7h8M7 11h5" />
+          <path d="M16 14h5v7l-3-2h-4v-5Z" />
+        </ActivityIcon>
+      );
     case 'terminal':
       return (
         <ActivityIcon tab={tab} className={className}>

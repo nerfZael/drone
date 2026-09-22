@@ -31,6 +31,7 @@ export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 
 export const WORKSPACE_TOOLS = {
   terminal: { label: 'Terminal', header: true, lazy: true },
+  chats: { label: 'Chats', header: true, lazy: true },
   env: { label: 'Env', header: true, lazy: true },
   editor: { label: 'Editor', header: true, lazy: true },
   preview: { label: 'Browser', header: true, lazy: true },

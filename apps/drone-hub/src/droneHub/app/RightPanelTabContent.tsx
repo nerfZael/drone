@@ -1,4 +1,5 @@
 import React from 'react';
+import type { DroneChatsPaneOptions } from './DroneChatsDock';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
 import {
@@ -25,6 +26,7 @@ import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
 import { isDroneStartingOrSeeding } from './helpers';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
+const loadDroneChatsDock = async () => (await import('./DroneChatsDock')).DroneChatsDock;
 const loadDroneChangesDock = async () => (await import('../changes/DroneChangesDock')).DroneChangesDock;
 const loadDroneChangeRequestsDock = async () =>
   (await import('../changeRequests/DroneChangeRequestsDock')).DroneChangeRequestsDock;
@@ -105,6 +107,7 @@ type PaneReadinessState = {
 };
 
 type RightPanelTabContentProps = {
+  chatsPaneOptions?: DroneChatsPaneOptions;
   drone: DroneSummary;
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
@@ -263,6 +266,7 @@ type RightPanelTabContentProps = {
 };
 
 export function RightPanelTabContent({
+  chatsPaneOptions,
   drone,
   tab,
   paneKey,
@@ -431,6 +435,14 @@ export function RightPanelTabContent({
   );
 
   switch (tab) {
+    case 'chats':
+      return (
+        <PaneModule tab={tab} load={loadDroneChatsDock}>
+          {(DroneChatsDock) => chatsPaneOptions ? (
+            <DroneChatsDock drone={drone} selectedChat={selectedChat} options={chatsPaneOptions} />
+          ) : <UiPaneState kind="empty" title="Select a drone to view its chats." />}
+        </PaneModule>
+      );
     case 'workflows':
       return (
         <PaneModule tab={tab} load={loadDroneWorkflowsDock}>

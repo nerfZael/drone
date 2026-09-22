@@ -3,6 +3,8 @@ import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pen
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { SideChatControls } from './SideChatControls';
 import { DisplacedMainChat } from './DisplacedMainChat';
+import { DetachedChatContent } from './DetachedChatWindows';
+import type { DroneChatsPaneOptions } from './DroneChatsDock';
 import { detachChatMenuItems } from './DetachedChatIndicator';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -549,6 +551,7 @@ type SelectedDroneWorkspaceProps = {
     drone: DroneSummary,
     tab: RightPanelTab,
     pane: 'single' | 'top' | 'bottom',
+    chatsPaneOptions?: DroneChatsPaneOptions,
   ) => React.ReactNode;
   /** Files shown in their own workspace windows after being dragged out of the editor. */
   fileWindows?: WorkspaceFileWindows;
@@ -2425,7 +2428,28 @@ export function SelectedDroneWorkspace({
         paneHeaderMode={workspacePaneHeaderMode}
         activeToolTab={rightPanelTab}
         openRequestNonce={rightPanelOpenRequestSeq}
-        renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
+        renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey, {
+          sideChatNames: sideChatWorkspace.sideChats.map((chat) => chat.name),
+          onSelectChat: (name) => {
+            if (sideChatWorkspace.sideChats.some((chat) => chat.name === name)) openSideChatAsMain(name);
+            else setSelectedChat(name);
+          },
+          renderChat: (chatName) => (
+            <DetachedChatContent
+              key={chatName}
+              chat={{ droneId: currentDrone.id, chatName, open: true }}
+              drone={{ ...currentDrone, sideChats: sideChatWorkspace.sideChats }}
+              context={{
+                drones: [currentDrone], currentDroneId: currentDrone.id, visible: true,
+                onSendPromptInNewChat: (_drone, payload, context, sourceChatName) => onSendPromptInNewChat(payload, context, sourceChatName),
+                onCreateQueuedNewChatNow,
+                onCreateNewChatAutoFocusHandled,
+                promotingNewChatActionById,
+                promoteNewChatActionErrorById,
+              }}
+            />
+          ),
+        })}
         fileWindows={fileWindows}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
