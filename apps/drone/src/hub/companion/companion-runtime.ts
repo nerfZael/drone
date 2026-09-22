@@ -41,6 +41,7 @@ import {
 import type { CompanionWorkspaceService } from './companion-workspaces';
 import { CompanionProposalModels } from './companion-proposal-models';
 import { CompanionSkills } from './companion-skills';
+import { CompanionAppContext } from './companion-app-context';
 import type { ResourceSubscriptionService, SessionSubscriptionDelivery } from '../subscriptions/resource-subscription-service';
 import type { ResourceSubscriptionDeliveryMode } from '../subscriptions/resource-subscription-types';
 
@@ -50,10 +51,12 @@ export type CompanionBrowserCall = (
   tool: CompanionBrowserToolName,
   args: Record<string, unknown>,
   signal?: AbortSignal,
+  messageId?: string,
 ) => Promise<any>;
 
 type RunContext = {
   acceptsSteering: boolean;
+  messageId: string;
   windowLayoutTools: boolean;
   runId: string;
   settings: CompanionSettings;
@@ -62,6 +65,7 @@ type RunContext = {
   snapshots: Map<string, BrowserTextSnapshot>;
   proposalModels: CompanionProposalModels;
   skills: CompanionSkills;
+  appContext: CompanionAppContext;
 };
 
 type BrowserTextSnapshot = {
@@ -167,13 +171,13 @@ export class CompanionRuntime {
   }
 
   /** Deliver through ASAP when enabled; false leaves the request buffered by the transport. */
-  steer(runId: string, prompt: string, deliveryMode?: ResourceSubscriptionDeliveryMode): boolean {
+  steer(runId: string, prompt: string, deliveryMode?: ResourceSubscriptionDeliveryMode, messageId?: string): boolean {
     if (this.closing || this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
     const threadId = `companion:${runId}`;
     const context = this.contexts.get(threadId);
     if (!context?.acceptsSteering || (deliveryMode ?? context.settings.promptDeliveryMode) === 'queue') return false;
     if (!this.activeRunIds.has(runId) || !this.host.canSteerThread(threadId)) return false;
-    this.host.steerThread(threadId, prompt);
+    this.host.steerThread(threadId, context.appContext?.steeringPrompt(prompt, messageId) ?? prompt);
     return true;
   }
 
@@ -274,11 +278,18 @@ export class CompanionRuntime {
           existingContext.settings = settings;
           existingContext.workspaceRevision = workspaceRevision;
         }
+        existingContext.messageId = input.messageId;
         existingContext.callBrowser = this.instrumentBrowserCall(input.callBrowser, telemetry);
         existingContext.snapshots.clear();
       } else {
+        const assertAvailable = () => {
+          if (this.closing || this.cancelledRunIds.has(runId) || !this.activeRunIds.has(runId)) {
+            throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
+          }
+        };
         this.contexts.set(threadId, {
           acceptsSteering: false,
+          messageId: input.messageId,
           windowLayoutTools: input.transport === 'websocket',
           runId,
           settings: restoredSettings ?? settings,
@@ -286,10 +297,14 @@ export class CompanionRuntime {
           callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
           proposalModels: new CompanionProposalModels(),
-          skills: new CompanionSkills(() => {
-            if (this.closing || this.cancelledRunIds.has(runId) || !this.activeRunIds.has(runId)) {
-              throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
-            }
+          skills: new CompanionSkills(assertAvailable),
+          appContext: new CompanionAppContext({
+            assertAvailable,
+            enabled: () => this.contexts.get(threadId)!.settings.enabledTools.includes('get_app_context'),
+            read: (signal, messageId) => {
+              const current = this.contexts.get(threadId)!;
+              return current.callBrowser('get_app_context', {}, signal, messageId ?? current.messageId);
+            },
           }),
         });
       }
@@ -369,8 +384,8 @@ export class CompanionRuntime {
     telemetry?: CompanionRunTelemetry,
   ): CompanionBrowserCall {
     if (!telemetry) return callBrowser;
-    return async (tool, args, signal) =>
-      await telemetry.measure(`browserTool.${tool}`, () => callBrowser(tool, args, signal));
+    return async (tool, args, signal, messageId) =>
+      await telemetry.measure(`browserTool.${tool}`, () => callBrowser(tool, args, signal, messageId));
   }
 
   cancel(runId: string): void {
@@ -526,13 +541,15 @@ export class CompanionRuntime {
           : await this.customTools(context, drones)),
         ...workspaceTools,
       ],
-      toolProviders: [filteredMcpProvider, context.skills],
+      toolProviders: [filteredMcpProvider, context.skills, context.appContext],
       beforePrompt: () => { context.acceptsSteering = true; },
       // The handle stays "running" while saving its final state. Steering then
       // would never reach the finished agent loop, so let the transport start a new run.
       afterPrompt: () => { context.acceptsSteering = false; },
-      promptContext: (lifecycle: Parameters<CompanionSkills['promptContext']>[0]) => context.skills.promptContext(lifecycle),
-      transformContext: (messages: Parameters<CompanionSkills['transformContext']>[0]) => context.skills.transformContext(messages),
+      promptContext: async (lifecycle: Parameters<CompanionSkills['promptContext']>[0]) => [
+        ...await context.skills.promptContext(lifecycle), ...await context.appContext.promptContext(lifecycle),
+      ],
+      transformContext: async (messages: Parameters<CompanionSkills['transformContext']>[0], signal?: AbortSignal) => context.appContext.transformContext(await context.skills.transformContext(messages), signal),
       getApiKey: resolveBlipProviderApiKey,
       dispose: () => mcpClient.close(),
     };

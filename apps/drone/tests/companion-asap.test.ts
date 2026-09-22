@@ -110,6 +110,12 @@ test('ASAP keeps an in-flight browser result valid and routes new tools and acti
     }
     expect(await firstResult).toBe('a');
     expect(await secondResult).toBe('b');
+    // Automatic reads keep the originating message's capture even after a correction arrives.
+    const prefetched = h.runs[0].callBrowser('get_app_context', {}, undefined, 'a');
+    const prefetchCall = h.messages.at(-1);
+    expect(prefetchCall.messageId).toBe('a');
+    h.session.resolveBrowserTool({ ...prefetchCall, ok: true, result: 'original workspace' });
+    expect(await prefetched).toBe('original workspace');
     h.runs[0].onEvent({ type: 'tool_call_completed', callId: 'tool', result: {} });
     expect(h.messages.at(-1)).toMatchObject({ type: 'activity', messageId: 'b' });
     await h.session.close('cancelled');

@@ -6,6 +6,7 @@ const ACTIVITY_RESULT_MAX_CHARS = 20_000;
 const DEFAULT_BROWSER_TOOL_TIMEOUT_MS = 20_000;
 
 type BrowserToolDispatch = {
+  messageId?: string;
   callId: string;
   generation: number;
   tool: CompanionBrowserToolName;
@@ -38,6 +39,7 @@ export class CompanionBrowserToolBroker {
     args: Record<string, unknown>,
     generation: number,
     signal?: AbortSignal,
+    messageId?: string,
   ): Promise<unknown> {
     if (!this.options.available())
       return Promise.reject(new Error(this.options.unavailableMessage));
@@ -59,7 +61,7 @@ export class CompanionBrowserToolBroker {
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        void Promise.resolve(this.options.dispatch({ callId, generation, tool, args })).catch(
+        void Promise.resolve(this.options.dispatch({ callId, generation, tool, args, ...(messageId ? { messageId } : {}) })).catch(
           (error) => this.reject(callId, error instanceof Error ? error : new Error(String(error))),
         );
       } catch (error) {

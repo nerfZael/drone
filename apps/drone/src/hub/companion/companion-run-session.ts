@@ -76,8 +76,8 @@ export class CompanionRunSession {
       dispatch: (call) =>
         this.options.emit({
           type: 'tool_call',
-          messageId: this.activeMessageId,
           ...call,
+          messageId: call.messageId ?? this.activeMessageId,
         }),
     });
     let lastSubscriptions = '';
@@ -193,11 +193,11 @@ export class CompanionRunSession {
       while (this.isAvailable()) {
         const { messageId } = queued;
         const runGeneration = this.generation;
-        const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
+        const callBrowser: CompanionBrowserCall = (tool, args, signal, contextMessageId) => {
           if (!this.isCurrentGeneration(runGeneration)) {
             return Promise.reject(new Error('Companion run is no longer active'));
           }
-          return this.browserTools.request(tool, args, runGeneration, signal);
+          return this.browserTools.request(tool, args, runGeneration, signal, contextMessageId);
         };
 
         try {
@@ -291,7 +291,7 @@ export class CompanionRunSession {
       }
       try {
         if (next.subscriptionDeliveryMode === 'queue' ||
-          !this.options.runtime.steer(this.options.runtimeRunId, next.prompt, next.subscriptionDeliveryMode)) {
+          !this.options.runtime.steer(this.options.runtimeRunId, next.prompt, next.subscriptionDeliveryMode, next.messageId)) {
           index += 1;
           continue;
         }

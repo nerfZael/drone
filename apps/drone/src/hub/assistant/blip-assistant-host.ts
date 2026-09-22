@@ -446,7 +446,7 @@ export class BlipAssistantHost {
     return tool.execute(callId, args, signal);
   }
 
-  steerThread(threadId: string, prompt: string): void {
+  steerThread(threadId: string, prompt: BlipPromptInput): void {
     const handle = this.handles.get(threadId);
     if (!handle) throw new Error(`Blip assistant thread is not running: ${threadId}`);
     handle.steer(prompt);
