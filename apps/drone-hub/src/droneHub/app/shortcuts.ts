@@ -31,6 +31,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Clears the current drone selection and returns to the home screen.',
   },
   {
+    id: 'navigateBack',
+    label: 'Go back',
+    description: 'Returns to the previously selected drone or chat.',
+  },
+  {
+    id: 'navigateForward',
+    label: 'Go forward',
+    description: 'Returns to the next drone or chat after going back.',
+  },
+  {
     id: 'createDraftDrone',
     label: 'Create root drone',
     description: 'Opens the new-drone composer at the root of the current repository.',
@@ -221,6 +231,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openQuickActions: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  navigateBack: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  navigateForward: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: null,
   createDraftGroup: null,
   createChatGroup: null,
@@ -229,7 +241,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDroneChat: null,
   cloneDroneChat: null,
   createSideChat: null,
-  toggleSideChatMain: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSideChatMain: null,
   toggleSelectedDronePinned: null,
   moveSelectedDroneToTop: null,
   toggleSelectedDronesToDo: null,
@@ -466,6 +478,24 @@ export function migrateQuickActionShortcuts(value: unknown): unknown {
   return next;
 }
 
+/** Add history shortcuts once; preserve custom bindings and explicit unbindings. */
+export function migrateNavigationShortcuts(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const next = { ...raw };
+  let changed = false;
+  for (const id of ['navigateBack', 'navigateForward'] as const) {
+    if (Object.prototype.hasOwnProperty.call(raw, id)) continue;
+    const binding = DEFAULT_SHORTCUT_BINDINGS[id]!;
+    if (id === 'navigateForward' && isSameShortcutBinding(next.toggleSideChatMain, binding)) {
+      next.toggleSideChatMain = null;
+    }
+    next[id] = Object.values(next).some((value) => isSameShortcutBinding(value, binding)) ? null : binding;
+    changed = true;
+  }
+  return changed ? next : value;
+}
+
 function isSameShortcutBinding(value: unknown, expected: ShortcutBinding): boolean {
   const binding = sanitizeShortcutBinding(value, null);
   return Boolean(
@@ -487,6 +517,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     openQuickActions: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openQuickActions),
     openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
+    navigateBack: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.navigateBack),
+    navigateForward: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.navigateForward),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createDraftGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftGroup),
     createChatGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChatGroup),

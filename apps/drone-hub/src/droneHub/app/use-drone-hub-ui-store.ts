@@ -11,6 +11,7 @@ import {
   cloneDefaultShortcutBindings,
   migrateChatComposerShortcuts,
   migrateQuickActionShortcuts,
+  migrateNavigationShortcuts,
   migrateCompanionShortcut,
   migrateCompanionSessionShortcuts,
   migrateFormerPullRequestsShortcut,
@@ -907,7 +908,7 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     };
     changed = true;
   }
-  return migrateQuickActionShortcuts(migrateChatComposerShortcuts(migrateCompanionShortcut(changed ? next : value)));
+  return migrateNavigationShortcuts(migrateQuickActionShortcuts(migrateChatComposerShortcuts(migrateCompanionShortcut(changed ? next : value))));
 }
 
 let pendingChatInputDraftsPersist: Record<string, string> | null = null;
