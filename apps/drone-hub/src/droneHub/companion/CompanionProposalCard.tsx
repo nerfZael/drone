@@ -353,8 +353,13 @@ function ProposalOperationList({
           operation,
           'droneId' in operation ? droneLabel(operation.droneId) : '',
         );
+        const disclosureLabel = !full && isMessage
+          ? `message to ${droneLabel(operation.droneId)}`
+          : `${!full && isCreateDrone ? 'message' : 'details'} for ${operationLabel}`;
         const detailsId = `${idPrefix}-${operation.id}`;
         const detailsExpanded = expandedOperationIds.has(operation.id);
+        const messageId = `${detailsId}-message`;
+        const messageExpanded = full || detailsExpanded;
         const targetStep = 'droneId' in operation ? createdInStep(operation.droneId) : null;
         const targetStepPill = targetStep !== null ? (
           <Pill tone="accent" title={`Targets the drone created in step ${targetStep}`}>
@@ -385,13 +390,13 @@ function ProposalOperationList({
           <>
             {headline}
             {isMessage ? (
-              <blockquote className={`mt-1.5 whitespace-pre-wrap break-words border-l-2 border-[var(--info-border)] pl-2.5 text-xs leading-relaxed text-[var(--fg)] ${full ? '' : 'line-clamp-4'}`}>
+              <blockquote id={messageId} className={`mt-1.5 whitespace-pre-wrap break-words border-l-2 border-[var(--info-border)] pl-2.5 text-xs leading-relaxed text-[var(--fg)] ${messageExpanded ? '' : 'line-clamp-4'}`}>
                 {operation.message}
               </blockquote>
             ) : null}
             {isCreateDrone && createSettings ? (
               <>
-                <div className={`mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--fg-secondary)] ${full ? '' : 'line-clamp-2'}`}>
+                <div id={messageId} className={`mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--fg-secondary)] ${messageExpanded ? '' : 'line-clamp-2'}`}>
                   {operation.prompt}
                 </div>
                 {/* Where it lands and how it runs, on one quiet line. */}
@@ -427,13 +432,13 @@ function ProposalOperationList({
             ) : null}
           </>
         );
-        const summary = details.length > 0 ? (
+        const summary = details.length > 0 || (!full && isMessage) ? (
           <button
             type="button"
             className="relative block w-full min-w-0 appearance-none rounded-sm bg-transparent p-0 pr-5 text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             aria-expanded={detailsExpanded}
-            aria-controls={detailsId}
-            aria-label={`${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
+            aria-controls={[...(details.length > 0 ? [detailsId] : []), ...(!full && (isMessage || isCreateDrone) ? [messageId] : [])].join(' ')}
+            aria-label={`${detailsExpanded ? 'Collapse' : 'Expand'} ${disclosureLabel}`}
             onClick={() => toggleOperationDetails(operation.id)}
           >
             {summaryContent}

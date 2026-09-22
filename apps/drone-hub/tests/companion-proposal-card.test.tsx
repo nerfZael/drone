@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Window } from 'happy-dom';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -46,7 +48,7 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Apply proposal');
     expect(html).toContain('Discard');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('review details for Create draft drone');
+    expect(html).toContain('Expand message for Create draft drone');
     expect(html).not.toContain('>Review details</summary>');
     expect(html).toContain('text-[var(--fg)]');
   });
@@ -207,7 +209,7 @@ describe('Companion proposal card', () => {
     );
 
     expect(html).toContain('Backend/Payments');
-    expect(html).toContain('aria-controls="proposal-operation-details-create"');
+    expect(html).toContain('aria-controls="proposal-operation-details-create proposal-operation-details-create-message"');
     expect(html).toContain('aria-controls="proposal-operation-details-clone-chat"');
     // Runtime, agent and model surface inline as pills; the rest stays behind the disclosure.
     expect(html).toContain('>Host<');
@@ -475,4 +477,53 @@ test('another running proposal disables Apply without labeling this draft as app
   expect(discard).toContain('Discard');
   expect(discard).not.toMatch(/<button[^>]* disabled=""/);
   expect(html).not.toContain('Applying');
+});
+
+
+test('clicking an item independently expands and collapses its message without applying the proposal', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  const container = dom.document.createElement('div'); dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  let applied = 0; let discarded = 0;
+  try {
+    await act(async () => root.render(<CompanionProposalCard
+      proposal={{ version: 1, title: 'Review', operations: [
+        { id: 'create', type: 'create_drone', name: 'Reviewer', prompt: 'Initial instructions. '.repeat(30), draft: true },
+        { id: 'message', type: 'send_message', droneId: '$create', message: 'Follow-up instructions. '.repeat(30) },
+      ] }}
+      defaultRepoPath="/workspace/repo" execution={null} executing={false} companionStatus="completed"
+      onExecute={() => { applied++; }} onDiscard={() => { discarded++; }}
+    />));
+    const initial = container.querySelector('#proposal-operation-details-create-message')!;
+    const message = container.querySelector('#proposal-operation-details-message-message')!;
+    const createButton = initial.closest('button')!;
+    const messageButton = message.closest('button')!;
+    expect(initial.classList.contains('line-clamp-2')).toBe(true);
+    expect(message.classList.contains('line-clamp-4')).toBe(true);
+    await act(async () => messageButton.click());
+    expect(message.classList.contains('line-clamp-4')).toBe(false);
+    expect(messageButton.getAttribute('aria-expanded')).toBe('true');
+    expect(initial.classList.contains('line-clamp-2')).toBe(true);
+    await act(async () => createButton.click());
+    expect(initial.classList.contains('line-clamp-2')).toBe(false);
+    expect(message.classList.contains('line-clamp-4')).toBe(false);
+    await act(async () => messageButton.click());
+    expect(message.classList.contains('line-clamp-4')).toBe(true);
+    expect(messageButton.getAttribute('aria-expanded')).toBe('false');
+    expect(initial.classList.contains('line-clamp-2')).toBe(false);
+    await act(async () => createButton.click());
+    expect(initial.classList.contains('line-clamp-2')).toBe(true);
+    expect(applied).toBe(0); expect(discarded).toBe(0);
+  } finally {
+    await act(async () => root.unmount());
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
 });
