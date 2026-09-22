@@ -118,7 +118,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleChatVoiceRecording',
     label: 'Record voice message',
-    description: 'Starts a voice message in the active chat composer, or stops and transcribes it. Double-tap to create a root drone and record there.',
+    description: 'Starts a voice message in the active chat composer, or stops and transcribes it. While recording, R transcribes, clones the chat, and sends there. Double-tap to create a root drone and record there.',
   },
   {
     id: 'toggleChatVoiceRecordingPause',

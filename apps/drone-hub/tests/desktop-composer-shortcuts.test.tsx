@@ -14,6 +14,7 @@ test('desktop composer shortcuts act on the local composer and leave typing alon
     Object.defineProperty(globalThis, key, { configurable: true, value });
   }
   const calls: string[] = [];
+  let recording = false;
   let onKey: (event: KeyboardEvent, scope: HTMLElement) => void;
   function Fixture() {
     const active = useActiveComposer();
@@ -22,6 +23,8 @@ test('desktop composer shortcuts act on the local composer and leave typing alon
       const main = active.registerComposer({ id: 'main', isEligible: () => true, appendTranscript() {},
         sendMessage: () => { calls.push('wrong-main'); return true; } });
       const local = active.registerComposer({ id: 'desktop', isEligible: () => true, appendTranscript() {},
+        voiceRecordingStatus: () => recording ? 'recording' : 'idle',
+        sendRecordingInClonedChat: () => { calls.push('clone-recording'); return true; },
         sendMessage: mode => { calls.push(mode === 'asap' ? 'asap' : 'send'); return true; },
         clearComposer: () => { calls.push('clear'); return true; },
         toggleVoiceRecording: () => { calls.push('voice'); return true; },
@@ -52,6 +55,11 @@ test('desktop composer shortcuts act on the local composer and leave typing alon
     expect(calls).toHaveLength(4);
     expect(await key('Enter')).toBe(true);
     expect(dom.document.activeElement).toBe(input);
+    recording = true;
+    expect(await key('r', input)).toBe(true);
+    expect(calls.at(-1)).toBe('clone-recording');
+    expect(await key('R', dom.document.body, true)).toBe(true);
+    expect(calls.slice(-2)).toEqual(['clone-recording', 'clone-recording']);
   } finally {
     await act(async () => root.unmount());
     dom.happyDOM.cancelAsync();

@@ -14,6 +14,7 @@ export type ActiveComposer = {
   readSnapshot?(): CompanionTextSnapshot;
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
   sendMessage?(deliveryMode?: ChatMessageDeliveryMode): boolean;
+  sendRecordingInClonedChat?(): boolean;
   toggleVoiceRecording?(): boolean;
   voiceRecordingStatus?(): ChatVoiceRecordingStatus;
   toggleVoiceRecordingPause?(): boolean;
@@ -40,6 +41,7 @@ type ActiveComposerContextValue = {
     content: string,
   ): { ok: true; revision: string };
   sendMessage(deliveryMode?: ChatMessageDeliveryMode): boolean;
+  sendRecordingInClonedChat(): boolean;
   toggleVoiceRecording(): boolean;
   toggleVoiceRecordingPause(): boolean;
   discardVoiceRecording(): boolean;
@@ -155,6 +157,10 @@ export class ActiveComposerRegistry {
     return composer;
   }
 
+  sendRecordingInClonedChat(): boolean {
+    return this.runRecordingAction('sendRecordingInClonedChat');
+  }
+
   toggleVoiceRecording(): boolean {
     return this.runActiveAction('toggleVoiceRecording');
   }
@@ -198,7 +204,7 @@ export class ActiveComposerRegistry {
     return composer;
   }
 
-  private runRecordingAction(action: 'toggleVoiceRecordingPause' | 'discardVoiceRecording'): boolean {
+  private runRecordingAction(action: 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'sendRecordingInClonedChat'): boolean {
     const composers = [...this.composers.values()];
     const recording = composers.find((composer) => {
       const status = composer.voiceRecordingStatus?.();
@@ -270,6 +276,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
     (deliveryMode?: ChatMessageDeliveryMode) => registry.sendMessage(deliveryMode),
     [registry],
   );
+  const sendRecordingInClonedChat = React.useCallback(() => registry.sendRecordingInClonedChat(), [registry]);
   const toggleVoiceRecording = React.useCallback(() => registry.toggleVoiceRecording(), [registry]);
   const toggleVoiceRecordingPause = React.useCallback(
     () => registry.toggleVoiceRecordingPause(),
@@ -292,6 +299,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       applyCapturedComposer,
       applyComposer,
       sendMessage,
+      sendRecordingInClonedChat,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
       discardVoiceRecording,
@@ -310,6 +318,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       applyCapturedComposer,
       registerComposer,
       sendMessage,
+      sendRecordingInClonedChat,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
     ],

@@ -422,9 +422,14 @@ export async function fetchDroneChatStateCached(opts: {
   includeConfig?: boolean;
   includeTranscript?: boolean;
   signal?: AbortSignal;
+  waitForCreation?: (droneId: string, chatName: string) => Promise<boolean>;
 }): Promise<FetchDroneChatStateCachedResult> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
+  if (opts.waitForCreation && !(await opts.waitForCreation(droneId, chatName))) {
+    throw new Error('Chat creation did not complete.');
+  }
+  opts.signal?.throwIfAborted();
   const turn = opts.turn ?? 'all';
   const qs = new URLSearchParams({ turn: String(turn) });
   if (opts.includeTranscript === false) {

@@ -1,3 +1,5 @@
+import { applyChatModelOverrides } from './droneHub/chat/selected-chat-model-overrides';
+import type { CanvasSendPrompt, CanvasDraftCreation } from './droneHub/canvas/canvas-messaging';
 import { useDesktopNotifications } from './droneHub/app/use-desktop-notifications';
 import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
@@ -158,6 +160,7 @@ import {
 } from './droneHub/app/new-drone-preferences';
 import {
   buildNewChatConfiguration,
+  newChatPreferencesRepoPath,
   buildNewChatCreatePayload,
   type NewChatConfiguration,
 } from './droneHub/app/new-chat-creation';
@@ -2443,6 +2446,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     patchQueuedPrompt,
     removeQueuedPrompt,
     requestJson,
+    waitForChatCreation: waitForDraftChatCreation,
     onChatInfoResolvedFromState: resolveChatInfoFromState,
     onChatInfoRejectedFromState: rejectChatInfoFromState,
     onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
@@ -4007,13 +4011,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return { ok: result.ok, error: result.error ?? null, meta: null };
   }, [assignCanvasDronesToOwner, droneDropActionModal, droppedDroneTarget, openDroneErrorModal]);
-  const sendCanvasPrompt = React.useCallback(
-    async (
-      targetsRaw: Array<{ droneId: string; chatName: string }>,
-      promptRaw: string,
-    ): Promise<{ ok: boolean; error?: string | null }> => {
-      const prompt = String(promptRaw ?? '').trim();
-      if (!prompt) return { ok: false, error: 'Message is empty.' };
+  const sendCanvasPrompt = React.useCallback<CanvasSendPrompt>(
+    async (targetsRaw, payload, context, overrides) => {
+      const prompt = String(payload.prompt ?? '').trim();
+      if (!prompt && payload.attachments.length === 0) return { ok: false, error: 'Message is empty.' };
 
       const targets: Array<{ droneId: string; chatName: string }> = [];
       for (const raw of Array.isArray(targetsRaw) ? targetsRaw : []) {
@@ -4036,7 +4037,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const droneLabel = drone ? uiDroneName(drone.name) : droneId;
         return `${droneLabel} / ${chatName}`;
       });
-      const userTimeZone = clientTimeZone();
 
       const results = await Promise.allSettled(
         targets.map(async ({ droneId, chatName }) => {
@@ -4046,25 +4046,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
           const resolvedChat = resolveChatNameForDrone(drone, chatName);
-          const data = await requestJson<{
-            ok: true;
-            accepted: true;
-            promptId: string;
-            autoRenameChat?: boolean;
-          }>(
-            `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/prompt`,
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                prompt,
-                attachments: [],
-                submittedAt: new Date().toISOString(),
-                ...(userTimeZone ? { userTimeZone } : {}),
-                autoRenameHandledByClient: true,
-              }),
-            },
-          );
+          if (!(await waitForDraftChatCreation(drone.id, resolvedChat))) throw new Error('Chat creation failed.');
+          await applyChatModelOverrides(requestJson, { droneId: drone.id, chatName: resolvedChat }, overrides);
+          const data = await sendDroneChatPrompt(requestJson, {
+            droneId: drone.id, chatName: resolvedChat, prompt,
+            attachments: payload.attachments, promptId: payload.promptId,
+            deliveryMode: context.deliveryMode, autoRenameHandledByClient: Boolean(prompt),
+          });
           if (data.autoRenameChat) {
             autoRenameChatFromFirstPromptRef.current(drone.id, resolvedChat, prompt);
           }
@@ -4087,7 +4075,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         error: `Sent to ${targets.length - failed.length}/${targets.length}. Failed: ${preview}${more}.`,
       };
     },
-    [drones, requestJson, uiDroneName],
+    [drones, requestJson, uiDroneName, waitForDraftChatCreation],
   );
   const [publishingDraft, setPublishingDraft] = React.useState(false);
   const publishSelectedDraft = React.useCallback(async (): Promise<boolean> => {
@@ -4117,19 +4105,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
   }, [currentDrone, publishingDraft, requestJson, selectedChat]);
   const createCanvasDroneFromDraft = React.useCallback(
-    async (payload: {
-      draftNodeId: string;
-      prompt: string;
-      label: string;
-      overrides: {
-        agentKey: string;
-        model: string;
-        repoPath: string;
-        group: string;
-      };
-    }): Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }> => {
+    async (payload: CanvasDraftCreation): Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }> => {
       const prompt = String(payload?.prompt ?? '').trim();
-      if (!prompt) return { ok: false, error: 'Message is empty.' };
+      if (!prompt && !payload.attachments?.length) return { ok: false, error: 'Message is empty.' };
 
       const overrides = payload?.overrides ?? {
         agentKey: '',
@@ -4177,6 +4155,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ...(seedAgentPermissionMode !== 'execute' ? { seedAgentPermissionMode } : {}),
           ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
           seedPrompt: prompt,
+          seedAttachments: payload.attachments ?? [],
+          ...(overrides.reasoning ? { seedReasoning: overrides.reasoning } : {}),
           seedSubmittedAt,
         };
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
@@ -4196,6 +4176,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           runtime: 'container',
           agent: seedAgent,
           model: seedModel,
+          reasoning: overrides.reasoning ?? null,
           agentPermissionMode: seedAgentPermissionMode,
           approvalPolicy: seedApprovalPolicy,
           prompt,
@@ -4405,7 +4386,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   autoRenameChatFromFirstPromptRef.current = suggestAndRenameDroneChatFromMessage;
   const resolveNewChatConfiguration = React.useCallback(
     (drone: DroneSummary): NewChatConfiguration => {
-      const repoPath = normalizeCreateRepoPath(drone.repoPath);
+      const repoPath = newChatPreferencesRepoPath(drone);
       const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
       const basePreferences =
         rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
@@ -4419,7 +4400,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       });
       return buildNewChatConfiguration(creationPreferences, resolveAgentKeyToConfig);
     },
-    [normalizeCreateRepoPath, resolveAgentKeyToConfig],
+    [resolveAgentKeyToConfig],
   );
   const createDroneChat = React.useCallback(
     async (
@@ -4643,6 +4624,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       try {
         const actionId = makeId();
         const submittedAt = new Date().toISOString();
+        if (context.cloneImmediately) {
+          const cloned = await cloneDroneChat(droneId, sourceChatName, { select: false });
+          if (!cloned.ok || !cloned.chatName) return false;
+          await sendDroneChatPrompt(requestJson, {
+            droneId,
+            chatName: cloned.chatName,
+            prompt,
+            attachments,
+            promptId: payload.promptId || actionId,
+            submittedAt,
+            deliveryMode: context.deliveryMode,
+          });
+          selectDroneChat(droneId, cloned.chatName);
+          return true;
+        }
         const result = await sendInNewDroneChatAction(requestJson, {
           droneId,
           chatName: sourceChatName,
@@ -4663,7 +4659,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return false;
       }
     },
-    [requestJson, selectDroneChat, selectedChat, selectedDrone, showShortcutToast],
+    [cloneDroneChat, requestJson, selectDroneChat, selectedChat, selectedDrone, showShortcutToast],
   );
   const createQueuedNewChatNow = React.useCallback(
     async (actionIdRaw: string, source?: { droneId: string; chatName: string }): Promise<void> => {

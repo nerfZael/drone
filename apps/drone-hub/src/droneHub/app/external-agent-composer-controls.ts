@@ -57,7 +57,7 @@ export function buildExternalAgentComposerControls(opts: {
   const selectedOpenRouterModel = opts.currentAgentKey === 'builtin:codex' && opts.currentModel?.startsWith('openrouter:');
   const reasoningControlEnabled = selectedOpenRouterModel
     ? Boolean(opts.models.find((model) => model.id === opts.currentModel)?.reasoningLevels?.length)
-    : opts.currentAgentKey === 'builtin:codex' ||
+    : opts.currentAgentKey === 'native' || opts.currentAgentKey === 'builtin:codex' ||
       opts.currentAgentKey === 'builtin:blip' ||
       opts.models.some((model) => (model.reasoningLevels?.length ?? 0) > 0);
   const autoCatalogModel =

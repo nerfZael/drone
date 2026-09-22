@@ -63,6 +63,11 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
     if (event.defaultPrevented || event.repeat || event.isComposing || !actions || !target || !element?.closest) return;
     if ((!scope.contains(element) && element !== scope.ownerDocument.body) || element.closest('[role="menu"], [data-shortcut-capture="true"]')) return;
     if (element.ownerDocument.querySelector('[role="dialog"][aria-modal="true"]')) return;
+    if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey &&
+      composer?.sendRecordingInClonedChat()) {
+      event.preventDefault();
+      return;
+    }
     const bindings = useDroneHubUiStore.getState().shortcutBindings;
     const action = (['createDroneChat', 'cloneDroneChat', 'createSideChat', 'focusPrimaryChatInput',
       'sendActiveChatComposer', 'toggleChatComposerEditorMode', 'toggleChatVoiceRecording',

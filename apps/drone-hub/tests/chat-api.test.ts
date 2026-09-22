@@ -338,3 +338,46 @@ describe('chat api request scopes', () => {
     }
   });
 });
+
+test('new chat state waits for saved configuration before caching the server defaults', async () => {
+  const originalFetch = globalThis.fetch;
+  let configured = false;
+  let reads = 0;
+  let finishCreation!: (ok: boolean) => void;
+  const creation = new Promise<boolean>((resolve) => { finishCreation = resolve; });
+  globalThis.fetch = (async () => {
+    reads += 1;
+    return new Response(JSON.stringify({
+      ok: true, id: 'drone-1', name: 'Drone one', chat: 'new-chat',
+      agent: { kind: 'builtin', id: configured ? 'codex' : 'cursor' },
+      model: configured ? 'saved-model' : null, transcripts: [], pending: [],
+    }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const pending = fetchDroneChatStateCached({ droneId: 'drone-1', chatName: 'new-chat', includeConfig: true,
+      waitForCreation: async (droneId, chatName) => {
+        expect([droneId, chatName]).toEqual(['drone-1', 'new-chat']);
+        return creation;
+      },
+    });
+    await Promise.resolve();
+    expect(reads).toBe(0);
+    configured = true;
+    finishCreation(true);
+    const result = await pending;
+    expect(reads).toBe(1);
+    expect(result.notModified).toBe(false);
+    if (!result.notModified) expect(result.chatInfo).toMatchObject({ agent: { kind: 'builtin', id: 'codex' }, model: 'saved-model' });
+
+    await expect(fetchDroneChatStateCached({ droneId: 'drone-1', chatName: 'failed',
+      waitForCreation: async () => false,
+    })).rejects.toThrow('Chat creation did not complete.');
+    const controller = new AbortController();
+    await expect(fetchDroneChatStateCached({ droneId: 'drone-1', chatName: 'left', signal: controller.signal,
+      waitForCreation: async () => { controller.abort(); return true; },
+    })).rejects.toThrow();
+    expect(reads).toBe(1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

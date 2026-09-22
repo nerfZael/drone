@@ -1,6 +1,12 @@
 import type { ChatAgentConfig } from '../../domain';
 import type { DesktopNewDronePreferences } from './new-drone-preferences';
 
+// Existing drones keep their repository preferences even if that repository
+// is no longer registered in the new-drone picker.
+export function newChatPreferencesRepoPath(drone: { repoPath?: string | null; repoAttached?: boolean | null }): string {
+  return drone.repoAttached === false ? '' : String(drone.repoPath ?? '').trim();
+}
+
 export type NewChatConfiguration = {
   agent: ChatAgentConfig;
   model?: string;

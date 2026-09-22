@@ -10,6 +10,7 @@ import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
+import { ChatsDockTab } from './ChatsDockTab';
 import { TerminalHeaderControlsContext } from '../terminal/terminal-header-controls-context';
 import {
   requestNewTerminalSession,
@@ -655,6 +656,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   }
   if (!closeable) return <MainChatTab {...props} />;
   if (tabFromPanelId(props.api.id) === 'terminal') return <TerminalDockTab {...props} />;
+  if (tabFromPanelId(props.api.id) === 'chats') return <ChatsDockTab {...props} />;
   return (
     <DockviewDefaultTab
       {...props}

@@ -3250,6 +3250,22 @@ select:disabled optgroup {
   cursor: not-allowed;
 }
 
+.dh-dock-tab-button[aria-checked="true"] {
+  color: var(--fg);
+  background: var(--accent-subtle);
+}
+
+.dh-dock-tab-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+}
+
+.dh-dockable-workspace .dv-tab.dv-inactive-tab .dh-dock-tab-group {
+  display: none;
+}
+
 .dh-dock-tab-divider {
   width: 1px;
   height: 12px;
@@ -4005,4 +4021,50 @@ select:disabled optgroup {
 }
 .dh-detached-chats .dv-resize-container {
   pointer-events: auto;
+}
+
+/*
+ * Canvas and Chats message composers: the agent chat composer at its compact
+ * size. The host supplies placement, so drop the composer's own gutter.
+ */
+[data-selected-chats-composer] .dh-chat-composer {
+  padding: 0;
+  background: transparent;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-box {
+  min-height: 0;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-row {
+  padding-left: .625rem;
+  padding-right: .625rem;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-row--collapsed {
+  min-height: 2.25rem;
+  padding-left: .25rem;
+  padding-right: .25rem;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-row--collapsed textarea {
+  min-height: 2.25rem;
+  padding-top: .4375rem;
+  padding-bottom: .4375rem;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-toolbar {
+  min-height: 2.25rem;
+  padding: 0 .25rem .25rem;
+}
+
+[data-selected-chats-composer] .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
+  width: 1.875rem;
+  height: 1.875rem;
+}
+
+[data-selected-chats-composer-meta] [data-chat-composer-model-picker] > button {
+  height: 1.5rem;
+  padding-left: .25rem;
+  padding-right: .25rem;
 }

@@ -634,6 +634,13 @@ export function useDroneHubLifecycleEffects({
       // The canvas owns local keys, but only the binding editor suspends
       // global shortcuts. Consume their local events to avoid double dispatch.
       if (captureRoot?.matches('[data-shortcut-binding-capture="true"]')) return;
+      if (!document.querySelector('[role="dialog"][aria-modal="true"]') &&
+        e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey &&
+        activeComposer.sendRecordingInClonedChat()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       if (isActiveGlobalShortcutMatch(e)) {
         e.preventDefault();
         e.stopPropagation();

@@ -28,7 +28,7 @@ export function useWindowChatModelControls(drone: DroneSummary, chatName: string
   }, [drone.id, chatName, provisioning]);
   const agent = config.chatInfo?.agent;
   const controls = buildExternalAgentComposerControls({
-    hasChats: Boolean(config.chatInfo), modelControlEnabled: agent?.kind === 'builtin',
+    hasChats: Boolean(config.chatInfo), modelControlEnabled: agent?.kind === 'builtin' || agent?.kind === 'native',
     currentAgentKey: agent?.kind === 'builtin' ? `builtin:${agent.id}` : agent?.kind ?? '',
     models: config.chatModels, currentModel: config.chatInfo?.model ?? null,
     currentReasoning: config.chatInfo?.reasoning ?? null,

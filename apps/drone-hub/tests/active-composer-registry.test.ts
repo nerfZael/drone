@@ -225,4 +225,26 @@ describe('ActiveComposerRegistry', () => {
     registry.discardVoiceRecording();
     expect(actions).toEqual(['live', 'old']);
   });
+  test('clone-and-send follows the recording owner through pause and transcription, not focus', () => {
+    const registry = new ActiveComposerRegistry();
+    const calls: string[] = [];
+    let status: 'idle' | 'recording' | 'paused' | 'transcribing' = 'idle';
+    registry.register({
+      ...composer('recording', { eligible: false }),
+      voiceRecordingStatus: () => status,
+      sendRecordingInClonedChat: () => { calls.push('clone recording'); return true; },
+    });
+    registry.register({
+      ...composer('focused', { eligible: true }),
+      sendRecordingInClonedChat: () => { calls.push('wrong chat'); return true; },
+    });
+    registry.focus('focused');
+    expect(registry.sendRecordingInClonedChat()).toBe(false);
+    for (const next of ['recording', 'paused', 'transcribing'] as const) {
+      status = next;
+      expect(registry.sendRecordingInClonedChat()).toBe(true);
+    }
+    expect(calls).toEqual(['clone recording', 'clone recording', 'clone recording']);
+  });
+
 });

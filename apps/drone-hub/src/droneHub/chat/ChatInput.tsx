@@ -158,6 +158,7 @@ export type ChatSendPayload = {
 export type ChatSendContext = {
   trigger: 'button' | 'keyboard';
   deliveryMode: ChatMessageDeliveryMode;
+  cloneImmediately?: boolean;
 };
 
 export type ChatInputDraftContent = {
@@ -177,6 +178,8 @@ export type ChatInputProps = {
   promptError: string | null;
   waiting: boolean;
   disabled?: boolean;
+  /** Block submission while allowing the draft and recording to remain editable. */
+  sendDisabled?: boolean;
   autoFocus?: boolean;
   focusTargetId?: string;
   modeHint?: string;
@@ -228,6 +231,7 @@ export function ChatInput({
   promptError,
   waiting,
   disabled,
+  sendDisabled: submissionDisabled = false,
   autoFocus,
   focusTargetId,
   modeHint = '',
@@ -276,6 +280,7 @@ export function ChatInput({
     throw new Error('COMPOSER_NOT_AVAILABLE');
   });
   const sendMessageShortcutRef = React.useRef<(deliveryMode?: ChatMessageDeliveryMode) => boolean>(() => false);
+  const sendRecordingInClonedChatRef = React.useRef<() => boolean>(() => false);
   const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const voiceRecordingStatusRef = React.useRef<ReturnType<typeof useChatVoiceRecorder>['status']>('idle');
   const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
@@ -350,13 +355,14 @@ export function ChatInput({
   React.useEffect(() => {
     return activeComposer.registerComposer({
       id: activeComposerTargetId,
-      requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name]')),
+      requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
       isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
       readSnapshot: () => readCompanionComposerRef.current(),
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
       sendMessage: (deliveryMode) => sendMessageShortcutRef.current(deliveryMode),
+      sendRecordingInClonedChat: () => sendRecordingInClonedChatRef.current(),
       toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
       voiceRecordingStatus: () => voiceRecordingStatusRef.current,
       toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
@@ -601,6 +607,7 @@ export function ChatInput({
   const trimmed = draft.trim();
   const sendDisabled =
     composerLocked ||
+    submissionDisabled ||
     voiceActionInFlight ||
     (trimmed.length === 0 &&
       attachments.length === 0 &&
@@ -731,7 +738,7 @@ export function ChatInput({
     () =>
       registerChatComposerEditorModeTarget({
         id: editorModeShortcutTargetId,
-        requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name]')),
+        requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
         primary: focusTargetId === 'primary-chat',
         isEligible: () => {
           const root = composerRootRef.current;
@@ -1125,7 +1132,7 @@ export function ChatInput({
     context: ChatSendContext,
     submit: ChatInputProps['onSend'] = onSend,
   ): boolean {
-    if (composerLocked) return false;
+    if (composerLocked || submissionDisabled) return false;
     const sendRequest = { context, submit };
     const disposition = voiceSendCoordinatorRef.current.requestSend(sendRequest);
     if (disposition !== 'run-now') return true;
@@ -1156,6 +1163,15 @@ export function ChatInput({
       trigger: 'keyboard',
       deliveryMode,
     });
+
+  sendRecordingInClonedChatRef.current = () => {
+    if (!voiceRecordingActive) return false;
+    // Reserve R while recording even when this composer cannot clone chats.
+    if (onSendInNewChat) {
+      sendNow({ trigger: 'keyboard', deliveryMode: 'queue', cloneImmediately: true }, onSendInNewChat);
+    }
+    return true;
+  };
 
   const sendButtonLabel =
     showStopAction && !showSeparateStopAction

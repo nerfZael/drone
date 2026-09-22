@@ -1,3 +1,4 @@
+import type { CanvasSendPrompt, CanvasDraftCreation } from '../canvas/canvas-messaging';
 import React from 'react';
 import type { DroneChatsPaneOptions } from './DroneChatsDock';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
@@ -135,21 +136,8 @@ type RightPanelTabContentProps = {
     ownerDroneId: string,
     targetDroneIds: string[],
   ) => Promise<{ ok: boolean; error?: string | null }>;
-  onSendCanvasPrompt: (
-    targets: Array<{ droneId: string; chatName: string }>,
-    prompt: string,
-  ) => Promise<{ ok: boolean; error?: string | null }>;
-  onCreateCanvasDroneFromDraft: (payload: {
-    draftNodeId: string;
-    prompt: string;
-    label: string;
-    overrides: {
-      agentKey: string;
-      model: string;
-      repoPath: string;
-      group: string;
-    };
-  }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
+  onSendCanvasPrompt: CanvasSendPrompt;
+  onCreateCanvasDroneFromDraft: (payload: CanvasDraftCreation) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameCanvasChat: (
     droneId: string,
     chatName: string,
@@ -438,7 +426,8 @@ export function RightPanelTabContent({
       return (
         <PaneModule tab={tab} load={loadDroneChatsDock}>
           {(DroneChatsDock) => chatsPaneOptions ? (
-            <DroneChatsDock drone={drone} selectedChat={selectedChat} options={chatsPaneOptions} />
+            <DroneChatsDock drone={drone} selectedChat={selectedChat} options={chatsPaneOptions} onDeleteChats={onDeleteCanvasChats} onSendToChats={onSendCanvasPrompt}
+              onCloneChat={onCloneCanvasChat} />
           ) : <UiPaneState kind="empty" title="Select a drone to view its chats." />}
         </PaneModule>
       );

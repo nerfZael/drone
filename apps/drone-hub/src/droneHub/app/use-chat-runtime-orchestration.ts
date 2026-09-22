@@ -103,6 +103,7 @@ type UseChatRuntimeOrchestrationArgs = {
   patchQueuedPrompt: (key: string, id: string, patch: Partial<QueuedPrompt>) => void;
   removeQueuedPrompt: (key: string, id: string) => void;
   requestJson: RequestJson;
+  waitForChatCreation?: (droneId: string, chatName: string) => Promise<boolean>;
   onChatInfoResolvedFromState: (chatInfo: ChatInfo) => void;
   onChatInfoRejectedFromState: (error: unknown) => void;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
@@ -216,6 +217,7 @@ export function useChatRuntimeOrchestration({
   patchQueuedPrompt,
   removeQueuedPrompt,
   requestJson,
+  waitForChatCreation,
   onChatInfoResolvedFromState,
   onChatInfoRejectedFromState,
   onAutoRenameChatFromFirstPrompt,
@@ -951,6 +953,7 @@ export function useChatRuntimeOrchestration({
       if (initial && mounted) setLoadingTranscript(true);
       try {
         const data = await fetchDroneChatStateCached({
+          waitForCreation: waitForChatCreation,
           droneId: selectedDrone,
           chatName: selectedChat,
           turn: 'all',
@@ -1104,6 +1107,7 @@ export function useChatRuntimeOrchestration({
     };
   }, [
     chatUiMode,
+    waitForChatCreation,
     selectedDrone,
     selectedChat,
     selectedChatCacheKey,
@@ -1128,6 +1132,7 @@ export function useChatRuntimeOrchestration({
     let mounted = true;
     const controller = new AbortController();
     void fetchDroneChatStateCached({
+      waitForCreation: waitForChatCreation,
       droneId: selectedDrone,
       chatName: selectedChat,
       includeConfig: true,
@@ -1148,7 +1153,7 @@ export function useChatRuntimeOrchestration({
       mounted = false;
       controller.abort();
     };
-  }, [chatUiMode, selectedChat, selectedChatCacheKey, selectedDrone]);
+  }, [chatUiMode, selectedChat, selectedChatCacheKey, selectedDrone, waitForChatCreation]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli') return;

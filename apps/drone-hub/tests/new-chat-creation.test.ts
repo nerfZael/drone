@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { ChatAgentConfig } from '../src/domain';
 import {
   buildNewChatConfiguration,
+  newChatPreferencesRepoPath,
   buildNewChatCreatePayload,
 } from '../src/droneHub/app/new-chat-creation';
 import type { DesktopNewDronePreferences } from '../src/droneHub/app/new-drone-preferences';
@@ -28,6 +29,13 @@ function resolveAgent(key: string): ChatAgentConfig {
 }
 
 describe('new chat creation defaults', () => {
+  test('looks up preferences under the existing drone repository even outside the registered picker', () => {
+    expect(newChatPreferencesRepoPath({ repoPath: ' /unregistered/repo ', repoAttached: true })).toBe('/unregistered/repo');
+    expect(newChatPreferencesRepoPath({ repoPath: '/legacy/repo' })).toBe('/legacy/repo');
+    expect(newChatPreferencesRepoPath({ repoPath: '/detached/repo', repoAttached: false })).toBe('');
+    expect(newChatPreferencesRepoPath({})).toBe('');
+  });
+
   test('creates ordinary chats independently and only copies explicit sources', () => {
     expect(buildNewChatCreatePayload({ name: 'review', draft: true })).toEqual({
       name: 'review',
