@@ -37,6 +37,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   fs.appendFileSync(logPath, JSON.stringify({ ...message, pid: process.pid }) + '\\n');
   const mode = fs.readFileSync(modePath, 'utf8');
   if (message.method === 'initialize') send({ id: message.id, result: {} });
+  if (message.method === 'config/read') send({ id: message.id, result: { config: { model_provider: 'openai', model: 'test' } } });
   if (message.method === 'thread/start' || message.method === 'thread/resume') {
     send({ id: message.id, result: { thread: { id: 'thread-1' } } });
   }
@@ -105,14 +106,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line)),
-    async send(requireDroneHubMcp = true, existingThreadId?: string) {
+    async send(requireDroneHubMcp = true, existingThreadId?: string, sessionKey = 'chat') {
       const message: CodexPromptMessage = {
         id: `message-${messages.size}`,
         state: 'queued',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         codexAppServer: {
-          sessionKey: 'chat',
+          sessionKey,
           launchScript,
           prompt: 'test',
           requireDroneHubMcp,
@@ -131,6 +132,18 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 }
 
 describe('managed Codex MCP startup', () => {
+  test('renamed and upgraded chat keys reuse one real app-server process', async () => {
+    const h = harness();
+    const id = '1b8ccc28-1440-4010-b5fe-8a538c429b73';
+    for (const key of [`side-original:${id}`, `B:${id}`, `codex-chat:drone:${id}`]) {
+      expect((await h.send(true, 'thread-1', key)).state).toBe('done');
+    }
+    const requests = h.requests();
+    expect(requests.filter((request) => request.method === 'initialize')).toHaveLength(1);
+    expect(requests.filter((request) => request.method === 'thread/resume')).toHaveLength(1);
+    expect(requests.filter((request) => request.method === 'turn/start')).toHaveLength(3);
+  });
+
   test.each(['missing', 'empty', 'failed', 'error', 'repeated'])(
     'fails visibly before generation when discovery is %s',
     async (mode) => {

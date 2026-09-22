@@ -2,6 +2,7 @@ import { readCodexRolloutUsage } from './CodexRolloutUsage';
 import { CODEX_OPENROUTER_PROVIDER, assertCodexModelProvider, codexModelRoute, codexToolInterfaceContext, codexProviderLaunchScript } from './codex-model-routing';
 import { CodexUsageTracker } from './CodexUsageTracker';
 import crypto from 'node:crypto';
+import { codexSessionIdentity } from './codex-session-identity';
 
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 
@@ -175,6 +176,7 @@ type CodexRunSession = {
   approvalResolutions: Map<string, ApprovalResolution>;
   lastUsedAt: number;
   operationTail: Promise<void>;
+  closing?: Promise<void>;
 };
 
 export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
@@ -188,7 +190,11 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
 
   async enqueue(message: TMessage): Promise<CodexPromptEnqueueResult> {
     const spec = message.codexAppServer;
-    const session = this.sessions.get(spec.sessionKey) ?? this.createSession(spec);
+    const session = this.findSession(spec) ?? this.createSession(spec);
+    if (session.closing) {
+      await session.closing;
+      return this.enqueue(message);
+    }
     return await this.serialize(session, async () => {
       session.lastUsedAt = Date.now();
       const steering =
@@ -213,7 +219,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   async cancel(message: TMessage): Promise<TMessage> {
     if (isTerminal(message.state)) return message;
     const spec = message.codexAppServer;
-    const session = this.sessions.get(spec.sessionKey);
+    const session = this.findSession(spec);
     if (!session) {
       return await this.markMessageCanceled(message);
     }
@@ -272,7 +278,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     approvalId: string,
     decision: CodexApprovalDecision,
   ): Promise<CodexPendingApproval> {
-    const session = this.sessions.get(message.codexAppServer.sessionKey);
+    const session = this.findSession(message.codexAppServer);
     if (!session) throw new Error('Codex approval is no longer active');
     const normalizedApprovalId = String(approvalId ?? '').trim();
     if (!normalizedApprovalId) throw new Error('missing Codex approval id');
@@ -301,7 +307,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   }
 
   ownsMessage(message: TMessage): boolean {
-    const session = this.sessions.get(message.codexAppServer.sessionKey);
+    const session = this.findSession(message.codexAppServer);
     if (!session) return false;
     return Boolean(
       session.queuedMessageIds.includes(message.id) ||
@@ -355,20 +361,30 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     await (alreadyMutating ? save() : this.options.mutate(save));
   }
 
-  sweepIdle(maxIdleMillis: number): void {
+  async sweepIdle(maxIdleMillis: number): Promise<void> {
     const now = Date.now();
+    const closing: Promise<void>[] = [];
     for (const [key, session] of this.sessions) {
       if (
         now - session.lastUsedAt < maxIdleMillis ||
         session.activeRun ||
         session.startingRun ||
-        session.queuedMessageIds.length > 0
+        session.queuedMessageIds.length > 0 ||
+        session.closing
       ) {
         continue;
       }
-      this.sessions.delete(key);
-      session.connection.stop();
+      // Keep the owner discoverable until its process exits and releases the
+      // writer. An enqueue arriving during shutdown waits before resuming.
+      session.closing = this.serialize(session, async () => {
+        if (Date.now() - session.lastUsedAt < maxIdleMillis || session.activeRun ||
+            session.startingRun || session.queuedMessageIds.length > 0) return;
+        await session.connection.close();
+        if (this.sessions.get(key) === session) this.sessions.delete(key);
+      }).finally(() => { session.closing = undefined; });
+      closing.push(session.closing);
     }
+    await Promise.all(closing);
   }
 
   stop(): void {
@@ -407,9 +423,9 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       credentialVersion: spec.openrouterCredentialVersion,
       usageTracker: new CodexUsageTracker(),
       model: spec.model,
-      key: spec.sessionKey,
+      key: codexSessionIdentity(spec.sessionKey),
       connection,
-      threadId: spec.threadId ?? spec.existingThreadId ?? null,
+      threadId: spec.threadId ?? (spec.forkThreadId ? null : spec.existingThreadId) ?? null,
       threadReady: false,
       verifiedMcpThreadId: null,
       activeTurnId: null,
@@ -426,6 +442,18 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
     this.sessions.set(session.key, session);
     return session;
+  }
+
+  private findSession(spec: CodexPromptSpec): CodexRunSession | undefined {
+    const byIdentity = this.sessions.get(codexSessionIdentity(spec.sessionKey));
+    if (byIdentity) return byIdentity;
+    // A legacy binding can identify the same thread with a different key.
+    // Reuse its owner for enqueue, cancellation, approvals and restart recovery.
+    // A fork's source thread is deliberately NOT an ownership candidate.
+    const threadId = spec.threadId ?? (spec.forkThreadId ? undefined : spec.existingThreadId);
+    return threadId
+      ? Array.from(this.sessions.values()).find((session) => session.threadId === threadId)
+      : undefined;
   }
 
   private createConnection(spec: CodexPromptSpec, getSession: () => CodexRunSession): CodexAppServerConnection {
@@ -1187,6 +1215,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     session.queuedMessageIds = [];
     session.activeTurnId = null;
     session.observedTurnIds.clear();
+    await session.connection.close();
     if (this.sessions.get(session.key) === session) this.sessions.delete(session.key);
   }
 

@@ -1709,7 +1709,9 @@ async function main() {
     console.error(`initial prompt pump failed: ${String(error?.message ?? error)}`);
   });
   const codexIdleSweep = setInterval(() => {
-    codexPromptRuns.sweepIdle(CODEX_APP_SERVER_IDLE_MS);
+    void codexPromptRuns.sweepIdle(CODEX_APP_SERVER_IDLE_MS).catch((error) => {
+      console.error(`Codex idle session cleanup failed: ${String(error?.message ?? error)}`);
+    });
   }, 60_000);
   (codexIdleSweep as any).unref?.();
 

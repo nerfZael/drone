@@ -1,4 +1,5 @@
 import { codexModelRoute } from '../codex-model-routing';
+import { codexChatSessionKey } from '../codex-session-identity';
 import { getUsageJournal, type ExternalUsageWatch } from './usage/UsageJournal';
 import { UsageRecoveryService } from './usage/UsageRecoveryService';
 import { openCodeUsagePromptScript } from './usage/openCodeUsagePromptScript';
@@ -999,7 +1000,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               : 'untrusted';
         const forkThreadId = pendingChatForkSourceSessionId(chat, 'codex');
         const existingThreadId = forkThreadId ? '' : readBuiltinTranscriptSessionId(chat, 'codex');
-        const stableChatId = String((chat as any)?.id ?? '').trim() || normalizedChat;
+        const stableChatId = String((chat as any)?.id ?? '').trim();
         const requireDroneHubMcp = Boolean(managedChatMcpEnv.DRONE_HUB_MCP_URL);
         const launchScript = [
           'set -euo pipefail',
@@ -1017,7 +1018,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
-          sessionKey: `${normalizedChat}:${stableChatId}`,
+          sessionKey: codexChatSessionKey(droneId, stableChatId),
           launchScript,
           requireDroneHubMcp,
           prompt: promptWithHistory,
