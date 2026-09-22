@@ -18,6 +18,8 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
   let jevPrompt = 'Send clear requests.';
   let autonomy = 'off';
   let brain = false;
+  let finishSave: (() => void) | undefined;
+  let delaySave = false;
   let failSave = false;
   let failLoad = false;
   const writes: unknown[] = [];
@@ -28,6 +30,7 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     expect(url).toBe('/api/settings/companion/live-voice');
     expect(new Headers(init?.headers).get('x-drone-client-request-id')).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
     if (init?.method === 'PUT') {
+      if (delaySave) await new Promise<void>(resolve => { finishSave = resolve; });
       if (failSave) return new Response('', { status: 500 });
       const body = JSON.parse(String(init.body));
       writes.push(body);
@@ -46,7 +49,7 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
   dom.document.body.append(element);
   let root = createRoot(element as unknown as HTMLElement);
   let live!: ReturnType<typeof useCompanionLive>;
-  function Harness() { live = useCompanionLive(); return <span>{String(live.enabled)}</span>; }
+  function Harness({ selected = true }: { selected?: boolean }) { live = useCompanionLive(undefined, undefined, selected); return <span>{String(live.enabled)}</span>; }
   try {
     await act(async () => { root.render(<Harness />); });
     expect(live.loading).toBe(false);
@@ -92,6 +95,23 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     expect(live.systemPrompt).toBe('Speak brightly.');
     await act(async () => { await live.saveVoiceMode('normal'); });
     expect(live.enabled).toBe(false);
+    // A save may finish after its session was deselected. Reopening must refresh
+    // the shared preference and must never retain a stale `saving` flag.
+    for (const reopenBeforeCompletion of [false, true]) {
+      delaySave = true;
+      let pending!: Promise<boolean>;
+      await act(async () => { pending = live.saveSystemPrompt('Saved while switching.'); });
+      expect(live.saving).toBe(true);
+      await act(async () => root.render(<Harness selected={false} />));
+      if (reopenBeforeCompletion) await act(async () => root.render(<Harness />));
+      await act(async () => { finishSave!(); await pending; });
+      expect(live.saving).toBe(false);
+      if (!reopenBeforeCompletion) await act(async () => root.render(<Harness />));
+      expect(live.loading).toBe(false);
+      expect(live.resolved).toBe(true);
+      expect(live.systemPrompt).toBe('Saved while switching.');
+      delaySave = false;
+    }
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of original) {

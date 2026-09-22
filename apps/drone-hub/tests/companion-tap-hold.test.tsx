@@ -110,7 +110,7 @@ test('tap sends on release, allows immediate restart, orders clips, and keeps ca
     expect(voice.status).toBe('idle');
     expect(starts).toBe(startsBeforeReset);
     expect(cancelledRuns).toEqual([prompts[0].runId]);
-    expect(discards.at(-1)).toBe(false);
+    expect(discards.at(-1)).toBe(true); // Other sessions can still be transcribing.
     expect(closes).toBe(1);
     expect(cues.at(-1)).toBe('reset');
     pending[3]('stale request after reset');

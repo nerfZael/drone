@@ -44,41 +44,13 @@ describe('shortcut defaults', () => {
     ]);
   });
 
-  test('uses 1/2/3/4 for root drone, grouped drone, draft chat, and chat clone', () => {
+  test('reserves default numbers for Companion while keeping the other shortcuts', () => {
     const defaults = cloneDefaultShortcutBindings();
-    expect(defaults.createDraftDrone).toEqual({
-      key: '1',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
+    expect(defaults.createDraftDrone).toBeNull();
     expect(defaults.createDraftGroup).toBeNull();
-    expect(defaults.createDraftDroneInCurrentGroup).toEqual({
-      key: '2',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
-    expect(defaults.createDroneChat).toEqual({
-      key: '3',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
-    expect(defaults.cloneDroneChat).toEqual({
-      key: '4',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
+    expect(defaults.createDraftDroneInCurrentGroup).toBeNull();
+    expect(defaults.createDroneChat).toBeNull();
+    expect(defaults.cloneDroneChat).toBeNull();
     expect(defaults.toggleSelectedDronePinned).toBeNull();
     expect(defaults.moveSelectedDroneToTop).toBeNull();
     expect(defaults.toggleSelectedDronesToDo).toBeNull();

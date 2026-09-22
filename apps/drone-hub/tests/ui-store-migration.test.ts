@@ -730,7 +730,7 @@ describe('drone hub ui store migration', () => {
     expect(snapshot.sidebarNodeOrderByParent.root).toEqual(['drone:b', 'drone:a']);
   });
 
-  test('migrates former creation defaults to 1/2/3/4', () => {
+  test('frees former creation defaults for Companion sessions', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         shortcutBindings: {
@@ -764,24 +764,10 @@ describe('drone hub ui store migration', () => {
     );
 
     expect(sanitizeShortcutBindings(migrated.shortcutBindings)).toMatchObject({
-      createDraftDrone: {
-        key: '1',
-        mod: false,
-        ctrl: false,
-        meta: false,
-        alt: false,
-        shift: false,
-      },
-      createDraftDroneInCurrentGroup: {
-        key: '2',
-        mod: false,
-        ctrl: false,
-        meta: false,
-        alt: false,
-        shift: false,
-      },
-      createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftDrone: null,
+      createDraftDroneInCurrentGroup: null,
+      createDroneChat: null,
+      cloneDroneChat: null,
       markSelectedDronesUnread: {
         key: 'z',
         mod: false,
@@ -805,10 +791,10 @@ describe('drone hub ui store migration', () => {
       12,
     );
     expect(sanitizeShortcutBindings(migratedDefaults.shortcutBindings)).toMatchObject({
-      createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftDrone: null,
+      createDraftDroneInCurrentGroup: null,
+      createDroneChat: null,
+      cloneDroneChat: null,
     });
 
     const migratedCustom = migrateDroneHubUiPersistedState(

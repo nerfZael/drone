@@ -129,3 +129,59 @@ test('moving Companion retains component state and DOM, follows theme, hides whe
     await child.happyDOM.close();
   }
 });
+
+for (const detached of [false, true]) test(`starting capture focuses Companion once and preserves its focused editor (floating=${detached})`, async () => {
+  const previousDetached = useDroneHubUiStore.getState().companionWindowDetached;
+  useDroneHubUiStore.setState({ companionWindowDetached: detached });
+  const source = new Window({ url: 'http://localhost' });
+  const child = new Window({ url: 'about:blank' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({ window: source, document: source.document,
+    MutationObserver: source.MutationObserver, ResizeObserver: source.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  const controls: string[] = [];
+  Object.assign(source, { open: () => child, droneHubDesktop: { companionWindow: {
+    control: (action: string) => { controls.push(action); }, onClose: () => () => {},
+  } } });
+  const outside = source.document.createElement('textarea');
+  source.document.body.append(outside);
+  outside.focus();
+  const container = source.document.createElement('div');
+  source.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  function Host({ visible, recording }: { visible: boolean; recording: boolean }) {
+    const host = useCompanionWindowHost(visible, recording);
+    return host.render(visible ? <aside aria-label="Companion" tabIndex={-1}><textarea /></aside> : null);
+  }
+  const focuses = () => controls.filter(action => action === 'focus').length;
+  try {
+    await act(async () => root.render(<Host visible={false} recording={false} />));
+    expect(focuses()).toBe(0);
+    await act(async () => root.render(<Host visible recording />));
+    const page = detached ? child.document : source.document;
+    expect(page.activeElement).toBe(page.querySelector('aside'));
+    expect(focuses()).toBe(1); // Includes restoring a hidden floating window.
+    const other = page.createElement('textarea'); page.body.append(other); other.focus();
+    await act(async () => root.render(<Host visible recording />));
+    expect(page.activeElement).toBe(other);
+    expect(focuses()).toBe(1); // Ongoing capture does not reclaim focus.
+    await act(async () => root.render(<Host visible recording={false} />));
+    await act(async () => root.render(<Host visible recording />));
+    expect(page.activeElement).toBe(page.querySelector('aside'));
+    expect(focuses()).toBe(2); // A later recording refocuses an already visible panel.
+    await act(async () => root.render(<Host visible recording={false} />));
+    const editor = page.querySelector('aside textarea')!;
+    (editor as unknown as HTMLTextAreaElement).focus();
+    await act(async () => root.render(<Host visible recording />));
+    expect(page.activeElement).toBe(editor);
+  } finally {
+    await act(async () => root.unmount());
+    useDroneHubUiStore.setState({ companionWindowDetached: previousDetached });
+    for (const [name, value] of originals) {
+      if (value) Object.defineProperty(globalThis, name, value); else Reflect.deleteProperty(globalThis, name);
+    }
+    await source.happyDOM.close(); await child.happyDOM.close();
+  }
+});

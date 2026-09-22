@@ -1,3 +1,7 @@
+import { relayCompanionWindowShortcuts } from './companion-window-shortcuts';
+import { companionSessionShortcut } from './companion-session-shortcut';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { COMPANION_SLOTS } from './companion-session-store';
 import { useCrossWindowFocus } from '../../ui/use-cross-window-focus';
 import { shouldCancelCompanionRecordingWithEscape } from './companion-shortcut';
 import { useCompanionWindowHost } from './companion-window';
@@ -193,7 +197,8 @@ export function CompanionOverlay() {
   }, [companion?.proposalHistory.length]);
   const visible = Boolean(companion && (companion.shortcutHint || (companion.panelVisibility !== 'closed' &&
     (companion.panelVisibility === 'open' || companion.status !== 'idle' || companion.live?.hasStarted || panelOpen))));
-  const companionWindow = useCompanionWindowHost(visible);
+  const recording = !companion?.live?.announcing && (companion?.status === 'recording' || companion?.live?.capturing === true);
+  const companionWindow = useCompanionWindowHost(visible, recording);
   const speech = useCompanionSpeechMute(visible);
   const popoverFocus = useCrossWindowFocus(companionWindow.portalContainer);
   React.useEffect(() => {
@@ -209,6 +214,22 @@ export function CompanionOverlay() {
     companionWindow.ownerWindow.addEventListener('keydown', onKeyDown, true);
     return () => companionWindow.ownerWindow?.removeEventListener('keydown', onKeyDown, true);
   }, [companionWindow.detached, companionWindow.ownerWindow, companion?.status, companion?.live?.status, companion?.switchingVoice, companion?.discardRecording]);
+  React.useEffect(() => {
+    if (!companionWindow.detached || !companionWindow.ownerWindow) return;
+    const view = companionWindow.ownerWindow;
+    const onKey = (event: KeyboardEvent) => {
+      const slot = companionSessionShortcut(event, useDroneHubUiStore.getState().shortcutBindings);
+      if (slot === null) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      companion?.selectSession(slot, true);
+    };
+    view.addEventListener('keydown', onKey);
+    return () => view.removeEventListener('keydown', onKey);
+  }, [companionWindow.detached, companionWindow.ownerWindow, companion?.selectSession]);
+  React.useEffect(() => {
+    if (!companionWindow.detached || !companionWindow.ownerWindow) return;
+    return relayCompanionWindowShortcuts(companionWindow.ownerWindow, window, () => useDroneHubUiStore.getState().shortcutBindings);
+  }, [companionWindow.detached, companionWindow.ownerWindow]);
   // Ctrl+V while Companion has focus queues the clipboard text like a capture. The floating window is
   // all Companion; in the main window only its own surfaces count, and editable fields keep their paste.
   const addTextAttachment = companion?.addTextAttachment;
@@ -398,6 +419,23 @@ export function CompanionOverlay() {
           setHistoryOpen(false);
         }}
       />
+      {companion.sessions?.length ? (
+        <nav aria-label="Companion sessions" className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-[var(--border)] bg-[var(--panel-raised)] px-1.5 py-1">
+          {companion.sessions.map(session => (
+            <button key={session.slot} type="button" aria-pressed={session.slot === companion.activeSlot}
+              aria-label={`Session ${session.slot}: ${companionStatusLabel(session.status, session.recordingPaused)}${session.working && session.status !== 'working' ? ' · Working' : ''}`}
+              title={`Session ${session.slot} · ${companionStatusLabel(session.status, session.recordingPaused)} · Press ${session.slot} to switch`}
+              onClick={() => companion.selectSession(session.slot)}
+              className={`inline-flex h-7 min-w-8 items-center justify-center gap-1 rounded-md border px-1.5 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${session.slot === companion.activeSlot ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'}`}>
+              {session.slot}<CompanionStatusIndicator status={session.status} recordingPaused={session.recordingPaused} />
+              {session.working && session.status !== 'working' ? <span aria-label="Working" className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent)]" /> : null}
+            </button>
+          ))}
+          {companion.sessions.length < 10 ? <button type="button" aria-label="New Companion session" title="New Companion session"
+            className="h-7 w-7 rounded-md text-[var(--muted)] hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            onClick={() => companion.selectSession(COMPANION_SLOTS.find(slot => !companion.sessions.some(session => session.slot === slot))!)}>+</button> : null}
+        </nav>
+      ) : null}
       <aside tabIndex={-1}
         data-companion-drop-active={dropActive || undefined}
         className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? proposalDisplayMode === 'summaries' ? flowsDown ? 'rounded-b-none' : 'rounded-t-none' : flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
@@ -595,6 +633,14 @@ export function CompanionOverlay() {
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
               {liveActive ? <rect x="6" y="6" width="12" height="12" rx="1" /> : <path d="M8 5v14l11-7Z" />}
+            </svg>
+          </CompanionHeaderButton> : null}
+          {companion.deleteSession ? <CompanionHeaderButton
+            label={`Delete session ${companion.activeSlot} and clear its conversation`}
+            disabled={companion.proposalExecuting}
+            onClick={() => void companion.deleteSession()}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
             </svg>
           </CompanionHeaderButton> : null}
           <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
