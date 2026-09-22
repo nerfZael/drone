@@ -12,7 +12,8 @@ import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
-import { renameSideChatWorkspaceChat } from './droneHub/app/side-chat-workspace-state';
+import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
+import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
   executeCompanionProposal,
@@ -62,6 +63,7 @@ import type { DroneDeleteConfirmModalDrone } from './droneHub/app/DroneDeleteCon
 import type { DroneHubOverlaysProps } from './droneHub/app/DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorkspaceContent';
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
+import { useChatDeleteShortcut } from './droneHub/app/use-chat-delete-shortcut';
 import type { DroneChatsPaneOptions } from './droneHub/app/DroneChatsDock';
 import { DetachedFileWindow } from './droneHub/files/DetachedFileWindow';
 import { focusFilePanel } from './droneHub/app/file-tab-drag';
@@ -214,6 +216,7 @@ import {
   normalizeContainerPathInput,
   resolveDroneFileOpenPath,
   resolveChatNameForDrone,
+  suggestChatCopyName,
   suggestNextDroneChatName,
 } from './droneHub/app/helpers';
 
@@ -3937,9 +3940,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       )
         return;
       const chatName = String(chatNameRaw ?? '').trim() || 'default';
+      // A side chat opened as the main chat remembers which chat it displaced, so the
+      // workspace can put it back (see openSideChatAsMain in SelectedDroneWorkspace).
+      const drone = droneByIdRef.current[droneId];
+      const sideChatNames = new Set((drone?.sideChats ?? []).map((chat) => chat.name));
+      const currentChat = selectedDrone === droneId ? String(selectedChat ?? '').trim() || 'default' : '';
+      if (sideChatNames.has(chatName) && currentChat && !sideChatNames.has(currentChat)) {
+        saveSideChatWorkspaceState(droneId, { previousMainChat: currentChat });
+      }
+      keepFocusOnNextChatActivation();
       selectDroneChat(droneId, chatName);
     },
-    [selectDroneChat, sidebarSelectableDroneIdSet],
+    [selectDroneChat, selectedChat, selectedDrone, sidebarSelectableDroneIdSet],
   );
   const assignCanvasDronesToOwner = React.useCallback(
     async (
@@ -4495,7 +4507,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const draftNames = [...newDraftChatsRef.current.values()]
       .filter((tracked) => tracked.droneId === latestDrone.id)
       .map((tracked) => tracked.chatName);
-    return { claimed, unavailable: [...(latestDrone.chats ?? []), ...claimed.keys(), ...draftNames] };
+    // Side chats share the drone's namespace even though the sidebar does not list them.
+    const sideChatNames = (latestDrone.sideChats ?? []).map((chat) => chat.name);
+    return { claimed, unavailable: [...(latestDrone.chats ?? []), ...sideChatNames, ...claimed.keys(), ...draftNames] };
   }, []);
   const createUntitledDroneChat = React.useCallback(
     async (
@@ -4505,14 +4519,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         copyFromChat?: string;
         mode?: 'copy-config' | 'fork';
         draft?: boolean;
+        /** Picks the name given the names already in use; "Untitled N" when left out. */
+        suggestName?: (unavailable: readonly string[]) => string;
       },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const latestDrone = droneByIdRef.current[drone.id] ?? drone;
       // Several chats can be created in one drone at once (a canvas group paste).
       // Claiming a name before the request keeps them from all asking for the same one.
       const { claimed, unavailable: unavailableChatNames } = reserveUntitledChatNames(latestDrone);
+      const suggestName = opts?.suggestName ?? suggestNextDroneChatName;
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const candidate = suggestNextDroneChatName(unavailableChatNames);
+        const candidate = suggestName(unavailableChatNames);
         claimed.set(candidate, Date.now());
         const created = await createDroneChat(latestDrone, candidate, opts);
         // A created chat stays claimed until the drone summary lists it.
@@ -4550,6 +4567,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const result = await createUntitledDroneChat(drone, {
           copyFromChat: sourceChatName,
           mode: 'fork',
+          suggestName: (unavailable) => suggestChatCopyName(sourceChatName, unavailable),
           ...(opts?.select === false ? { select: false } : {}),
         });
         if (!result.ok) {
@@ -5376,6 +5394,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [deleteCanvasChats],
   );
+  useChatDeleteShortcut(deleteCanvasChat);
   const canvasDraftRepoLabel = React.useMemo(() => {
     const repoPath = String(chatHeaderRepoPath ?? '').trim();
     if (!repoPath) return '';

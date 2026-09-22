@@ -108,6 +108,25 @@ export function suggestNextDroneChatName(chats: readonly string[] | null | undef
   return allocateUntitledDisplayName(Array.isArray(chats) ? chats : []);
 }
 
+// The Hub's limit for a chat name.
+const CHAT_NAME_MAX_LEN = 64;
+const COPY_SUFFIX = /\s+-\s+Copy(?:\s+\d+)?$/i;
+
+/**
+ * The name for a clone of `sourceName`: "plan - Copy", then "plan - Copy 2" and
+ * so on past names in `taken`. Copying a copy counts up from the original
+ * rather than piling up suffixes.
+ */
+export function suggestChatCopyName(sourceName: string, taken: readonly string[] | null | undefined): string {
+  const takenLower = new Set((Array.isArray(taken) ? taken : []).map((name) => String(name ?? '').trim().toLowerCase()));
+  const original = String(sourceName ?? '').trim().replace(COPY_SUFFIX, '').trim() || 'default';
+  for (let attempt = 1; ; attempt += 1) {
+    const suffix = attempt === 1 ? ' - Copy' : ` - Copy ${attempt}`;
+    const candidate = `${original.slice(0, Math.max(1, CHAT_NAME_MAX_LEN - suffix.length)).trimEnd()}${suffix}`;
+    if (!takenLower.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export function newDraftChatFocusKey(nowMs: number = Date.now(), randomSeed: number = Math.random()): string {
   const ms = Number.isFinite(nowMs) && nowMs > 0 ? Math.floor(nowMs) : Date.now();
   const rnd = Number.isFinite(randomSeed) && randomSeed >= 0 ? randomSeed : Math.random();

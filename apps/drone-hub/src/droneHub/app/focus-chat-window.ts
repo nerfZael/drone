@@ -1,3 +1,24 @@
+// Long enough to outlive the render that follows a selection; short enough
+// that a selection which changed nothing cannot hold back the next one.
+const KEEP_FOCUS_TTL_MS = 1_000;
+let keepFocusUntil = 0;
+
+/**
+ * The next chat activation must leave keyboard focus where it is. A canvas
+ * opens the chat behind a clicked card, and its selection still has copy,
+ * paste and delete to answer to.
+ */
+export function keepFocusOnNextChatActivation(now: number = Date.now()): void {
+  keepFocusUntil = now + KEEP_FOCUS_TTL_MS;
+}
+
+/** True once per marked activation, and never for an old mark. */
+export function consumeKeepFocusOnChatActivation(now: number = Date.now()): boolean {
+  const keep = keepFocusUntil > now;
+  keepFocusUntil = 0;
+  return keep;
+}
+
 // Dockview mounts content through a portal. Focus the chat scope when it
 // arrives so shortcuts target it without typing into the composer.
 export function focusChatWindow(

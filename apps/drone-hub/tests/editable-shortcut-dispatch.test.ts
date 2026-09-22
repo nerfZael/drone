@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldDispatchEditableShortcutAction } from '../src/droneHub/app/lifecycle-effect-helpers';
+import { shouldDispatchEditableShortcutAction, shouldRunGlobalShortcutAction } from '../src/droneHub/app/lifecycle-effect-helpers';
 
 describe('editable shortcut dispatch', () => {
   test('typing R never opens quick actions in an input', () => {
@@ -154,5 +154,23 @@ describe('editable shortcut dispatch', () => {
         targetInAssistantChatInput: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe('desktop-wide shortcut while typing', () => {
+  const input = { tagName: 'INPUT', isContentEditable: false } as unknown as Element;
+  const canvas = { tagName: 'DIV', isContentEditable: false } as unknown as Element;
+  test('plain shortcuts wait while a focused text field has the keyboard', () => {
+    expect(shouldRunGlobalShortcutAction({ actionId: 'markSelectedDronesUnread', documentFocused: true, activeElement: input })).toBe(false);
+    expect(shouldRunGlobalShortcutAction({ actionId: 'createDroneChat', documentFocused: true, activeElement: input })).toBe(false);
+  });
+  test('the same shortcuts run from a canvas, and from another app', () => {
+    expect(shouldRunGlobalShortcutAction({ actionId: 'markSelectedDronesUnread', documentFocused: true, activeElement: canvas })).toBe(true);
+    expect(shouldRunGlobalShortcutAction({ actionId: 'markSelectedDronesUnread', documentFocused: false, activeElement: input })).toBe(true);
+  });
+  test('companion and composer shortcuts keep working while typing', () => {
+    for (const actionId of ['toggleCompanion', 'applyCompanionProposal', 'toggleChatComposerEditorMode', 'openQuickOpen']) {
+      expect(shouldRunGlobalShortcutAction({ actionId, documentFocused: true, activeElement: input })).toBe(true);
+    }
   });
 });

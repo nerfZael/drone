@@ -23,7 +23,7 @@ import { workspaceGridPanelCount } from './workspace-panel-count';
 import { isUsableFloatingBounds } from './floating-window-bounds';
 import { alignFloatingChats, SIDE_CHAT_PANEL_PREFIX } from './align-floating-chats';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
-import { focusChatWindow } from './focus-chat-window';
+import { consumeKeepFocusOnChatActivation, focusChatWindow } from './focus-chat-window';
 import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
@@ -100,6 +100,10 @@ type DockableDroneWorkspaceProps = {
   onActiveToolTabChange?: (tab: RightPanelTab) => void;
   onPreviewHostChange?: (state: PreviewHostState) => void;
   onVisibleToolTabsChange?: (tabs: RightPanelTab[]) => void;
+  /** Keeps floating side chat windows out of sight, positions and all, until it is off again. */
+  hideFloatingSideChats?: boolean;
+  /** Something needs a floating window on screen: one was focused, returned to, or just created. */
+  onRevealFloatingSideChats?: () => void;
   onBeforeWorkspaceMouseDown?: () => void;
   onAfterToolPanelRemove?: () => void;
   /** Files opened in their own workspace windows by dragging editor tabs onto the grid. */
@@ -460,12 +464,12 @@ export function resetWorkspaceToChat(api: DockviewApi): void {
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
-  const { chatContent: content, mainChatControls, mainChatName } = React.useContext(DockableDroneWorkspaceContext);
+  const { chatContent: content, mainChatName, droneId } = React.useContext(DockableDroneWorkspaceContext);
   React.useEffect(() => {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle(mainChatName || DEFAULT_CHAT_NAME);
   }, [containerApi, mainChatName]);
-  return <UiPanel flush className="h-full outline-none" data-main-workspace-chat="true">{mainChatControls}{content}</UiPanel>;
+  return <UiPanel flush className="h-full outline-none" data-main-workspace-chat="true" data-chat-drone-id={droneId} data-chat-name={mainChatName}>{content}</UiPanel>;
 }
 
 /** Main chat tab: the chat name with its estimated cost. It never closes. */
@@ -474,7 +478,8 @@ function MainChatTab({ api }: IDockviewPanelHeaderProps) {
   const title = usePanelTitle(api);
   const chatName = ctx.mainChatName || DEFAULT_CHAT_NAME;
   return (
-    <div className="dv-default-tab" data-testid="dockview-dv-default-tab" title={title}>
+    <div className="dv-default-tab" data-testid="dockview-dv-default-tab" title={title}
+      data-chat-drone-id={ctx.droneId} data-chat-name={chatName}>
       <span className="dv-default-tab-content">{title} <ChatUsageBadge droneId={ctx.droneId} chatName={chatName} /></span>
     </div>
   );
@@ -661,6 +666,12 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
 
 function WorkspaceHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
+  // A fork shown as the main chat keeps its actions in the tab bar, where the tab names it.
+  if (activePanel?.id === CHAT_PANEL_ID) {
+    return ctx.mainChatControls
+      ? <div className="dh-chat-window-actions" role="toolbar" aria-label="Side chat controls">{ctx.mainChatControls}</div>
+      : null;
+  }
   if (!activePanel?.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return null;
   const chatName = activePanel.id.slice(SIDE_CHAT_PANEL_PREFIX.length);
   if (chatName === ctx.mainChatName && ctx.displacedMainChatName) {
@@ -778,7 +789,12 @@ export function DockableDroneWorkspace({
   onBeforeWorkspaceMouseDown,
   onAfterToolPanelRemove,
   fileWindows,
+  hideFloatingSideChats = false,
+  onRevealFloatingSideChats,
 }: DockableDroneWorkspaceProps) {
+  const revealFloatingSideChatsRef = React.useRef<(() => void) | null>(null);
+  revealFloatingSideChatsRef.current = hideFloatingSideChats ? onRevealFloatingSideChats ?? null : null;
+  const revealFloatingSideChats = React.useCallback(() => revealFloatingSideChatsRef.current?.(), []);
   const apiRef = React.useRef<DockviewApi | null>(null);
   const restoringPresetRef = React.useRef(false);
   const sideChatsRef = React.useRef(sideChats);
@@ -913,6 +929,7 @@ export function DockableDroneWorkspace({
     const root = workspaceElementRef.current;
     if (!panel || !root) return false;
     cancelPendingChatFocusRef.current?.();
+    revealFloatingSideChats();
     panel.api.setActive();
     if (opts?.keyboardFocus === false) return true;
     cancelPendingChatFocusRef.current = focusChatWindow(root,
@@ -921,7 +938,7 @@ export function DockableDroneWorkspace({
       () => apiRef.current?.getPanel(panel.id) === panel,
     );
     return true;
-  }, [mainChatName, displacedMainChatName]);
+  }, [mainChatName, displacedMainChatName, revealFloatingSideChats]);
   React.useEffect(() => () => cancelPendingChatFocusRef.current?.(), [currentDrone.id]);
 
   React.useEffect(() => {
@@ -934,6 +951,7 @@ export function DockableDroneWorkspace({
     return () => window.removeEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
   }, [currentDrone.id, focusFloatingChat]);
 
+  const knownSideChatNamesRef = React.useRef<{ droneId: string; names: Set<string> } | null>(null);
   React.useEffect(() => {
     const api = apiRef.current;
     const root = workspaceElementRef.current;
@@ -949,6 +967,10 @@ export function DockableDroneWorkspace({
     // displays the regular chat; promoting another fork restores this one
     // in place and moves the regular chat to the new fork's slot.
     const floatingChats = sideChats.filter((chat) => (chat.name !== mainChatName || displacedMainChatName) && !state.closedWindows.includes(chat.name));
+    // A side chat made while the windows are hidden would open unseen.
+    const known = knownSideChatNamesRef.current;
+    if (known?.droneId === currentDrone.id && sideChats.some((chat) => !known.names.has(chat.name))) revealFloatingSideChats();
+    knownSideChatNamesRef.current = { droneId: currentDrone.id, names: new Set(sideChats.map((chat) => chat.name)) };
     const wanted = new Set(floatingChats.map((chat) => `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`));
     for (const panel of api.panels) {
       if (!panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX) || wanted.has(panel.id)) continue;
@@ -991,7 +1013,7 @@ export function DockableDroneWorkspace({
       });
       prepareSideChatPanel(panel);
     }
-  }, [currentDrone.id, sideChats, mainChatName, displacedMainChatName, readyVersion]);
+  }, [currentDrone.id, sideChats, mainChatName, displacedMainChatName, readyVersion, revealFloatingSideChats]);
 
   const handledFocusRequestRef = React.useRef<typeof sideChatFocusRequest>(null);
   React.useEffect(() => {
@@ -1017,8 +1039,10 @@ export function DockableDroneWorkspace({
     // Selecting a regular chat in the sidebar must focus that new main chat.
     const focusReturned = returned && !promoted && sideChatReturnRequest !== previousReturnRequest
       && sideChatReturnRequest?.droneId === currentDrone.id && sideChatReturnRequest.chatName === previous;
+    if (focusReturned) revealFloatingSideChats();
     const panel = api.getPanel(focusReturned ? `${SIDE_CHAT_PANEL_PREFIX}${previous}` : CHAT_PANEL_ID);
     panel?.api.setActive();
+    if (consumeKeepFocusOnChatActivation()) return;
     return focusChatWindow(root,
       () => !focusReturned
         ? root.querySelector<HTMLElement>('[data-main-workspace-chat]')
@@ -1026,7 +1050,7 @@ export function DockableDroneWorkspace({
             .find((element) => element.dataset.sideChatName === previous && !element.closest('.dv-tabs-container')),
       () => root.isConnected,
     );
-  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest, sideChatFocusRequest, readyVersion]);
+  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest, sideChatFocusRequest, readyVersion, revealFloatingSideChats]);
 
   React.useEffect(() => {
     if (!useMobileLayout) return;
@@ -1626,7 +1650,7 @@ export function DockableDroneWorkspace({
                 </UiPanel>
               )
             ) : (
-              <UiPanel flush className="h-full" data-main-workspace-chat="true">{chatContent}</UiPanel>
+              <UiPanel flush className="h-full" data-main-workspace-chat="true" data-chat-drone-id={currentDrone.id} data-chat-name={mainChatName}>{chatContent}</UiPanel>
             )}
           </UiPanelBody>
         </UiPanel>
@@ -1636,6 +1660,7 @@ export function DockableDroneWorkspace({
           className={`relative flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
             paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
           } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
+          data-floating-side-chats={hideFloatingSideChats ? 'hidden' : undefined}
           onMouseDownCapture={handleWorkspaceMouseDownCapture}
         >
           <UndoChatWindowLayout workspaceId={currentDrone.id} />

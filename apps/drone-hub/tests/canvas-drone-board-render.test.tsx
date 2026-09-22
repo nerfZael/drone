@@ -240,10 +240,10 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
       root.render(<Dock drone={drone} onCloneChat={onCloneChat} onActivateChat={(_d, chatName) => activated.push(chatName)} />),
     );
 
-    // Clicking a side chat brings its window forward but leaves the keyboard on the canvas.
+    // Clicking a side chat opens it as the main chat, like any other card, and keeps the keyboard on the canvas.
     await act(async () => Simulate.click(card('side-1')));
-    expect(focusRequests).toEqual([{ droneId: 'alpha', chatName: 'side-1', keyboardFocus: false }]);
-    expect(activated).toEqual([]);
+    expect(activated).toEqual(['side-1']);
+    expect(focusRequests).toEqual([]);
     expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').selectedDroneIds).toEqual([alpha('side-1')]);
     await act(async () => Simulate.keyDown(viewport(), { key: 'c', ctrlKey: true }));
     await act(async () => Simulate.keyDown(viewport(), { key: 'v', ctrlKey: true }));

@@ -979,6 +979,8 @@ export function SelectedDroneWorkspace({
   });
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
   const sideChatWorkspace = useWorkspaceSideChats(currentDrone, activeChatName);
+  const hideSideChatWindowsWithCanvas = useDroneHubUiStore((s) => s.hideSideChatWindowsWithCanvas);
+  const setHideSideChatWindowsWithCanvas = useDroneHubUiStore((s) => s.setHideSideChatWindowsWithCanvas);
   const [sideChatReturnRequest, setSideChatReturnRequest] = React.useState<{ droneId: string; chatName: string } | null>(null);
   const mainSideChat = sideChatWorkspace.sideChats.find((chat) => chat.name === activeChatName);
   const previousMainChat = readSideChatWorkspaceState(currentDrone.id).previousMainChat;
@@ -2386,7 +2388,6 @@ export function SelectedDroneWorkspace({
             chat={mainSideChat}
             busy={Boolean(sideChatWorkspace.busy)}
             main
-            droneId={currentDrone.id}
             onKeep={() => void sideChatWorkspace.finish(mainSideChat.name, true)}
             onOpenSource={() => openSideChatSource(mainSideChat)}
             onMove={returnMainToFloating}
@@ -2454,6 +2455,8 @@ export function SelectedDroneWorkspace({
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
         onVisibleToolTabsChange={onVisibleToolTabsChange}
+        hideFloatingSideChats={hideSideChatWindowsWithCanvas && visibleToolTabs.includes('canvas')}
+        onRevealFloatingSideChats={() => setHideSideChatWindowsWithCanvas(false)}
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}

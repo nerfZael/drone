@@ -3124,6 +3124,11 @@ select:disabled optgroup {
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
 }
 
+/* Out of the way while the canvas is open; the windows keep their places for when it closes. */
+.dh-dockable-workspace[data-floating-side-chats='hidden'] .dv-resize-container:has([data-side-chat-name]) {
+  display: none;
+}
+
 /* A single floating chat uses the entire title bar to move the window. */
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container {
   position: relative;

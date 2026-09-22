@@ -8,7 +8,9 @@ export function focusedSideChatMainControl(doc: Document = document): HTMLButton
     button = [...(group?.querySelectorAll<HTMLButtonElement>('[data-side-chat-move]') ?? [])]
       .find((element) => element.dataset.sideChatMove === activeSide.dataset.sideChatName) ?? null;
   } else {
-    button = doc.querySelector<HTMLButtonElement>('[data-main-workspace-chat] [data-side-chat-move]');
+    // The control sits in the main chat's tab bar, beside the pane that holds the transcript.
+    const main = doc.querySelector<HTMLElement>('[data-main-workspace-chat]');
+    button = (main?.closest('.dv-groupview') ?? main)?.querySelector<HTMLButtonElement>('[data-side-chat-move]') ?? null;
   }
   if (!button || button.disabled || button.closest('[aria-hidden="true"]') || button.getClientRects().length === 0) return null;
   return button;

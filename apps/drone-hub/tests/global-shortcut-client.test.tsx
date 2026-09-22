@@ -63,18 +63,29 @@ test('canvas focus keeps global companion recording enabled; binding capture sus
       source.send('shortcut', { actionId: 'toggleCompanion' });
     }
     expect(actions).toEqual(['toggleCompanion', 'toggleCompanion']);
+    // A plain key promoted to a desktop-wide shortcut is still just a letter inside a text field.
+    await act(async () => { editor.focus(); });
+    source.send('shortcut', { actionId: 'markSelectedDronesUnread' });
+    expect(actions).toHaveLength(2);
+    await act(async () => { canvas.focus(); });
+    source.send('shortcut', { actionId: 'markSelectedDronesUnread' });
+    expect(actions.at(-1)).toBe('markSelectedDronesUnread');
+    await act(async () => { editor.focus(); focused = false; });
+    source.send('shortcut', { actionId: 'markSelectedDronesUnread' });
+    expect(actions).toHaveLength(4);
+    await act(async () => { focused = true; });
     await act(async () => { capture.focus(); });
     expect(activities.at(-1)?.capturing).toBe(true);
     source.send('shortcut', { actionId: 'toggleCompanion' });
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(4);
     // A background window must still accept the global recording action.
     await act(async () => { focused = false; dom.dispatchEvent(new dom.Event('blur')); });
     source.send('shortcut', { actionId: 'toggleCompanion' });
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(5);
     await act(async () => { focused = true; canvas.focus(); });
     expect(activities.at(-1)).toMatchObject({ focused: true, capturing: false });
     source.send('shortcut', { actionId: 'toggleCompanion' });
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(6);
     source.send('shortcut', { actionId: 'toggleCompanion', phase: 'down' });
     source.send('shortcut', { actionId: 'toggleCompanion', phase: 'up', heldMs: 720 });
     expect(gestures.slice(-2)).toEqual([{ phase: 'down', heldMs: undefined }, { phase: 'up', heldMs: 720 }]);

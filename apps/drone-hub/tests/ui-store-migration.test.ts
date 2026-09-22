@@ -121,6 +121,7 @@ describe('drone hub ui store migration', () => {
         autoDelete: true,
         transcriptInlineImages: false,
         showCanvasLastMessagePreviews: true,
+        hideSideChatWindowsWithCanvas: false,
         seenModelIds: ['gpt-5.4', 'o3'],
         automations: [{ id: 'retired-automation' }],
         playbookRunsSelectionInitialized: true,
@@ -136,6 +137,7 @@ describe('drone hub ui store migration', () => {
       collapsedGroups: { 'repo:/work/repo': true },
       collapsedDroneSections: { 'chats:drone-a': true },
       showCanvasLastMessagePreviews: true,
+      hideSideChatWindowsWithCanvas: false,
       seenModelIds: ['gpt-5.4', 'o3'],
     });
     expect((migrated as any).autoDelete).toBeUndefined();

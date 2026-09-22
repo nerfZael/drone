@@ -41,7 +41,7 @@ function harness() {
   let mounted = false;
   let available = true;
   return {
-    document, scope, composer,
+    document, scope, composer, exports,
     start: () => exports.focusChatWindow({ isConnected: true }, () => mounted ? scope : null, () => available),
     mount: () => { mounted = true; },
     loadComposer: () => { ready = true; },
@@ -102,4 +102,16 @@ test('cleanup cancels scheduled focus and disconnects observation', () => {
   cancel(); h.mount(); h.loadComposer(); h.mutate(); h.frame();
   expect(h.document.activeElement).toBeNull();
   expect(h.observed()).toBe(false);
+});
+
+test('a canvas-originated activation keeps focus once, and the mark does not outlive its moment', () => {
+  const { exports } = harness();
+  expect(exports.consumeKeepFocusOnChatActivation(1_000)).toBe(false);
+  exports.keepFocusOnNextChatActivation(1_000);
+  expect(exports.consumeKeepFocusOnChatActivation(1_200)).toBe(true);
+  // Consumed: the next activation, from the sidebar, focuses the chat as usual.
+  expect(exports.consumeKeepFocusOnChatActivation(1_300)).toBe(false);
+  // A mark nothing consumed (the chat was already the main chat) expires on its own.
+  exports.keepFocusOnNextChatActivation(2_000);
+  expect(exports.consumeKeepFocusOnChatActivation(3_500)).toBe(false);
 });

@@ -60,7 +60,6 @@ import {
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
 import { OPTIMISTIC_MEMBER_TTL_MS, buildDroneBoardMembers, planDroneBoardPlacements } from './drone-board';
-import { focusSideChat } from '../app/side-chat-events';
 import {
   measureRectInWorldSpace,
   type CanvasRect,
@@ -493,18 +492,6 @@ export function DroneCanvasDock({
     }
     return out;
   }, [boardMembers]);
-  // Used on both boards, so it is keyed on its own inputs rather than the
-  // drone-board member key (which is empty on the global board).
-  const sideChatNodeIds = React.useMemo(
-    () =>
-      new Set(
-        [
-          ...(boardSideChats ?? []).map((chat) => chat.name),
-          ...(optimisticMembers ?? []).filter((member) => member.sideChat).map((member) => member.chatName),
-        ].map((chatName) => createCanvasChatNodeId(String(boardDrone?.id ?? ''), chatName)),
-      ),
-    [boardDrone?.id, boardSideChats, optimisticMembers],
-  );
   React.useEffect(() => {
     if (!boardDroneId || !optimisticMembers?.length) return;
     const confirmed = new Set([...(boardDrone?.chats ?? []), ...(boardDrone?.sideChats ?? []).map((chat) => chat.name)]);
@@ -731,6 +718,8 @@ export function DroneCanvasDock({
     focusPrimaryChatInputShortcutBinding,
     showCanvasLastMessagePreviews,
     setShowCanvasLastMessagePreviews,
+    hideSideChatWindowsWithCanvas,
+    setHideSideChatWindowsWithCanvas,
     seenModelIds,
   } = useDroneHubUiStore(
     useShallow((s) => ({
@@ -738,6 +727,8 @@ export function DroneCanvasDock({
       focusPrimaryChatInputShortcutBinding: s.shortcutBindings.focusPrimaryChatInput,
       showCanvasLastMessagePreviews: s.showCanvasLastMessagePreviews,
       setShowCanvasLastMessagePreviews: s.setShowCanvasLastMessagePreviews,
+      hideSideChatWindowsWithCanvas: s.hideSideChatWindowsWithCanvas,
+      setHideSideChatWindowsWithCanvas: s.setHideSideChatWindowsWithCanvas,
       seenModelIds: s.seenModelIds,
     })),
   );
@@ -1740,13 +1731,11 @@ export function DroneCanvasDock({
         }
         const chatRef = parseCanvasChatNodeId(droneId);
         if (!chatRef) return;
-        // A side chat usually lives in a floating window; bring that forward instead of replacing the main
-        // chat. Keyboard focus stays on the canvas, whose selection the copy, paste and delete keys act on.
-        if (sideChatNodeIds.has(droneId) && focusSideChat(chatRef.droneId, chatRef.chatName, { keyboardFocus: false })) return;
+        // Side chats included: a card opens its chat as the main chat.
         onActivateChat?.(chatRef.droneId, chatRef.chatName);
       }
     },
-    [focusViewportElement, onActivateChat, setSelectedDroneIds, sideChatNodeIds, toggleSelectedDroneId],
+    [focusViewportElement, onActivateChat, setSelectedDroneIds, toggleSelectedDroneId],
   );
 
   const onNodeDoubleClick = React.useCallback(
@@ -2213,6 +2202,13 @@ export function DroneCanvasDock({
             >
               Last msgs
             </UiToolbarButton>
+            <UiToolbarButton
+              pressed={!hideSideChatWindowsWithCanvas}
+              onClick={() => setHideSideChatWindowsWithCanvas(!hideSideChatWindowsWithCanvas)}
+              title="Keep floating side chat windows visible while the canvas is open. Off, they stay hidden until the canvas is closed."
+            >
+              Side chat windows
+            </UiToolbarButton>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1">
             <UiToolbarButton onClick={resetViewport} title="Reset canvas view">
@@ -2600,7 +2596,8 @@ export function DroneCanvasDock({
                           cancelInlineRename();
                         }
                       }}
-                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      // Looks like the title it replaces: the card's own border already says it is being edited.
+                      className="block w-full min-w-0 border-0 bg-transparent p-0 text-12-5 font-[var(--weight-semibold)] leading-[inherit] text-[var(--fg-secondary)] caret-[var(--accent)] outline-none focus:outline-none focus-visible:outline-none"
                     />
                   ) : assignmentHoverTarget ? (
                     <span className="block">

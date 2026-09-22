@@ -53,6 +53,7 @@ function ChatListRow({ drone, name, selected, onSelect }: {
   const preview = value ? latestChatPreview(value) : null;
   return (
     <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined}
+      data-chat-drone-id={droneId} data-chat-name={name}
       className={`col-span-2 grid w-full grid-cols-subgrid items-center gap-x-3 border-b border-[var(--border-subtle)] py-2.5 text-left text-12 hover:bg-[var(--hover)] focus-visible:outline focus-visible:outline-[var(--accent)] ${selected ? 'bg-[var(--accent-subtle)]' : ''}`}>
       <ChatName drone={drone} name={name} selected={selected} />
       <span className="flex min-w-0 items-center gap-1.5" title={error ?? preview?.text}>

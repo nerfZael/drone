@@ -11,6 +11,7 @@ import {
   clearActiveGlobalShortcutSettings,
   GLOBAL_SHORTCUT_SETTINGS_EVENT,
 } from './global-shortcut-state';
+import { shouldRunGlobalShortcutAction } from './lifecycle-effect-helpers';
 import type { ShortcutActionId } from './shortcuts';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
@@ -80,6 +81,16 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
         document.activeElement.closest('[data-shortcut-binding-capture="true"]')
       ) {
         cancelCompanionPress();
+        return;
+      }
+      if (
+        typeof actionId === 'string' &&
+        !shouldRunGlobalShortcutAction({
+          actionId,
+          documentFocused: document.hasFocus(),
+          activeElement: document.activeElement,
+        })
+      ) {
         return;
       }
       const { phase, heldMs } = data as { phase?: unknown; heldMs?: unknown };

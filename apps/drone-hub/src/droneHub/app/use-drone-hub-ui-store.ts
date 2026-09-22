@@ -128,6 +128,8 @@ type DroneHubUiState = {
   headerOverflowOpen: boolean;
   outputView: OutputView;
   showCanvasLastMessagePreviews: boolean;
+  /** Floating side chat windows stay out of the way while a canvas pane is open. */
+  hideSideChatWindowsWithCanvas: boolean;
   transcriptInlineImageOverrides: Record<string, boolean>;
   spawnContextRepoPath: string;
   spawnContextByRepoKey: Record<string, SpawnContextPreferences>;
@@ -203,6 +205,7 @@ type DroneHubUiState = {
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
+  setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnContextRepoPath: (next: Updater<string>) => void;
   updateSpawnContextForRepo: (repoPath: string, next: Partial<SpawnContextPreferences>) => void;
@@ -373,6 +376,7 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
+  | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
   | 'spawnModel'
@@ -995,6 +999,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
+      hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
       spawnContextRepoPath: '',
       spawnContextByRepoKey: {
@@ -1255,6 +1260,10 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next),
         })),
+      setHideSideChatWindowsWithCanvas: (next) =>
+        set((s) => ({
+          hideSideChatWindowsWithCanvas: resolveNext(s.hideSideChatWindowsWithCanvas, next),
+        })),
       setTranscriptInlineImageOverride: (messageIdRaw, next) =>
         set((s) => {
           const messageId = String(messageIdRaw ?? '').trim();
@@ -1511,6 +1520,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
+        hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
@@ -1637,6 +1647,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
+          ),
+          hideSideChatWindowsWithCanvas: normalizeBoolean(
+            persisted.hideSideChatWindowsWithCanvas ?? currentState.hideSideChatWindowsWithCanvas,
           ),
           spawnContextByRepoKey: normalizeSpawnContextByRepoKey(
             (persisted as any).spawnContextByRepoKey ?? currentState.spawnContextByRepoKey,
