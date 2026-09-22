@@ -434,7 +434,7 @@ export function CompanionOverlay() {
         </div>
       ) : null}
       {/* Keep the session row inside the card, directly above its controls. */}
-      {companion.sessions?.length ? (
+      {companion.sessions?.length && (companion.sessions.length > 1 || companion.sessions[0].slot !== 1) ? (
         <nav aria-label="Companion sessions" className={`flex shrink-0 flex-wrap items-center gap-1 px-2 pt-1 ${flowsDown ? 'order-1' : 'order-2'}`}>
           {companion.sessions.map(session => (
             <button key={session.slot} type="button" aria-pressed={session.slot === companion.activeSlot}

@@ -61,6 +61,10 @@ for (const detached of [false, true]) test(`session switches keep shared setting
     await act(async () => root.render(<CompanionProvider><Harness /></CompanionProvider>));
     await act(async () => companion.selectSession(1));
     const page = detached ? child.document : dom.document;
+    expect(page.querySelector('[aria-label="Companion sessions"]')).toBeNull();
+    await act(async () => companion.selectSession(2));
+    expect(page.querySelector('[aria-label="Companion sessions"]')).not.toBeNull();
+    await act(async () => companion.selectSession(1));
     const frame = page.querySelector('aside[aria-label="Companion"]');
     const toolbar = page.querySelector('[data-companion-window-bar]');
     const sessions = page.querySelector('[aria-label="Companion sessions"]');
