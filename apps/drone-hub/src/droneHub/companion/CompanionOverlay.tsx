@@ -432,7 +432,7 @@ export function CompanionOverlay() {
             </button>
           ))}
           {companion.sessions.length < 10 ? <button type="button" aria-label="New Companion session" title="New Companion session"
-            className="h-7 w-7 rounded-md text-[var(--muted)] hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            className="h-7 w-7 rounded-md text-[var(--muted)] hover:bg-[var(--hover)] focus-visible:outline-none"
             onClick={() => companion.selectSession(COMPANION_SLOTS.find(slot => !companion.sessions.some(session => session.slot === slot))!)}>+</button> : null}
         </nav>
       ) : null}
