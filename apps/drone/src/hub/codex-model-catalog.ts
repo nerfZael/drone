@@ -19,6 +19,9 @@ export async function loadCodexCatalog() {
     return (levels.length ? levels : ['off']).map((thinkingLevel) => ({
       provider: 'codex' as const, id: model.id, name: model.label,
       thinkingLevel: thinkingLevel as HubAgentModelOption['thinkingLevel'],
+      ...(levels.includes(model.defaultReasoningLevel)
+        ? { defaultReasoningLevel: model.defaultReasoningLevel as HubAgentModelOption['thinkingLevel'] }
+        : {}),
     }));
   });
   const ids = new Set(models.map((model) => model.id));

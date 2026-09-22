@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { getModel } from "../src/models.js";
 import { codexPromptCacheKey, streamSimpleOpenAICodexResponses } from "../src/providers/openai-codex-responses.js";
-import type { Context, Model } from "../src/types.js";
+import type { Context, Model, ThinkingLevel } from "../src/types.js";
 
 const context: Context = {
 	systemPrompt: "You are concise.",
@@ -18,10 +18,11 @@ function fakeCodexToken(): string {
 	return `header.${payload}.signature`;
 }
 
-async function capturePayload(model: Model<"openai-codex-responses">): Promise<any> {
+async function capturePayload(model: Model<"openai-codex-responses">, reasoning?: ThinkingLevel): Promise<any> {
 	let payload: any;
 	const stream = streamSimpleOpenAICodexResponses(model, context, {
 		apiKey: fakeCodexToken(),
+		reasoning,
 		onPayload: (nextPayload) => {
 			payload = nextPayload;
 			throw new Error("stop after payload capture");
@@ -33,6 +34,17 @@ async function capturePayload(model: Model<"openai-codex-responses">): Promise<a
 }
 
 describe("openai codex responses", () => {
+	for (const id of ["gpt-6-sol", "gpt-6-luna"] as const) {
+		test(`sends ${id} and its selected reasoning without downgrading`, async () => {
+			const model = getModel("openai-codex", id);
+			for (const level of ["low", "medium", "high", "xhigh"] as const) {
+				const payload = await capturePayload(model, level);
+				expect(payload.model).toBe(id);
+				expect(payload.reasoning.effort).toBe(level);
+			}
+		});
+	}
+
 	test.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])("registers %s for ChatGPT authentication", (modelId) => {
 		const model = getModel("openai-codex", modelId) as Model<"openai-codex-responses">;
 

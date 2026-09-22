@@ -3,6 +3,8 @@ export type LocalAssistantThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 export const DEFAULT_LOCAL_ASSISTANT_THINKING_LEVEL: LocalAssistantThinkingLevel = 'low';
 
 export const LOCAL_ASSISTANT_MODEL_OPTIONS = [
+  { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
+  { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },

@@ -90,20 +90,25 @@ function mergeThinkingLevelMap(model: Model<any>, map: NonNullable<Model<any>["t
 	model.thinkingLevelMap = { ...model.thinkingLevelMap, ...map };
 }
 
+function isGpt6SolOrLuna(modelId: string): boolean {
+	return modelId === "gpt-6-sol" || modelId === "gpt-6-luna";
+}
+
 function supportsOpenAiXhigh(modelId: string): boolean {
 	return (
 		modelId.includes("gpt-5.2") ||
 		modelId.includes("gpt-5.3") ||
 		modelId.includes("gpt-5.4") ||
 		modelId.includes("gpt-5.5") ||
-		modelId.includes("gpt-5.6")
+		modelId.includes("gpt-5.6") ||
+		isGpt6SolOrLuna(modelId)
 	);
 }
 
 function supportsOpenAiReasoningNone(model: Model<any>): boolean {
 	return (
 		(model.api === "openai-responses" || model.api === "azure-openai-responses" || model.api === "openai-codex-responses") &&
-		(model.id === "gpt-5.5" || model.id === "gpt-5.5-pro" || model.id.startsWith("gpt-5.6-"))
+		(model.id === "gpt-5.5" || model.id === "gpt-5.5-pro" || model.id.startsWith("gpt-5.6-") || isGpt6SolOrLuna(model.id))
 	);
 }
 
@@ -166,6 +171,9 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	}
 	if (model.provider === "openai-codex" && supportsOpenAiXhigh(model.id)) {
 		mergeThinkingLevelMap(model, { minimal: "low" });
+	}
+	if (isGpt6SolOrLuna(model.id)) {
+		mergeThinkingLevelMap(model, { minimal: null });
 	}
 	if (model.provider === "openai-codex" && model.id === "gpt-5.1-codex-mini") {
 		mergeThinkingLevelMap(model, { minimal: "medium", low: "medium", medium: "medium", high: "high" });
@@ -1196,12 +1204,16 @@ async function generateModels() {
 	}
 
 	// Add missing gpt models
-	const gpt56Models = [
+	// Official metadata: https://developers.openai.com/api/docs/models/gpt-6-sol
+	// https://developers.openai.com/api/docs/models/gpt-6-luna and /api/docs/pricing
+	const latestGptModels = [
+		{ id: "gpt-6-sol", name: "GPT-6 Sol", cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
+		{ id: "gpt-6-luna", name: "GPT-6 Luna", cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 } },
 		{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } },
 		{ id: "gpt-5.6-terra", name: "GPT-5.6 Terra", cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 } },
 		{ id: "gpt-5.6-luna", name: "GPT-5.6 Luna", cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 } },
 	] as const;
-	for (const model of gpt56Models) {
+	for (const model of latestGptModels) {
 		if (allModels.some((candidate) => candidate.provider === "openai" && candidate.id === model.id)) continue;
 		allModels.push({
 			...model,
@@ -1534,7 +1546,7 @@ async function generateModels() {
 			contextWindow: CODEX_CONTEXT,
 			maxTokens: CODEX_MAX_TOKENS,
 		},
-		...gpt56Models.map((model) => ({
+		...latestGptModels.map((model) => ({
 			...model,
 			cost: { ...model.cost, cacheWrite: 0 },
 			api: "openai-codex-responses" as const,

@@ -18,6 +18,8 @@ describe('phone assistant model migration', () => {
 
   test('offers supported alternatives for both phone providers', () => {
     expect(localAssistantModelOptions('codex')).toEqual([
+      { provider: 'codex', id: 'gpt-6-sol', name: 'GPT-6 Sol' },
+      { provider: 'codex', id: 'gpt-6-luna', name: 'GPT-6 Luna' },
       { provider: 'codex', id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
       { provider: 'codex', id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
       { provider: 'codex', id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },

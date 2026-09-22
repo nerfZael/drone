@@ -15,6 +15,19 @@ import { withTempDroneDataDir } from './test-helpers';
 import { resetHubSettingsRepositoryForTests } from '../src/host/hub-settings-repository';
 
 describe('Companion settings', () => {
+  test('preserves GPT-6 selections and reasoning for both providers', () => {
+    for (const provider of ['openai', 'codex']) {
+      for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+        const levels = provider === 'openai' ? ['off', 'low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high', 'xhigh'];
+        for (const thinkingLevel of levels) {
+          expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, provider, model, thinkingLevel })).toMatchObject({
+            provider, model, thinkingLevel,
+          });
+        }
+      }
+    }
+  });
+
   test('offers supported providers including Cerebras and Gemini 3.5 Flash-Lite', () => {
     expect(new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))).toEqual(new Set([
       'openai',

@@ -28,16 +28,24 @@ function modelOptions(
   id: string,
   name: string,
   levels: NativeAgentThinkingLevel[] = STANDARD_REASONING_LEVELS,
+  defaultReasoningLevel?: NativeAgentThinkingLevel,
 ): HubAgentModelOption[] {
-  return levels.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
+  return levels.map((thinkingLevel) => ({
+    provider, id, name, thinkingLevel,
+    ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
+  }));
 }
 
 export const HUB_AGENT_MODEL_OPTIONS: HubAgentModelOption[] = [
   ...modelOptions('cerebras', DEFAULT_CEREBRAS_MODEL, 'Qwen 3.8 27B'),
+  ...modelOptions('openai', 'gpt-6-sol', 'GPT-6 Sol', ['off', 'low', 'medium', 'high', 'xhigh'], 'medium'),
+  ...modelOptions('openai', 'gpt-6-luna', 'GPT-6 Luna', ['off', 'low', 'medium', 'high', 'xhigh'], 'medium'),
   ...modelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
   ...modelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
   ...modelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
   ...modelOptions('openai', 'gpt-5.5', 'GPT-5.5'),
+  ...modelOptions('codex', 'gpt-6-sol', 'GPT-6 Sol', ['low', 'medium', 'high', 'xhigh'], 'medium'),
+  ...modelOptions('codex', 'gpt-6-luna', 'GPT-6 Luna', ['low', 'medium', 'high', 'xhigh'], 'medium'),
   ...modelOptions('codex', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
   ...modelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
   ...modelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
