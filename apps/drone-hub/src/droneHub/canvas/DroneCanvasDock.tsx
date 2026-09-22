@@ -2464,12 +2464,13 @@ export function DroneCanvasDock({
             const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             const nodeHeight = nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
+            // A drone board is one drone's chats: its repository and branch are the same on every card.
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : nodeDroneId
+              : nodeDroneId && !droneScope
                 ? String(droneRepoById[nodeDroneId] ?? '').trim()
                 : '';
-            const repoBranch = !draftNode && nodeDroneId
+            const repoBranch = !draftNode && nodeDroneId && !droneScope
               ? String(droneById[nodeDroneId]?.repoBranch ?? '').trim()
               : '';
             const canvasDroneLabel = canvasDroneId
