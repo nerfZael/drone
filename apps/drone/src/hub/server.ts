@@ -5181,35 +5181,43 @@ async function startDroneHubApiServerWithLifecycle(
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
     const chatCloneSources = resolveChatCloneSources(d.chats);
-    const sideChats = Object.entries(d.chats ?? {}).flatMap(([name, entry]: [string, any]) =>
-      entry?.visibility === 'side-chat'
-        ? [
-            {
-              name,
-              ...entry.sideChatOrigin,
-              ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
-              agent: inferChatAgent(entry, d),
-            },
-          ]
-        : [],
+    const sideChatEntries = Object.entries(d.chats ?? {}).filter(
+      ([, entry]: [string, any]) => entry?.visibility === 'side-chat',
     );
-    const workflowChatSet = new Set([...workflowChats, ...sideChats.map((chat) => chat.name)]);
-    const pendingBusyChats = droneId
-      ? busyChatNamesForDrone(d, droneId).filter(
-          (chatName: string) => !workflowChatSet.has(chatName),
-        )
-      : [];
-    const busyChats = await mergeNativeBusyChatNames({
-      busyChatNames: pendingBusyChats,
-      chatNames: chats,
-      droneEntry: d,
-      isNativeChat: (chatEntry, droneEntry) =>
-        inferChatAgent(chatEntry, droneEntry).kind === 'native',
-      isThreadBusy: async (threadId) =>
-        assistantPromptDrains.has(threadId) ||
-        blipAssistantHost.isThreadRunning(threadId) ||
-        (await assistantService.nativeThreadHasActiveRun(threadId)),
-    });
+    const sideChatNames = sideChatEntries.map(([name]) => name);
+    const workflowChatSet = new Set([...workflowChats, ...sideChatNames]);
+    const allBusyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
+    // A side chat's work is its own: it does not make the drone busy, but its card shows it.
+    const pendingBusyChats = allBusyChats.filter((chatName: string) => !workflowChatSet.has(chatName));
+    const isNativeChat = (chatEntry: any, droneEntry: any) =>
+      inferChatAgent(chatEntry, droneEntry).kind === 'native';
+    const isThreadBusy = async (threadId: string) =>
+      assistantPromptDrains.has(threadId) ||
+      blipAssistantHost.isThreadRunning(threadId) ||
+      (await assistantService.nativeThreadHasActiveRun(threadId));
+    const [busyChats, busySideChats] = await Promise.all([
+      mergeNativeBusyChatNames({
+        busyChatNames: pendingBusyChats,
+        chatNames: chats,
+        droneEntry: d,
+        isNativeChat,
+        isThreadBusy,
+      }),
+      mergeNativeBusyChatNames({
+        busyChatNames: allBusyChats.filter((chatName: string) => sideChatNames.includes(chatName)),
+        chatNames: sideChatNames,
+        droneEntry: d,
+        isNativeChat,
+        isThreadBusy,
+      }),
+    ]);
+    const sideChats = sideChatEntries.map(([name, entry]: [string, any]) => ({
+      name,
+      ...entry.sideChatOrigin,
+      ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
+      agent: inferChatAgent(entry, d),
+      busy: busySideChats.includes(name),
+    }));
     const approvalChats = chats.flatMap((chatName) => {
       const chatEntry = d.chats?.[chatName];
       const agent = inferChatAgent(chatEntry, d);

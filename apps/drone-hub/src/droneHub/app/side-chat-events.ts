@@ -12,9 +12,16 @@ export function requestAlignFloatingChats(droneId: string): boolean {
 export type SideChatCheckpointTarget = { sourceChatName: string; checkpointId: string };
 export type OpenSideChatDetail = { droneId: string; target?: SideChatCheckpointTarget };
 
-export function focusSideChat(droneId: string, chatName: string): boolean {
-  const event = new CustomEvent(FOCUS_SIDE_CHAT_EVENT, {
-    detail: { droneId, chatName },
+export type FocusSideChatDetail = {
+  droneId: string;
+  chatName: string;
+  /** False brings the window forward but leaves keyboard focus where it is, e.g. on a canvas that has more to do. */
+  keyboardFocus?: boolean;
+};
+
+export function focusSideChat(droneId: string, chatName: string, opts?: { keyboardFocus?: boolean }): boolean {
+  const event = new CustomEvent<FocusSideChatDetail>(FOCUS_SIDE_CHAT_EVENT, {
+    detail: { droneId, chatName, keyboardFocus: opts?.keyboardFocus !== false },
     cancelable: true,
   });
   window.dispatchEvent(event);

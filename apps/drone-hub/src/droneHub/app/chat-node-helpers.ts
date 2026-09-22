@@ -40,7 +40,7 @@ export function nextUnreadChatReadCursor(
 
 export function normalizedDroneChats(
   drone: DroneSummary | null | undefined,
-  opts?: { includeDefaultWhenEmpty?: boolean },
+  opts?: { includeDefaultWhenEmpty?: boolean; includeSideChats?: boolean },
 ): string[] {
   const source = Array.isArray(drone?.chats) ? drone.chats : [];
   const out: string[] = [];
@@ -50,6 +50,12 @@ export function normalizedDroneChats(
     out.push(chatName);
   }
   if (out.length === 0 && opts?.includeDefaultWhenEmpty) out.push('default');
+  if (opts?.includeSideChats) {
+    for (const sideChat of drone?.sideChats ?? []) {
+      const chatName = String(sideChat?.name ?? '').trim();
+      if (chatName && !out.includes(chatName)) out.push(chatName);
+    }
+  }
   return out;
 }
 
@@ -165,8 +171,9 @@ export function busyChatNodeIdsForDrone(drone: DroneSummary | null | undefined):
     : drone?.busy
       ? ['default']
       : [];
+  const busySideChats = (drone?.sideChats ?? []).filter((chat) => chat?.busy === true).map((chat) => chat.name);
   const out: string[] = [];
-  for (const raw of rawBusyChats) {
+  for (const raw of [...rawBusyChats, ...busySideChats]) {
     const chatName = String(raw ?? '').trim() || 'default';
     const nodeId = createCanvasChatNodeId(droneId, chatName);
     if (!nodeId || out.includes(nodeId)) continue;

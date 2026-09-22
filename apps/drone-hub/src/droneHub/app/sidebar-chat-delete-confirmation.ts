@@ -100,3 +100,53 @@ export function buildSidebarChatGroupDeleteConfirmation({
     destructive: true,
   };
 }
+
+/**
+ * One question for every chat selected on a canvas, however many drones they
+ * belong to. Default chats are never deleted this way; the message says so
+ * when one was selected.
+ */
+export function buildCanvasChatDeleteConfirmation({
+  targets,
+  droneLabelById,
+  deleteMode,
+  isDraft,
+}: {
+  targets: ReadonlyArray<{ droneId: string; chatName: string }>;
+  droneLabelById: (droneId: string) => string;
+  deleteMode: DroneDeleteMode;
+  isDraft: (droneId: string, chatName: string) => boolean;
+}): AppConfirmationOptions {
+  const droneIds = [...new Set(targets.map((target) => target.droneId))];
+  const chatNames = targets.map((target) => target.chatName);
+  const draftChatNames = targets.filter((target) => isDraft(target.droneId, target.chatName)).map((target) => target.chatName);
+  if (droneIds.length <= 1) {
+    return buildSidebarChatDeleteConfirmation({
+      chatNames,
+      droneLabel: droneLabelById(droneIds[0] ?? ''),
+      deleteMode,
+      draftChatNames,
+    });
+  }
+  const count = chatNames.length;
+  const draftCount = draftChatNames.length;
+  const archiveCount = deleteMode === 'archive' ? count - draftCount : 0;
+  const action = archiveCount > 0 && draftCount === 0 ? 'Archive' : 'Delete';
+  const recovery = archiveCount > 0
+    ? ' You can restore archived chats from Settings > Archive before they auto-delete.'
+    : '';
+  if (archiveCount > 0 && draftCount > 0) {
+    return {
+      title: `Archive and delete ${count} chats?`,
+      message: `Archive ${archiveCount} chat${archiveCount === 1 ? '' : 's'} and permanently delete ${draftCount} draft chat${draftCount === 1 ? '' : 's'} across ${droneIds.length} drones?${recovery}`,
+      confirmLabel: 'Archive and delete',
+      destructive: true,
+    };
+  }
+  return {
+    title: `${action} ${count} chats?`,
+    message: `${action} ${count} selected chats across ${droneIds.length} drones?${recovery}`,
+    confirmLabel: `${action} chats`,
+    destructive: true,
+  };
+}

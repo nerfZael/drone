@@ -155,10 +155,9 @@ type RightPanelTabContentProps = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onDeleteCanvasChat: (
-    droneId: string,
-    chatName: string,
-  ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
+  onDeleteCanvasChats: (
+    targets: ReadonlyArray<{ droneId: string; chatName: string }>,
+  ) => Promise<Array<{ droneId: string; chatName: string; ok: boolean; deletedDrone?: boolean; error?: string | null }>>;
   onCloneCanvasDrone: (
     drone: DroneSummary,
   ) => Promise<{ ok: boolean; droneId?: string; droneName?: string }> | { ok: boolean; droneId?: string; droneName?: string };
@@ -283,7 +282,7 @@ export function RightPanelTabContent({
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameCanvasChat,
-  onDeleteCanvasChat,
+  onDeleteCanvasChats,
   onCloneCanvasDrone,
   onCloneCanvasChat,
   onCreateCanvasChat,
@@ -475,7 +474,7 @@ export function RightPanelTabContent({
               onSendCanvasPrompt={onSendCanvasPrompt}
               onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
               onRenameChat={onRenameCanvasChat}
-              onDeleteChat={onDeleteCanvasChat}
+              onDeleteChats={onDeleteCanvasChats}
               onCloneChat={onCloneCanvasChat}
               onCloneDrone={onCloneCanvasDrone}
               onCreateChat={onCreateCanvasChat}

@@ -50,6 +50,8 @@ export type DroneSummary = {
     sourceChatName: string;
     checkpointId: string;
     agent: { kind: string; id?: string };
+    /** Its agent is answering. Side chats are not counted in `busyChats`, which describes the drone. */
+    busy?: boolean;
   }>;
   /** Chat name -> the chat it was cloned from, for sidebar clones and side chats alike. */
   chatCloneSources?: Record<string, string>;

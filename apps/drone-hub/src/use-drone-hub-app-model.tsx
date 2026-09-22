@@ -116,7 +116,7 @@ import {
 } from './droneHub/app/drone-selection-helpers';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import {
-  buildSidebarChatDeleteConfirmation,
+  buildCanvasChatDeleteConfirmation,
   type DeleteDroneChatOptions,
 } from './droneHub/app/sidebar-chat-delete-confirmation';
 import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
@@ -3591,7 +3591,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     for (const drone of drones) {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) continue;
-      for (const chatName of normalizedDroneChats(drone, { includeDefaultWhenEmpty: true })) {
+      // Side chats have cards on the canvas too.
+      for (const chatName of normalizedDroneChats(drone, { includeDefaultWhenEmpty: true, includeSideChats: true })) {
         const nodeId = createCanvasChatNodeId(droneId, chatName);
         if (!nodeId) continue;
         out[nodeId] = {
@@ -5219,76 +5220,135 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onDeleteSelectedDroneFromInputShortcut: deleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut: markSelectedDronesUnreadShortcut,
   });
-  const deleteCanvasChat = React.useCallback(
+  type CanvasChatDeleteResult = {
+    droneId: string;
+    chatName: string;
+    ok: boolean;
+    deletedDrone?: boolean;
+    error?: string | null;
+  };
+  const deleteCanvasChats = React.useCallback(
     async (
-      droneIdRaw: string,
-      chatNameRaw: string,
+      targetsRaw: ReadonlyArray<{ droneId: string; chatName: string }>,
       opts?: DeleteDroneChatOptions,
-    ): Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }> => {
-      const droneId = String(droneIdRaw ?? '').trim();
-      const chatName = String(chatNameRaw ?? '').trim() || 'default';
-      if (!droneId) return { ok: false, error: 'Missing drone id.' };
-      if (!sidebarSelectableDroneIdSet.has(droneId))
-        return { ok: false, error: 'Drone is unavailable.' };
-
-      const drone = drones.find((item) => item.id === droneId) ?? null;
-      const chats =
-        Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
+    ): Promise<CanvasChatDeleteResult[]> => {
       const deleteMode = deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent';
-      if (!chats.includes(chatName))
-        return { ok: false, error: `Chat "${chatName}" is unavailable.` };
-
-      if (chats.length <= 1) {
-        const opened = requestDeleteDrones([droneId]);
-        return opened
-          ? { ok: false, deletedDrone: false, error: '' }
-          : { ok: false, deletedDrone: false, error: 'Failed to open delete confirmation.' };
-      }
-      if (chatName === 'default') {
-        return { ok: false, error: 'Default chat cannot be deleted while other chats exist.' };
-      }
-
-      const droneLabel = drone ? uiDroneName(drone.name) : droneId;
-      if (opts?.confirmed !== true) {
-        const confirmed = await confirmDelete(buildSidebarChatDeleteConfirmation({
-          chatNames: [chatName],
-          droneLabel,
-          deleteMode,
-          draftChatNames: drone?.draftChats?.[chatName] === true ? [chatName] : [],
-        }));
-        if (!confirmed) return { ok: false, error: '' };
-      }
-
-      try {
-        await requestJson<{ ok: true; deletedChat: string }>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
-          { method: 'DELETE' },
-        );
-        deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
-        useDetachedChatStore.getState().forgetChat(droneId, chatName);
-        setSidebarChatOrderByDrone((prev) => {
-          const currentOrder = prev[droneId];
-          if (!currentOrder || !currentOrder.includes(chatName)) return prev;
-          const next = { ...prev };
-          const filtered = currentOrder.filter((entry) => entry !== chatName);
-          if (filtered.length === 0) {
-            delete next[droneId];
-            return next;
-          }
-          next[droneId] = filtered;
-          return next;
-        });
-        if (selectedDrone === droneId && selectedChat === chatName) {
-          const remaining = chats.filter((chat) => chat !== chatName);
-          const fallbackChat = remaining.includes('default')
-            ? 'default'
-            : (remaining[0] ?? 'default');
-          setSelectedChat(fallbackChat);
+      const results: CanvasChatDeleteResult[] = [];
+      const deletable: Array<{ droneId: string; chatName: string; drone: DroneSummary | null; chats: string[] }> = [];
+      const seen = new Set<string>();
+      for (const raw of targetsRaw) {
+        const droneId = String(raw?.droneId ?? '').trim();
+        const chatName = String(raw?.chatName ?? '').trim() || 'default';
+        const key = `${droneId}\u0000${chatName}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const fail = (error: string) => results.push({ droneId, chatName, ok: false, error });
+        if (!droneId) {
+          fail('Missing drone id.');
+          continue;
         }
-        return { ok: true, deletedDrone: false, error: null };
-      } catch (err: any) {
-        return { ok: false, deletedDrone: false, error: err?.message ?? String(err) };
+        if (!sidebarSelectableDroneIdSet.has(droneId)) {
+          fail('Drone is unavailable.');
+          continue;
+        }
+        const drone = drones.find((item) => item.id === droneId) ?? null;
+        const chats =
+          Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
+        const sideChat = (drone?.sideChats ?? []).some((chat) => chat.name === chatName);
+        if (!chats.includes(chatName) && !sideChat) {
+          fail(`Chat "${chatName}" is unavailable.`);
+          continue;
+        }
+        deletable.push({ droneId, chatName, drone, chats: sideChat ? [] : chats });
       }
+
+      // The last chat of a drone is the drone: deleting it asks about the drone instead.
+      if (deletable.length === 1 && deletable[0].chats.length > 0 && deletable[0].chats.length <= 1) {
+        const { droneId, chatName } = deletable[0];
+        const opened = requestDeleteDrones([droneId]);
+        results.push({
+          droneId,
+          chatName,
+          ok: false,
+          deletedDrone: false,
+          error: opened ? '' : 'Failed to open delete confirmation.',
+        });
+        return results;
+      }
+      const kept: Array<(typeof deletable)[number]> = [];
+      for (const target of deletable) {
+        // A side chat is not one of the drone's chats, so it never stands in for the drone.
+        if (target.chatName === 'default' && target.chats.length > 0) {
+          if (deletable.length === 1) {
+            results.push({
+              droneId: target.droneId,
+              chatName: target.chatName,
+              ok: false,
+              error: 'Default chat cannot be deleted while other chats exist.',
+            });
+          }
+          continue;
+        }
+        kept.push(target);
+      }
+      if (kept.length === 0) return results;
+
+      if (opts?.confirmed !== true) {
+        const defaultChatKept = kept.length < deletable.length;
+        const question = buildCanvasChatDeleteConfirmation({
+          targets: kept,
+          droneLabelById: (droneId) => {
+            const drone = drones.find((item) => item.id === droneId) ?? null;
+            return drone ? uiDroneName(drone.name) : droneId;
+          },
+          deleteMode,
+          isDraft: (droneId, chatName) =>
+            drones.find((item) => item.id === droneId)?.draftChats?.[chatName] === true,
+        });
+        const confirmed = await confirmDelete(
+          defaultChatKept
+            ? { ...question, message: `${question.message ?? ''} The default chat will be kept.`.trim() }
+            : question,
+        );
+        if (!confirmed) {
+          for (const target of kept) results.push({ droneId: target.droneId, chatName: target.chatName, ok: false, error: '' });
+          return results;
+        }
+      }
+
+      for (const { droneId, chatName, chats } of kept) {
+        try {
+          await requestJson<{ ok: true; deletedChat: string }>(
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
+            { method: 'DELETE' },
+          );
+          deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
+          useDetachedChatStore.getState().forgetChat(droneId, chatName);
+          setSidebarChatOrderByDrone((prev) => {
+            const currentOrder = prev[droneId];
+            if (!currentOrder || !currentOrder.includes(chatName)) return prev;
+            const next = { ...prev };
+            const filtered = currentOrder.filter((entry) => entry !== chatName);
+            if (filtered.length === 0) {
+              delete next[droneId];
+              return next;
+            }
+            next[droneId] = filtered;
+            return next;
+          });
+          if (selectedDrone === droneId && selectedChat === chatName) {
+            const remaining = chats.filter((chat) => chat !== chatName);
+            const fallbackChat = remaining.includes('default')
+              ? 'default'
+              : (remaining[0] ?? 'default');
+            setSelectedChat(fallbackChat);
+          }
+          results.push({ droneId, chatName, ok: true, deletedDrone: false, error: null });
+        } catch (err: any) {
+          results.push({ droneId, chatName, ok: false, deletedDrone: false, error: err?.message ?? String(err) });
+        }
+      }
+      return results;
     },
     [
       deleteActionSettingsState.deleteSettings,
@@ -5303,6 +5363,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       sidebarSelectableDroneIdSet,
       uiDroneName,
     ],
+  );
+  /** One chat, as the sidebar asks; the same question and the same rules as a canvas selection. */
+  const deleteCanvasChat = React.useCallback(
+    async (
+      droneId: string,
+      chatName: string,
+      opts?: DeleteDroneChatOptions,
+    ): Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }> => {
+      const [result] = await deleteCanvasChats([{ droneId, chatName }], opts);
+      return result ?? { ok: false, error: 'Missing drone id.' };
+    },
+    [deleteCanvasChats],
   );
   const canvasDraftRepoLabel = React.useMemo(() => {
     const repoPath = String(chatHeaderRepoPath ?? '').trim();
@@ -5416,7 +5488,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onSendCanvasPrompt={sendCanvasPrompt}
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
-          onDeleteCanvasChat={deleteCanvasChat}
+          onDeleteCanvasChats={deleteCanvasChats}
           onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
           onCreateCanvasChat={(droneId) => createChatForTarget({ droneId })}

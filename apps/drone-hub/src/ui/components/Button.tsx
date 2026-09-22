@@ -56,7 +56,7 @@ export const UiButton = React.forwardRef<HTMLButtonElement, UiButtonProps>(funct
       disabled={unavailable}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center border transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed enabled:active:translate-y-px',
+        'inline-flex shrink-0 items-center justify-center border transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed enabled:active:translate-y-px',
         variantClassName[variant],
         sizeClassName[size],
         loading ? 'opacity-75' : disabled ? 'opacity-40' : null,

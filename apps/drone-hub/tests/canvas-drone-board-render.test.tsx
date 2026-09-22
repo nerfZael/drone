@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
+import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
 import {
   EMPTY_CANVAS_BOARD,
@@ -31,16 +32,23 @@ function makeDrone(
   } as unknown as DroneSummary;
 }
 
-type CloneChat = NonNullable<React.ComponentProps<typeof DroneCanvasDock>['onCloneChat']>;
+type DockProps = React.ComponentProps<typeof DroneCanvasDock>;
+type CloneChat = NonNullable<DockProps['onCloneChat']>;
 
 function Dock({
   drone,
   onCreateChat,
   onCloneChat,
+  onDeleteChats,
+  onRenameChat,
+  onActivateChat,
 }: {
   drone: DroneSummary;
   onCreateChat?: (droneId: string) => Promise<boolean>;
   onCloneChat?: CloneChat;
+  onDeleteChats?: DockProps['onDeleteChats'];
+  onRenameChat?: DockProps['onRenameChat'];
+  onActivateChat?: DockProps['onActivateChat'];
 }) {
   const noop = () => {};
   return (
@@ -55,6 +63,9 @@ function Dock({
         chatNodeStateById={{}}
         onCreateChat={onCreateChat}
         onCloneChat={onCloneChat}
+        onDeleteChats={onDeleteChats}
+        onRenameChat={onRenameChat}
+        onActivateChat={onActivateChat}
         spawnAgentMenuEntries={[]}
         spawnAgentKey=""
         onSpawnAgentKeyChange={noop}
@@ -177,6 +188,104 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     await act(async () => globalButton.click());
     expect(nodeIds()).toEqual([createCanvasChatNodeId('beta', 'default')]);
   } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('side chat cards copy, paste and delete like any other card, and a rename is kept on click-away', async () => {
+  const dom = new Window();
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom,
+    document: dom.document,
+    HTMLElement: dom.HTMLElement,
+    Event: dom.Event,
+    CustomEvent: dom.CustomEvent,
+    // The rename field focuses itself on the next frame.
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const card = (chatName: string) => container.querySelector(`[data-drone-id="${alpha(chatName)}"]`) as unknown as Element;
+  const viewport = () => container.querySelector('[data-drone-canvas-viewport="1"]') as unknown as Element;
+  // The workspace that owns the floating side chat window.
+  const focusRequests: FocusSideChatDetail[] = [];
+  const onFocusSideChat = (event: Event) => {
+    focusRequests.push((event as CustomEvent<FocusSideChatDetail>).detail);
+    event.preventDefault();
+  };
+  dom.addEventListener(FOCUS_SIDE_CHAT_EVENT, onFocusSideChat);
+  try {
+    const cloned: string[] = [];
+    const activated: string[] = [];
+    const onCloneChat: CloneChat = async (_droneId, chatName) => {
+      cloned.push(chatName);
+      return { ok: true, chatName: `${chatName}-copy` };
+    };
+    const drone = makeDrone(['default', 'plan'], [['side-1', 'plan']]);
+    await act(async () =>
+      root.render(<Dock drone={drone} onCloneChat={onCloneChat} onActivateChat={(_d, chatName) => activated.push(chatName)} />),
+    );
+
+    // Clicking a side chat brings its window forward but leaves the keyboard on the canvas.
+    await act(async () => Simulate.click(card('side-1')));
+    expect(focusRequests).toEqual([{ droneId: 'alpha', chatName: 'side-1', keyboardFocus: false }]);
+    expect(activated).toEqual([]);
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').selectedDroneIds).toEqual([alpha('side-1')]);
+    await act(async () => Simulate.keyDown(viewport(), { key: 'c', ctrlKey: true }));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'v', ctrlKey: true }));
+    expect(cloned).toEqual(['side-1']);
+
+    // Delete asks once for the whole selection, side chat included, and the cards go together.
+    const deleteCalls: Array<Array<{ droneId: string; chatName: string }>> = [];
+    const onDeleteChats: NonNullable<DockProps['onDeleteChats']> = async (targets) => {
+      deleteCalls.push([...targets]);
+      return targets.map((target) => ({ ...target, ok: true }));
+    };
+    await act(async () => root.render(<Dock drone={drone} onCloneChat={onCloneChat} onDeleteChats={onDeleteChats} />));
+    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete' }));
+    expect(deleteCalls).toEqual([[{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'alpha', chatName: 'side-1' }]]);
+    // With the modifier held it is the same request, not one per card.
+    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete', shiftKey: true }));
+    expect(deleteCalls.length).toBe(2);
+
+    // A title being edited is saved when the field loses focus, and dropped on Escape.
+    const renames: string[] = [];
+    const onRenameChat: NonNullable<DockProps['onRenameChat']> = async (_droneId, _chatName, newName) => {
+      renames.push(newName);
+      return { ok: true, chatName: newName };
+    };
+    await act(async () => root.render(<Dock drone={drone} onRenameChat={onRenameChat} />));
+    await act(async () => Simulate.doubleClick(card('plan')));
+    let input = container.querySelector('input') as unknown as HTMLInputElement;
+    await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
+    await act(async () => Simulate.blur(input));
+    expect(renames).toEqual(['plan b']);
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan b'], [['side-1', 'plan b']])} onRenameChat={onRenameChat} />));
+    await act(async () => Simulate.doubleClick(card('plan b')));
+    input = container.querySelector('input') as unknown as HTMLInputElement;
+    await act(async () => Simulate.change(input, { target: { value: 'plan c' } } as never));
+    await act(async () => Simulate.keyDown(input, { key: 'Escape' }));
+    await act(async () => Simulate.blur(input));
+    expect(renames).toEqual(['plan b']);
+    expect(container.querySelector('input')).toBeNull();
+  } finally {
+    dom.removeEventListener(FOCUS_SIDE_CHAT_EVENT, onFocusSideChat);
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {

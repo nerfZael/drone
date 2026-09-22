@@ -1,15 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import {
   approvalChatNodeIdsForDrone,
+  busyChatNodeIdsForDrone,
   droneChatRequiresApproval,
   hasOnlyDefaultChat,
   nextUnreadChatReadCursor,
+  normalizedDroneChats,
   reconcileManualUnreadMarker,
   resolveAgentChatF2RenameTarget,
   resolveCanvasChatDisplay,
   summarizeSidebarChats,
   unreadChatNodeIdsForDrone,
 } from '../src/droneHub/app/chat-node-helpers';
+import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -29,6 +32,7 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
     approvalChats: seed.approvalChats,
     approvalRequired: seed.approvalRequired,
     busyChats: seed.busyChats,
+    sideChats: seed.sideChats,
     fleetParentId: seed.fleetParentId ?? null,
     repoAttached: seed.repoAttached ?? false,
     hubPhase: seed.hubPhase ?? null,
@@ -103,6 +107,24 @@ describe('chat node helpers', () => {
       busyChatNodeIdSet: new Set(['chat:alpha::working']),
       unreadAgentMessageByChatNodeId: { 'chat:alpha::default': true },
     })).toEqual({ approval: 1, unread: 0, working: 1 });
+  });
+
+  test('a busy side chat has a working card even though it does not make the drone busy', () => {
+    const agent = { kind: 'builtin', id: 'codex' };
+    const d = drone({
+      id: 'alpha',
+      name: 'Alpha',
+      chats: ['default'],
+      busyChats: [],
+      sideChats: [
+        { name: 'side-a', sourceChatName: 'default', checkpointId: 'c1', agent, busy: true },
+        { name: 'side-b', sourceChatName: 'default', checkpointId: 'c1', agent },
+      ],
+    });
+    expect(busyChatNodeIdsForDrone(d)).toEqual([createCanvasChatNodeId('alpha', 'side-a')]);
+    // The sidebar lists the drone's chats; the canvas has a card for side chats as well.
+    expect(normalizedDroneChats(d)).toEqual(['default']);
+    expect(normalizedDroneChats(d, { includeSideChats: true })).toEqual(['default', 'side-a', 'side-b']);
   });
 
   test('treats an implicit empty chat list as only the default chat', () => {

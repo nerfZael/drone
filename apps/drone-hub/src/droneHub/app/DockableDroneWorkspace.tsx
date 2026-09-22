@@ -24,7 +24,7 @@ import { isUsableFloatingBounds } from './floating-window-bounds';
 import { alignFloatingChats, SIDE_CHAT_PANEL_PREFIX } from './align-floating-chats';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
-import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
+import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
@@ -906,7 +906,7 @@ export function DockableDroneWorkspace({
   }, [currentDrone.id]);
 
   const cancelPendingChatFocusRef = React.useRef<(() => void) | null>(null);
-  const focusFloatingChat = React.useCallback((chatName: string) => {
+  const focusFloatingChat = React.useCallback((chatName: string, opts?: { keyboardFocus?: boolean }) => {
     if (chatName === mainChatName) return false;
     const slotName = chatName === displacedMainChatName ? mainChatName : chatName;
     const panel = apiRef.current?.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${slotName}`);
@@ -914,6 +914,7 @@ export function DockableDroneWorkspace({
     if (!panel || !root) return false;
     cancelPendingChatFocusRef.current?.();
     panel.api.setActive();
+    if (opts?.keyboardFocus === false) return true;
     cancelPendingChatFocusRef.current = focusChatWindow(root,
       () => [...root.querySelectorAll<HTMLElement>('[data-side-chat-name]')]
         .find((element) => element.dataset.sideChatName === chatName && !element.closest('.dv-tabs-container')),
@@ -925,9 +926,9 @@ export function DockableDroneWorkspace({
 
   React.useEffect(() => {
     const focus = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
+      const detail = (event as CustomEvent<FocusSideChatDetail>).detail;
       if (detail?.droneId !== currentDrone.id) return;
-      if (focusFloatingChat(detail.chatName)) event.preventDefault();
+      if (focusFloatingChat(detail.chatName, { keyboardFocus: detail.keyboardFocus })) event.preventDefault();
     };
     window.addEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
     return () => window.removeEventListener(FOCUS_SIDE_CHAT_EVENT, focus);

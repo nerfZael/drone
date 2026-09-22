@@ -182,6 +182,18 @@ describeSocketSuite('chat management api', () => {
       } });
       expect(side.isError).not.toBe(true);
       expect(side.structuredContent).toMatchObject({ ok: true, chat: 'side-a', draft: false });
+      // A side chat with a prompt in flight: its own card shows that, but the drone is not busy for it.
+      await updateRegistry((reg: any) => {
+        reg.drones[droneId].chats['side-a'].pendingPrompts = [
+          { id: 'run-side-a', prompt: 'Keep going', state: 'running', at: new Date().toISOString() },
+        ];
+      });
+      const summaries = await apiFetch('/api/drones');
+      const summarized = summaries.data.drones.find((drone: any) => drone.id === droneId);
+      expect(summarized.sideChats.find((chat: any) => chat.name === 'side-a')).toMatchObject({ busy: true });
+      expect(summarized.sideChats.find((chat: any) => chat.name === 'side-b')).toMatchObject({ busy: false });
+      expect(summarized.busyChats).not.toContain('side-a');
+      expect(summarized.busy).toBe(false);
 
       const sent = await client.callTool({ name: 'send_message', arguments: {
         drone: droneId, chat: 'Untitled 2', message: 'Held question',

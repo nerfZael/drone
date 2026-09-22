@@ -45,7 +45,6 @@ export function AppConfirmDialog({
   onConfirm: () => void;
   portalContainer?: HTMLElement;
 }) {
-  const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const confirmButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   return (
@@ -59,11 +58,12 @@ export function AppConfirmDialog({
       size="small"
       showCloseButton={false}
       portalContainer={portalContainer}
-      initialFocusRef={destructive ? cancelButtonRef : confirmButtonRef}
+      // The question was asked because the person chose the action, so Enter completes it;
+      // Escape is always there to back out. Destructive dialogs stand out by colour instead.
+      initialFocusRef={confirmButtonRef}
       footer={
         <>
           <UiButton
-            ref={cancelButtonRef}
             onClick={onCancel}
             size="medium"
           >

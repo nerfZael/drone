@@ -43,6 +43,12 @@ describe('application confirmation dialog', () => {
     expect(html).toContain('Close pull request');
   });
 
+  test('Enter completes the action that was asked about, whether or not it is destructive', () => {
+    const source = readFileSync(new URL('../src/ui/AppConfirmDialog.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('initialFocusRef={confirmButtonRef}');
+    expect(source).not.toContain('cancelButtonRef');
+  });
+
   test('uses the themed confirmation for setting a drone as the base image', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/use-drone-mutation-actions.ts', import.meta.url),

@@ -340,7 +340,7 @@ export function DroneCanvasDock({
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameChat,
-  onDeleteChat,
+  onDeleteChats,
   onCloneChat,
   onCloneDrone,
   onCreateChat,
@@ -392,10 +392,10 @@ export function DroneCanvasDock({
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onDeleteChat?: (
-    droneId: string,
-    chatName: string,
-  ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
+  /** Deletes the chats together, behind one confirmation; a result per chat asked about. */
+  onDeleteChats?: (
+    targets: ReadonlyArray<{ droneId: string; chatName: string }>,
+  ) => Promise<Array<{ droneId: string; chatName: string; ok: boolean; deletedDrone?: boolean; error?: string | null }>>;
   onCloneChat?: (
     droneId: string,
     chatName: string,
@@ -569,6 +569,8 @@ export function DroneCanvasDock({
   const [inlineRenamingDroneId, setInlineRenamingDroneId] = React.useState<string | null>(null);
   const [inlineRenameDraft, setInlineRenameDraft] = React.useState('');
   const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
+  // Enter and Escape settle a rename themselves; the blur that follows the field going away must not.
+  const inlineRenameSettledRef = React.useRef(false);
   const [deletingChatNodeById, setDeletingChatNodeById] = React.useState<Record<string, boolean>>({});
   const [canvasControlsExpanded, setCanvasControlsExpanded] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
@@ -809,6 +811,7 @@ export function DroneCanvasDock({
       const node = nodesByDroneId[droneId];
       if (!node) return;
       setSelectedDroneIds([droneId]);
+      inlineRenameSettledRef.current = false;
       setInlineRenameBusy(false);
       setInlineRenamingDroneId(droneId);
       setInlineRenameDraft(String(node.label ?? droneId));
@@ -864,8 +867,11 @@ export function DroneCanvasDock({
         return;
       }
       setMessageError(String(result.error ?? 'Rename failed.'));
+      // The field stays open for another try, and clicking away saves again.
+      inlineRenameSettledRef.current = false;
     } catch (err: any) {
       setMessageError(err?.message ?? String(err));
+      inlineRenameSettledRef.current = false;
     } finally {
       setInlineRenameBusy(false);
     }
@@ -879,53 +885,55 @@ export function DroneCanvasDock({
     upsertNodes,
   ]);
 
-  const deleteChatNode = React.useCallback(
-    async (nodeIdRaw: string) => {
-      const nodeId = String(nodeIdRaw ?? '').trim();
-      if (!nodeId || isCanvasDraftNodeId(nodeId)) {
-        removeNodes([nodeId]);
-        return;
+  /** Deletes the chats behind the selected cards, asking once for all of them. */
+  const deleteChatNodes = React.useCallback(
+    async (nodeIdsRaw: readonly string[]) => {
+      const chatNodeIds: string[] = [];
+      const cardsOnly: string[] = [];
+      for (const raw of nodeIdsRaw) {
+        const nodeId = String(raw ?? '').trim();
+        if (!nodeId) continue;
+        if (!isCanvasDraftNodeId(nodeId) && parseCanvasChatNodeId(nodeId)) chatNodeIds.push(nodeId);
+        else cardsOnly.push(nodeId);
       }
-      const chatRef = parseCanvasChatNodeId(nodeId);
-      if (!chatRef) {
-        removeNodes([nodeId]);
-        return;
-      }
-      if (!onDeleteChat) {
+      if (cardsOnly.length > 0) removeNodes(cardsOnly);
+      if (chatNodeIds.length === 0) return;
+      if (!onDeleteChats) {
         setMessageError('Chat deletion is unavailable.');
         return;
       }
-      setDeletingChatNodeById((prev) => ({ ...prev, [nodeId]: true }));
+      const targets = chatNodeIds.map((nodeId) => parseCanvasChatNodeId(nodeId)!);
+      setDeletingChatNodeById((prev) => Object.assign({ ...prev }, ...chatNodeIds.map((nodeId) => ({ [nodeId]: true }))));
       setMessageError(null);
       try {
-        const result = await onDeleteChat(chatRef.droneId, chatRef.chatName);
-        if (!result.ok) {
-          const errorText = String(result.error ?? '').trim();
-          if (errorText) setMessageError(errorText);
-          return;
+        const results = await onDeleteChats(targets);
+        const errors = results.map((result) => String(result.error ?? '').trim()).filter(Boolean);
+        if (errors.length > 0) setMessageError(errors.length === 1 ? errors[0] : `${errors.length} chats could not be deleted: ${errors[0]}`);
+        const toRemove = new Set<string>();
+        for (const result of results) {
+          if (!result.ok) continue;
+          useDroneCanvasStore.getState().dropOptimisticBoardMembers(result.droneId, [result.chatName]);
+          if (result.deletedDrone) {
+            for (const candidateId of nodeOrder) {
+              const ref = parseCanvasChatNodeId(candidateId);
+              if (ref?.droneId === result.droneId || parseCanvasDroneNodeId(candidateId) === result.droneId) toRemove.add(candidateId);
+            }
+          } else {
+            toRemove.add(createCanvasChatNodeId(result.droneId, result.chatName));
+          }
         }
-        useDroneCanvasStore.getState().dropOptimisticBoardMembers(chatRef.droneId, [chatRef.chatName]);
-        if (result.deletedDrone) {
-          const toRemove = nodeOrder.filter((candidateId) => {
-            const ref = parseCanvasChatNodeId(candidateId);
-            return ref?.droneId === chatRef.droneId || parseCanvasDroneNodeId(candidateId) === chatRef.droneId;
-          });
-          if (toRemove.length > 0) removeNodes(toRemove);
-          return;
-        }
-        removeNodes([nodeId]);
+        if (toRemove.size > 0) removeNodes([...toRemove]);
       } catch (err: any) {
         setMessageError(err?.message ?? String(err));
       } finally {
         setDeletingChatNodeById((prev) => {
-          if (!prev[nodeId]) return prev;
           const next = { ...prev };
-          delete next[nodeId];
+          for (const nodeId of chatNodeIds) delete next[nodeId];
           return next;
         });
       }
     },
-    [nodeOrder, onDeleteChat, removeNodes],
+    [nodeOrder, onDeleteChats, removeNodes],
   );
 
   const getDraftPlacement = React.useCallback(
@@ -1732,8 +1740,9 @@ export function DroneCanvasDock({
         }
         const chatRef = parseCanvasChatNodeId(droneId);
         if (!chatRef) return;
-        // A side chat usually lives in a floating window; bring that forward instead of replacing the main chat.
-        if (sideChatNodeIds.has(droneId) && focusSideChat(chatRef.droneId, chatRef.chatName)) return;
+        // A side chat usually lives in a floating window; bring that forward instead of replacing the main
+        // chat. Keyboard focus stays on the canvas, whose selection the copy, paste and delete keys act on.
+        if (sideChatNodeIds.has(droneId) && focusSideChat(chatRef.droneId, chatRef.chatName, { keyboardFocus: false })) return;
         onActivateChat?.(chatRef.droneId, chatRef.chatName);
       }
     },
@@ -2111,41 +2120,19 @@ export function DroneCanvasDock({
       }
 
       if ((key === 'delete' || key === 'backspace') && selectedDroneIds.length > 0) {
-        const shiftDeleteOnly =
-          key === 'delete' && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
-        if (shiftDeleteOnly) {
-          event.preventDefault();
-          event.stopPropagation();
-          cancelActivePointerInteractions();
-          setMessageError(null);
-          setMessageDraft('');
-
-          const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
-          if (draftNodeIds.length > 0) {
-            removeNodes(draftNodeIds);
-          }
-
-          const chatNodeIds = sortChatNodeIdsForDestructiveDelete(
-            selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id)),
-          );
-          if (chatNodeIds.length > 0) {
-            void (async () => {
-              for (const nodeId of chatNodeIds) {
-                await deleteChatNode(nodeId);
-              }
-            })();
-          }
-          return;
-        }
-
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
         event.preventDefault();
         event.stopPropagation();
-        // A drone board always shows all of its chats, so there is no card to remove.
-        if (droneScope) return;
         cancelActivePointerInteractions();
-        removeNodes(selectedDroneIds);
-        setMessageDraft('');
         setMessageError(null);
+        setMessageDraft('');
+        // On the global board Delete only takes cards off the board; Shift+Delete deletes the
+        // chats themselves. A drone board has no cards to remove, so Delete deletes there too.
+        if (droneScope || event.shiftKey) {
+          void deleteChatNodes(sortChatNodeIdsForDestructiveDelete(selectedDroneIds));
+          return;
+        }
+        removeNodes(selectedDroneIds);
       }
     },
     [
@@ -2158,7 +2145,7 @@ export function DroneCanvasDock({
       nodeOrder,
       openMessageBar,
       cancelActivePointerInteractions,
-      deleteChatNode,
+      deleteChatNodes,
       createDraftNearViewportCenter,
       focusPrimaryChatInputShortcutBinding,
       pasteCopiedCanvasNodesAsClones,
@@ -2591,20 +2578,25 @@ export function DroneCanvasDock({
                       onDoubleClick={(event) => {
                         event.stopPropagation();
                       }}
+                      // Clicking away keeps what was typed, as in a file explorer; only Escape discards it.
                       onBlur={() => {
-                        cancelInlineRename();
+                        if (inlineRenameBusy || inlineRenameSettledRef.current) return;
+                        inlineRenameSettledRef.current = true;
+                        void submitInlineRename();
                       }}
                       onKeyDown={(event) => {
                         if ((event.nativeEvent as any)?.isComposing) return;
                         if (event.key === 'Enter') {
                           event.preventDefault();
                           event.stopPropagation();
+                          inlineRenameSettledRef.current = true;
                           void submitInlineRename();
                           return;
                         }
                         if (event.key === 'Escape') {
                           event.preventDefault();
                           event.stopPropagation();
+                          inlineRenameSettledRef.current = true;
                           cancelInlineRename();
                         }
                       }}

@@ -693,9 +693,10 @@ code, pre {
   background: var(--workspace);
 }
 
+/* Keyboard focus only: a ring on the control's own edge, not a halo around it. */
 :where(button, [role='button'], a, input, textarea, select):focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 
 /* Fields use one quiet 1px border instead of stacking the general keyboard

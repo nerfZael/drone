@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  buildCanvasChatDeleteConfirmation,
   buildSidebarChatDeleteConfirmation,
   buildSidebarChatGroupDeleteConfirmation,
 } from '../src/droneHub/app/sidebar-chat-delete-confirmation';
@@ -109,5 +110,50 @@ describe('sidebar chat delete confirmation', () => {
     expect(singleDeleteFlow).toContain('opts?.confirmed !== true');
     expect(singleDeleteFlow).toContain('await confirmDelete(');
     expect(singleDeleteFlow).not.toContain('window.confirm');
+  });
+});
+
+describe('buildCanvasChatDeleteConfirmation', () => {
+  const labels = (droneId: string) => ({ alpha: 'Alpha', beta: 'Beta' })[droneId] ?? droneId;
+  const noDrafts = () => false;
+
+  test('a selection within one drone asks the sidebar question, once, for all of its chats', () => {
+    expect(
+      buildCanvasChatDeleteConfirmation({
+        targets: [{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'alpha', chatName: 'side-1' }],
+        droneLabelById: labels,
+        deleteMode: 'permanent',
+        isDraft: noDrafts,
+      }),
+    ).toEqual({
+      title: 'Delete 2 chats?',
+      message: 'Delete 2 selected chats from “Alpha”?',
+      confirmLabel: 'Delete chats',
+      destructive: true,
+    });
+  });
+
+  test('a selection across drones counts the drones instead of naming one', () => {
+    expect(
+      buildCanvasChatDeleteConfirmation({
+        targets: [{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'beta', chatName: 'notes' }, { droneId: 'beta', chatName: 'more' }],
+        droneLabelById: labels,
+        deleteMode: 'archive',
+        isDraft: noDrafts,
+      }),
+    ).toEqual({
+      title: 'Archive 3 chats?',
+      message: 'Archive 3 selected chats across 2 drones? You can restore archived chats from Settings > Archive before they auto-delete.',
+      confirmLabel: 'Archive chats',
+      destructive: true,
+    });
+    expect(
+      buildCanvasChatDeleteConfirmation({
+        targets: [{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'beta', chatName: 'draft' }],
+        droneLabelById: labels,
+        deleteMode: 'archive',
+        isDraft: (_droneId, chatName) => chatName === 'draft',
+      }),
+    ).toMatchObject({ title: 'Archive and delete 2 chats?', confirmLabel: 'Archive and delete' });
   });
 });
