@@ -66,11 +66,17 @@ for (const detached of [false, true]) test(`sessions preserve recording, concurr
   const container = dom.document.createElement('div'); dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
   const page = () => detached && child.document.querySelector('[data-companion-surface]') ? child : dom;
-  const press = async (key: string) => act(async () => { page().document.body.dispatchEvent(new (page().KeyboardEvent)('keydown', { key, bubbles: true, cancelable: true })); });
+  const press = async (key: string, target = page().document.body) => act(async () => { target.dispatchEvent(new (page().KeyboardEvent)('keydown', { key, bubbles: true, cancelable: true })); });
   try {
     await act(async () => root.render(<CompanionProvider><Harness /></CompanionProvider>));
     expect(companion.sessions).toEqual([]);
-    await press('2');
+    const canvas = dom.document.createElement('div');
+    canvas.setAttribute('data-shortcut-capture', 'true');
+    canvas.setAttribute('data-drone-canvas-viewport', '1');
+    canvas.tabIndex = 0;
+    dom.document.body.append(canvas);
+    canvas.focus();
+    await press('2', canvas);
     expect(companion.sessions.map(s => s.slot)).toEqual([2]);
     expect(companion.activeSlot).toBe(2);
     expect(page().document.querySelector('[aria-label="Companion sessions"] button')?.textContent).toBe('2');
@@ -216,7 +222,19 @@ test('number shortcuts respect typing, dialogs, modifiers, repeats, and manual b
   expect(companionSessionShortcut(event('2', child), bindings)).toBeNull();
   const dialog = dom.document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dom.document.body.append(dialog);
   expect(companionSessionShortcut(event(), bindings)).toBeNull(); dialog.remove();
+  const canvas = dom.document.createElement('div');
+  canvas.setAttribute('data-shortcut-capture', 'true');
+  canvas.setAttribute('data-drone-canvas-viewport', '1');
+  const card = dom.document.createElement('button'); canvas.append(card);
+  expect(companionSessionShortcut(event('2', canvas), bindings)).toBe(2);
+  expect(companionSessionShortcut(event('2', card), bindings)).toBe(2);
+  const composer = dom.document.createElement('textarea'); canvas.append(composer);
+  expect(companionSessionShortcut(event('2', composer), bindings)).toBeNull();
+  const capture = dom.document.createElement('div');
+  capture.setAttribute('data-shortcut-capture', 'true'); canvas.append(capture);
+  expect(companionSessionShortcut(event('2', capture), bindings)).toBeNull();
   bindings.createDraftDrone = { key: '2', mod: false, ctrl: false, meta: false, shift: false, alt: false };
+  expect(companionSessionShortcut(event('2', canvas), bindings)).toBeNull();
   expect(companionSessionShortcut(event(), bindings)).toBeNull();
 });
 
