@@ -419,8 +419,23 @@ export function CompanionOverlay() {
           setHistoryOpen(false);
         }}
       />
+      <aside tabIndex={-1}
+        data-companion-drop-active={dropActive || undefined}
+        className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} flex-col ${companion.proposals.length > 0 ? proposalDisplayMode === 'summaries' ? flowsDown ? 'rounded-b-none' : 'rounded-t-none' : flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
+        aria-label="Companion"
+      >
+      {/* A soft veil says what will happen; it never takes the pointer, so the drop lands on the page beneath. */}
+      {dropActive ? (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[var(--accent-subtle)] backdrop-blur-[1.5px]">
+          <span className="flex items-center gap-1.5 rounded-full border border-[var(--accent-border)] bg-[var(--panel-raised)] px-2.5 py-1 text-[11px] text-[var(--fg)] shadow-sm">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            Drop to attach
+          </span>
+        </div>
+      ) : null}
+      {/* Keep the session row inside the card, directly above its controls. */}
       {companion.sessions?.length ? (
-        <nav aria-label="Companion sessions" className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-[var(--border)] bg-[var(--panel-raised)] px-1.5 py-1">
+        <nav aria-label="Companion sessions" className={`flex shrink-0 flex-wrap items-center gap-1 px-2 pt-1 ${flowsDown ? 'order-1' : 'order-2'}`}>
           {companion.sessions.map(session => (
             <button key={session.slot} type="button" aria-pressed={session.slot === companion.activeSlot}
               aria-label={`Session ${session.slot}: ${companionStatusLabel(session.status, session.recordingPaused)}${session.working && session.status !== 'working' ? ' · Working' : ''}`}
@@ -436,22 +451,8 @@ export function CompanionOverlay() {
             onClick={() => companion.selectSession(COMPANION_SLOTS.find(slot => !companion.sessions.some(session => session.slot === slot))!)}>+</button> : null}
         </nav>
       ) : null}
-      <aside tabIndex={-1}
-        data-companion-drop-active={dropActive || undefined}
-        className={`relative outline-none transition-[box-shadow,border-color] duration-150 flex max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl border bg-[var(--panel-raised)] ${dropActive ? 'border-[var(--accent-border)] shadow-[0_0_0_4px_var(--accent-subtle),var(--shadow-dialog)]' : 'border-[var(--border)] shadow-[var(--edge-highlight),var(--shadow-dialog)]'} ${companionWindow.detached && !flowsDown ? 'flex-col-reverse' : 'flex-col'} ${companion.proposals.length > 0 ? proposalDisplayMode === 'summaries' ? flowsDown ? 'rounded-b-none' : 'rounded-t-none' : flowsDown ? 'rounded-br-none' : 'rounded-tr-none' : ''}`}
-        aria-label="Companion"
-      >
-      {/* A soft veil says what will happen; it never takes the pointer, so the drop lands on the page beneath. */}
-      {dropActive ? (
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-[var(--accent-subtle)] backdrop-blur-[1.5px]">
-          <span className="flex items-center gap-1.5 rounded-full border border-[var(--accent-border)] bg-[var(--panel-raised)] px-2.5 py-1 text-[11px] text-[var(--fg)] shadow-sm">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-            Drop to attach
-          </span>
-        </div>
-      ) : null}
       {/* Header doubles as the user's message once a transcript exists. In the floating window it is the bar that stays put. */}
-      <div data-companion-window-bar="true" data-companion-drag-handle={companionWindow.detached || undefined} className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
+      <div data-companion-window-bar="true" data-companion-drag-handle={companionWindow.detached || undefined} className={`flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5 ${flowsDown ? 'order-2' : 'order-3'}`}>
         <Popover.Root open={expanded} onOpenChange={setExpanded}>
           <Popover.Trigger asChild>
             <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}
@@ -687,10 +688,10 @@ export function CompanionOverlay() {
         </div>
       </div>
 
-      {companionWindow.error ? <p role="alert" className="px-3 py-2 text-xs text-[var(--red)]">{companionWindow.error}</p> : null}
+      {companionWindow.error ? <p role="alert" className="order-1 px-3 py-2 text-xs text-[var(--red)]">{companionWindow.error}</p> : null}
       {/* Body: the reply is what the user came for. */}
       {companion.error || (companion.reply && !replyCollapsed) ? (
-        <div className="min-h-0 overflow-y-auto">
+        <div className={`min-h-0 overflow-y-auto ${flowsDown ? 'order-3' : 'order-1'}`}>
           {companion.error ? (
             <div className="mx-3 mt-2.5 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-xs text-[var(--red)]">
               {companion.error}
@@ -699,7 +700,7 @@ export function CompanionOverlay() {
           {companion.reply && !replyCollapsed ? (
             // The margin around the reply still drags the floating window; the text itself can be selected and copied.
             <div data-companion-drag-handle={companionWindow.detached || undefined}
-              className={`px-3 ${companionWindow.detached && !flowsDown ? 'pb-0.5 pt-2' : 'pb-2 pt-0.5'} ${companionWindow.detached ? 'cursor-move' : ''}`}>
+              className={`px-3 ${flowsDown ? 'pb-2 pt-0.5' : 'pb-0.5 pt-2'} ${companionWindow.detached ? 'cursor-move' : ''}`}>
               <div data-companion-selectable="true" className="cursor-auto select-text">
                 <ChatMessageBody role="assistant" text={companion.reply} autoExpand
                   // Paths in a reply refer to Companion home: open the file there, or select the folder.
