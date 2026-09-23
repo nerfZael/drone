@@ -46,6 +46,8 @@ const {
 const {
   resetWorkspaceToChat,
   rebalanceGridGroupWidths,
+  captureGridGroupWidths,
+  fitAddedGridGroups,
   isChatOnlyGrid,
   sizeWorkspaceOpenedFromChat,
   ensureWorkspaceToolPanel,
@@ -232,6 +234,9 @@ describe('per-drone workspace state', () => {
     const api = {
       width: 1800,
       groups,
+      get panels() {
+        return groups.flatMap((group) => group.panels.map((panel) => ({ id: panel.id, api: { group } })));
+      },
       getPanel: (id: string) => {
         const group = groups.find((entry) => entry.panels.some((panel) => panel.id === id));
         return group ? { api: { group } } : undefined;
@@ -294,6 +299,39 @@ describe('per-drone workspace state', () => {
     );
     rebalanceGridGroupWidths(api);
     expect(calls.map((call) => call.width)).toEqual([900, 900]);
+  });
+
+  test('switching Changes to Editor takes the explorer width from that pane only', () => {
+    writeWorkspaceExplorerWidth(240);
+    // Dockview has already squeezed the explorer in; the pre-open widths were 500 / 1300.
+    // The Editor reuses the Changes panel, so it keeps the tool:changes id.
+    const { api, calls, groups } = sizingWorkspace(
+      [['agent-chat'], ['tool:changes'], ['file-explorer']], [500, 900, 400],
+    );
+    const previous = new Map([[groups[0], 500], [groups[1], 1300]]) as any;
+    fitAddedGridGroups(api, previous);
+    expect(calls.slice(0, 3)).toEqual([
+      { ids: ['agent-chat'], width: 500 },
+      { ids: ['tool:changes'], width: 1060 },
+      { ids: ['file-explorer'], width: 240 },
+    ]);
+  });
+
+  test('opening another tool keeps the existing panes in their chosen proportions', () => {
+    const { api, calls, groups } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer'], ['tool:terminal']], [400, 800, 200, 400],
+    );
+    const previous = captureGridGroupWidths(api);
+    previous.delete(groups[3] as any);
+    for (const [group, width] of [[groups[0], 520], [groups[1], 1040], [groups[2], 240]] as const) previous.set(group as any, width);
+    fitAddedGridGroups(api, previous);
+    // 1800 - 400 new - 240 explorer leaves 1160 for chat and editor at 1:2.
+    expect(calls.slice(0, 4)).toEqual([
+      { ids: ['agent-chat'], width: 387 },
+      { ids: ['tool:editor'], width: 773 },
+      { ids: ['file-explorer'], width: 240 },
+      { ids: ['tool:terminal'], width: 400 },
+    ]);
   });
 
   test('opens editor and explorer as separate panels and reuses their positions', () => {

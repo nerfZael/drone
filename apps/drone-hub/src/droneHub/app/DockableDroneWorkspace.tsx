@@ -257,6 +257,21 @@ function newToolPanelWidth(api: DockviewApi, referencePanelId: string): number {
   return DEFAULT_NEW_TOOL_PANEL_WIDTH;
 }
 
+type GridGroup = DockviewApi['groups'][number];
+
+function isStandaloneExplorerGroup(group: GridGroup): boolean {
+  return group.panels.length === 1 && group.panels[0].id === EXPLORER_PANEL_ID;
+}
+
+function measuredGridGroups(api: DockviewApi): GridGroup[] {
+  return api.groups.filter((group) => {
+    if (group.api.location.type !== 'grid') return false;
+    const width = Math.round(Number(group.width ?? 0));
+    const height = Math.round(Number(group.height ?? 0));
+    return width > 0 && height > 0;
+  });
+}
+
 export type RebalanceGridGroupOptions = {
   /** Explorer sidebar width measured before Dockview handed a closed
    * neighbour's space to the explorer; keeps the sidebar from growing. */
@@ -264,20 +279,13 @@ export type RebalanceGridGroupOptions = {
 };
 
 export function rebalanceGridGroupWidths(api: DockviewApi, options: RebalanceGridGroupOptions = {}): void {
-  const groups = api.groups.filter((group) => {
-    if (group.api.location.type !== 'grid') return false;
-    const width = Math.round(Number(group.width ?? 0));
-    const height = Math.round(Number(group.height ?? 0));
-    return width > 0 && height > 0;
-  });
+  const groups = measuredGridGroups(api);
   const workspaceWidth = Math.round(Number(api.width ?? 0));
   if (workspaceWidth <= 0 || groups.length <= 1) return;
 
   // The standalone explorer is a sidebar, not another full-width tool pane.
   // Capture its width before resizing siblings, since Dockview redistributes space.
-  const explorer = groups.find((group) =>
-    group.panels.length === 1 && group.panels[0].id === EXPLORER_PANEL_ID,
-  );
+  const explorer = groups.find(isStandaloneExplorerGroup);
   const preferredExplorerWidth = Number(options.explorerWidth);
   const explorerWidth = !explorer
     ? 0
@@ -291,6 +299,58 @@ export function rebalanceGridGroupWidths(api: DockviewApi, options: RebalanceGri
     group.api.setSize({ width: targetWidth, height });
   }
   if (explorer) explorer.api.setSize({ width: explorerWidth });
+}
+
+/** Snapshot of grid group widths, taken before opening a tool so the panes the
+ * user already sized can be restored around the newly added ones. */
+export function captureGridGroupWidths(api: DockviewApi): Map<GridGroup, number> {
+  return new Map(measuredGridGroups(api).map((group) => [group, Math.round(Number(group.width))]));
+}
+
+/** Makes room for groups added since `previousWidths` was captured without
+ * resetting the widths the user chose for the existing panes. An explorer
+ * added beside an existing editor takes its space from that editor only;
+ * other new panes shrink the existing panes proportionally. */
+export function fitAddedGridGroups(api: DockviewApi, previousWidths: Map<GridGroup, number>): void {
+  const groups = measuredGridGroups(api);
+  const workspaceWidth = Math.round(Number(api.width ?? 0));
+  const added = groups.filter((group) => !previousWidths.has(group));
+  if (workspaceWidth <= 0 || added.length === 0) return;
+  const existing = groups.filter((group) => previousWidths.has(group));
+  const addedExplorer = added.find(isStandaloneExplorerGroup);
+  const addedTools = added.filter((group) => group !== addedExplorer);
+  const explorerWidth = readWorkspaceExplorerWidth();
+  const targets = new Map<GridGroup, number>();
+
+  const editorGroup = editorChangesPanels(api)[0]?.api.group;
+  if (addedExplorer && addedTools.length === 0 && editorGroup && previousWidths.has(editorGroup)) {
+    // Editor replaced Changes in the same pane: the explorer is part of that
+    // pane, so only the editor gives up width for it.
+    for (const group of existing) targets.set(group, previousWidths.get(group)!);
+    targets.set(editorGroup, Math.max(1, previousWidths.get(editorGroup)! - explorerWidth));
+  } else {
+    const addedWidth = addedTools.reduce((sum, group) => sum + Math.round(Number(group.width)), 0)
+      + (addedExplorer ? explorerWidth : 0);
+    // Existing explorers stay at their width; the other panes keep their ratios.
+    const fixedWidth = existing
+      .filter(isStandaloneExplorerGroup)
+      .reduce((sum, group) => sum + previousWidths.get(group)!, 0);
+    const scale = Math.max(0, workspaceWidth - addedWidth - fixedWidth) / Math.max(1, workspaceWidth - fixedWidth);
+    for (const group of existing) {
+      const previous = previousWidths.get(group)!;
+      targets.set(group, isStandaloneExplorerGroup(group) ? previous : Math.max(1, Math.round(previous * scale)));
+    }
+    for (const group of addedTools) targets.set(group, Math.round(Number(group.width)));
+  }
+  if (addedExplorer) targets.set(addedExplorer, explorerWidth);
+  // Dockview hands each resize's difference to the rightmost pane, so sizing
+  // left to right leaves every earlier pane on target and the last one with
+  // exactly the remainder.
+  const left = (group: GridGroup) => group.element?.getBoundingClientRect?.().left ?? 0;
+  const ordered = Array.from(targets).sort(([a], [b]) => left(a) - left(b));
+  for (const [group, width] of ordered) {
+    group.api.setSize({ width, height: Math.max(1, Math.round(Number(group.height ?? 0))) });
+  }
 }
 
 function standaloneExplorerWidth(api: DockviewApi): number | undefined {
@@ -1254,10 +1314,10 @@ export function DockableDroneWorkspace({
     }, 200);
   }, [persistCurrentLayout]);
 
-  const rebalanceWorkspaceGridGroups = React.useCallback((afterRebalance?: () => void, options: RebalanceGridGroupOptions = {}) => {
+  const resizeWorkspaceGridGroupsLater = React.useCallback((resize: (api: DockviewApi) => void, afterResize?: () => void) => {
     const api = apiRef.current;
     if (!api) {
-      afterRebalance?.();
+      afterResize?.();
       return;
     }
     const revision = workspaceLayoutRevisionRef.current;
@@ -1266,15 +1326,19 @@ export function DockableDroneWorkspace({
       if (currentApi !== api || revision !== workspaceLayoutRevisionRef.current) return;
       suppressSaveRef.current = true;
       try {
-        rebalanceGridGroupWidths(currentApi, options);
+        resize(currentApi);
       } finally {
         suppressSaveRef.current = false;
         updateWorkspacePanelState();
         persistCurrentLayout();
-        afterRebalance?.();
+        afterResize?.();
       }
     }, 0);
   }, [persistCurrentLayout, updateWorkspacePanelState]);
+
+  const rebalanceWorkspaceGridGroups = React.useCallback((afterRebalance?: () => void, options: RebalanceGridGroupOptions = {}) => {
+    resizeWorkspaceGridGroupsLater((api) => rebalanceGridGroupWidths(api, options), afterRebalance);
+  }, [resizeWorkspaceGridGroupsLater]);
 
   const loadLayout = React.useCallback(() => {
     const api = apiRef.current;
@@ -1318,6 +1382,7 @@ export function DockableDroneWorkspace({
     if (!api) return;
     lastAppliedOpenRequestRef.current = openRequestNonce;
     const wasChatOnly = isChatOnlyGrid(api);
+    const previousWidths = captureGridGroupWidths(api);
     let addedPanel = false;
     suppressSaveRef.current = true;
     try {
@@ -1331,7 +1396,7 @@ export function DockableDroneWorkspace({
       sizeWorkspaceOpenedFromChat(api);
       persistCurrentLayout();
     } else if (addedPanel) {
-      rebalanceWorkspaceGridGroups();
+      resizeWorkspaceGridGroupsLater((currentApi) => fitAddedGridGroups(currentApi, previousWidths));
     } else {
       persistCurrentLayout();
     }
@@ -1340,7 +1405,7 @@ export function DockableDroneWorkspace({
     useMobileLayout,
     openRequestNonce,
     persistCurrentLayout,
-    rebalanceWorkspaceGridGroups,
+    resizeWorkspaceGridGroupsLater,
     updateWorkspacePanelState,
   ]);
 
