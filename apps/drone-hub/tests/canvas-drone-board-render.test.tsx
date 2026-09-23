@@ -299,30 +299,15 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     await act(async () => Simulate.keyDown(viewport(), { key: 'Delete', shiftKey: true }));
     expect(deleteCalls.length).toBe(2);
 
-    // Right-click preserves a multi-selection; an unselected card becomes the sole target.
+    // Right-drag pans the canvas, so right-click on a card opens no menu; the keyboard copies the whole selection.
     await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
     await act(async () => Simulate.contextMenu(card('side-1'), { clientX: 20, clientY: 20 }));
-    const menuItem = (label: string) => Array.from(dom.document.querySelectorAll('[role="menuitem"]'))
-      .find((el) => el.textContent?.includes(label)) as unknown as HTMLButtonElement;
-    // The menu copies the targeted cards; Paste clones every copied chat.
-    await act(async () => menuItem('Copy 2 chats').click());
-    await act(async () => Simulate.contextMenu(card('side-1'), { clientX: 20, clientY: 20 }));
-    const clonesBeforeMenuPaste = cloned.length;
-    await act(async () => menuItem('Paste').click());
+    expect(dom.document.querySelectorAll('[role="menuitem"]').length).toBe(0);
+    await act(async () => Simulate.keyDown(viewport(), { key: 'c', ctrlKey: true }));
+    const clonesBeforePaste = cloned.length;
+    await act(async () => Simulate.keyDown(viewport(), { key: 'v', ctrlKey: true }));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(cloned.slice(clonesBeforeMenuPaste).sort()).toEqual(['plan', 'side-1']);
-    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
-    await act(async () => Simulate.contextMenu(card('side-1'), { clientX: 20, clientY: 20 }));
-    let item = menuItem('Delete');
-    expect(item.textContent).toContain('Delete 2 chats');
-    await act(async () => (item as unknown as HTMLButtonElement).click());
-    expect(deleteCalls[2]).toEqual([{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'alpha', chatName: 'side-1' }]);
-    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
-    await act(async () => Simulate.contextMenu(card('default'), { clientX: 20, clientY: 20 }));
-    item = menuItem('Delete');
-    expect(item.textContent).toContain('Delete chat');
-    await act(async () => (item as unknown as HTMLButtonElement).click());
-    expect(deleteCalls[3]).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
+    expect(cloned.slice(clonesBeforePaste).sort()).toEqual(['plan', 'side-1']);
 
     // A title being edited is saved when the field loses focus, and dropped on Escape.
     const renames: string[] = [];
@@ -549,8 +534,8 @@ test('dragging a card onto the canvas composer references it in the message with
   const card = (chatName: string) => container.querySelector(`[data-drone-id="${alpha(chatName)}"]`) as unknown as Element;
   const composer = () => container.querySelector('[data-selected-chats-composer]')!;
   const board = () => selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha');
-  const mouse = async (type: string, x: number, y: number) => {
-    await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: y, bubbles: true })); });
+  const mouse = async (type: string, x: number, y: number, buttons = type === 'mouseup' ? 0 : 1) => {
+    await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: y, buttons, bubbles: true })); });
   };
   try {
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])} onSendCanvasPrompt={async (targets, payload) => {
@@ -578,6 +563,24 @@ test('dragging a card onto the canvas composer references it in the message with
     expect(sends[0].targets).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
     expect(sends[0].payload.prompt).toBe('Compare with this\n\nReferenced drones and chats:\n- Chat "plan" in drone "Alpha" (drone id: alpha)');
     expect(tiles()).toEqual([]);
+
+    // A lost mouseup: the next move with the button up drops the card where it is instead of dragging it along.
+    await act(async () => Simulate.mouseDown(card('plan'), { button: 0, clientX: 10, clientY: 10 }));
+    await mouse('mousemove', 100, 100);
+    await mouse('mousemove', 100, 100, 0);
+    const released = board().nodesByDroneId[alpha('plan')];
+    expect(released.x).not.toBe(planStart.x);
+    await mouse('mousemove', 300, 300, 0);
+    expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: released.x, y: released.y });
+
+    // Right-drag pans even when it starts on a card, and ends once the right button is up.
+    const panStart = { x: board().panX, y: board().panY };
+    await act(async () => Simulate.mouseDown(card('plan'), { button: 2, clientX: 10, clientY: 10 }));
+    await mouse('mousemove', 60, 40, 2);
+    expect({ x: board().panX, y: board().panY }).toEqual({ x: panStart.x + 50, y: panStart.y + 30 });
+    await mouse('mousemove', 200, 200, 0);
+    expect({ x: board().panX, y: board().panY }).toEqual({ x: panStart.x + 50, y: panStart.y + 30 });
+    expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: released.x, y: released.y });
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });

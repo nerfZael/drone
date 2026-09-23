@@ -20,7 +20,6 @@ import {
 } from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { selectSidebarChatNodes } from '../app/sidebar-chat-selection';
-import { SidebarContextMenu } from '../app/SidebarContextMenu';
 import { chatClipboardHasContent, pastableClipboard, useChatClipboardStore } from '../app/chat-clipboard-store';
 import {
   composerReferencesFromNodeIds,
@@ -459,7 +458,6 @@ export function DroneCanvasDock({
   );
   const boardDroneId = scope === 'drone' ? String(boardDrone?.id ?? '').trim() || null : null;
   const droneScope = Boolean(boardDroneId);
-  const clipboardHasContent = useChatClipboardStore((state) => chatClipboardHasContent(state, boardDroneId));
   const {
     nodesByDroneId,
     nodeOrder: storedNodeOrder,
@@ -921,7 +919,6 @@ export function DroneCanvasDock({
   ]);
 
   /** Deletes the chats behind the selected cards, asking once for all of them. */
-  const [chatContextMenu, setChatContextMenu] = React.useState<{ x: number; y: number; view: Window; nodeIds: string[] } | null>(null);
   const deleteChatNodes = React.useCallback(
     async (nodeIdsRaw: readonly string[]) => {
       const chatNodeIds: string[] = [];
@@ -1251,6 +1248,16 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     const onWindowMouseMove = (event: MouseEvent) => {
+      // The mouseup can be lost (released over a webview, outside the window, or swallowed by another handler),
+      // so a move with the primary button already up ends the drag instead of leaving the node stuck to the cursor.
+      // Pans are right-drags (button bit 2); card and marquee drags are left-drags (bit 1).
+      const released = panDragRef.current
+        ? (event.buttons & 2) === 0
+        : (nodeDragRef.current || marqueeDragRef.current) && (event.buttons & 1) === 0;
+      if (released) {
+        onWindowMouseUp(event);
+        return;
+      }
       const nodeDrag = nodeDragRef.current;
       if (nodeDrag) {
         const dx = (event.clientX - nodeDrag.startClientX) / nodeDrag.scale;
@@ -1425,14 +1432,33 @@ export function DroneCanvasDock({
       setSelectionBox(null);
     };
 
-    window.addEventListener('mousemove', onWindowMouseMove);
-    window.addEventListener('mouseup', onWindowMouseUp);
+    const onWindowBlur = () => {
+      if (!nodeDragRef.current && !panDragRef.current && !marqueeDragRef.current) return;
+      const nodeDrag = nodeDragRef.current;
+      if (nodeDrag?.moved) suppressNodeClickRef.current = true;
+      setComposerDropHover(false);
+      dispatchCanvasAssignmentPreview(null);
+      setAssignmentHoverNodeId(null);
+      setAssignmentHoverTargetCount(0);
+      nodeDragRef.current = null;
+      setDraggingNodeId(null);
+      panDragRef.current = null;
+      setPanning(false);
+      marqueeDragRef.current = null;
+      setSelectionBox(null);
+    };
+
+    // Capture phase so a child that stops propagation of mouseup cannot leave a drag running.
+    window.addEventListener('mousemove', onWindowMouseMove, true);
+    window.addEventListener('mouseup', onWindowMouseUp, true);
+    window.addEventListener('blur', onWindowBlur);
     return () => {
       dispatchCanvasAssignmentPreview(null);
       setAssignmentHoverNodeId(null);
       setAssignmentHoverTargetCount(0);
-      window.removeEventListener('mousemove', onWindowMouseMove);
-      window.removeEventListener('mouseup', onWindowMouseUp);
+      window.removeEventListener('mousemove', onWindowMouseMove, true);
+      window.removeEventListener('mouseup', onWindowMouseUp, true);
+      window.removeEventListener('blur', onWindowBlur);
     };
   }, [clearSelection, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
 
@@ -1823,10 +1849,6 @@ export function DroneCanvasDock({
   const onCanvasMouseDown = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       viewportRef.current?.focus({ preventScroll: true });
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest('[data-canvas-node="1"]')) {
-        return;
-      }
       if (event.button === 2) {
         event.preventDefault();
         panDragRef.current = {
@@ -1841,6 +1863,10 @@ export function DroneCanvasDock({
         return;
       }
 
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('[data-canvas-node="1"]')) {
+        return;
+      }
       if (event.button !== 0) return;
       event.preventDefault();
       const viewport = viewportRef.current;
@@ -2262,21 +2288,6 @@ export function DroneCanvasDock({
       flush
       className="h-full w-full"
     >
-      {chatContextMenu ? <SidebarContextMenu x={chatContextMenu.x} y={chatContextMenu.y}
-        view={chatContextMenu.view} label="Canvas chat actions" onClose={() => setChatContextMenu(null)}
-        items={[
-          ...(chatContextMenu.nodeIds.length ? [{ id: 'copy-chat', shortcut: 'Ctrl+C',
-            label: chatContextMenu.nodeIds.length === 1 ? 'Copy chat' : `Copy ${chatContextMenu.nodeIds.length} chats`,
-            onSelect: () => { copyCanvasNodesForClone(chatContextMenu.nodeIds); },
-          }] : []),
-          { id: 'paste-chat', label: 'Paste', shortcut: 'Ctrl+V', disabled: !clipboardHasContent || (!onCloneChat && !onCloneDrone),
-            onSelect: () => pasteCopiedCanvasNodesAsClones({ x: chatContextMenu.x, y: chatContextMenu.y }) },
-          ...(chatContextMenu.nodeIds.length ? [{ id: 'delete-chat', tone: 'danger' as const, separatorBefore: true,
-            label: chatContextMenu.nodeIds.length === 1 ? 'Delete chat' : `Delete ${chatContextMenu.nodeIds.length} chats`,
-            disabled: !onDeleteChats || chatContextMenu.nodeIds.some((id) => deletingChatNodeById[id]),
-            onSelect: () => { void deleteChatNodes(sortChatNodeIdsForDestructiveDelete(chatContextMenu.nodeIds)); },
-          }] : []),
-        ]} /> : null}
         <UiPanelToolbar aria-label="Canvas controls" className="min-h-0 gap-1.5 px-2 py-1">
           {boardDrone ? (
             <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
@@ -2463,13 +2474,8 @@ export function DroneCanvasDock({
           cursorClientPointRef.current = null;
         }}
         onDoubleClick={onCanvasDoubleClick}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          // Empty canvas offers Paste; cards and the composer have their own menus or none.
-          const target = event.target as HTMLElement;
-          if (target.closest('[data-canvas-node], [data-selected-chats-composer]')) return;
-          setChatContextMenu({ x: event.clientX, y: event.clientY, view: event.currentTarget.ownerDocument.defaultView!, nodeIds: [] });
-        }}
+        // Right-drag pans the canvas, so right-click opens no menu.
+        onContextMenu={(event) => event.preventDefault()}
         onWheel={onWheel}
       >
         <div
@@ -2623,16 +2629,6 @@ export function DroneCanvasDock({
                   if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
                   else delete nodeElementByDroneIdRef.current[node.droneId];
                 }}
-                onContextMenu={(event) => {
-                  if (draftNode || droneNode) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const selection = selectedDroneIds.includes(node.droneId) ? selectedDroneIds : [node.droneId];
-                  setSelectedDroneIds(selection);
-                  const nodeIds = selection.filter((id) => !isCanvasDraftNodeId(id) && Boolean(parseCanvasChatNodeId(id)));
-                  setChatContextMenu({ x: event.clientX, y: event.clientY,
-                    view: event.currentTarget.ownerDocument.defaultView!, nodeIds });
-                }}
                 onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
@@ -2744,7 +2740,8 @@ export function DroneCanvasDock({
                         }
                       }}
                       // Looks like the title it replaces: the card's own border already says it is being edited.
-                      className="block w-full min-w-0 border-0 bg-transparent p-0 text-12-5 font-[var(--weight-semibold)] leading-[inherit] text-[var(--fg-secondary)] caret-[var(--accent)] outline-none focus:outline-none focus-visible:outline-none"
+                      className={`block w-full min-w-0 border-0 bg-transparent p-0 text-12-5 font-[var(--weight-semibold)] leading-[inherit] text-[var(--fg-secondary)] caret-[var(--accent)] outline-none focus:outline-none focus-visible:outline-none ${droneNode ? '' : 'text-center'}`}
+                      style={labelTextBoost > 1 ? { fontSize: `calc(var(--text-12-5) * ${labelTextBoost.toFixed(3)})` } : undefined}
                     />
                   ) : assignmentHoverTarget ? (
                     <span className="block">
