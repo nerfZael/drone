@@ -20,6 +20,7 @@ import { SidebarContextMenu } from './SidebarContextMenu';
 import { useChatsViewStore } from './chats-view-store';
 import { chatClipboardHasContent, pastableClipboard, useChatClipboardStore } from './chat-clipboard-store';
 import { runWithConcurrency } from '../canvas/clone-shortcuts';
+import { keepFocusOnNextChatActivation } from './focus-chat-window';
 
 const CHAT_PASTE_CONCURRENCY = 4;
 
@@ -67,10 +68,11 @@ function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu, o
     }, 5000, [droneId, name],
   );
   const preview = value ? latestChatPreview(value) : null;
+  // Selection shows as the tint; the global keyboard ring would outrank a plain outline-none here.
   return (
     <button type="button" draggable onDragStart={onDragStart} onClick={onSelect} onContextMenu={onContextMenu} aria-pressed={selected} aria-current={active ? 'true' : undefined}
       data-chat-drone-id={droneId} data-chat-name={name}
-      className={`relative col-span-2 grid w-full select-none grid-cols-subgrid items-center gap-x-3 rounded-[var(--radius-medium)] px-2 py-1.5 text-left text-12 outline-none ${
+      className={`relative col-span-2 grid w-full select-none grid-cols-subgrid items-center gap-x-3 rounded-[var(--radius-medium)] px-2 py-1.5 text-left text-12 outline-none focus-visible:outline-none ${
         selected ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
       {/* The bar marks the open chat; other selected rows only get the tint. */}
       {active ? (
@@ -136,6 +138,7 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
     if (chatNames.length) useChatClipboardStore.getState().copy({
       chats: chatNames.map((chatName) => ({ droneId: drone.id, chatName })),
       droneNames: drone.name ? { [drone.id]: drone.name } : {},
+      view: rootRef.current?.ownerDocument.defaultView,
     });
   };
   /** Clones the chats copied from this drone; the clones become the selection. */
@@ -196,10 +199,16 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
   };
   const selectRow = (name: string, event: React.MouseEvent<HTMLButtonElement>) => {
     const additive = event.ctrlKey || event.metaKey;
+    // Picking rows drops any text selected earlier, so Ctrl+C copies the chats, not that text.
+    event.currentTarget.ownerDocument.getSelection()?.removeAllRanges();
     setSelection(selectSidebarChatNodes({ currentNodeIds: selectedNames, orderedNodeIds: names,
       nodeId: name, anchorNodeId: anchorRef.current, additive, range: event.shiftKey }));
     if (!event.shiftKey) anchorRef.current = name;
-    if (!additive && !event.shiftKey) options.onSelectChat(name);
+    if (!additive && !event.shiftKey) {
+      // The opened chat must not take focus: the rows still answer to copy, paste and delete.
+      keepFocusOnNextChatActivation();
+      options.onSelectChat(name);
+    }
   };
   /** Dragging a selected row carries the whole selection, e.g. into the composer as references. */
   const startRowDrag = (name: string, event: React.DragEvent<HTMLElement>) => {
@@ -281,7 +290,7 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
               <button type="button" draggable onDragStart={(event) => startRowDrag(name, event)}
                 onClick={(event) => selectRow(name, event)} onContextMenu={(event) => openMenu(name, event)}
                 aria-pressed={selectedNames.includes(name)} title={`Open ${name} as main chat`}
-                className={`flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-12 outline-none ${selectedNames.includes(name) ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
+                className={`flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-12 outline-none focus-visible:outline-none ${selectedNames.includes(name) ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
                 <span className="min-w-0 flex-1"><ChatName drone={drone} name={name} selected={selectedChat === name} /></span>
                 <span className="text-11 text-[var(--muted)]">Open ↗</span>
               </button>

@@ -2101,7 +2101,7 @@ export function DroneCanvasDock({
         const name = String(effectiveDroneNameById[droneId] ?? '').trim();
         if (name) droneNames[droneId] = name;
       }
-      useChatClipboardStore.getState().copy({ chats, drones, droneNames });
+      useChatClipboardStore.getState().copy({ chats, drones, droneNames, view: viewportRef.current?.ownerDocument.defaultView });
     }
     return drones.length + chats.length;
   }, [effectiveDroneNameById, selectedDroneIds]);

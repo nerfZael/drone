@@ -17,8 +17,11 @@ type ChatClipboardState = {
   droneNames: Record<string, string>;
   /** What the copy put on the system clipboard; a paste of exactly this text pastes the copy as references. */
   text: string;
-  /** Replaces the whole clipboard, like any copy. */
-  copy: (next: { chats: CopiedChat[]; drones?: CopiedDrone[]; droneNames?: Record<string, string> }) => void;
+  /**
+   * Replaces the whole clipboard, like any copy. `view` is the window the copy came from:
+   * a desktop tool window can only write its own system clipboard, not the Hub's.
+   */
+  copy: (next: { chats: CopiedChat[]; drones?: CopiedDrone[]; droneNames?: Record<string, string>; view?: Window | null }) => void;
 };
 
 function copiedReferences(state: Pick<ChatClipboardState, 'chats' | 'drones'>): ComposerReference[] {
@@ -42,7 +45,7 @@ export const useChatClipboardStore = create<ChatClipboardState>()((set) => ({
   drones: [],
   droneNames: {},
   text: '',
-  copy: ({ chats, drones = [], droneNames = {} }) => {
+  copy: ({ chats, drones = [], droneNames = {}, view }) => {
     const next = {
       chats: chats.map(({ droneId, chatName }) => ({ droneId, chatName })),
       drones: drones.map(({ droneId, nodeId }) => ({ droneId, nodeId })),
@@ -51,7 +54,7 @@ export const useChatClipboardStore = create<ChatClipboardState>()((set) => ({
     const text = composerReferencesBlock(copiedReferences(next), droneNamesForReferences(next.droneNames));
     set({ ...next, text });
     // No focus-stealing fallback: copying must leave the keyboard on the canvas or Chats window.
-    void globalThis.navigator?.clipboard?.writeText?.(text)?.catch?.(() => {});
+    void (view ?? globalThis).navigator?.clipboard?.writeText?.(text)?.catch?.(() => {});
   },
 }));
 

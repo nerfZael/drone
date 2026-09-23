@@ -11,6 +11,7 @@ import { useDroneHubRuntimeStore } from '../src/droneHub/app/use-drone-hub-runti
 import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
 import { useChatsViewStore } from '../src/droneHub/app/chats-view-store';
 import { useChatClipboardStore } from '../src/droneHub/app/chat-clipboard-store';
+import { consumeKeepFocusOnChatActivation } from '../src/droneHub/app/focus-chat-window';
 
 const drone = { id: 'drone-1', chats: ['default', 'nested-chat'], workflowChats: ['workflow'],
   sideChats: [{ name: 'side' }], statusOk: true, busyChats: ['default'],
@@ -199,6 +200,10 @@ test('Chats window copies and pastes chats from the menu and with Ctrl+C / Ctrl+
   const press = async (name: string, key: string) => {
     await act(async () => { row(name).dispatchEvent(new dom.KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); });
   };
+  // The copy writes this window's system clipboard, as a desktop tool window must.
+  const written: string[] = [];
+  Object.defineProperty(dom.navigator, 'clipboard', { configurable: true,
+    value: { writeText: async (text: string) => { written.push(text); } } });
   useChatClipboardStore.getState().copy({ chats: [] });
   try {
     await act(async () => root.render(<DroneChatsDock drone={drone} selectedChat="default" options={options}
@@ -211,9 +216,21 @@ test('Chats window copies and pastes chats from the menu and with Ctrl+C / Ctrl+
     await act(async () => menuItem('Paste').click());
     expect(clones).toEqual(['drone-1/default']);
 
+    expect(written.at(-1)).toBe(useChatClipboardStore.getState().text);
+    expect(written.at(-1)).toContain('Chat "default"');
+
     // Ctrl+C copies the whole selection; Ctrl+V clones every copied chat.
+    // Text selected before picking rows does not keep Ctrl+C from copying them.
+    const stale = dom.document.createElement('p');
+    stale.textContent = 'Earlier selected text';
+    dom.document.body.append(stale);
+    dom.document.getSelection()!.selectAllChildren(stale);
+    consumeKeepFocusOnChatActivation();
     await act(async () => { row('workflow').dispatchEvent(new dom.MouseEvent('click', { bubbles: true })); });
+    // Opening the clicked chat leaves focus on the rows, where Ctrl+C is handled.
+    expect(consumeKeepFocusOnChatActivation()).toBe(true);
     await act(async () => { row('nested-chat').dispatchEvent(new dom.MouseEvent('click', { bubbles: true, ctrlKey: true })); });
+    expect(dom.document.getSelection()!.toString()).toBe('');
     await press('nested-chat', 'c');
     expect(useChatClipboardStore.getState().chats.map((chat) => chat.chatName)).toEqual(['workflow', 'nested-chat']);
     await press('nested-chat', 'v');
