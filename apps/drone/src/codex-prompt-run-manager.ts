@@ -848,7 +848,11 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   ): Promise<void> {
     if (!spec.requireDroneHubMcp || session.verifiedMcpThreadId === threadId) return;
     session.verifiedMcpThreadId = null;
-    const deadline = Date.now() + 10_000;
+    // Inventory discovery can take additional time even after MCP startup has
+    // completed (including inventory for other configured servers). Keep one
+    // bounded budget across polling and pagination, with headroom beyond the
+    // managed server's 10-second startup timeout.
+    const deadline = Date.now() + 30_000;
     const cursors = new Set<string>();
     let cursor: string | undefined;
     try {

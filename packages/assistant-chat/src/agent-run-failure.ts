@@ -71,6 +71,18 @@ export function agentRunFailurePresentation(
   } = {},
 ): AgentRunFailurePresentation {
   const technicalMessage = String(error ?? '').trim() || 'Unknown agent failure';
+  // This check runs before turn/start. A timeout here does not mean an agent
+  // response lost its connection or that any requested work has started.
+  if (technicalMessage.startsWith('Drone Hub tools are unavailable:')) {
+    return {
+      recoverable: false,
+      kind: 'error',
+      title: 'Drone Hub tools unavailable',
+      summary: 'The agent could not start because its Drone Hub tools were not ready. Retry the prompt.',
+      technicalMessage,
+      ...(options.code ? { code: options.code } : {}),
+    };
+  }
   const evidence = [
     technicalMessage,
     ...(options.evidence ?? []).map((value) => String(value ?? '')),

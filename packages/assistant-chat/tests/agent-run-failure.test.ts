@@ -6,6 +6,18 @@ import {
 } from '../src';
 
 describe('agent run failure presentation', () => {
+  test('distinguishes tool startup timeouts from interrupted agent work', () => {
+    const error = 'Drone Hub tools are unavailable: Codex App Server request timed out: mcpServerStatus/list. Check the connection and retry the prompt. (exit 1)';
+    expect(agentRunFailurePresentation(error)).toMatchObject({
+      recoverable: false,
+      kind: 'error',
+      title: 'Drone Hub tools unavailable',
+      summary: 'The agent could not start because its Drone Hub tools were not ready. Retry the prompt.',
+      technicalMessage: error,
+    });
+    expect(isAgentTransportInterruption(error)).toBe(false);
+  });
+
   test('recognizes exhausted Codex reconnect output as a recoverable interruption', () => {
     const failure = agentRunFailurePresentation(
       [

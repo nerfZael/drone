@@ -2705,7 +2705,12 @@ export function DroneSidebar({
             touchAction: 'pan-y',
           }}
         >
-          <div data-sidebar-navigation-items="true" style={navigationItemScaleStyle}>
+          {/* Clip wide rows before they enlarge the scrollable area that dnd-kit auto-scrolls. */}
+          <div
+            data-sidebar-navigation-items="true"
+            className="-mx-1 overflow-x-clip px-1"
+            style={navigationItemScaleStyle}
+          >
           {dronesError && (
             <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
               Failed to load drones: {dronesError}

@@ -42,6 +42,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     send({ id: message.id, result: { thread: { id: 'thread-1' } } });
   }
   if (message.method === 'mcpServerStatus/list') {
+    if (mode === 'slow') {
+      return setTimeout(() => send({ id: message.id, result: { data: [{
+        name: 'drone-hub', runtimeStatus: 'connected', tools: { list_drones: { name: 'list_drones' } },
+      }], nextCursor: null } }), 10_500);
+    }
     if (mode === 'starting' && discoveryCount++ === 0) {
       return send({ id: message.id, result: { data: [{ name: 'drone-hub', runtimeStatus: 'starting', tools: {} }], nextCursor: null } });
     }
@@ -186,6 +191,14 @@ describe('managed Codex MCP startup', () => {
       h.requests().filter((request) => request.method === 'mcpServerStatus/list'),
     ).toHaveLength(2);
   });
+
+  test('allows healthy discovery to finish beyond the server startup timeout', async () => {
+    const h = harness('slow');
+    expect((await h.send(true, 'thread-1')).state).toBe('done');
+    const requests = h.requests();
+    expect(requests.filter((request) => request.method === 'mcpServerStatus/list')).toHaveLength(1);
+    expect(requests.filter((request) => request.method === 'turn/start')).toHaveLength(1);
+  }, 15_000);
 
   test('starts a fresh connection when retrying failed tool discovery', async () => {
     const h = harness('empty');
