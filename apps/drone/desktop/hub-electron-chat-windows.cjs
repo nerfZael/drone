@@ -1,5 +1,13 @@
 const CHAT_WINDOW_PREFIX = 'drone-hub-chat:';
+// A tool pane (editor, terminal, canvas, ...) shown in its own window; wider than a chat.
+const TOOL_WINDOW_PREFIX = 'drone-hub-tool:';
 const CHAT_WINDOW_PIN_CHANNEL = 'drone-hub:chat-window-pin';
+
+function ownedWindowSize(frameName) {
+  if (frameName.startsWith(CHAT_WINDOW_PREFIX)) return { width: 640, height: 800 };
+  if (frameName.startsWith(TOOL_WINDOW_PREFIX)) return { width: 1040, height: 760 };
+  return null;
+}
 
 function installChatWindows({ mainWindow, ipcMain, shell }) {
   const windows = new Map();
@@ -7,9 +15,10 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => {});
   };
   const handleWindowOpen = ({ url, frameName }) => {
-    if (url === 'about:blank' && frameName.startsWith(CHAT_WINDOW_PREFIX)) {
+    const size = url === 'about:blank' ? ownedWindowSize(frameName) : null;
+    if (size) {
       return { action: 'allow', overrideBrowserWindowOptions: {
-        width: 640, height: 800, minWidth: 320, minHeight: 280,
+        ...size, minWidth: 320, minHeight: 280,
         frame: true, titleBarStyle: 'default', titleBarOverlay: false,
         alwaysOnTop: false, backgroundColor: '#11161e',
       } };
@@ -19,7 +28,7 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
   };
   mainWindow.webContents.setWindowOpenHandler(handleWindowOpen);
   mainWindow.webContents.on('did-create-window', (child, { frameName }) => {
-    if (!frameName.startsWith(CHAT_WINDOW_PREFIX)) return;
+    if (!ownedWindowSize(frameName)) return;
     windows.set(frameName, child);
     child.setMenu(null);
     child.webContents.setWindowOpenHandler(({ url }) => {
@@ -47,4 +56,4 @@ function installChatWindows({ mainWindow, ipcMain, shell }) {
   });
   return handleWindowOpen;
 }
-module.exports = { installChatWindows, CHAT_WINDOW_PREFIX, CHAT_WINDOW_PIN_CHANNEL };
+module.exports = { installChatWindows, CHAT_WINDOW_PREFIX, TOOL_WINDOW_PREFIX, CHAT_WINDOW_PIN_CHANNEL };

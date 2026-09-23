@@ -1,5 +1,6 @@
 import { beginTerminalOpen, markTerminalModuleReady } from './terminal-performance';
 import React from 'react';
+import type { PaneKey } from '../app/pane-key';
 import { UiPaneState, UiPanel, UiPanelBody, UiPanelStatusStrip } from '../../ui/components';
 import '@xterm/xterm/css/xterm.css';
 import { formatDroneRuntimeError } from '../app/chat-startup-errors';
@@ -34,24 +35,24 @@ export type DroneTerminalDockProps = {
   droneName: string;
   chatName: string;
   defaultCwd: string;
-  paneKey: 'single' | 'top' | 'bottom';
+  paneKey: PaneKey;
   sessionsState: TerminalPaneSessionsState;
-  onEnsureSessions: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
-  onCreateSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
+  onEnsureSessions: (droneId: string, paneKey: PaneKey, cwd: string) => void;
+  onCreateSession: (droneId: string, paneKey: PaneKey, cwd: string) => void;
   onActivateSession: (
     droneId: string,
-    paneKey: 'single' | 'top' | 'bottom',
+    paneKey: PaneKey,
     sessionId: string,
   ) => void;
   onResolveSessionName: (
     droneId: string,
-    paneKey: 'single' | 'top' | 'bottom',
+    paneKey: PaneKey,
     sessionId: string,
     sessionName: string,
   ) => void;
   onCloseSession: (
     droneId: string,
-    paneKey: 'single' | 'top' | 'bottom',
+    paneKey: PaneKey,
     sessionId: string,
   ) => void;
   disabled: boolean;

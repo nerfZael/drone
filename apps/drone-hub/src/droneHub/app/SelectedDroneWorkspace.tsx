@@ -5,6 +5,7 @@ import { SideChatControls } from './SideChatControls';
 import { DisplacedMainChat } from './DisplacedMainChat';
 import { DetachedChatContent } from './DetachedChatWindows';
 import type { DroneChatsPaneOptions } from './DroneChatsDock';
+import type { PaneKey } from './pane-key';
 import { detachChatMenuItems } from './DetachedChatIndicator';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -551,7 +552,7 @@ type SelectedDroneWorkspaceProps = {
   renderRightPanelTabContent: (
     drone: DroneSummary,
     tab: RightPanelTab,
-    pane: 'single' | 'top' | 'bottom',
+    pane: PaneKey,
     chatsPaneOptions?: DroneChatsPaneOptions,
   ) => React.ReactNode;
   /** Files shown in their own workspace windows after being dragged out of the editor. */

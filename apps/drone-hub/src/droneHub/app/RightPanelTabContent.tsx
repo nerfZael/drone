@@ -1,6 +1,7 @@
 import type { CanvasSendPrompt, CanvasDraftCreation } from '../canvas/canvas-messaging';
 import React from 'react';
 import type { DroneChatsPaneOptions } from './DroneChatsDock';
+import type { PaneKey } from './pane-key';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
 import {
@@ -111,7 +112,7 @@ type RightPanelTabContentProps = {
   chatsPaneOptions?: DroneChatsPaneOptions;
   drone: DroneSummary;
   tab: RightPanelTab;
-  paneKey: 'top' | 'bottom' | 'single';
+  paneKey: PaneKey;
   selectedChat: string;
   droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
@@ -171,16 +172,16 @@ type RightPanelTabContentProps = {
   currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
   terminalSessionsState: TerminalPaneSessionsState;
-  onEnsureTerminalSessions: (droneId: string, paneKey: 'top' | 'bottom' | 'single', cwd: string) => void;
-  onCreateTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', cwd: string) => void;
-  onActivateTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
+  onEnsureTerminalSessions: (droneId: string, paneKey: PaneKey, cwd: string) => void;
+  onCreateTerminalSession: (droneId: string, paneKey: PaneKey, cwd: string) => void;
+  onActivateTerminalSession: (droneId: string, paneKey: PaneKey, sessionId: string) => void;
   onResolveTerminalSessionName: (
     droneId: string,
-    paneKey: 'top' | 'bottom' | 'single',
+    paneKey: PaneKey,
     sessionId: string,
     sessionName: string,
   ) => void;
-  onCloseTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
+  onCloseTerminalSession: (droneId: string, paneKey: PaneKey, sessionId: string) => void;
   uiDroneName: (nameRaw: string) => string;
   currentFsPath: string;
   explorerReveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
@@ -247,12 +248,13 @@ type RightPanelTabContentProps = {
   onRemapOpenedEditorFilesForPathChange: (sourcePath: string, targetPath: string) => void;
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (fromTabId: string, toTabId: string) => void;
-  onOpenPullRequest: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
-  onRevealChangesFileInFiles: (paneKey: 'top' | 'bottom' | 'single', repoRelativePath: string) => void;
+  onOpenPullRequest: (paneKey: PaneKey, pullRequest: RepoPullRequestSummary) => void;
+  onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
 };
 
-export function RightPanelTabContent({
+export function RightPanelTabContent(props: RightPanelTabContentProps) {
+  const {
   chatsPaneOptions,
   drone,
   tab,
@@ -342,85 +344,12 @@ export function RightPanelTabContent({
   onOpenPullRequest,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
-}: RightPanelTabContentProps) {
+  } = props;
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);
   const chatName = selectedChat || 'default';
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
-  const renderFileExplorer = (explorerZoom: number) => (
-    <PaneModule tab="editor" load={loadDroneFilesDock}>
-      {(DroneFilesDock) => (
-        <DroneFilesDock
-          key={`${paneKey}-file-explorer`}
-          droneId={drone.id}
-          droneName={drone.name}
-          droneLabel={uiDroneName(drone.name)}
-          path={currentFsPath}
-          homePath={defaultFsPathForCurrentDrone}
-          reveal={explorerReveal}
-          entries={fsEntries}
-          loading={fsLoading}
-          error={isCurrent ? fsErrorUi : fsError}
-          startup={isCurrent ? {
-            waiting: filesPane.waiting,
-            timedOut: filesPane.timedOut,
-            hubPhase: drone.hubPhase,
-            hubMessage: drone.hubMessage,
-          } : null}
-          onOpenPath={setCurrentFsPath}
-          onRefresh={refreshFsList}
-          onRefreshOpenedFile={onRefreshOpenedEditorFile}
-          onOpenFile={onOpenFileInEditor}
-          onOpenFileInPanel={onOpenFileInPanel}
-          onCloseOpenedFile={onCloseOpenedEditorFile}
-          onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
-          onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
-          onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
-          openedFile={openedFile}
-          zoom={explorerZoom}
-        />
-      )}
-    </PaneModule>
-  );
-  const fileEditorContent = (
-    <PaneModule tab="editor" load={loadDroneEditorDock}>
-      {(DroneEditorDock) => (
-        <DroneEditorDock
-          droneId={drone.id}
-          droneName={drone.name}
-          openedFile={openedFile}
-          quickOpen={quickOpen}
-          openedFileTabs={openedFileTabs}
-          activeOpenedFileTabId={activeOpenedFileTabId}
-          onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
-          onSaveOpenedEditorFile={onSaveOpenedEditorFile}
-          onAppendFileDictationLine={onAppendFileDictationLine}
-          onOpenFileDictationTarget={onOpenFileDictationTarget}
-          onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
-          onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
-          onCloseOpenedEditorFile={onCloseOpenedEditorFile}
-          onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
-          onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
-          onOpenFileTargetInEditor={onOpenFileTargetInEditor}
-        />
-      )}
-    </PaneModule>
-  );
-
-  const fileEditor = (
-    <div className="relative h-full min-h-0">
-      <div className="h-full" style={{ visibility: pendingFileOpenPath ? 'hidden' : undefined }}>
-        {fileEditorContent}
-      </div>
-      {pendingFileOpenPath ? (
-        <div className="absolute inset-0">
-          <UiPaneState kind="loading" title="Loading file…" description={pendingFileOpenPath} />
-        </div>
-      ) : null}
-    </div>
-  );
-
   switch (tab) {
     case 'chats':
       return (
@@ -532,13 +461,7 @@ export function RightPanelTabContent({
       );
 
     case 'editor':
-      return (
-        <PaneModule tab={tab} load={loadDroneEditorWorkspace}>
-          {(DroneEditorWorkspace) => (
-            <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
-          )}
-        </PaneModule>
-      );
+      return <EditorWorkspacePane {...props} />;
 
     case 'preview':
       return (
@@ -659,4 +582,136 @@ export function RightPanelTabContent({
     default:
       return null;
   }
+}
+
+export type EditorWorkspacePaneProps = Pick<RightPanelTabContentProps,
+  | 'drone' | 'paneKey' | 'currentDroneId' | 'defaultFsPathForCurrentDrone' | 'uiDroneName'
+  | 'currentFsPath' | 'explorerReveal' | 'fsEntries' | 'fsLoading' | 'fsError' | 'fsErrorUi' | 'filesPane'
+  | 'setCurrentFsPath' | 'refreshFsList' | 'onRefreshOpenedEditorFile' | 'onReloadOpenedEditorFileFromDisk'
+  | 'onOverwriteOpenedEditorFile' | 'onOpenFileInEditor' | 'onOpenFileInPanel' | 'onOpenFileTargetInEditor'
+  | 'pendingFileOpenPath' | 'openedFile' | 'quickOpen' | 'openedFileTabs' | 'activeOpenedFileTabId'
+  | 'onOpenedEditorFileContentChange' | 'onSaveOpenedEditorFile' | 'onAppendFileDictationLine'
+  | 'onOpenFileDictationTarget' | 'onCloseOpenedEditorFile' | 'onConfirmCloseOpenedEditorFilesForPaths'
+  | 'onCloseOpenedEditorFilesForPaths' | 'onRemapOpenedEditorFilesForPathChange'
+  | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs'>;
+
+/** The Editor tool: file explorer beside the editor, both bound to one drone's editor state. */
+export function EditorWorkspacePane({
+  drone,
+  paneKey,
+  currentDroneId,
+  defaultFsPathForCurrentDrone,
+  uiDroneName,
+  currentFsPath,
+  explorerReveal,
+  fsEntries,
+  fsLoading,
+  fsError,
+  fsErrorUi,
+  filesPane,
+  setCurrentFsPath,
+  refreshFsList,
+  onRefreshOpenedEditorFile,
+  onReloadOpenedEditorFileFromDisk,
+  onOverwriteOpenedEditorFile,
+  onOpenFileInEditor,
+  onOpenFileInPanel,
+  onOpenFileTargetInEditor,
+  pendingFileOpenPath,
+  openedFile,
+  quickOpen,
+  openedFileTabs,
+  activeOpenedFileTabId,
+  onOpenedEditorFileContentChange,
+  onSaveOpenedEditorFile,
+  onAppendFileDictationLine,
+  onOpenFileDictationTarget,
+  onCloseOpenedEditorFile,
+  onConfirmCloseOpenedEditorFilesForPaths,
+  onCloseOpenedEditorFilesForPaths,
+  onRemapOpenedEditorFilesForPathChange,
+  onActivateOpenedEditorFileTab,
+  onReorderOpenedEditorFileTabs,
+}: EditorWorkspacePaneProps) {
+  const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
+  const renderFileExplorer = (explorerZoom: number) => (
+    <PaneModule tab="editor" load={loadDroneFilesDock}>
+      {(DroneFilesDock) => (
+        <DroneFilesDock
+          key={`${paneKey}-file-explorer`}
+          droneId={drone.id}
+          droneName={drone.name}
+          droneLabel={uiDroneName(drone.name)}
+          path={currentFsPath}
+          homePath={defaultFsPathForCurrentDrone}
+          reveal={explorerReveal}
+          entries={fsEntries}
+          loading={fsLoading}
+          error={isCurrent ? fsErrorUi : fsError}
+          startup={isCurrent ? {
+            waiting: filesPane.waiting,
+            timedOut: filesPane.timedOut,
+            hubPhase: drone.hubPhase,
+            hubMessage: drone.hubMessage,
+          } : null}
+          onOpenPath={setCurrentFsPath}
+          onRefresh={refreshFsList}
+          onRefreshOpenedFile={onRefreshOpenedEditorFile}
+          onOpenFile={onOpenFileInEditor}
+          onOpenFileInPanel={onOpenFileInPanel}
+          onCloseOpenedFile={onCloseOpenedEditorFile}
+          onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
+          onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
+          onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
+          openedFile={openedFile}
+          zoom={explorerZoom}
+        />
+      )}
+    </PaneModule>
+  );
+  const fileEditorContent = (
+    <PaneModule tab="editor" load={loadDroneEditorDock}>
+      {(DroneEditorDock) => (
+        <DroneEditorDock
+          droneId={drone.id}
+          droneName={drone.name}
+          openedFile={openedFile}
+          quickOpen={quickOpen}
+          openedFileTabs={openedFileTabs}
+          activeOpenedFileTabId={activeOpenedFileTabId}
+          onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
+          onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+          onAppendFileDictationLine={onAppendFileDictationLine}
+          onOpenFileDictationTarget={onOpenFileDictationTarget}
+          onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
+          onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
+          onCloseOpenedEditorFile={onCloseOpenedEditorFile}
+          onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
+          onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
+          onOpenFileTargetInEditor={onOpenFileTargetInEditor}
+        />
+      )}
+    </PaneModule>
+  );
+
+  const fileEditor = (
+    <div className="relative h-full min-h-0">
+      <div className="h-full" style={{ visibility: pendingFileOpenPath ? 'hidden' : undefined }}>
+        {fileEditorContent}
+      </div>
+      {pendingFileOpenPath ? (
+        <div className="absolute inset-0">
+          <UiPaneState kind="loading" title="Loading file…" description={pendingFileOpenPath} />
+        </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <PaneModule tab="editor" load={loadDroneEditorWorkspace}>
+      {(DroneEditorWorkspace) => (
+        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
+      )}
+    </PaneModule>
+  );
 }

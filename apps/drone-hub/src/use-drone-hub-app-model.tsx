@@ -79,6 +79,7 @@ import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorks
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import { useChatDeleteShortcut } from './droneHub/app/use-chat-delete-shortcut';
 import type { DroneChatsPaneOptions } from './droneHub/app/DroneChatsDock';
+import type { PaneKey } from './droneHub/app/pane-key';
 import { DetachedFileWindow } from './droneHub/files/DetachedFileWindow';
 import { focusFilePanel } from './droneHub/app/file-tab-drag';
 import type { WorkspaceFileWindows } from './droneHub/app/DockableDroneWorkspace';
@@ -257,7 +258,7 @@ import type { GlobalDictationOverlayProps } from './droneHub/dictation/GlobalDic
 const EMPTY_VISIBLE_TOOL_TABS: RightPanelTab[] = [];
 const NO_HIDDEN_SIDEBAR_GROUPS: string[] = [];
 
-type PreviewPaneKey = 'single' | 'top' | 'bottom';
+type PreviewPaneKey = PaneKey;
 type PreviewPaneSnapshot = {
   drone: DroneSummary;
   currentDroneId: string | null;
@@ -3829,6 +3830,34 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, fsEntries, openedEditorFileTabs, openEditorFile, revealFileInExplorer, setCurrentFsPath],
   );
 
+  // Brings the Hub to one drone's workspace, leaving any home, draft, or group view.
+  const showDroneWorkspace = React.useCallback(
+    (droneIdRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return;
+      const targetDrone = droneByIdRef.current[droneId];
+      if (targetDrone) setActiveRepoPath(String(targetDrone.repoPath ?? '').trim());
+      setAppView('workspace');
+      setHomeOpen(false);
+      setSelectedGroupMultiChat(null);
+      setDraftChat(null);
+      setDraftCreateOpen(false);
+      setDraftCreateError(null);
+      setSelectedDrone(droneId);
+      setSelectedDroneIds([droneId]);
+    },
+    [
+      setActiveRepoPath,
+      setAppView,
+      setDraftChat,
+      setDraftCreateError,
+      setDraftCreateOpen,
+      setHomeOpen,
+      setSelectedDrone,
+      setSelectedDroneIds,
+      setSelectedGroupMultiChat,
+    ],
+  );
   const openFileDictationTarget = React.useCallback(
     (target: { droneId: string; path: string; name: string }) => {
       const droneId = String(target.droneId ?? '').trim();
@@ -3839,35 +3868,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const name =
         String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
       const targetDrone = droneByIdRef.current[droneId];
-      if (targetDrone) {
-        setActiveRepoPath(String(targetDrone.repoPath ?? '').trim());
-        setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
-      }
-      setAppView('workspace');
-      setHomeOpen(false);
-      setSelectedGroupMultiChat(null);
-      setDraftChat(null);
-      setDraftCreateOpen(false);
-      setDraftCreateError(null);
-      setSelectedDrone(droneId);
-      setSelectedDroneIds([droneId]);
+      if (targetDrone) setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
+      showDroneWorkspace(droneId);
       openEditorLocation({ droneId, path, name });
       requestRightPanelTab('editor');
     },
-    [
-      openEditorLocation,
-      requestRightPanelTab,
-      setActiveRepoPath,
-      setAppView,
-      setFsPathForDrone,
-      setDraftChat,
-      setDraftCreateError,
-      setDraftCreateOpen,
-      setHomeOpen,
-      setSelectedDrone,
-      setSelectedDroneIds,
-      setSelectedGroupMultiChat,
-    ],
+    [openEditorLocation, requestRightPanelTab, setFsPathForDrone, showDroneWorkspace],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: {
@@ -3985,18 +3991,23 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     window.addEventListener(CHAT_OPEN_FILE_EVENT, openFile);
     return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
   }, [currentDrone?.id, openMarkdownFileReference]);
-  const resolveCurrentDroneRepoFilePath = React.useCallback(
-    (repoRelativePathRaw: string): string | null => {
+  const resolveDroneRepoFilePath = React.useCallback(
+    (drone: DroneSummary | null, repoRelativePathRaw: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')
         .trim()
         .replace(/\\/g, '/')
         .replace(/^\/+/, '');
       if (!relativePath) return null;
-      const basePath =
-        String(defaultFsPathForCurrentDrone ?? '').trim() || droneHomePath(currentDrone);
+      const basePath = drone && drone.id === currentDrone?.id
+        ? String(defaultFsPathForCurrentDrone ?? '').trim() || droneHomePath(drone)
+        : droneHomePath(drone);
       return normalizeContainerPathInput(`${basePath.replace(/\/+$/g, '')}/${relativePath}`);
     },
     [currentDrone, defaultFsPathForCurrentDrone],
+  );
+  const resolveCurrentDroneRepoFilePath = React.useCallback(
+    (repoRelativePath: string) => resolveDroneRepoFilePath(currentDrone, repoRelativePath),
+    [currentDrone, resolveDroneRepoFilePath],
   );
   const openChangesFileInEditor = React.useCallback(
     (repoRelativePath: string) => {
@@ -4008,7 +4019,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [openFileInFilesPane, resolveCurrentDroneRepoFilePath],
   );
   const revealChangesFileInFiles = React.useCallback(
-    (_pane: 'top' | 'bottom' | 'single', repoRelativePath: string) => {
+    (_pane: PaneKey, repoRelativePath: string) => {
       const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
       if (!containerPath) return;
       const slash = containerPath.lastIndexOf('/');
@@ -5601,13 +5612,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         lockedPreview?.setSelectedPreviewUrlOverride ?? setSelectedPreviewUrlOverride;
       const previewPortRows = lockedPreview?.portRows ?? portRows;
 
+      // A pane can show a drone other than the selected one (a pinned desktop
+      // window); the selected chat and Explorer home belong to the selected drone.
+      const isSelectedDrone = drone.id === currentDrone?.id;
       return (
         <RightPanelTabContent
           chatsPaneOptions={chatsPaneOptions}
           drone={previewDrone}
           tab={tab}
           paneKey={paneKey}
-          selectedChat={selectedChat}
+          selectedChat={isSelectedDrone ? selectedChat : ''}
           droneById={droneById}
           droneNameById={droneNameById}
           droneRepoById={droneRepoById}
@@ -5640,7 +5654,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCanvasCreateGroupChange={setDraftCreateGroup}
           currentDroneId={previewCurrentDroneId}
           currentCanvasChatNodeId={selectedCanvasChatNodeId}
-          defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
+          defaultFsPathForCurrentDrone={isSelectedDrone ? defaultFsPathForCurrentDrone : droneHomePath(drone) || '/'}
           terminalSessionsState={terminalSessionsState}
           onEnsureTerminalSessions={ensureTerminalPaneSessions}
           onCreateTerminalSession={createTerminalPaneTab}
@@ -5757,13 +5771,31 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onRemapOpenedEditorFilesForPathChange={remapOpenedFileTabsForPathChange}
           onActivateOpenedEditorFileTab={activateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
-          onRevealChangesFileInFiles={revealChangesFileInFiles}
-          onOpenChangesFileInEditor={openChangesFileInEditor}
-          onOpenPullRequest={() => requestRightPanelTab('prs')}
+          onRevealChangesFileInFiles={isSelectedDrone ? revealChangesFileInFiles : (_pane, repoRelativePath) => {
+            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath);
+            if (!containerPath) return;
+            const slash = containerPath.lastIndexOf('/');
+            setFsPathForDrone(drone, slash > 0 ? containerPath.slice(0, slash) : '/');
+            showDroneWorkspace(drone.id);
+            requestRightPanelTab('editor');
+          }}
+          onOpenChangesFileInEditor={isSelectedDrone ? openChangesFileInEditor : (repoRelativePath) => {
+            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath);
+            if (!containerPath) return;
+            openFileDictationTarget({ droneId: drone.id, path: containerPath, name: containerPath.split('/').filter(Boolean).pop() || containerPath });
+          }}
+          onOpenPullRequest={() => {
+            if (!isSelectedDrone) showDroneWorkspace(drone.id);
+            requestRightPanelTab('prs');
+          }}
         />
       );
     },
     [
+      resolveDroneRepoFilePath,
+      setFsPathForDrone,
+      showDroneWorkspace,
+      requestRightPanelTab,
       agentLabel,
       currentDrone?.id,
       currentFsPath,
@@ -6065,6 +6097,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
 
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
+    droneById,
     chatContextActions: {
       createChat: createChatForTarget,
       cloneChat: cloneChatForTarget,

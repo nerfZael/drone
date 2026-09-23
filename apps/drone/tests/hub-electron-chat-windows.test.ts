@@ -10,6 +10,10 @@ test('restricts native windows and pin commands to owned chat windows and closes
   installChatWindows({ mainWindow, ipcMain, shell: { openExternal: async () => {} } });
   expect(mainWindow.webContents.open({ url: 'about:blank', frameName: 'drone-hub-chat:a' }).action).toBe('allow');
   expect(mainWindow.webContents.open({ url: 'about:blank', frameName: 'other' }).action).toBe('deny');
+  const tool = mainWindow.webContents.open({ url: 'about:blank', frameName: 'drone-hub-tool:editor:1' });
+  expect(tool.action).toBe('allow');
+  expect(tool.overrideBrowserWindowOptions.width).toBeGreaterThan(640);
+  expect(mainWindow.webContents.open({ url: 'https://example.com', frameName: 'drone-hub-tool:editor:1' }).action).toBe('deny');
   expect(mainWindow.webContents.open({ url: 'https://example.com', frameName: 'drone-hub-chat:a' }).action).toBe('deny');
   let pinned = false;
   let destroyed = false;
@@ -27,6 +31,14 @@ test('restricts native windows and pin commands to owned chat windows and closes
   expect(pin(trusted, 'drone-hub-chat:a', 'yes')).toBe(false);
   expect(pin(trusted, 'drone-hub-chat:a', true)).toBe(true);
   expect(pin(trusted, 'drone-hub-chat:a', false)).toBe(false);
+  let toolPinned = false;
+  const toolChild = Object.assign(new EventEmitter(), {
+    webContents: contents(), setMenu() {}, isDestroyed: () => false,
+    setAlwaysOnTop: (value: boolean) => { toolPinned = value; }, isAlwaysOnTop: () => toolPinned,
+    destroy: () => {},
+  });
+  mainWindow.webContents.emit('did-create-window', toolChild, { frameName: 'drone-hub-tool:editor:1' });
+  expect(pin(trusted, 'drone-hub-tool:editor:1', true)).toBe(true);
   mainWindow.emit('closed');
   expect(destroyed).toBe(true);
   expect(handlers.size).toBe(0);

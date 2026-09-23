@@ -63,6 +63,11 @@ type UseFileEditorStateArgs = {
   hostedTabIds?: readonly string[];
   /** A hosted tab was made active (e.g. opened again); the host should focus its window. */
   onHostedTabActivated?: (tabId: string) => void;
+  /**
+   * Write each drone's last opened file to storage for the next session. Off for
+   * a second editor (a desktop window), which would otherwise overwrite the Hub's.
+   */
+  rememberOpenedFiles?: boolean;
 };
 
 type LoadSession = { droneId: string; path: string; cancel: () => void };
@@ -192,6 +197,7 @@ export function useFileEditorState({
   onRefreshFsList,
   hostedTabIds,
   onHostedTabActivated,
+  rememberOpenedFiles = true,
 }: UseFileEditorStateArgs) {
   const currentDroneId = String(currentDrone?.id ?? '').trim();
   const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>(
@@ -240,6 +246,7 @@ export function useFileEditorState({
   );
 
   React.useEffect(() => {
+    if (!rememberOpenedFiles) return;
     const previous = rememberedEditorFilesRef.current ?? {};
     const next = rememberedEditorFilesFromTabState(tabStateByDroneId);
     const droneIds = new Set([...Object.keys(previous), ...Object.keys(next)]);
@@ -248,7 +255,7 @@ export function useFileEditorState({
       writeRememberedEditorFile(droneId, next[droneId] ?? null);
     }
     rememberedEditorFilesRef.current = next;
-  }, [tabStateByDroneId]);
+  }, [rememberOpenedFiles, tabStateByDroneId]);
 
   const setTabState = React.useCallback(
     (next: React.SetStateAction<OpenedFileTabsState>) => setTabStateForDrone(currentDroneId, next),

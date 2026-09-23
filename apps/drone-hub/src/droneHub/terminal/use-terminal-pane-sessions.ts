@@ -1,4 +1,5 @@
 import React from 'react';
+import type { PaneKey } from '../app/pane-key';
 import {
   closeTerminalPaneSession,
   createTerminalPaneSession,
@@ -9,7 +10,7 @@ import {
   type TerminalPaneSessionsState,
 } from './terminal-tabs-state';
 
-export type TerminalPaneKey = 'single' | 'top' | 'bottom';
+export type TerminalPaneKey = PaneKey;
 
 function terminalPaneStateKey(droneIdRaw: string, paneKey: TerminalPaneKey): string {
   const droneId = String(droneIdRaw ?? '').trim();

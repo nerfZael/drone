@@ -5,9 +5,11 @@ import { registerAppDialogSurface } from '../../ui/AppConfirmDialog';
 import type { ChatContextTarget } from './ChatContextActions';
 
 /** Render an additional chat view exclusively in its native desktop window. */
-export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose, children }: {
+export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose, children, kind = 'chat' }: {
   chatTarget?: ChatContextTarget;
   chatKey: string; title: string; request: number; onClose: () => void; children: React.ReactNode;
+  /** A tool window opens wider and without the chat surface's chrome. */
+  kind?: 'chat' | 'tool';
 }) {
   const titleRef = React.useRef(title);
   titleRef.current = title;
@@ -23,7 +25,8 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
   const [outside, setOutside] = React.useState(false);
   const [pinned, setPinned] = React.useState(false);
   const [error, setError] = React.useState('');
-  const name = `drone-hub-chat:${chatKey}`;
+  const name = `${kind === 'tool' ? 'drone-hub-tool' : 'drone-hub-chat'}:${chatKey}`;
+  const features = kind === 'tool' ? 'width=1040,height=760' : 'width=640,height=800';
   React.useLayoutEffect(() => {
     return () => { cleanup.current?.(); host.remove(); };
   }, [host]);
@@ -32,7 +35,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
   }, [title]);
   const open = React.useCallback(() => {
     if (popup.current && !popup.current.closed) { popup.current.focus(); return; }
-    const child = window.open('about:blank', name, 'width=640,height=800');
+    const child = window.open('about:blank', name, features);
     if (!child) { setError('Could not open the desktop window. Try again.'); return; }
     setError('');
     popup.current = child;
@@ -99,7 +102,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     };
     child.focus();
     host.dataset.desktopChatFocused = String(child.document.hasFocus());
-  }, [host, name]);
+  }, [host, name, features]);
   React.useEffect(() => {
     open();
   }, [request, open]);
@@ -127,7 +130,9 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
   // dh-floating-chat gives this window the same slim composer and tighter
   // transcript as a floating chat in the Hub once it is narrow enough.
   return createPortal(<div onContextMenu={contextMenu.onContextMenu}
-    className="dh-floating-chat flex min-h-0 flex-1 flex-col bg-[var(--chat-background)]">
+    className={kind === 'tool'
+      ? 'dh-desktop-tool-window flex min-h-0 flex-1 flex-col bg-[var(--panel)]'
+      : 'dh-floating-chat flex min-h-0 flex-1 flex-col bg-[var(--chat-background)]'}>
     {error && <div role="alert" className="px-2 text-12 text-[var(--red)]">{error}</div>}
     {children}
     {contextMenu.menu}

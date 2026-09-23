@@ -112,12 +112,16 @@ type UseFilesAndPortsPaneStateArgs = {
   portsEnabled: boolean;
 };
 
-export function useFilesAndPortsPaneState({
+/**
+ * The Explorer's folder listing and path for one drone. Separate from the
+ * ports state so an editor shown for another drone (a pinned desktop window)
+ * can have its own listing without duplicating the preview's port bookkeeping.
+ */
+export function useFilesPaneState({
   currentDrone,
   requestJson,
   filesEnabled,
-  portsEnabled,
-}: UseFilesAndPortsPaneStateArgs) {
+}: Omit<UseFilesAndPortsPaneStateArgs, 'portsEnabled'>) {
   const [fsPathByDrone, setFsPathByDrone] = React.useState<Record<string, string>>({});
   const [fsRefreshNonce, setFsRefreshNonce] = React.useState(0);
   const [fsResp, setFsResp] = React.useState<DroneFsListPayload | null>(null);
@@ -335,6 +339,28 @@ export function useFilesAndPortsPaneState({
     if (fsOkForCurrentDrone) filesPane.markReady();
   }, [fsOkForCurrentDrone, filesPane.markReady]);
   const fsErrorUi = filesPane.suppressErrors ? null : fsErrorCombined;
+
+  return {
+    defaultFsPathForCurrentDrone,
+    currentFsPath,
+    setFsPathForDrone,
+    setCurrentFsPath,
+    refreshFsList,
+    fsEntries,
+    fsLoading,
+    fsError,
+    fsErrorUi,
+    filesPane,
+  };
+}
+
+export function useFilesAndPortsPaneState({
+  currentDrone,
+  requestJson,
+  filesEnabled,
+  portsEnabled,
+}: UseFilesAndPortsPaneStateArgs) {
+  const files = useFilesPaneState({ currentDrone, requestJson, filesEnabled });
 
   const portsPollIntervalMs = currentDrone ? 5000 : 60000;
   const {
@@ -602,16 +628,7 @@ export function useFilesAndPortsPaneState({
   }, [currentDrone?.id, portReachabilityByDrone]);
 
   return {
-    defaultFsPathForCurrentDrone,
-    currentFsPath,
-    setFsPathForDrone,
-    setCurrentFsPath,
-    refreshFsList,
-    fsEntries,
-    fsLoading,
-    fsError,
-    fsErrorUi,
-    filesPane,
+    ...files,
     selectedPreviewPort,
     currentPortReachability,
     portsLoading,

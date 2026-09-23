@@ -527,6 +527,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     fileWindows,
     renderPersistentPreviewContent,
     renameCanvasChat,
+    droneById,
   } = args;
 
   return {
@@ -541,6 +542,11 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       onCreateNewChatAutoFocusHandled: consumeNewChatActionAutoFocus,
       promotingNewChatActionById,
       promoteNewChatActionErrorById,
+    },
+    desktopToolWindowsProps: {
+      droneById,
+      currentDrone,
+      renderToolPane: renderRightPanelTabContent,
     },
     appView,
     setupWelcomeProps: setupStatusState.setupStatus?.shouldShowWelcome

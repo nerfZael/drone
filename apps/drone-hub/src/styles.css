@@ -3273,6 +3273,15 @@ select:disabled optgroup {
   background: var(--border);
 }
 
+/* The slot a tab's controls render into; it keeps the tab's own flex layout. */
+.dh-dock-tab-controls {
+  display: contents;
+}
+
+.dh-dock-tab-controls:empty + .dh-dock-tab-divider {
+  display: none;
+}
+
 /* They belong to the panel on show; a tab waiting behind another keeps only its name. */
 .dh-dockable-workspace .dv-tab.dv-inactive-tab .dh-dock-tab-button,
 .dh-dockable-workspace .dv-tab.dv-inactive-tab .dh-dock-tab-divider {

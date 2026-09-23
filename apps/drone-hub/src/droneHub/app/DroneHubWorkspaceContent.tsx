@@ -1,4 +1,5 @@
 import { DetachedChatWindows, type DetachedChatWindowsProps } from './DetachedChatWindows';
+import { DesktopToolWindows, type DesktopToolWindowsProps } from './DesktopToolWindows';
 import React from 'react';
 import { ChatContextActionsContext, type ChatContextActions } from './ChatContextActions';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
@@ -28,6 +29,7 @@ export type DroneHubWorkspaceContentProps = {
   chatContextActions?: ChatContextActions;
   appView: AppView;
   detachedChatWindowsProps: Omit<DetachedChatWindowsProps, 'visible' | 'currentDroneId'>;
+  desktopToolWindowsProps: Omit<DesktopToolWindowsProps, 'chatContext'>;
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
   settingsViewProps: React.ComponentProps<typeof SettingsViewComponent>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
@@ -59,6 +61,7 @@ export function DroneHubWorkspaceContent({
   chatContextActions,
   appView,
   detachedChatWindowsProps,
+  desktopToolWindowsProps,
   setupWelcomeProps,
   settingsViewProps,
   draftChatWorkspaceProps,
@@ -98,6 +101,7 @@ export function DroneHubWorkspaceContent({
     <ChatContextActionsContext.Provider value={chatContextActions ?? null}>
       <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
         <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
+        <DesktopToolWindows {...desktopToolWindowsProps} chatContext={detachedChatWindowsProps} />
         <DetachedChatWindows {...detachedChatWindowsProps}
           currentDroneId={selectedDroneWorkspaceProps?.currentDrone.id ?? null}
           visible={appView === 'workspace' && !setupWelcomeProps && !draftChatWorkspaceProps && !groupMultiChatWorkspaceProps && Boolean(selectedDroneWorkspaceProps)} />

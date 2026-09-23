@@ -1,6 +1,6 @@
 import React from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview';
-import { usePanelTitle } from './ChatWindowTab';
+import { DockTabShell, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
 import { CHATS_VIEWS, useChatsViewStore, type ChatsView } from './chats-view-store';
 
 const ICONS: Record<ChatsView, React.ReactNode> = {
@@ -22,31 +22,14 @@ const LABELS: Record<ChatsView, string> = {
   grid: 'Grid: every chat open side by side',
 };
 
+const chatsTab = () => 'chats' as const;
+
 /** The Chats window's dock tab. Its list/grid switch lives here so the body keeps its full height. */
 export function ChatsDockTab({ api }: IDockviewPanelHeaderProps) {
-  const title = usePanelTitle(api);
   const view = useChatsViewStore((state) => state.view);
   const setView = useChatsViewStore((state) => state.setView);
-  const middleButtonDown = React.useRef(false);
-  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
   return (
-    <div
-      className="dv-default-tab"
-      data-testid="dockview-dv-default-tab"
-      title={title}
-      onPointerDown={(event) => {
-        middleButtonDown.current = event.button === 1;
-        if (event.button === 1) event.preventDefault();
-      }}
-      onPointerUp={(event) => {
-        if (middleButtonDown.current && event.button === 1) api.close();
-        middleButtonDown.current = false;
-      }}
-      onPointerLeave={() => {
-        middleButtonDown.current = false;
-      }}
-    >
-      <span className="dv-default-tab-content">{title}</span>
+    <DockTabShell api={api}>
       <div role="radiogroup" aria-label="Chat view" className="dh-dock-tab-group">
         {CHATS_VIEWS.map((option) => (
           <button
@@ -58,9 +41,9 @@ export function ChatsDockTab({ api }: IDockviewPanelHeaderProps) {
             aria-label={LABELS[option]}
             aria-checked={view === option}
             data-chats-view={option}
-            onPointerDown={stop}
+            onPointerDown={stopTabEvent}
             onClick={(event) => {
-              stop(event);
+              stopTabEvent(event);
               setView(option);
             }}
           >
@@ -68,19 +51,7 @@ export function ChatsDockTab({ api }: IDockviewPanelHeaderProps) {
           </button>
         ))}
       </div>
-      <span className="dh-dock-tab-divider" aria-hidden="true" />
-      <div
-        className="dv-default-tab-action"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={(event) => {
-          event.preventDefault();
-          api.close();
-        }}
-      >
-        <svg height="11" width="11" viewBox="0 0 28 28" aria-hidden="true" focusable={false} className="dv-svg">
-          <path d="M2.1 27.3L0 25.2L11.55 13.65L0 2.1L2.1 0L13.65 11.55L25.2 0L27.3 2.1L15.75 13.65L27.3 25.2L25.2 27.3L13.65 15.75L2.1 27.3Z" />
-        </svg>
-      </div>
-    </div>
+      <OpenDesktopToolButton tab={chatsTab} />
+    </DockTabShell>
   );
 }
