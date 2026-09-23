@@ -22,7 +22,7 @@ function audioFilenameForMime(mimeTypeRaw: string): string {
   return 'recording.webm';
 }
 
-function groqErrorMessage(status: number, statusText: string, data: unknown): string {
+function groqErrorMessage(status: number, statusText: string, data: unknown, requestId: string | null): string {
   const body = data && typeof data === 'object' ? (data as any) : null;
   const nested = body?.error;
   const message =
@@ -33,7 +33,9 @@ function groqErrorMessage(status: number, statusText: string, data: unknown): st
         : typeof body?.error === 'string'
           ? body.error
           : '';
-  return message.trim() || `GROQ transcription failed (${status} ${statusText})`;
+  const reason = message.trim();
+  const detail = reason && reason !== statusText ? reason : 'The provider returned no further details.';
+  return `GROQ transcription failed (HTTP ${status}${statusText ? ` ${statusText}` : ''}): ${detail}${requestId ? ` [request ID: ${requestId}]` : ''}`;
 }
 
 export async function transcribeAudioWithGroq(opts: {
@@ -91,7 +93,8 @@ export async function transcribeAudioWithGroq(opts: {
   }
 
   if (!response.ok) {
-    throw new Error(groqErrorMessage(response.status, response.statusText, data));
+    const requestId = response.headers.get('x-request-id');
+    throw Object.assign(new Error(groqErrorMessage(response.status, response.statusText, data, requestId)), { status: response.status });
   }
 
   const text = String(data?.text ?? '').trim();

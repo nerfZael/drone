@@ -43,7 +43,11 @@ export async function diarizeRecording(file: string, apiKey: string): Promise<Ar
     method: 'POST', headers: { authorization: `Bearer ${apiKey}` }, body: form, signal: AbortSignal.timeout(15 * 60_000),
   });
   const result: any = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(`OpenAI transcription failed: ${result?.error?.message || response.status}`);
+  if (!response.ok) {
+    const requestId = response.headers.get('x-request-id');
+    const detail = typeof result?.error?.message === 'string' ? result.error.message.trim() : '';
+    throw Object.assign(new Error(`OpenAI transcription failed (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''})${detail && detail !== response.statusText ? `: ${detail}` : ''}${requestId ? ` [request ID: ${requestId}]` : ''}`), { status: response.status });
+  }
   return parseDiarizedSegments(result?.segments);
 }
 

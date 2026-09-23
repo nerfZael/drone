@@ -31,6 +31,9 @@ test('final transcript renders anonymous speakers and treats spoken markup as te
 
 test('shows processing, failures and silent completion without inventing speech', () => {
   expect(renderToStaticMarkup(<RecordingTranscript recording={recording} status="processing" />)).toContain('You can close this window');
-  expect(renderToStaticMarkup(<RecordingTranscript recording={{ ...recording, error: 'Provider unavailable' }} status="failed" />)).toContain('Provider unavailable');
+  const failed = renderToStaticMarkup(<RecordingTranscript recording={{ ...recording, error: 'Provider unavailable' }} status="failed" />);
+  expect(failed).toContain('Provider unavailable');
+  expect(failed).toContain('Saved live preview');
+  expect(failed).toContain('hello');
   expect(renderToStaticMarkup(<RecordingTranscript recording={recording} status="complete" />)).toContain('No speech was detected');
 });

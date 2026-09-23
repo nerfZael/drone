@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { RecordingStore, recordingMarkdown } from '../src/hub/recordings/RecordingStore';
 import { RecordingProcessor } from '../src/hub/recordings/RecordingProcessor';
 import { mergeRecordingSegments } from '../src/hub/recordings/recording-audio';
@@ -51,6 +51,34 @@ describe('recording bundles', () => {
 });
 
 describe('two-track processing with real FFmpeg and mocked providers', () => {
+  test('resets timestamps on later chunks before sending them to GROQ', async () => {
+    const { recording, directory } = await store.create({ liveTranscription: true });
+    await fixtureAudio(directory);
+    for (const source of ['microphone', 'system']) {
+      const shifted = spawnSync('ffmpeg', ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=12',
+        '-af', 'asetpts=PTS+120/TB', '-ar', '16000', '-ac', '1', '-c:a', 'flac', path.join(directory, source, '000001.flac')]);
+      expect(shifted.status).toBe(0);
+      await fs.appendFile(path.join(directory, `${source}.csv`), '000001.flac,120.000000,132.000000\n');
+    }
+    recording.previewChunks = 1;
+    globalThis.fetch = (async () => Response.json({ text: 'hello', segments: [{ start: 0, end: 0.5, text: 'hello' }] })) as typeof fetch;
+    await new RecordingProcessor(store, async () => ({ microphone: 'test', system: 'test' })).preview(recording);
+    for (const source of ['microphone', 'system']) {
+      const normalized = path.join(directory, 'processing', `${source}-000001.flac.normalized.flac`);
+      const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=start_time', '-of', 'default=noprint_wrappers=1:nokey=1', normalized], { encoding: 'utf8' });
+      expect(probe.status).toBe(0);
+      expect(Number(probe.stdout.trim())).toBe(0);
+    }
+  });
+
+  test('identifies the track and audio time when transcription fails', async () => {
+    const { recording, directory } = await store.create({ keepAudio: true });
+    await fixtureAudio(directory);
+    globalThis.fetch = (async () => Response.json({ error: { message: 'Internal Server Error' } }, { status: 500, statusText: 'Internal Server Error' })) as typeof fetch;
+    await expect(new RecordingProcessor(store, async () => ({ microphone: 'test', system: 'test' })).process(recording))
+      .rejects.toThrow(/Microphone transcription failed at 0:00–0:01: GROQ transcription failed \(HTTP 500 Internal Server Error\): The provider returned no further details\. Retry processing; the source audio is saved\./);
+  });
+
   test('rebuilds interrupted caches and supports data directories containing quotes and newlines', async () => {
     store = new RecordingStore(path.join(root, "home's\nfiles"), path.join(root, "pending's\nfiles"));
     const { recording, directory } = await store.create({ keepAudio: true });
@@ -101,11 +129,11 @@ describe('two-track processing with real FFmpeg and mocked providers', () => {
     let fail = true, microphoneRequests = 0;
     globalThis.fetch = (async url => {
       if (String(url).includes('groq')) { microphoneRequests++; return Response.json({ text: 'hello', segments: [{ start: 0, end: 0.5, text: 'hello' }] }); }
-      if (fail) return Response.json({ error: { message: 'try later' } }, { status: 429 });
+      if (fail) return Response.json({ error: { message: 'try later' } }, { status: 429, headers: { 'x-request-id': 'openai-456' } });
       return Response.json({ segments: [] });
     }) as typeof fetch;
     const processor = new RecordingProcessor(store, async () => ({ microphone: 'test', system: 'test' }));
-    await expect(processor.process(recording)).rejects.toThrow('try later');
+    await expect(processor.process(recording)).rejects.toThrow('Desktop speaker labeling failed for part 1: OpenAI transcription failed (HTTP 429): try later [request ID: openai-456]');
     expect((await fs.stat(path.join(await store.directory(recording.id), 'microphone.flac'))).size).toBeGreaterThan(0);
     fail = false;
     await processor.process(recording);

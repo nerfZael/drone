@@ -63,7 +63,8 @@ export class RecordingProcessor {
       try { diarized = parseDiarizedSegments(JSON.parse(await fs.readFile(await this.store.file(directory, path.relative(directory, cache)), 'utf8'))); }
       catch (error: any) {
         if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-        diarized = await diarizeRecording(mp3, keys.system);
+        try { diarized = await diarizeRecording(mp3, keys.system); }
+        catch (cause) { throw new Error(`Desktop speaker labeling failed for part ${part + 1}: ${errorMessage(cause)}${retryAdvice(cause)}`, { cause }); }
         await writeRecordingFile(cache, JSON.stringify(diarized));
       }
       const speakers = new Map<string, string>();
@@ -111,7 +112,26 @@ export class RecordingProcessor {
       return segments;
     }
     catch (error: any) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
-    const segments = await transcribeRecordingChunk(await this.store.file(directory, chunk.name), source, key, chunk.start);
+    const track = source === 'microphone' ? 'Microphone' : 'Desktop';
+    const audio = await this.store.file(directory, chunk.name);
+    let upload = audio;
+    // The segment muxer can leave absolute FLAC timestamps despite
+    // -reset_timestamps 1. Give the provider a zero-based file for every later
+    // chunk while retaining the original for retry and final combination.
+    if (chunk.start > 0) {
+      upload = path.join(directory, 'processing', `${source}-${path.basename(chunk.name)}.normalized.flac`);
+      try {
+        await fs.rm(upload, { force: true });
+        await runAudioCommand(['-nostdin', '-v', 'error', '-n', '-i', audio, '-af', 'asetpts=PTS-STARTPTS', '-ar', '16000', '-ac', '1', '-c:a', 'flac', upload]);
+      } catch (cause) {
+        throw new Error(`${track} audio preparation failed at ${formatTime(chunk.start)}–${formatTime(chunk.end)}: ${errorMessage(cause)}`, { cause });
+      }
+    }
+    let segments: RecordingSegment[];
+    try { segments = await transcribeRecordingChunk(upload, source, key, chunk.start); }
+    catch (cause) {
+      throw new Error(`${track} transcription failed at ${formatTime(chunk.start)}–${formatTime(chunk.end)}: ${errorMessage(cause)}${retryAdvice(cause)}`, { cause });
+    }
     await writeRecordingFile(path.join(directory, cacheName), JSON.stringify(segments));
     return segments;
   }
@@ -131,4 +151,15 @@ export class RecordingProcessor {
     await fs.rm(output, { force: true });
     await runAudioCommand(['-nostdin', '-v', 'error', '-n', '-f', 'concat', '-safe', '0', '-i', list, '-c:a', 'flac', output]);
   }
+}
+
+function formatTime(seconds: number): string {
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+function errorMessage(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }
+function retryAdvice(cause: unknown): string {
+  const status = typeof cause === 'object' && cause !== null && 'status' in cause ? cause.status : null;
+  return typeof status === 'number' && status >= 500 ? ' Retry processing; the source audio is saved.' : '';
 }

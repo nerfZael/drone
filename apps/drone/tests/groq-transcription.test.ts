@@ -8,6 +8,12 @@ afterEach(() => {
 });
 
 describe('GROQ transcription', () => {
+  test('keeps the HTTP status when the provider only returns a generic error', async () => {
+    globalThis.fetch = (async () => Response.json({ error: { message: 'Internal Server Error' } }, { status: 500, statusText: 'Internal Server Error', headers: { 'x-request-id': 'req-123' } })) as typeof fetch;
+    await expect(transcribeAudioWithGroq({ audio: Buffer.from([1]), apiKey: 'groq-test' }))
+      .rejects.toThrow('GROQ transcription failed (HTTP 500 Internal Server Error): The provider returned no further details. [request ID: req-123]');
+  });
+
   test('selects quality and forwards language and recent transcript context', async () => {
     let form: FormData | null = null;
     globalThis.fetch = (async (_input, init) => {

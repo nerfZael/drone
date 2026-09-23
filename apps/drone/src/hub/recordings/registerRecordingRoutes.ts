@@ -32,11 +32,12 @@ export function registerRecordingRoutes(router: HubRouter, dependencies: Recordi
   const trackJob = (id: string, work: () => Promise<void>) => {
     const job = Promise.resolve().then(work).finally(() => { if (jobs.get(id) === job) jobs.delete(id); });
     jobs.set(id, job);
-    void job.catch(error => console.error('Could not persist recording job:', message(error)));
+    void job.catch(error => console.error('[DesktopRecording] Could not persist job', { recordingId: id, error }));
   };
   const processAndPersist = async (recording: DesktopRecording) => {
     try { await processor.process(recording); }
     catch (error) {
+      console.error('[DesktopRecording] Processing failed', { recordingId: recording.id, error });
       if (recording.status === 'complete') recording.warnings.push(`Transcript is complete, but audio cleanup failed: ${message(error)}`);
       else { recording.status = 'failed'; recording.error = message(error); }
       await store.save(recording);
@@ -97,7 +98,10 @@ export function registerRecordingRoutes(router: HubRouter, dependencies: Recordi
       if (!jobs.has(recording.id) && !mutations.has(recording.id)) {
         trackJob(recording.id, async () => {
           try { await processor.preview(recording); }
-          catch (error) { recording.previewError = message(error); await store.save(recording); }
+          catch (error) {
+            console.error('[DesktopRecording] Live preview failed', { recordingId: recording.id, error });
+            recording.previewError = message(error); await store.save(recording);
+          }
         });
       }
       json(200, { ok: true });
@@ -129,7 +133,10 @@ export function registerRecordingRoutes(router: HubRouter, dependencies: Recordi
           await store.publish(latest.id);
           await store.save(latest);
           if (!receipt.error) await processAndPersist(latest);
-        } catch (error) { latest.status = 'failed'; latest.error = message(error); await store.save(latest); }
+        } catch (error) {
+          console.error('[DesktopRecording] Finalization failed', { recordingId: latest.id, error });
+          latest.status = 'failed'; latest.error = message(error); await store.save(latest);
+        }
       });
       leases.delete(recording.id);
       json(202, { ok: true });
