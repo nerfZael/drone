@@ -1,0 +1,278 @@
+{
+  "at": "2026-09-23T11:11:49.818Z",
+  "results": [
+    {
+      "clip": "silence-1s",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 1,
+      "rmsDb": null,
+      "peakDb": null,
+      "status": 200,
+      "requestId": "req_01m36zdsnte7s8yk1ka3awcb2x",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 29.98,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "silence-5s",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 5,
+      "rmsDb": null,
+      "peakDb": null,
+      "status": 200,
+      "requestId": "req_01m36zdsz0em5849qm2n7wvvms",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 29.98,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "silence-30s",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 30,
+      "rmsDb": null,
+      "peakDb": null,
+      "status": 200,
+      "requestId": "req_01m36zdtbeem39gj3yetexjtk8",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 29.98,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "noise-5s-minus55dB",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 5,
+      "rmsDb": -55.02163199849336,
+      "peakDb": -50.22257122354151,
+      "status": 200,
+      "requestId": "req_01m36zdtnbepdbtesn15hhdxn2",
+      "text": " .",
+      "language": "English",
+      "segments": [
+        {
+          "text": " .",
+          "start": 0,
+          "end": 5,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.37458327,
+          "compression_ratio": 0.2
+        }
+      ]
+    },
+    {
+      "clip": "noise-30s-minus40dB",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 30,
+      "rmsDb": -39.996589404191624,
+      "peakDb": -35.22203198497398,
+      "status": 200,
+      "requestId": "req_01m36zdtyne41r6zfa658d6jp0",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 29.98,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.43079627,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "hum-5s-minus45dB",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 5,
+      "rmsDb": -45.001153890175765,
+      "peakDb": -41.97618855242874,
+      "status": 200,
+      "requestId": "req_01m36zdvbbejpvp2pa0jmqhegf",
+      "text": " .",
+      "language": "English",
+      "segments": [
+        {
+          "text": " .",
+          "start": 0,
+          "end": 5,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.36610055,
+          "compression_ratio": 0.2
+        }
+      ]
+    },
+    {
+      "clip": "spoken-thank-you",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 5,
+      "rmsDb": -22.220750891158843,
+      "peakDb": -3.452652406479699,
+      "status": 200,
+      "requestId": "req_01m36zdvjqew3bajrtg2qn8wt8",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 1.36,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.62702733,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "quiet-spoken-thank-you",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 5,
+      "rmsDb": -62.22011330375477,
+      "peakDb": -43.46054508275024,
+      "status": 200,
+      "requestId": "req_01m36zdvvxesw8718zhf05n73z",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 1.3399999,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.55127436,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    },
+    {
+      "clip": "sentence-with-silence",
+      "model": "whisper-large-v3-turbo",
+      "seconds": 15,
+      "rmsDb": -20.979381341555584,
+      "peakDb": -2.1764921418502445,
+      "status": 200,
+      "requestId": "req_01m36zdw9peze9ev6j63vgczcs",
+      "text": " Please open the project and show the latest changes.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Please open the project and show the latest changes.",
+          "start": 0,
+          "end": 4,
+          "no_speech_prob": 0,
+          "avg_logprob": -0.28890595,
+          "compression_ratio": 0.9298246
+        }
+      ]
+    },
+    {
+      "clip": "silence-5s",
+      "model": "whisper-large-v3",
+      "seconds": 5,
+      "rmsDb": null,
+      "peakDb": null,
+      "status": 200,
+      "requestId": "req_01m36zdwhbejjaswe244wa7drz",
+      "text": " you",
+      "language": "English",
+      "segments": [
+        {
+          "text": " you",
+          "start": 0,
+          "end": 0.62,
+          "no_speech_prob": 0.7006836,
+          "avg_logprob": -0.7080598,
+          "compression_ratio": 0.33333334
+        }
+      ]
+    },
+    {
+      "clip": "silence-30s",
+      "model": "whisper-large-v3",
+      "seconds": 30,
+      "rmsDb": null,
+      "peakDb": null,
+      "status": 200,
+      "requestId": "req_01m36zdwzae8h900bppwsybr7w",
+      "text": " you",
+      "language": "English",
+      "segments": [
+        {
+          "text": " you",
+          "start": 0,
+          "end": 0.62,
+          "no_speech_prob": 0.7006836,
+          "avg_logprob": -0.7080598,
+          "compression_ratio": 0.33333334
+        }
+      ]
+    },
+    {
+      "clip": "noise-5s-minus55dB",
+      "model": "whisper-large-v3",
+      "seconds": 5,
+      "rmsDb": -55.02163199849336,
+      "peakDb": -50.22257122354151,
+      "status": 200,
+      "requestId": "req_01m36zdxdre4582y5dwq6veb5f",
+      "text": " .",
+      "language": "English",
+      "segments": [
+        {
+          "text": " .",
+          "start": 0,
+          "end": 5,
+          "no_speech_prob": 0.1829834,
+          "avg_logprob": -0.20236212,
+          "compression_ratio": 0.2
+        }
+      ]
+    },
+    {
+      "clip": "spoken-thank-you",
+      "model": "whisper-large-v3",
+      "seconds": 5,
+      "rmsDb": -22.220750891158843,
+      "peakDb": -3.452652406479699,
+      "status": 200,
+      "requestId": "req_01m36zdxqwe5pvz5gd1c556j21",
+      "text": " Thank you.",
+      "language": "English",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "start": 0,
+          "end": 1.36,
+          "no_speech_prob": 0.044006348,
+          "avg_logprob": -0.6954705,
+          "compression_ratio": 0.57894737
+        }
+      ]
+    }
+  ]
+}

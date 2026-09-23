@@ -1,0 +1,110 @@
+{
+  "at": "2026-09-23T11:14:08.854Z",
+  "results": [
+    {
+      "name": "plain-json",
+      "responseFormat": "json",
+      "status": 200,
+      "requestId": "req_01m36zj3szempttc04brytj8qy",
+      "text": " Thank you."
+    },
+    {
+      "name": "explicit-English",
+      "language": "en",
+      "status": 200,
+      "requestId": "req_01m36zj410eknvgyn9s19r0p35",
+      "text": " Thank you.",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641
+        }
+      ]
+    },
+    {
+      "name": "dictation-style-prompt",
+      "prompt": "Voice dictation transcript.",
+      "status": 200,
+      "requestId": "req_01m36zj489ed9bwkp2daferzr3",
+      "text": " Thank you.",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.6186256
+        }
+      ]
+    },
+    {
+      "name": "anti-hallucination-instruction",
+      "prompt": "Transcribe only audible speech. If there is silence, return no text.",
+      "status": 200,
+      "requestId": "req_01m36zj4n9ektvkggtb9mdn0h1",
+      "text": " If there is silence, return no text.",
+      "segments": [
+        {
+          "text": " If there is silence, return no text.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.5965179
+        }
+      ]
+    },
+    {
+      "name": "recent-speech-context",
+      "prompt": "Please open the project and show the latest changes.",
+      "status": 200,
+      "requestId": "req_01m36zj4yhenpr29tvpq8zxjbt",
+      "text": " Thank you.",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.4427657
+        }
+      ]
+    },
+    {
+      "name": "explicit-Croatian",
+      "language": "hr",
+      "status": 200,
+      "requestId": "req_01m36zj54zevz81kxz3ha74xgx",
+      "text": " Hvala što pratite kanal.",
+      "segments": [
+        {
+          "text": " Hvala što pratite kanal.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.19691958
+        }
+      ]
+    },
+    {
+      "name": "flac-format",
+      "format": "flac",
+      "status": 200,
+      "requestId": "req_01m36zj5cqeedvvh1wf2rc67dy",
+      "text": " Thank you.",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641
+        }
+      ]
+    },
+    {
+      "name": "webm-format",
+      "format": "webm",
+      "status": 200,
+      "requestId": "req_01m36zj5mae3z94fm242dw04y9",
+      "text": " Thank you.",
+      "segments": [
+        {
+          "text": " Thank you.",
+          "no_speech_prob": 0,
+          "avg_logprob": -0.2932641
+        }
+      ]
+    }
+  ]
+}
