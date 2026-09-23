@@ -28,7 +28,8 @@ export type ChatComposerEditorHandle = {
   applyCompanionEdit: (content: string) => boolean;
 };
 
-const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '6rem';
+// One line: the 20px line plus 10px padding above and below; it grows with the text.
+const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '2.5rem';
 const CHAT_COMPOSER_EDITOR_MAX_HEIGHT = '80cqh';
 
 type ChatComposerEditorProps = {

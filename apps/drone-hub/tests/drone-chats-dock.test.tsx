@@ -20,6 +20,13 @@ test('the inventory includes grouped, workflow, and optimistic side chats withou
   expect(allDroneChatNames(drone, ['side', 'new-side'])).toEqual(['default', 'nested-chat', 'workflow', 'side', 'new-side']);
 });
 
+test('the Chats window lists chats oldest first, with chats of unknown age last', () => {
+  const dated = { ...drone, chatCreatedAt: {
+    workflow: '2026-09-01T09:00:00Z', 'nested-chat': '2026-09-01T11:00:00Z', default: '2026-09-01T10:00:00Z',
+  } } as DroneSummary;
+  expect(allDroneChatNames(dated, ['new-side'])).toEqual(['workflow', 'default', 'nested-chat', 'side', 'new-side']);
+});
+
 test('preview chooses the latest speaker, including a pending user message', () => {
   const messages = [{ role: 'assistant' as const, text: 'Done.\nAll tests passed.', at: '2026-09-22T10:00:00Z' }];
   expect(latestChatPreview({ messages, pending: [] })?.text).toBe('Done. All tests passed.');
@@ -132,6 +139,13 @@ test('chat rows toggle and range-select, and right-click deletes exactly the tar
     await click('side', { shiftKey: true });
     expect(selected()).toEqual(['nested-chat', 'workflow', 'side']);
     expect(opened).toEqual(['nested-chat']);
+    // Delete takes the whole selection in one request, not just the focused row.
+    const deleteKey = new dom.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+    await act(async () => { row('side').dispatchEvent(deleteKey); });
+    expect(deleteKey.defaultPrevented).toBe(true);
+    expect(deleted.shift()).toEqual(['nested-chat', 'workflow', 'side']);
+    await click('nested-chat');
+    await click('side', { shiftKey: true });
     await context('workflow');
     expect(selected()).toEqual(['nested-chat', 'workflow', 'side']);
     const menuItem = (label: string) => Array.from(dom.document.querySelectorAll('[role="menuitem"]')).find((el) => el.textContent?.includes(label))!;
@@ -312,7 +326,6 @@ test('Chats window broadcasts to selected rows with attachments and shortcuts wi
     Object.defineProperty(file, 'files', { configurable: true, value: [new dom.File(['notes'], 'notes.txt', { type: 'text/plain' })] });
     await act(async () => Simulate.change(file as unknown as Element));
     await act(async () => { row('workflow').dispatchEvent(new dom.MouseEvent('click', { bubbles: true, shiftKey: true })); });
-    await act(async () => (container.querySelector('[aria-label="Collapse chats composer"]') as unknown as HTMLButtonElement).click());
     await press(row('workflow') as unknown as Element, 'Tab');
     expect(sends[1]).toMatchObject({ targets: [{ droneId: drone.id, chatName: 'nested-chat' }, { droneId: drone.id, chatName: 'workflow' }],
       payload: { attachments: [{ name: 'notes.txt', dataBase64: 'bm90ZXM=' }] }, context: { deliveryMode: 'asap' }, overrides: {} });
@@ -377,14 +390,14 @@ test('dragging Chats rows onto the composer references them in the next message'
     const transfer = { types: [...data.keys()], getData: (type: string) => data.get(type) ?? '', files: [] };
     await act(async () => Simulate.dragOver(composer(), { dataTransfer: transfer } as never));
     await act(async () => Simulate.drop(composer(), { dataTransfer: transfer } as never));
-    expect(composer().textContent).toContain('2 referenced');
+    expect(composer().querySelectorAll('[data-reference-tile="chat"]').length).toBe(2);
     const input = container.querySelector('[data-selected-chats-composer] textarea')!;
     await act(async () => Simulate.change(input as unknown as Element, { target: { value: 'Summarize these' } } as never));
     await act(async () => { Simulate.keyDown(input as unknown as Element, { key: 'Enter', nativeEvent: new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) } as never); });
     expect(sends.at(-1)?.prompt).toBe(['Summarize these', '', 'Referenced drones and chats:',
-      '- Chat "workflow" in drone "drone-1" (drone id: drone-1, chat: workflow)',
-      '- Chat "side" in drone "drone-1" (drone id: drone-1, chat: side)'].join('\n'));
-    expect(composer().textContent).not.toContain('referenced');
+      '- Chat "workflow" in drone "drone-1" (drone id: drone-1)',
+      '- Chat "side" in drone "drone-1" (drone id: drone-1)'].join('\n'));
+    expect(composer().querySelectorAll('[data-reference-tile]').length).toBe(0);
   } finally {
     await act(async () => root.unmount());
     for (const [key, descriptor] of originals) {

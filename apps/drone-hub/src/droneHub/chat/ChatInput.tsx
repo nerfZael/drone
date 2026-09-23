@@ -168,6 +168,29 @@ export type ChatInputDraftContent = {
 
 export type ChatEditorCtrlEnterBehavior = 'queue' | 'new-chat';
 
+export type ChatComposerReferenceTile = {
+  id: string;
+  kind: 'drone' | 'chat';
+  label: string;
+  title: string;
+  onRemove: () => void;
+};
+
+const ATTACHMENT_TILE_CLASS =
+  'block h-11 w-16 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),0_2px_8px_var(--shadow-color)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]';
+const ATTACHMENT_TILE_REMOVE_CLASS =
+  'absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[11px] leading-none text-[var(--muted)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100 disabled:cursor-not-allowed';
+
+/** A badge over a name, like a file tile: what kind of thing, then which one. */
+function AttachmentTileLabel({ badge, name }: { badge: string; name: string }) {
+  return (
+    <span aria-hidden="true" className="flex h-full flex-col items-center justify-center gap-0.5 px-1">
+      <span className="rounded border border-[var(--border-subtle)] px-1 text-[9px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)]">{badge}</span>
+      <span className="w-full truncate text-center text-[8px] text-[var(--muted)]">{name}</span>
+    </span>
+  );
+}
+
 export type ChatInputProps = {
   resetKey: string;
   draftPersistenceKey?: string;
@@ -186,6 +209,10 @@ export type ChatInputProps = {
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
+  /** Drones or chats referenced by the message, shown as tiles among the attachments. */
+  referenceTiles?: ChatComposerReferenceTile[];
+  /** Highlights the composer while something it accepts is dragged over it. */
+  referenceDropActive?: boolean;
   composerLeadingControls?: React.ReactNode;
   composerTrailingControls?: React.ReactNode;
   composerControls?: ChatComposerControlsConfig;
@@ -238,6 +265,8 @@ export function ChatInput({
   attachmentsEnabled,
   attachmentMode = 'images',
   composerContext,
+  referenceTiles = [],
+  referenceDropActive = false,
   composerLeadingControls,
   composerTrailingControls,
   composerControls,
@@ -262,7 +291,6 @@ export function ChatInput({
   const [dragActive, setDragActive] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [composerFocused, setComposerFocused] = React.useState(false);
-  const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
   const [uncontrolledEditorMode, setUncontrolledEditorMode] = React.useState(false);
   const composerRootRef = React.useRef<HTMLDivElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -542,7 +570,6 @@ export function ChatInput({
     }
     setAttachmentError(null);
     setComposerFocused(false);
-    setCompactVoiceRecording(false);
     // Revoke any preview object URLs.
     setComposerAttachments((prev) => {
       revokeDraftImagePreviewUrls(prev);
@@ -609,10 +636,10 @@ export function ChatInput({
     trimmed.length > 0 ||
     attachments.length > 0 ||
     Boolean(composerContext) ||
+    referenceTiles.length > 0 ||
     Boolean(promptError || attachmentError) ||
     continuousDictationTargeted ||
-    continuousVoiceActive ||
-    (voiceRecordingActive && !compactVoiceRecording);
+    continuousVoiceActive;
   // Expanding and collapsing swap the textarea's padding; keep its height in step.
   React.useEffect(() => {
     resizeTextarea();
@@ -651,11 +678,6 @@ export function ChatInput({
     setVoiceActionInFlight(false);
     void discardVoiceRecording();
   }, [composerLocked, discardVoiceRecording, voiceRecordingActive]);
-
-  React.useEffect(() => {
-    if (voiceRecordingActive) return;
-    setCompactVoiceRecording(false);
-  }, [voiceRecordingActive]);
 
   const previousWaitingRef = React.useRef(waiting);
   React.useEffect(() => {
@@ -757,17 +779,12 @@ export function ChatInput({
     fileInputRef.current?.click();
   }
 
-  async function beginVoiceRecordingFromComposer(compact: boolean) {
+  async function beginVoiceRecordingFromComposer() {
     readComposerSelection();
-    if (compact) {
-      setComposerFocused(false);
-      setCompactVoiceRecording(true);
-    } else {
-      setCompactVoiceRecording(false);
-    }
+    // Recording shows as one row; focusing the composer brings the text back.
+    setComposerFocused(false);
     if (editorMode) focusComposerAtSelection();
-    const started = await startVoiceRecording();
-    if (!started) setCompactVoiceRecording(false);
+    await startVoiceRecording();
     if (editorMode) {
       window.requestAnimationFrame(() => focusComposerAtSelection());
     }
@@ -1066,7 +1083,8 @@ export function ChatInput({
     if (composerLocked || continuousVoiceActive || microphoneOwnedElsewhere) return false;
     if (voiceRecordingStatus === 'idle') {
       readComposerSelection();
-      setCompactVoiceRecording(false);
+      // Stay expanded only when the shortcut was pressed while typing.
+      setComposerFocused(textareaRef.current !== null && textareaRef.current === textareaRef.current.ownerDocument.activeElement);
       void startVoiceRecording();
       return true;
     }
@@ -1259,17 +1277,26 @@ export function ChatInput({
           }}
           className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
-          } ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
+          } ${referenceDropActive ? 'ring-1 ring-[var(--accent)]' : ''} ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
             continuousDictationTargeted
               ? 'ring-1 ring-[var(--accent-muted)] ring-offset-1 ring-offset-[var(--chat-background)]'
               : ''
           }`}
         >
           <ChatComposerContext config={composerContext} />
-          {attachmentsOn && attachments.length > 0 && (
+          {referenceTiles.length > 0 || (attachmentsOn && attachments.length > 0) ? (
             // Small tiles like the Companion's: no heading, one row, remove on hover.
-            <div aria-label="Attachments" className="flex gap-1.5 overflow-x-auto px-2.5 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {attachments.map((a) => {
+            <div aria-label="Attachments" className="flex gap-1.5 overflow-x-auto px-2.5 pb-0.5 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {referenceTiles.map((tile) => (
+                <div key={tile.id} className="group relative shrink-0" data-reference-tile={tile.kind}>
+                  <div role="img" aria-label={tile.title} title={tile.title} className={ATTACHMENT_TILE_CLASS}>
+                    <AttachmentTileLabel badge={tile.kind} name={tile.label} />
+                  </div>
+                  <button type="button" aria-label={`Remove ${tile.label}`} title="Remove" onClick={tile.onRemove}
+                    className={ATTACHMENT_TILE_REMOVE_CLASS}>×</button>
+                </div>
+              ))}
+              {attachmentsOn ? attachments.map((a) => {
                 const readable = draftAttachmentIsReadable(a);
                 const view = (target: HTMLElement) => setViewedAttachment({
                   attachment: a.kind === 'image' ? { kind: 'image', name: a.name, src: a.previewUrl } : viewedDraftText(a),
@@ -1280,16 +1307,13 @@ export function ChatInput({
                     <button type="button" aria-label={`View ${a.name}`} title={`${a.name} · ${formatBytes(a.size)}`}
                       disabled={a.kind !== 'image' && !readable}
                       onClick={(event) => view(event.currentTarget)}
-                      className="block h-11 w-16 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] enabled:hover:border-[var(--accent-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                      className={`${ATTACHMENT_TILE_CLASS} enabled:hover:border-[var(--accent-border)]`}>
                       {a.kind === 'image' ? (
                         <img src={a.previewUrl} alt="" className="h-full w-full object-cover" />
                       ) : a.kind === 'text' ? (
                         <span aria-hidden="true" className="block h-full whitespace-pre-wrap break-all p-1 text-left font-mono text-[5px] leading-[6px] text-[var(--fg-secondary)]">{a.text.slice(0, 260)}</span>
                       ) : (
-                        <span aria-hidden="true" className="flex h-full flex-col items-center justify-center gap-0.5 px-1">
-                          <span className="rounded border border-[var(--border-subtle)] px-1 text-[9px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)]">{/\.([a-z0-9]{1,5})$/i.exec(a.name)?.[1] ?? 'file'}</span>
-                          <span className="w-full truncate text-center text-[8px] text-[var(--muted)]">{a.name}</span>
-                        </span>
+                        <AttachmentTileLabel badge={/\.([a-z0-9]{1,5})$/i.exec(a.name)?.[1] ?? 'file'} name={a.name} />
                       )}
                     </button>
                     {a.kind === 'text' ? (
@@ -1301,14 +1325,14 @@ export function ChatInput({
                     ) : null}
                     <button type="button" aria-label={`Remove ${a.name}`} title="Remove"
                       disabled={attachmentControlsLocked} onClick={() => removeAttachment(a.id)}
-                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[11px] leading-none text-[var(--muted)] opacity-0 shadow-sm hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] group-hover:opacity-100 disabled:cursor-not-allowed">
+                      className={ATTACHMENT_TILE_REMOVE_CLASS}>
                       ×
                     </button>
                   </div>
                 );
-              })}
+              }) : null}
             </div>
-          )}
+          ) : null}
 
           {viewedAttachment ? <AttachmentViewerDialog attachment={viewedAttachment.attachment} portalContainer={viewedAttachment.container} onClose={() => setViewedAttachment(null)} /> : null}
           {attachmentsOn ? (
@@ -1327,7 +1351,7 @@ export function ChatInput({
           ) : null}
 
           <div className={`dh-chat-composer-row relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'dh-chat-composer-row--collapsed min-h-[3.125rem] px-[.5625rem]'}`}>
-            {!composerExpanded && compactVoiceRecording && voiceRecordingActive ? (
+            {!composerExpanded && voiceRecordingActive ? (
               <>
                 <button
                   type="button"
@@ -1344,7 +1368,15 @@ export function ChatInput({
                     <path d="M18 6L6 18" />
                   </svg>
                 </button>
-                <div className="flex min-w-0 flex-1 items-center gap-[.4375rem] px-3 text-[.625rem] font-medium tracking-[.015625rem]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposerFocused(true);
+                    window.requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                  title="Type a message while recording"
+                  className="flex min-w-0 flex-1 cursor-text items-center gap-[.4375rem] self-stretch px-3 text-left text-[.625rem] font-medium tracking-[.015625rem] outline-none"
+                >
                   <span
                     className={`h-[.4375rem] w-[.4375rem] flex-shrink-0 rounded-full ${
                       voiceRecordingStatus === 'paused'
@@ -1359,7 +1391,7 @@ export function ChatInput({
                   <span className="flex-shrink-0 text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
                     {voiceRecordingDuration}
                   </span>
-                </div>
+                </button>
                 <div className="flex flex-shrink-0 items-center gap-[.4375rem]">
                   <button
                     type="button"
@@ -1451,7 +1483,7 @@ export function ChatInput({
             {editorMode ? (
               <div
                 className={`min-w-0 flex-1 overflow-hidden ${
-                  !composerContext && attachments.length === 0
+                  !composerContext && attachments.length === 0 && referenceTiles.length === 0
                     ? 'rounded-t-[var(--chat-composer-radius)]'
                     : ''
                 }`}
@@ -1468,7 +1500,6 @@ export function ChatInput({
                   ref={editorRef}
                   value={draft}
                   disabled={composerLocked}
-                  readOnly={voiceRecordingActive}
                   autoFocus={autoFocus}
                   focusTargetId={focusTargetId}
                   initialSelection={composerSelectionRef.current}
@@ -1566,7 +1597,8 @@ export function ChatInput({
               className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
-              disabled={composerLocked || voiceRecordingActive}
+              // Typing is allowed while recording; the transcript goes in at the cursor when it stops.
+              disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
               aria-keyshortcuts={
@@ -1590,7 +1622,7 @@ export function ChatInput({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     textareaRef.current?.blur();
-                    void beginVoiceRecordingFromComposer(true);
+                    void beginVoiceRecordingFromComposer();
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1624,51 +1656,6 @@ export function ChatInput({
               </>
             )}
           </div>
-
-          {voiceRecordingActive && composerExpanded ? (
-            <div className="flex items-center gap-[.4375rem] px-3 pb-2 pt-[.3125rem] text-[.625rem] font-medium tracking-[.015625rem]">
-              <span
-                className={`h-[.4375rem] w-[.4375rem] rounded-full ${
-                  voiceRecordingStatus === 'paused'
-                    ? 'bg-[var(--yellow)]'
-                    : voiceRecordingStatus === 'transcribing'
-                      ? 'bg-[var(--accent)]'
-                      : 'bg-[var(--red)]'
-                }`}
-                aria-hidden="true"
-              />
-              <span className="text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
-              <span className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
-                {voiceRecordingDuration}
-              </span>
-            </div>
-          ) : null}
-
-          {continuousVoiceActive ? (
-            <div className="flex items-center gap-[.4375rem] px-3 pb-2 pt-[.3125rem] text-[.625rem] font-medium tracking-[.015625rem]">
-              <span
-                className={`h-[.4375rem] w-[.4375rem] rounded-full ${
-                  continuousVoice.status === 'error'
-                    ? 'bg-[var(--red)]'
-                    : continuousVoice.status === 'paused'
-                      ? 'bg-[var(--yellow)]'
-                      : continuousVoice.status === 'speech'
-                        ? 'bg-[var(--green)]'
-                        : 'bg-[var(--accent)]'
-                }`}
-                aria-hidden="true"
-              />
-              <span className="text-[var(--accent)]" aria-live="polite">
-                {continuousVoiceLabel}
-              </span>
-              <span
-                className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
-                aria-label={`${continuousVoiceDuration} elapsed`}
-              >
-                {continuousVoiceDuration}
-              </span>
-            </div>
-          ) : null}
 
           {composerExpanded ? (
             <div
@@ -1737,7 +1724,51 @@ export function ChatInput({
                 </div>
               ) : null}
 
-              <div data-chat-composer-toolbar-spacer="true" className="min-w-2 flex-1" />
+              {/* While recording, the status sits in the toolbar instead of taking a row of its own. */}
+              <div data-chat-composer-toolbar-spacer="true" className="flex min-w-2 flex-1 items-center gap-[.4375rem] px-1 text-[.625rem] font-medium tracking-[.015625rem]">
+                {voiceRecordingActive ? (
+                  <>
+                    <span
+                      className={`h-[.4375rem] w-[.4375rem] rounded-full ${
+                        voiceRecordingStatus === 'paused'
+                          ? 'bg-[var(--yellow)]'
+                          : voiceRecordingStatus === 'transcribing'
+                            ? 'bg-[var(--accent)]'
+                            : 'bg-[var(--red)]'
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span className="text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
+                    <span className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+                      {voiceRecordingDuration}
+                    </span>
+                  </>
+                ) : continuousVoiceActive ? (
+                  <>
+                    <span
+                      className={`h-[.4375rem] w-[.4375rem] rounded-full ${
+                        continuousVoice.status === 'error'
+                          ? 'bg-[var(--red)]'
+                          : continuousVoice.status === 'paused'
+                            ? 'bg-[var(--yellow)]'
+                            : continuousVoice.status === 'speech'
+                              ? 'bg-[var(--green)]'
+                              : 'bg-[var(--accent)]'
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span className="text-[var(--accent)]" aria-live="polite">
+                      {continuousVoiceLabel}
+                    </span>
+                    <span
+                      className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
+                      aria-label={`${continuousVoiceDuration} elapsed`}
+                    >
+                      {continuousVoiceDuration}
+                    </span>
+                  </>
+                ) : null}
+              </div>
 
               {!voiceRecordingActive && !continuousVoiceActive ? composerStatus : null}
 
@@ -1875,7 +1906,7 @@ export function ChatInput({
                   onMouseDown={preserveEditorFocus}
                   onClick={() => {
                     textareaRef.current?.blur();
-                    void beginVoiceRecordingFromComposer(false);
+                    void beginVoiceRecordingFromComposer();
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"

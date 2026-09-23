@@ -8,7 +8,6 @@ import {
 } from '../app/app-config';
 import { draggedCanvasNodeIdsFromData, type DroneHubDragData } from '../app/drone-hub-dnd';
 import { parseDraggedChatPayload, parseDraggedDronePayload } from '../canvas/chat-node-utils';
-import type { ChatComposerContextItem } from './ChatComposerContext';
 
 /** A drone or chat dropped on a composer; its name and ID go out with the next message. */
 export type ComposerReference =
@@ -63,11 +62,12 @@ function droneLabel(droneId: string, drones: DroneNames): string {
   return String(drones[droneId]?.name ?? '').trim() || droneId;
 }
 
-export function composerReferenceContextItem(reference: ComposerReference, drones: DroneNames): ChatComposerContextItem {
+/** How a reference shows as a composer tile: its name, with the full description on hover. */
+export function composerReferenceTile(reference: ComposerReference, drones: DroneNames): { id: string; kind: ComposerReference['kind']; label: string; title: string } {
   const drone = droneLabel(reference.droneId, drones);
   return reference.kind === 'chat'
-    ? { id: composerReferenceId(reference), label: reference.chatName, meta: `Chat in ${drone}` }
-    : { id: composerReferenceId(reference), label: drone, meta: `Drone · ${reference.droneId}` };
+    ? { id: composerReferenceId(reference), kind: 'chat', label: reference.chatName, title: `Chat "${reference.chatName}" in ${drone}` }
+    : { id: composerReferenceId(reference), kind: 'drone', label: drone, title: `Drone "${drone}" (${reference.droneId})` };
 }
 
 /** The prompt as sent: the typed text, then one line per referenced drone or chat. */
@@ -77,7 +77,7 @@ export function appendComposerReferences(promptRaw: string, references: Composer
   const lines = references.map((reference) => {
     const drone = droneLabel(reference.droneId, drones);
     return reference.kind === 'chat'
-      ? `- Chat "${reference.chatName}" in drone "${drone}" (drone id: ${reference.droneId}, chat: ${reference.chatName})`
+      ? `- Chat "${reference.chatName}" in drone "${drone}" (drone id: ${reference.droneId})`
       : `- Drone "${drone}" (drone id: ${reference.droneId})`;
   });
   const block = ['Referenced drones and chats:', ...lines].join('\n');

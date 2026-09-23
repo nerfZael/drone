@@ -55,6 +55,8 @@ export type DroneSummary = {
   }>;
   /** Chat name -> the chat it was cloned from, for sidebar clones and side chats alike. */
   chatCloneSources?: Record<string, string>;
+  /** Chat name -> ISO creation time, where the hub recorded one. */
+  chatCreatedAt?: Record<string, string>;
   unreadChats?: string[];
   chatReadStates?: Record<
     string,

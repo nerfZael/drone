@@ -137,6 +137,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameStringArray(left.chats, right.chats) &&
     sameStringArray(left.workflowChats, right.workflowChats) &&
     JSON.stringify(left.sideChats ?? []) === JSON.stringify(right.sideChats ?? []) &&
+    JSON.stringify(left.chatCreatedAt ?? {}) === JSON.stringify(right.chatCreatedAt ?? {}) &&
     sameStringArray(left.unreadChats, right.unreadChats) &&
     sameChatReadStates(left.chatReadStates, right.chatReadStates) &&
     sameBooleanMap(left.draftChats, right.draftChats) &&

@@ -6,6 +6,17 @@ function parseIsoOrZero(raw: unknown): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+/** Chat name -> when it was created, for chats that recorded it. Lets clients list chats in creation order. */
+export function resolveChatCreatedAt(chats: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!chats || typeof chats !== 'object') return out;
+  for (const [chatName, entry] of Object.entries(chats as Record<string, any>)) {
+    const createdAt = String(entry?.createdAt ?? '').trim();
+    if (createdAt && parseIsoOrZero(createdAt) > 0) out[chatName] = createdAt;
+  }
+  return out;
+}
+
 /**
  * Chat name -> the chat it was cloned from. The stored source ID wins over the
  * stored name so a renamed source keeps its clones; a deleted source drops out.

@@ -1,9 +1,17 @@
 import type { DroneSummary } from '../types';
 
+/** Every chat of the drone, oldest first. Chats without a recorded time (e.g. just created) come last. */
 export function allDroneChatNames(drone: DroneSummary, sideChatNames: string[] = []): string[] {
   // Group membership is sidebar presentation; drone.chats is the full inventory.
-  return [...new Set([...drone.chats, ...(drone.workflowChats ?? []),
+  const names = [...new Set([...drone.chats, ...(drone.workflowChats ?? []),
     ...(drone.sideChats ?? []).map((chat) => chat.name), ...sideChatNames])];
+  const createdAt = (name: string) => Date.parse(drone.chatCreatedAt?.[name] ?? '') || Infinity;
+  // Array.prototype.sort is stable, so equal or unknown times keep the inventory order.
+  return names.sort((a, b) => {
+    const left = createdAt(a);
+    const right = createdAt(b);
+    return left === right ? 0 : left < right ? -1 : 1;
+  });
 }
 
 export type ChatPreviewPayload = {

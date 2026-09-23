@@ -80,7 +80,7 @@ describe('chat send shortcuts', () => {
 
     expect(editor).toContain('editor.onDidContentSizeChange');
     expect(editor).toContain('height: editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT');
-    expect(editor).toContain("const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '6rem'");
+    expect(editor).toContain("const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '2.5rem'");
     expect(editor).toContain("const CHAT_COMPOSER_EDITOR_MAX_HEIGHT = '80cqh'");
     expect(chatSurface).toContain('[container-type:size]');
     expect(editor).not.toContain('h-[clamp(18rem,36vh,28rem)]');

@@ -581,6 +581,7 @@ import {
   isDraftChatEntry,
   isDraftDroneEntry,
   resolveChatCloneSources,
+  resolveChatCreatedAt,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
 import { mergeNativeBusyChatNames } from './native-drone-summary';
@@ -5295,6 +5296,7 @@ async function startDroneHubApiServerWithLifecycle(
       workflowChats,
       sideChats,
       chatCloneSources,
+      chatCreatedAt: resolveChatCreatedAt(d.chats),
       unreadChats,
       chatReadStates,
       draftChats,

@@ -445,7 +445,8 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect((input() as unknown as HTMLTextAreaElement).value).toBe('Keep my attachment');
     expect(container.textContent).toContain('notes.txt');
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('plan')}"]`) as unknown as Element, { ctrlKey: true }));
-    await act(async () => (container.querySelector('[aria-label="Collapse canvas composer"]') as unknown as HTMLButtonElement).click());
+    await act(async () => (viewport() as unknown as HTMLElement).focus());
+    await key(viewport() as unknown as Element, 'Escape');
     expect(container.textContent).toContain('notes.txt');
     await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent?.startsWith('Message ')) as unknown as HTMLButtonElement).click());
     await key(input() as unknown as Element, 'Tab');
@@ -567,16 +568,16 @@ test('dragging a card onto the canvas composer references it in the message with
     await mouse('mouseup', 500, 500);
     expect(board().selectedDroneIds).toEqual([alpha('default')]);
     expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: planStart.x, y: planStart.y });
-    expect(composer().textContent).toContain('1 referenced');
-    expect(composer().textContent).toContain('Chat in Alpha');
+    const tiles = () => Array.from(composer().querySelectorAll('[data-reference-tile] [role="img"]')).map((tile) => tile.getAttribute('title'));
+    expect(tiles()).toEqual(['Chat "plan" in Alpha']);
 
     const input = container.querySelector('[data-canvas-message-bar] textarea')!;
     await act(async () => Simulate.change(input as unknown as Element, { target: { value: 'Compare with this' } } as never));
     await act(async () => { Simulate.keyDown(input as unknown as Element, { key: 'Enter', nativeEvent: new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) } as never); await settle(); });
     expect(sends).toHaveLength(1);
     expect(sends[0].targets).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
-    expect(sends[0].payload.prompt).toBe('Compare with this\n\nReferenced drones and chats:\n- Chat "plan" in drone "Alpha" (drone id: alpha, chat: plan)');
-    expect(composer().textContent).not.toContain('referenced');
+    expect(sends[0].payload.prompt).toBe('Compare with this\n\nReferenced drones and chats:\n- Chat "plan" in drone "Alpha" (drone id: alpha)');
+    expect(tiles()).toEqual([]);
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });

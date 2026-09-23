@@ -8,8 +8,7 @@ import { useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import {
   COMPOSER_REFERENCE_DRAG_TYPES,
   appendComposerReferences,
-  composerReferenceContextItem,
-  composerReferenceId,
+  composerReferenceTile,
   composerReferencesFromDragData,
   composerReferencesFromTransfer,
   mergeComposerReferences,
@@ -38,7 +37,6 @@ type SelectedChatsComposerProps = {
   spawnAgentKey?: string;
   error: string | null;
   onExpand: () => void;
-  onCollapse: () => void;
   onDraftChange: (next: string) => void;
   onDraftContentChange?: ChatInputProps['onDraftContentChange'];
   onSpawnCountChange?: (next: string) => void;
@@ -94,15 +92,10 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const acceptsNativeDrag = (event: React.DragEvent) =>
     COMPOSER_REFERENCE_DRAG_TYPES.some((type) => event.dataTransfer?.types?.includes?.(type));
   const dropActive = nativeDropActive || sidebarDropActive || Boolean(props.referenceDropActive);
-  const composerContext = props.references.length || dropActive ? {
-    label: props.references.length
-      ? `${props.references.length} referenced`
-      : 'Drop to reference',
-    items: props.references.map((reference) => composerReferenceContextItem(reference, props.droneById)),
-    emptyHint: 'Release to add their names and IDs to this message.',
-    disabled: props.sending,
-    onRemove: (id: string) => props.onReferencesChange(props.references.filter((reference) => composerReferenceId(reference) !== id)),
-  } : undefined;
+  const referenceTiles = props.references.map((reference) => ({
+    ...composerReferenceTile(reference, props.droneById),
+    onRemove: () => props.onReferencesChange(referencesRef.current.filter((item) => item !== reference)),
+  }));
   return (
     <div ref={rootRef} data-selected-chats-composer="1"
       data-reference-drop-active={dropActive ? 'true' : undefined}
@@ -124,7 +117,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
         ? 'absolute bottom-2 left-1/2 z-20 w-[min(34rem,calc(100%-1rem))] -translate-x-1/2'
-        : 'flex-shrink-0 border-t border-[var(--border)] px-2 pb-2 pt-1'}
+        : 'flex-shrink-0 px-2 pb-2 pt-1'}
       onMouseDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
       onWheel={(event) => event.stopPropagation()}
@@ -156,7 +149,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
               props.onReferencesChange(referencesRef.current.filter((reference) => !references.includes(reference)));
             }
             return sent;
-          }} composerContext={composerContext} composerTrailingControls={
+          }} referenceTiles={referenceTiles} referenceDropActive={dropActive} composerTrailingControls={
             // In the toolbar, where the agent chat keeps its model picker.
             <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
               draftAgentKey={props.hasDrafts ? props.spawnAgentKey : undefined}
@@ -170,8 +163,6 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
                   onChange={(event) => props.onSpawnCountChange?.(event.target.value)} onBlur={props.onSpawnCountBlur}
                   className="h-5 w-9 rounded border border-[var(--border)] bg-[var(--panel)] px-1 text-[var(--fg)]" />
               </label> : null}
-              <button type="button" onClick={props.onCollapse} aria-label={`Collapse ${surface} composer`} title="Collapse composer"
-                className="flex-shrink-0 rounded px-1 leading-none hover:bg-[var(--hover)]">⌄</button>
             </div>
           } />
       </div>

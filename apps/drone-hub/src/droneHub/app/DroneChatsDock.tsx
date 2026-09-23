@@ -70,9 +70,10 @@ function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu, o
   return (
     <button type="button" draggable onDragStart={onDragStart} onClick={onSelect} onContextMenu={onContextMenu} aria-pressed={selected} aria-current={active ? 'true' : undefined}
       data-chat-drone-id={droneId} data-chat-name={name}
-      className={`relative col-span-2 grid w-full select-none grid-cols-subgrid items-center gap-x-3 rounded-[var(--radius-medium)] px-2 py-1.5 text-left text-12 focus-visible:outline focus-visible:outline-[var(--accent)] ${
+      className={`relative col-span-2 grid w-full select-none grid-cols-subgrid items-center gap-x-3 rounded-[var(--radius-medium)] px-2 py-1.5 text-left text-12 outline-none ${
         selected ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
-      {selected ? (
+      {/* The bar marks the open chat; other selected rows only get the tint. */}
+      {active ? (
         <span aria-hidden="true"
           className="pointer-events-none absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-border)]" />
       ) : null}
@@ -118,7 +119,6 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
   const selectedNames = selection.filter((name) => names.includes(name));
   const activeComposer = useOptionalActiveComposer();
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const [composerExpanded, setComposerExpanded] = React.useState(true);
   const [pendingComposerAction, setPendingComposerAction] = React.useState<'voice' | 'focus' | 'queue' | 'asap' | null>(null);
   React.useEffect(() => {
     if (!pendingComposerAction || !activeComposer) return;
@@ -172,6 +172,13 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
       else void pasteChats();
       return;
     }
+    // Delete takes the whole selection, asking once; otherwise the app-wide shortcut deletes only the focused row.
+    if (key === 'delete' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && selectedNames.length && onDeleteChats) {
+      event.preventDefault();
+      event.stopPropagation();
+      void deleteChats(selectedNames);
+      return;
+    }
     if (!onSendToChats) return;
     const bindings = useDroneHubUiStore.getState().shortcutBindings;
     const voice = isShortcutMatch(bindings.toggleChatVoiceRecording, event.nativeEvent);
@@ -182,7 +189,6 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
     event.preventDefault();
     event.stopPropagation();
     if (!selectedNames.length || !activeComposer) return;
-    setComposerExpanded(true);
     setPendingComposerAction(voice ? 'voice' : focus ? 'focus' : asap ? 'asap' : 'queue');
   };
   const selectRow = (name: string, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -272,7 +278,7 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
               <button type="button" draggable onDragStart={(event) => startRowDrag(name, event)}
                 onClick={(event) => selectRow(name, event)} onContextMenu={(event) => openMenu(name, event)}
                 aria-pressed={selectedNames.includes(name)} title={`Open ${name} as main chat`}
-                className={`flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-12 ${selectedNames.includes(name) ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
+                className={`flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-12 outline-none ${selectedNames.includes(name) ? 'bg-[var(--selected)]' : 'hover:bg-[var(--hover)]'}`}>
                 <span className="min-w-0 flex-1"><ChatName drone={drone} name={name} selected={selectedChat === name} /></span>
                 <span className="text-11 text-[var(--muted)]">Open ↗</span>
               </button>
@@ -283,20 +289,16 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
         </div>
       )}
       {onSendToChats ? <ChatsWindowComposer key={drone.id} drone={drone} droneById={droneById} selectedNames={selectedNames}
-        onSendToChats={onSendToChats} expanded={composerExpanded}
-        onExpand={() => setComposerExpanded(true)} onCollapse={() => setComposerExpanded(false)} /> : null}
+        onSendToChats={onSendToChats} /> : null}
     </div>
   );
 }
 
-function ChatsWindowComposer({ drone, droneById, selectedNames, onSendToChats, expanded, onExpand, onCollapse }: {
+function ChatsWindowComposer({ drone, droneById, selectedNames, onSendToChats }: {
   drone: DroneSummary;
   droneById?: Record<string, DroneSummary>;
   selectedNames: string[];
   onSendToChats: CanvasSendPrompt;
-  expanded: boolean;
-  onExpand: () => void;
-  onCollapse: () => void;
 }) {
   const [draft, setDraft] = React.useState('');
   const [references, setReferences] = React.useState<ComposerReference[]>([]);
@@ -324,7 +326,7 @@ function ChatsWindowComposer({ drone, droneById, selectedNames, onSendToChats, e
   return <SelectedChatsComposer surface="chats" selectionKey={`chats-window:${drone.id}`}
     selectedCount={selectedNames.length} selectedLabel={selectedNames.join(', ')}
     targets={targets} droneById={{ ...droneById, [drone.id]: drone }}
-    expanded={expanded} onExpand={onExpand} onCollapse={onCollapse}
+    expanded onExpand={() => {}}
     sending={sending} draft={draft} onDraftChange={setDraft} error={error} onSend={send}
     references={references} onReferencesChange={setReferences} />;
 }

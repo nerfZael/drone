@@ -26,5 +26,5 @@ test('references are appended to the prompt with names and IDs', () => {
   const drones = { d1: { name: 'Builder' } };
   expect(appendComposerReferences('  Look  ', [], drones)).toBe('Look');
   expect(appendComposerReferences('Look', [{ kind: 'chat', droneId: 'd1', chatName: 'plan' }, { kind: 'drone', droneId: 'd9' }], drones))
-    .toBe('Look\n\nReferenced drones and chats:\n- Chat "plan" in drone "Builder" (drone id: d1, chat: plan)\n- Drone "d9" (drone id: d9)');
+    .toBe('Look\n\nReferenced drones and chats:\n- Chat "plan" in drone "Builder" (drone id: d1)\n- Drone "d9" (drone id: d9)');
 });

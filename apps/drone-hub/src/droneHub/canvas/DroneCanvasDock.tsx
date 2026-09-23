@@ -2277,17 +2277,17 @@ export function DroneCanvasDock({
             onSelect: () => { void deleteChatNodes(sortChatNodeIdsForDestructiveDelete(chatContextMenu.nodeIds)); },
           }] : []),
         ]} /> : null}
-        <UiPanelToolbar aria-label="Canvas controls" className="px-3 py-2">
+        <UiPanelToolbar aria-label="Canvas controls" className="min-h-0 gap-1.5 px-2 py-1">
           {boardDrone ? (
             <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
-              <UiToolbarButton
+              <UiToolbarButton size="xsmall"
                 pressed={droneScope}
                 onClick={() => setScope('drone')}
                 title="Every chat of this drone, laid out for you. New, cloned and side chats appear on their own."
               >
                 This drone
               </UiToolbarButton>
-              <UiToolbarButton
+              <UiToolbarButton size="xsmall"
                 pressed={!droneScope}
                 onClick={() => setScope('global')}
                 title="One board shared across drones. Drag drones and chats in from the sidebar."
@@ -2297,7 +2297,7 @@ export function DroneCanvasDock({
             </div>
           ) : null}
           {droneScope ? null : (
-            <UiToolbarIconButton
+            <UiToolbarIconButton size="xsmall"
               onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
               label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
               icon={<IconTune className="h-3.5 w-3.5" />}
@@ -2308,7 +2308,7 @@ export function DroneCanvasDock({
             />
           )}
           <div className="flex min-w-0 flex-1 items-center gap-1">
-            <UiToolbarButton
+            <UiToolbarButton size="xsmall"
               pressed={showCanvasLastMessagePreviews}
               onClick={() =>
                 setShowCanvasLastMessagePreviews(!showCanvasLastMessagePreviews)
@@ -2317,7 +2317,7 @@ export function DroneCanvasDock({
             >
               Last msgs
             </UiToolbarButton>
-            <UiToolbarButton
+            <UiToolbarButton size="xsmall"
               pressed={!hideSideChatWindowsWithCanvas}
               onClick={() => setHideSideChatWindowsWithCanvas(!hideSideChatWindowsWithCanvas)}
               title="Keep floating side chat windows visible while the canvas is open. Off, they stay hidden until the canvas is closed."
@@ -2326,10 +2326,10 @@ export function DroneCanvasDock({
             </UiToolbarButton>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1">
-            <UiToolbarButton onClick={fitViewportToNodes} disabled={nodes.length === 0} title="Zoom and pan so every node is in view">
+            <UiToolbarButton size="xsmall" onClick={fitViewportToNodes} disabled={nodes.length === 0} title="Zoom and pan so every node is in view">
               Fit
             </UiToolbarButton>
-            <UiToolbarButton onClick={resetViewport} title="Reset canvas view">
+            <UiToolbarButton size="xsmall" onClick={resetViewport} title="Reset canvas view">
               Reset
             </UiToolbarButton>
             <span className="w-[48px] text-right text-10 font-mono text-[var(--muted-dim)]" title="Current zoom">
@@ -2809,7 +2809,6 @@ export function DroneCanvasDock({
           spawnCount={draftSpawnCount}
           error={messageError}
           onExpand={openMessageBar}
-          onCollapse={closeMessageBar}
           onSpawnCountChange={onDraftSpawnCountChange}
           onSpawnCountBlur={onDraftSpawnCountBlur}
           onDraftChange={(next) => {
