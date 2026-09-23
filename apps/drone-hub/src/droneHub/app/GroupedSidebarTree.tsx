@@ -1,3 +1,4 @@
+import { useChatDeleting } from './chat-deletion-store';
 import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
 import React from 'react';
 import { SIDEBAR_CHAT_GROUP_REQUEST_EVENT } from './sidebar-group-draft-events';
@@ -601,6 +602,15 @@ type GroupedSidebarChatRowProps = {
   depth?: number;
 };
 
+/** Trailing spinner on a chat row while the chat is being deleted, from any surface. */
+function SidebarChatDeletingIndicator({ chatName }: { chatName: string }) {
+  return (
+    <span className="flex flex-shrink-0 items-center text-[var(--red)]" role="status" aria-label={`Deleting ${chatName}`} title="Deleting…">
+      <IconSpinner className="opacity-90" />
+    </span>
+  );
+}
+
 const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ drone, chatName, isOptimistic, parentPath = null, depth = 0 }: GroupedSidebarChatRowProps) {
   const activeDrag = useDroneHubActiveDrag();
   const {
@@ -647,6 +657,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     y: number;
   } | null>(null);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+  const deleting = useChatDeleting(drone.id, chatName);
   const locallyRequiredApproval = useChatApprovalRequired(chatNodeId);
   const approvalRequired =
     droneChatRequiresApproval(drone, chatName) || locallyRequiredApproval;
@@ -830,6 +841,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${contextMenuPosition ? 'dh-sidebar-row-context-target' : ''} ${isDragging ? 'opacity-60' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
           aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
           aria-current={active ? 'page' : undefined}
+          aria-busy={deleting || undefined}
         >
           {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
           <span
@@ -849,8 +861,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               />
             )}
           </span>
-          <span className={sidebarChatLabelClass}>{chatName}</span>
+          <span className={`${sidebarChatLabelClass} ${deleting ? 'opacity-45' : ''}`}>{chatName}</span>
           <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
+          {deleting ? <SidebarChatDeletingIndicator chatName={chatName} /> : null}
           {draft ? (
             <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
@@ -918,7 +931,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               id: 'delete-chat',
               label: selectedChatNames.length > 1 ? `Delete ${selectedChatNames.length} chats` : 'Delete chat',
               separatorBefore: true,
-              icon: deletingChats[`${drone.id}:${chatName}`] ? (
+              icon: deleting ? (
                 <IconSpinner className="h-3.5 w-3.5" />
               ) : (
                 <IconTrash className="h-3.5 w-3.5" />
@@ -955,6 +968,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+  const deleting = useChatDeleting(drone.id, chatName);
   const locallyRequiredApproval = useChatApprovalRequired(chatNodeId);
   const approvalRequired =
     droneChatRequiresApproval(drone, chatName) || locallyRequiredApproval;
@@ -984,6 +998,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
           className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })}`}
           aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
           aria-current={active ? 'page' : undefined}
+          aria-busy={deleting || undefined}
         >
           {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
           <span
@@ -1003,8 +1018,9 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
               />
             )}
           </span>
-          <span className={sidebarChatLabelClass}>{chatName}</span>
+          <span className={`${sidebarChatLabelClass} ${deleting ? 'opacity-45' : ''}`}>{chatName}</span>
           <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
+          {deleting ? <SidebarChatDeletingIndicator chatName={chatName} /> : null}
         </button>
       </div>
     </div>

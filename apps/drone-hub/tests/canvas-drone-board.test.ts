@@ -4,6 +4,7 @@ import {
   buildDroneBoardMembers,
   placeClonedChatOnDroneBoard,
   planDroneBoardPlacements,
+  removeClonedChatFromDroneBoard,
 } from '../src/droneHub/canvas/drone-board';
 import { buildCanvasRelationshipEdges } from '../src/droneHub/canvas/relationship-edges';
 import {
@@ -148,6 +149,19 @@ describe('canvas boards in the store', () => {
 
     state.dropOptimisticBoardMembers('alpha', ['pasted', 'side-9']);
     expect(useDroneCanvasStore.getState().optimisticMembersByDroneId).toEqual({});
+  });
+
+  test('a paste position replaces a card left over from a deleted chat of the same name, and a failed clone puts it back', () => {
+    getCanvasBoardActions('alpha').upsertNodes([{ droneId: nodeId('plan (copy)'), label: 'plan (copy)', x: 5, y: 5 }]);
+    placeClonedChatOnDroneBoard('alpha', 'plan', 'plan (copy)', { position: { x: 900, y: 40 } });
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[nodeId('plan (copy)')]).toMatchObject({ x: 900, y: 40 });
+    removeClonedChatFromDroneBoard('alpha', 'plan (copy)', { x: 5, y: 5, label: 'plan (copy)' });
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[nodeId('plan (copy)')]).toMatchObject({ x: 5, y: 5 });
+    expect(useDroneCanvasStore.getState().optimisticMembersByDroneId).toEqual({});
+    // Without an earlier card, the failed clone's card just goes.
+    placeClonedChatOnDroneBoard('alpha', 'plan', 'plan (copy 2)', { position: { x: 900, y: 40 } });
+    removeClonedChatFromDroneBoard('alpha', 'plan (copy 2)', null);
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[nodeId('plan (copy 2)')]).toBeUndefined();
   });
 
   test('leaves placement to the board when the source was never laid out', () => {

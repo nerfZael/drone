@@ -349,6 +349,17 @@ describe('sidebar presentation', () => {
     );
   });
 
+  test('marks a chat row while the chat is being deleted from any surface', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    // Both the draggable and the static row read the shared deletion state.
+    expect(groupedTreeSource.split('const deleting = useChatDeleting(drone.id, chatName);')).toHaveLength(3);
+    expect(groupedTreeSource.split('{deleting ? <SidebarChatDeletingIndicator chatName={chatName} /> : null}')).toHaveLength(3);
+    expect(groupedTreeSource.split('aria-busy={deleting || undefined}')).toHaveLength(3);
+  });
+
   test('uses a thin temporary outline for sidebar context-menu targets', () => {
     const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 

@@ -5,6 +5,7 @@ import type { CanvasChatTarget } from '../canvas/canvas-messaging';
 import { SelectedChatsModelOverrides } from './SelectedChatsModelOverrides';
 import type { ChatModelOverrides } from './selected-chat-model-overrides';
 import { useDroneHubActiveDrag } from '../app/drone-hub-dnd';
+import { droneNamesForReferences, pastedChatReferences } from '../app/chat-clipboard-store';
 import {
   COMPOSER_REFERENCE_DRAG_TYPES,
   appendComposerReferences,
@@ -92,8 +93,14 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const acceptsNativeDrag = (event: React.DragEvent) =>
     COMPOSER_REFERENCE_DRAG_TYPES.some((type) => event.dataTransfer?.types?.includes?.(type));
   const dropActive = nativeDropActive || sidebarDropActive || Boolean(props.referenceDropActive);
+  // Names that came with pasted references, for drones this window has no summary of.
+  const [pastedDroneNames, setPastedDroneNames] = React.useState<Record<string, string>>({});
+  const referenceDroneNames = React.useMemo(
+    () => ({ ...droneNamesForReferences(pastedDroneNames), ...props.droneById }),
+    [pastedDroneNames, props.droneById],
+  );
   const referenceTiles = props.references.map((reference) => ({
-    ...composerReferenceTile(reference, props.droneById),
+    ...composerReferenceTile(reference, referenceDroneNames),
     onRemove: () => props.onReferencesChange(referencesRef.current.filter((item) => item !== reference)),
   }));
   return (
@@ -111,6 +118,15 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
         event.stopPropagation();
         setNativeDropActive(false);
         addReferences(composerReferencesFromTransfer(event.dataTransfer));
+      }}
+      // Drones and chats copied on the canvas or in the Chats window paste as references, like a drop.
+      onPasteCapture={(event) => {
+        const pasted = pastedChatReferences(event.clipboardData);
+        if (!pasted) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setPastedDroneNames((current) => ({ ...current, ...pasted.droneNames }));
+        addReferences(pasted.references);
       }}
       hidden={props.selectedCount <= 0 && surface === 'canvas'}
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
@@ -143,7 +159,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
           onSend={async (payload, context) => {
             if (props.selectedCount === 0) return false;
             const references = props.references;
-            const sent = await props.onSend({ ...payload, prompt: appendComposerReferences(payload.prompt, references, props.droneById) }, context, overrides);
+            const sent = await props.onSend({ ...payload, prompt: appendComposerReferences(payload.prompt, references, referenceDroneNames) }, context, overrides);
             if (sent) {
               setOverrides({});
               props.onReferencesChange(referencesRef.current.filter((reference) => !references.includes(reference)));

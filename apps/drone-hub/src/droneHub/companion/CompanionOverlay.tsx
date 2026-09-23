@@ -1,6 +1,7 @@
 import { relayCompanionWindowShortcuts } from './companion-window-shortcuts';
 import { companionSessionShortcut } from './companion-session-shortcut';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { pastedChatReferences } from '../app/chat-clipboard-store';
 import { COMPANION_SLOTS } from './companion-session-store';
 import { useCrossWindowFocus } from '../../ui/use-cross-window-focus';
 import { shouldCancelCompanionRecordingWithEscape } from './companion-shortcut';
@@ -241,6 +242,13 @@ export function CompanionOverlay() {
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target as Element | null;
       if (!companionWindow.detached && !target?.closest?.('[data-companion-surface]')) return;
+      // Drones and chats copied on the canvas or in the Chats window go along as a reference, even from its text field.
+      const references = pastedChatReferences(event.clipboardData);
+      if (references) {
+        event.preventDefault();
+        addTextAttachment(references.text);
+        return;
+      }
       if (target?.closest?.('input, textarea, [contenteditable="true"], [data-portable-editor], .monaco-editor')) return;
       // Copied files (a screenshot, or files copied in a file manager) win over any text that came along.
       const images = Array.from(event.clipboardData?.files ?? []);

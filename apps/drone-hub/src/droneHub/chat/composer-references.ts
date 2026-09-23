@@ -56,7 +56,7 @@ export function composerReferencesFromDragData(data: DroneHubDragData | null): C
   return composerReferencesFromNodeIds(draggedCanvasNodeIdsFromData(data));
 }
 
-type DroneNames = Record<string, { name?: string } | undefined>;
+export type DroneNames = Record<string, { name?: string } | undefined>;
 
 function droneLabel(droneId: string, drones: DroneNames): string {
   return String(drones[droneId]?.name ?? '').trim() || droneId;
@@ -70,16 +70,22 @@ export function composerReferenceTile(reference: ComposerReference, drones: Dron
     : { id: composerReferenceId(reference), kind: 'drone', label: drone, title: `Drone "${drone}" (${reference.droneId})` };
 }
 
-/** The prompt as sent: the typed text, then one line per referenced drone or chat. */
-export function appendComposerReferences(promptRaw: string, references: ComposerReference[], drones: DroneNames): string {
-  const prompt = String(promptRaw ?? '').trim();
-  if (references.length === 0) return prompt;
+/** The block a message carries for its references: a heading, then one line per drone or chat. */
+export function composerReferencesBlock(references: ComposerReference[], drones: DroneNames): string {
+  if (references.length === 0) return '';
   const lines = references.map((reference) => {
     const drone = droneLabel(reference.droneId, drones);
     return reference.kind === 'chat'
       ? `- Chat "${reference.chatName}" in drone "${drone}" (drone id: ${reference.droneId})`
       : `- Drone "${drone}" (drone id: ${reference.droneId})`;
   });
-  const block = ['Referenced drones and chats:', ...lines].join('\n');
+  return ['Referenced drones and chats:', ...lines].join('\n');
+}
+
+/** The prompt as sent: the typed text, then one line per referenced drone or chat. */
+export function appendComposerReferences(promptRaw: string, references: ComposerReference[], drones: DroneNames): string {
+  const prompt = String(promptRaw ?? '').trim();
+  const block = composerReferencesBlock(references, drones);
+  if (!block) return prompt;
   return prompt ? `${prompt}\n\n${block}` : block;
 }

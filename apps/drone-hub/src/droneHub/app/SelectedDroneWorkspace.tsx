@@ -113,6 +113,7 @@ import {
   useDropdownDismiss,
 } from '../../ui/dropdown';
 import { UiTooltip, type UiMenuSelectEntry } from '../../ui/components';
+import { ChatDeletingOverlay } from './ChatDeletingOverlay';
 import { fetchDroneChatTranscript, fetchDroneChatTurnActivity } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
@@ -2547,6 +2548,7 @@ export function SelectedDroneWorkspace({
                 </div>
               ) : null}
               <div className="relative flex min-h-0 flex-1 flex-col">
+                <ChatDeletingOverlay droneId={currentDrone.id} chatName={activeChatName} />
                 {showDroneStartupFailureEmptyState ? (
                   <EmptyState
                     icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}

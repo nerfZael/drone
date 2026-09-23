@@ -133,7 +133,10 @@ export function DroneChatsDock({ drone, selectedChat, options, onDeleteChats, on
     else activeComposer.sendMessage(pendingComposerAction);
   }, [pendingComposerAction, activeComposer]);
   const copyChats = (chatNames: string[]) => {
-    if (chatNames.length) useChatClipboardStore.getState().copy({ chats: chatNames.map((chatName) => ({ droneId: drone.id, chatName })) });
+    if (chatNames.length) useChatClipboardStore.getState().copy({
+      chats: chatNames.map((chatName) => ({ droneId: drone.id, chatName })),
+      droneNames: drone.name ? { [drone.id]: drone.name } : {},
+    });
   };
   /** Clones the chats copied from this drone; the clones become the selection. */
   const pasteChats = async () => {

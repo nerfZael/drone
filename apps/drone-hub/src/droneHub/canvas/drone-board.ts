@@ -145,25 +145,67 @@ export function placeClonedChatOnDroneBoard(
   const cloneChatName = String(cloneChatNameRaw ?? '').trim();
   const cloneNodeId = createCanvasChatNodeId(droneId, cloneChatName);
   if (!droneId || !sourceNodeId || !cloneNodeId) return null;
-  useDroneCanvasStore.getState().addOptimisticBoardMember(droneId, {
+  const addMember = () => useDroneCanvasStore.getState().addOptimisticBoardMember(droneId, {
     chatName: cloneChatName,
     sourceChatName,
     sideChat: opts?.sideChat === true,
     addedAt: Date.now(),
   });
   const board = selectCanvasBoard(useDroneCanvasStore.getState(), droneId);
-  if (board.nodesByDroneId[cloneNodeId]) return null;
+  // An explicit paste position wins over a stored one: the name was just picked as unused,
+  // so a stored card for it is left over from a deleted chat of the same name.
   let slot = opts?.position ?? null;
-  if (!slot) {
+  if (!slot && !board.nodesByDroneId[cloneNodeId]) {
     const source = board.nodesByDroneId[sourceNodeId];
-    if (!source) return null;
-    const occupied = Object.values(board.nodesByDroneId)
-      .filter((node) => parseCanvasChatNodeId(node.droneId))
-      .map((node) => ({ ...node, label: parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label }));
-    slot = firstFreeSlotBelow(branchAnchor({ ...source, label: sourceChatName }), getNodeWidthPx(cloneChatName), occupied);
+    if (source) {
+      const occupied = Object.values(board.nodesByDroneId)
+        .filter((node) => parseCanvasChatNodeId(node.droneId))
+        .map((node) => ({ ...node, label: parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label }));
+      slot = firstFreeSlotBelow(branchAnchor({ ...source, label: sourceChatName }), getNodeWidthPx(cloneChatName), occupied);
+    }
   }
+  if (!slot) {
+    addMember();
+    return null;
+  }
+  // Position first: a new member without one would be laid out by the board before this lands.
   getCanvasBoardActions(droneId).upsertNodes([
     { droneId: cloneNodeId, label: cloneChatName, x: slot.x, y: slot.y },
   ]);
+  addMember();
   return cloneNodeId;
+}
+
+/**
+ * Undoes `placeClonedChatOnDroneBoard` for a clone that was never created. `previous` is the
+ * card stored under that name before the placement (a chat this client did not know about yet
+ * can own the name), which goes back where it was.
+ */
+export function removeClonedChatFromDroneBoard(
+  droneIdRaw: string,
+  cloneChatNameRaw: string,
+  previous?: { x: number; y: number; label: string } | null,
+): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const cloneChatName = String(cloneChatNameRaw ?? '').trim();
+  const cloneNodeId = createCanvasChatNodeId(droneId, cloneChatName);
+  if (!droneId || !cloneNodeId) return;
+  useDroneCanvasStore.getState().dropOptimisticBoardMembers(droneId, [cloneChatName]);
+  const actions = getCanvasBoardActions(droneId);
+  if (previous) actions.upsertNodes([{ droneId: cloneNodeId, label: previous.label, x: previous.x, y: previous.y }]);
+  else actions.removeNodes([cloneNodeId]);
+}
+
+/**
+ * Forgets the card stored for a chat name this client just picked as unused. Names are
+ * reused ("Untitled 2" again after an empty draft was thrown away), and a card left from
+ * the earlier chat would otherwise put the new one where the old one was, not where it
+ * was asked for.
+ */
+export function forgetStaleChatCard(droneIdRaw: string, chatNameRaw: string): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const nodeId = createCanvasChatNodeId(droneId, String(chatNameRaw ?? '').trim());
+  if (!droneId || !nodeId) return;
+  const actions = getCanvasBoardActions(droneId);
+  if (selectCanvasBoard(useDroneCanvasStore.getState(), droneId).nodesByDroneId[nodeId]) actions.removeNodes([nodeId]);
 }

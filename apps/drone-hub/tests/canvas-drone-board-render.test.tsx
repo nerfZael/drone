@@ -8,6 +8,8 @@ import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
+import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
+import { beginChatDeletion, markChatsDeleted, useChatDeletionStore } from '../src/droneHub/app/chat-deletion-store';
 import {
   EMPTY_CANVAS_BOARD,
   getCanvasBoardActions,
@@ -166,14 +168,51 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     expect(created).toEqual(['alpha']);
     expect(nodeIds().some((id) => String(id).startsWith('draft:'))).toBe(false);
 
+    // The new chat lands where it was double-clicked, even when its reused name ("Untitled 2",
+    // after an empty draft was thrown away) still has a card stored from the earlier chat.
+    await act(async () => getCanvasBoardActions('alpha').upsertNodes([{ droneId: alpha('Untitled 2'), label: 'Untitled 2', x: 5, y: 5 }]));
+    const onCreateUntitled = async () => {
+      // Like the app: the fresh name's left-over card is forgotten before the chat is listed.
+      forgetStaleChatCard('alpha', 'Untitled 2');
+      return true;
+    };
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} onCreateChat={onCreateUntitled} />));
+    await act(async () => Simulate.doubleClick(viewport as unknown as Element, { button: 0, clientX: 6000, clientY: 4000 }));
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'Untitled 2'])} onCreateChat={onCreateUntitled} />));
+    const { panX, panY, scale } = board();
+    const untitled = board().nodesByDroneId[alpha('Untitled 2')];
+    expect(Math.abs(untitled.x - (6000 - panX) / scale)).toBeLessThan(200);
+    expect(Math.abs(untitled.y - (4000 - panY) / scale)).toBeLessThan(100);
+
+    // Deleted outside the canvas (the sidebar): its card goes at once and is not laid out again
+    // while the summary still lists the chat, and nothing is left for a later chat of that name.
+    await act(async () => {
+      markChatsDeleted([{ droneId: 'alpha', chatName: 'Untitled 2' }]);
+      getCanvasBoardActions('alpha').removeNodes([alpha('Untitled 2')]);
+    });
+    expect(nodeIds()).not.toContain(alpha('Untitled 2'));
+    expect(board().nodesByDroneId[alpha('Untitled 2')]).toBeUndefined();
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} onCreateChat={onCreateUntitled} />));
+    expect(useChatDeletionStore.getState().deletedAtByNodeId).toEqual({});
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} onCreateChat={onCreateChat} />));
+
     // Copy two cards, move the cursor away, paste: both clones start at once, keep the
     // group's shape around the cursor, and a group paste does not flip the main chat.
-    const calls: Array<{ chatName: string; opts: Parameters<CloneChat>[2]; finish: (name: string) => void }> = [];
-    const onCloneChat: CloneChat = (_droneId, chatName, opts) =>
+    const calls: Array<{ chatName: string; opts: Parameters<CloneChat>[2]; finish: () => void }> = [];
+    // Like the app: the clone's card is placed once its name is picked, before the server copy finishes.
+    const onCloneChat: CloneChat = (droneId, chatName, opts) =>
       new Promise((resolve) => {
-        calls.push({ chatName, opts, finish: (name) => resolve({ ok: true, chatName: name }) });
+        const name = `${chatName}-pasted`;
+        placeClonedChatOnDroneBoard(droneId, chatName, name, { position: opts?.boardPosition });
+        opts?.onPlaced?.(name);
+        calls.push({ chatName, opts, finish: () => resolve({ ok: true, chatName: name }) });
       });
-    await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])} onCloneChat={onCloneChat} />));
+    const sentTo: string[][] = [];
+    const onSendCanvasPrompt: NonNullable<DockProps['onSendCanvasPrompt']> = async (targets) => {
+      sentTo.push(targets.map((target) => target.chatName).sort());
+      return { ok: true };
+    };
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])} onCloneChat={onCloneChat} onSendCanvasPrompt={onSendCanvasPrompt} />));
     await act(async () => {
       getCanvasBoardActions('alpha').moveNode(alpha('default'), 0, 0);
       getCanvasBoardActions('alpha').moveNode(alpha('plan'), 200, 120);
@@ -188,10 +227,20 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     expect(positionOf('plan').y - positionOf('default').y).toBe(120);
     expect(positionOf('default').x).toBeGreaterThan(1000);
     expect(calls.every((call) => call.opts?.select === false)).toBe(true);
+    // The clones are shown and selected while still copying, so Q can record into them right away.
+    expect([...board().selectedDroneIds].sort()).toEqual([alpha('default-pasted'), alpha('plan-pasted')]);
+    expect(board().nodesByDroneId[alpha('plan-pasted')]).toMatchObject(positionOf('plan'));
+    // A message to them waits until the server has created both clones.
+    const input = container.querySelector('[data-canvas-message-bar] textarea')!;
+    await act(async () => Simulate.change(input as unknown as Element, { target: { value: 'Continue' } } as never));
+    await act(async () => { Simulate.keyDown(input as unknown as Element, { key: 'Enter', nativeEvent: new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) } as never); });
+    expect(sentTo).toEqual([]);
     await act(async () => {
-      calls[0].finish('copy-a');
-      calls[1].finish('copy-b');
+      calls[0].finish();
+      calls[1].finish();
     });
+    expect(sentTo).toEqual([['default-pasted', 'plan-pasted']]);
+    expect([...board().selectedDroneIds].sort()).toEqual([alpha('default-pasted'), alpha('plan-pasted')]);
 
     // Switching to the global board shows the hand-curated nodes, untouched.
     const globalButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Global')!;
@@ -285,19 +334,53 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').selectedDroneIds).not.toContain(alpha('plan'));
 
     // Delete asks once for the whole selection, side chat included, and the cards go together.
+    // While the hub deletes them, each card shows it is going away.
     const deleteCalls: Array<Array<{ droneId: string; chatName: string }>> = [];
+    let finishDelete: () => void = () => {};
     const onDeleteChats: NonNullable<DockProps['onDeleteChats']> = async (targets) => {
       deleteCalls.push([...targets]);
+      const end = beginChatDeletion(targets);
+      await new Promise<void>((resolve) => { finishDelete = resolve; });
+      for (const target of targets) end(target);
       return targets.map((target) => ({ ...target, ok: true }));
+    };
+    const deleteAndFinish = async (event: Record<string, unknown>) => {
+      await act(async () => Simulate.keyDown(viewport(), event));
+      await act(async () => finishDelete());
     };
     await act(async () => root.render(<Dock drone={drone} onCloneChat={onCloneChat} onDeleteChats={onDeleteChats} />));
     await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
+    const otherPositions = () => Object.fromEntries(Object.entries(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId)
+      .filter(([nodeId]) => nodeId !== alpha('plan') && nodeId !== alpha('side-1'))
+      .map(([nodeId, node]) => [nodeId, { x: node.x, y: node.y }]));
+    const positionsBeforeDelete = otherPositions();
     await act(async () => Simulate.keyDown(viewport(), { key: 'Delete' }));
+    expect(card('plan').getAttribute('aria-busy')).toBe('true');
+    expect(card('plan').textContent).toContain('Deleting');
+    expect(card('default').getAttribute('aria-busy')).toBeNull();
+    await act(async () => finishDelete());
     expect(deleteCalls).toEqual([[{ droneId: 'alpha', chatName: 'plan' }, { droneId: 'alpha', chatName: 'side-1' }]]);
+    // Deleting cards leaves every other card where it was.
+    expect(otherPositions()).toEqual(positionsBeforeDelete);
+    // The summary still lists the deleted chats until it refreshes: their cards go at once
+    // instead of being placed again as if they were new chats.
+    expect(card('plan')).toBeNull();
+    expect(card('side-1')).toBeNull();
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')]).toBeUndefined();
+    // Once the summary drops them, chats created again under those names get cards again.
+    const recreateDeletedChats = async () => {
+      await act(async () => root.render(<Dock drone={makeDrone(['default'])} onCloneChat={onCloneChat} onDeleteChats={onDeleteChats} />));
+      expect(otherPositions()).toEqual(positionsBeforeDelete);
+      await act(async () => root.render(<Dock drone={drone} onCloneChat={onCloneChat} onDeleteChats={onDeleteChats} />));
+    };
+    await recreateDeletedChats();
+    expect(card('plan')).not.toBeNull();
+    expect(card('side-1')).not.toBeNull();
     // With the modifier held it is the same request, not one per card.
     await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
-    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete', shiftKey: true }));
+    await deleteAndFinish({ key: 'Delete', shiftKey: true });
     expect(deleteCalls.length).toBe(2);
+    await recreateDeletedChats();
 
     // Right-drag pans the canvas, so right-click on a card opens no menu; the keyboard copies the whole selection.
     await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('plan'), alpha('side-1')]));
@@ -316,11 +399,22 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
       return { ok: true, chatName: newName };
     };
     await act(async () => root.render(<Dock drone={drone} onRenameChat={onRenameChat} />));
+    const planBeforeRename = { ...selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')] };
+    const edgeCount = () => container.querySelectorAll('svg path[stroke]').length;
+    const edgesBeforeRename = edgeCount();
     await act(async () => Simulate.doubleClick(card('plan')));
     let input = container.querySelector('[data-canvas-node] input') as unknown as HTMLInputElement;
     await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
     await act(async () => Simulate.blur(input));
     expect(renames).toEqual(['plan b']);
+    // Until the summary refreshes, the renamed card stays put with its lines, and the old
+    // name is not laid out again as if it were a new chat.
+    expect(card('plan')).toBeNull();
+    expect(card('plan b')).not.toBeNull();
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan b')])
+      .toMatchObject({ x: planBeforeRename.x, y: planBeforeRename.y });
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')]).toBeUndefined();
+    expect(edgeCount()).toBe(edgesBeforeRename);
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan b'], [['side-1', 'plan b']])} onRenameChat={onRenameChat} />));
     await act(async () => Simulate.doubleClick(card('plan b')));
     input = container.querySelector('[data-canvas-node] input') as unknown as HTMLInputElement;

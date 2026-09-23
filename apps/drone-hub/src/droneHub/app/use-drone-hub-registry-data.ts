@@ -6,6 +6,7 @@ import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
 import { compareDronesByNewestFirst } from './helpers';
 import { fetchJson, usePoll } from './hooks';
 import { subscribeDesktopEvents } from './desktop-events';
+import { applyOptimisticChatRenames, type OptimisticChatRenames } from './optimistic-chat-renames';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -16,6 +17,8 @@ type UseDroneHubRegistryDataArgs = {
   activeRepoPath: string;
   optimisticallyDeletedDrones: Record<string, boolean>;
   setOptimisticallyDeletedDrones: Setter<Record<string, boolean>>;
+  /** Chats renamed here that the summaries do not show yet. */
+  optimisticChatRenames?: OptimisticChatRenames;
   setActiveRepoPath: Setter<string>;
   setChatHeaderRepoPath: Setter<string>;
 };
@@ -433,6 +436,7 @@ export function useDroneHubRegistryData({
   activeRepoPath,
   optimisticallyDeletedDrones,
   setOptimisticallyDeletedDrones,
+  optimisticChatRenames,
   setActiveRepoPath,
   setChatHeaderRepoPath,
 }: UseDroneHubRegistryDataArgs) {
@@ -457,9 +461,10 @@ export function useDroneHubRegistryData({
 
   const allDrones = React.useMemo(() => {
     const hiddenNames = Object.keys(optimisticallyDeletedDrones);
-    if (hiddenNames.length === 0) return polledDrones;
-    return polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
-  }, [optimisticallyDeletedDrones, polledDrones]);
+    const visible = hiddenNames.length === 0 ? polledDrones : polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
+    if (!optimisticChatRenames || Object.keys(optimisticChatRenames).length === 0) return visible;
+    return visible.map((drone) => applyOptimisticChatRenames(drone, optimisticChatRenames[drone.id]));
+  }, [optimisticChatRenames, optimisticallyDeletedDrones, polledDrones]);
   const drones = React.useMemo(
     () => allDrones.filter((drone) => !isWorkflowChildDrone(drone)),
     [allDrones],

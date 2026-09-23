@@ -13,6 +13,7 @@ import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-fil
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
+import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
@@ -42,9 +43,20 @@ import { clientTimeZone } from './droneHub/app/client-time-zone';
 import {
   getCanvasBoardActions,
   isCanvasDraftNodeId,
+  selectCanvasBoard,
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
-import { placeClonedChatOnDroneBoard } from './droneHub/canvas/drone-board';
+import { forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
+import {
+  beginChatDeletion,
+  markChatsDeleted,
+  pruneDeletedChats,
+  unmarkChatsDeleted,
+} from './droneHub/app/chat-deletion-store';
+import {
+  pruneOptimisticChatRenames,
+  type OptimisticChatRenames,
+} from './droneHub/app/optimistic-chat-renames';
 import {
   WHITEBOARD_OPEN_EVENT,
   writeActiveWhiteboardId,
@@ -446,6 +458,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const [optimisticallyRenamedDrones, setOptimisticallyRenamedDrones] = React.useState<
     Record<string, string>
   >({});
+  const [optimisticChatRenames, setOptimisticChatRenames] = React.useState<OptimisticChatRenames>({});
+  /** Shows a renamed chat under its new name at once, so the open chat keeps its transcript instead of reloading. */
+  const rememberOptimisticChatRename = React.useCallback((droneId: string, oldName: string, newName: string) => {
+    if (!droneId || !oldName || !newName || oldName === newName) return;
+    // Canvas cards move to the new name first, so a board never sees it listed without a position.
+    const oldNodeId = createCanvasChatNodeId(droneId, oldName);
+    const newNodeId = createCanvasChatNodeId(droneId, newName);
+    if (oldNodeId && newNodeId) {
+      getCanvasBoardActions(null).replaceNodeId(oldNodeId, newNodeId, newName);
+      getCanvasBoardActions(droneId).replaceNodeId(oldNodeId, newNodeId, newName);
+    }
+    // Committed before the caller selects the new name: a render that sees the new name
+    // missing from the summary would drop the chat's cached transcript.
+    flushSync(() => setOptimisticChatRenames((current) => {
+      // A chat renamed again before the summary caught up goes straight to its latest name.
+      const renames = Object.fromEntries(
+        Object.entries(current[droneId] ?? {}).map(([from, to]) => [from, to === oldName ? newName : to]),
+      );
+      if (!Object.values(renames).includes(newName)) renames[oldName] = newName;
+      return { ...current, [droneId]: renames };
+    }));
+  }, []);
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -505,9 +539,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeRepoPath,
     optimisticallyDeletedDrones,
     setOptimisticallyDeletedDrones,
+    optimisticChatRenames,
     setActiveRepoPath,
     setChatHeaderRepoPath,
   });
+  React.useEffect(() => {
+    setOptimisticChatRenames((current) => pruneOptimisticChatRenames(current, polledDrones));
+  }, [polledDrones]);
+  React.useEffect(() => {
+    if (Object.keys(optimisticChatRenames).length === 0) return;
+    // Like drone renames: never mask the hub's own view for long if its summary does not update.
+    const timeoutId = window.setTimeout(() => setOptimisticChatRenames({}), OPTIMISTIC_DRONE_RENAME_TIMEOUT_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [optimisticChatRenames]);
   React.useEffect(() => {
     setOptimisticallyRenamedDrones((current) => {
       let changed = false;
@@ -2347,6 +2391,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       return next;
     });
   }, [setStartupSeedByDrone]);
+  /**
+   * A deleted chat stays hidden until the summaries stop listing it, and its canvas cards go,
+   * so a later chat reusing the name does not inherit a left-over position.
+   */
+  const forgetDeletedChat = React.useCallback((droneId: string, chatName: string) => {
+    markChatsDeleted([{ droneId, chatName }]);
+    const nodeId = createCanvasChatNodeId(droneId, chatName);
+    if (!nodeId) return;
+    getCanvasBoardActions(droneId).removeNodes([nodeId]);
+    getCanvasBoardActions(null).removeNodes([nodeId]);
+  }, []);
+  React.useEffect(() => {
+    pruneDeletedChats(polledDrones);
+  }, [polledDrones]);
   const deleteAbandonedDraftChat = React.useCallback(
     (
       key: string,
@@ -2361,6 +2419,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       tracked.abandoned = true;
       tracked.cleanupInFlight = true;
       clearStartupSeedForChat(tracked.droneId, tracked.chatName);
+      forgetDeletedChat(tracked.droneId, tracked.chatName);
       const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
       void requestJson<{ ok: true }>(url, { method: 'DELETE' })
         .then(() => {
@@ -2370,6 +2429,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         })
         .catch((error: unknown) => {
           newDraftChatsRef.current.delete(key);
+          unmarkChatsDeleted([tracked]);
           unhideOptimisticallyRemovedDraftChat(tracked.droneId, tracked.chatName);
           console.warn('[DroneHub] abandoned new draft chat cleanup failed', {
             droneId: tracked.droneId,
@@ -2380,6 +2440,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       clearStartupSeedForChat,
+      forgetDeletedChat,
       requestJson,
       unhideOptimisticallyRemovedDraftChat,
     ],
@@ -3390,6 +3451,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               operation.chatName,
               operation.newName,
             );
+            rememberOptimisticChatRename(operation.droneId, operation.chatName, operation.newName);
             useDetachedChatStore.getState().rename(operation.droneId, operation.chatName, operation.newName);
             renameSideChatWorkspaceChat(operation.droneId, operation.chatName, operation.newName);
             return {
@@ -4245,6 +4307,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
         );
         renameChatRuntimeCache(droneId, chatName, newName);
+        rememberOptimisticChatRename(droneId, chatName, newName);
         useDetachedChatStore.getState().rename(droneId, chatName, newName);
         renameSideChatWorkspaceChat(droneId, chatName, newName);
         setSidebarChatOrderByDrone((prev) => {
@@ -4327,6 +4390,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             );
             renameChatRuntimeCache(droneId, chatName, candidate);
+            rememberOptimisticChatRename(droneId, chatName, candidate);
             useDetachedChatStore.getState().rename(droneId, chatName, candidate);
             renameSideChatWorkspaceChat(droneId, chatName, candidate);
             const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
@@ -4524,6 +4588,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         draft?: boolean;
         /** Picks the name given the names already in use; "Untitled N" when left out. */
         suggestName?: (unavailable: readonly string[]) => string;
+        /** Called with each name tried, before the request, so callers can show the chat at once. */
+        onNameChosen?: (chatName: string) => void;
+        /** Called when a tried name did not become a chat. */
+        onNameReleased?: (chatName: string) => void;
       },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const latestDrone = droneByIdRef.current[drone.id] ?? drone;
@@ -4534,10 +4602,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const candidate = suggestName(unavailableChatNames);
         claimed.set(candidate, Date.now());
+        // A clone placed by the caller (onNameChosen) replaces the stored card itself.
+        if (!opts?.onNameChosen) forgetStaleChatCard(latestDrone.id, candidate);
+        opts?.onNameChosen?.(candidate);
         const created = await createDroneChat(latestDrone, candidate, opts);
         // A created chat stays claimed until the drone summary lists it.
         if (created.ok) return { ok: true, chatName: candidate, error: null };
         claimed.delete(candidate);
+        opts?.onNameReleased?.(candidate);
         const createError = String(created.error ?? '').trim();
         if (!/already exists/i.test(createError)) {
           return { ok: false, error: createError || 'The new chat could not be created.' };
@@ -4554,7 +4626,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       droneIdRaw: string,
       sourceChatNameRaw: string,
-      opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
+      opts?: {
+        select?: boolean;
+        boardPosition?: { x: number; y: number };
+        /** The clone's card is on its drone's board, before the server has finished copying the chat. */
+        onPlaced?: (chatName: string) => void;
+      },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const sourceChatName = String(sourceChatNameRaw ?? '').trim() || 'default';
@@ -4567,18 +4644,27 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       cloningChatKeysRef.current.add(cloneKey);
       setCloningChatKeys((current) => ({ ...current, [cloneKey]: true }));
       try {
+        // The card goes on the board as soon as its name is known, so a paste shows (and can
+        // select) the clone at once; forking the transcript on the server can take a while.
+        const previousCardByName = new Map<string, { x: number; y: number; label: string } | null>();
         const result = await createUntitledDroneChat(drone, {
           copyFromChat: sourceChatName,
           mode: 'fork',
           suggestName: (unavailable) => suggestChatCopyName(sourceChatName, unavailable),
           ...(opts?.select === false ? { select: false } : {}),
+          onNameChosen: (chatName) => {
+            const stored = selectCanvasBoard(useDroneCanvasStore.getState(), droneId)
+              .nodesByDroneId[createCanvasChatNodeId(droneId, chatName)];
+            previousCardByName.set(chatName, stored ? { x: stored.x, y: stored.y, label: stored.label } : null);
+            // Without a paste position the clone goes beside its source, not onto a left-over card.
+            if (!opts?.boardPosition) forgetStaleChatCard(droneId, chatName);
+            placeClonedChatOnDroneBoard(droneId, sourceChatName, chatName, { position: opts?.boardPosition });
+            opts?.onPlaced?.(chatName);
+          },
+          onNameReleased: (chatName) => removeClonedChatFromDroneBoard(droneId, chatName, previousCardByName.get(chatName)),
         });
         if (!result.ok) {
           showShortcutToast(result.error || 'The chat could not be cloned.', 'Clone chat failed');
-        } else if (result.chatName) {
-          placeClonedChatOnDroneBoard(droneId, sourceChatName, result.chatName, {
-            position: opts?.boardPosition,
-          });
         }
         return result;
       } finally {
@@ -4699,6 +4785,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const createDraftDroneChat = React.useCallback(async (drone: DroneSummary): Promise<boolean> => {
     const latestDrone = droneByIdRef.current[drone.id] ?? drone;
     const chatName = suggestNextDroneChatName(reserveUntitledChatNames(latestDrone).unavailable);
+    // Before the chat is listed, so the canvas places it fresh (where it was double-clicked).
+    forgetStaleChatCard(latestDrone.id, chatName);
     let configuration: NewChatConfiguration;
     try {
       configuration = resolveNewChatConfiguration(latestDrone);
@@ -5354,6 +5442,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         }
       }
 
+      // Every surface showing one of these chats (its card, the open chat) shows it going away.
+      const endChatDeletion = beginChatDeletion(kept);
       for (const { droneId, chatName, chats } of kept) {
         try {
           await requestJson<{ ok: true; deletedChat: string }>(
@@ -5361,6 +5451,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             { method: 'DELETE' },
           );
           deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
+          forgetDeletedChat(droneId, chatName);
           useDetachedChatStore.getState().forgetChat(droneId, chatName);
           setSidebarChatOrderByDrone((prev) => {
             const currentOrder = prev[droneId];
@@ -5384,14 +5475,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           results.push({ droneId, chatName, ok: true, deletedDrone: false, error: null });
         } catch (err: any) {
           results.push({ droneId, chatName, ok: false, deletedDrone: false, error: err?.message ?? String(err) });
+          endChatDeletion({ droneId, chatName });
         }
       }
+      // Deleted ones stay marked until the whole batch is done: callers drop them together.
+      for (const target of kept) endChatDeletion(target);
       return results;
     },
     [
       deleteActionSettingsState.deleteSettings,
       confirmDelete,
       drones,
+      forgetDeletedChat,
       requestDeleteDrones,
       requestJson,
       selectedChat,

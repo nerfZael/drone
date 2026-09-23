@@ -3,6 +3,7 @@ import type { ChatSendPayload, ChatSendContext } from '../chat/ChatInput';
 import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './canvas-messaging';
 import React from 'react';
+import { flushSync } from 'react-dom';
 import '@xyflow/react/dist/style.css';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
@@ -17,10 +18,12 @@ import {
   UiToolbarButton,
   UiToolbarIconButton,
   UiToolbarInput,
+  UiSpinner,
 } from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { selectSidebarChatNodes } from '../app/sidebar-chat-selection';
 import { chatClipboardHasContent, pastableClipboard, useChatClipboardStore } from '../app/chat-clipboard-store';
+import { markChatsDeleted, pruneDeletedChatsOfDrone, useChatDeletionStore } from '../app/chat-deletion-store';
 import {
   composerReferencesFromNodeIds,
   mergeComposerReferences,
@@ -69,7 +72,7 @@ import {
   selectCanvasBoard,
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
-import { OPTIMISTIC_MEMBER_TTL_MS, buildDroneBoardMembers, planDroneBoardPlacements } from './drone-board';
+import { OPTIMISTIC_MEMBER_TTL_MS, buildDroneBoardMembers, planDroneBoardPlacements, type DroneBoardMember } from './drone-board';
 import {
   measureRectInWorldSpace,
   type CanvasRect,
@@ -434,7 +437,7 @@ export function DroneCanvasDock({
   onCloneChat?: (
     droneId: string,
     chatName: string,
-    opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
+    opts?: { select?: boolean; boardPosition?: { x: number; y: number }; onPlaced?: (chatName: string) => void },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onCloneDrone?: (
     drone: DroneSummary,
@@ -515,11 +518,47 @@ export function DroneCanvasDock({
         : '',
     [boardChatCloneSources, boardChats, boardSideChats, droneScope, optimisticMembers],
   );
-  const boardMembers = React.useMemo(
+  const summaryBoardMembers = React.useMemo(
     () => (droneScope ? buildDroneBoardMembers(boardDrone, optimisticMembers) : []),
     // The summary is rebuilt on every refresh; only its chat list matters here.
     [boardDroneId, boardMemberKey],
   );
+  // A chat deleted or renamed here keeps its old entry in the summary until the next refresh.
+  // Apply the change meanwhile, or placement would take the old name for a new chat and drop
+  // a card (and its line) at the view center until the refresh lands.
+  // Deletes from any surface (sidebar, Chats window, here) hide the chat until the summary drops it.
+  const deletedAtByNodeId = useChatDeletionStore((state) => state.deletedAtByNodeId);
+  const [renamedChatNodes, setRenamedChatNodes] = React.useState<Readonly<Record<string, { nodeId: string; chatName: string }>>>({});
+  const boardMembers = React.useMemo(() => {
+    if (Object.keys(deletedAtByNodeId).length === 0 && Object.keys(renamedChatNodes).length === 0) return summaryBoardMembers;
+    const out: DroneBoardMember[] = [];
+    const seen = new Set<string>();
+    for (const member of summaryBoardMembers) {
+      if (member.nodeId in deletedAtByNodeId) continue;
+      const renamed = renamedChatNodes[member.nodeId];
+      const sourceRenamed = member.sourceNodeId ? renamedChatNodes[member.sourceNodeId] : undefined;
+      const next = {
+        ...member,
+        ...(renamed ?? {}),
+        ...(sourceRenamed ? { sourceNodeId: sourceRenamed.nodeId } : {}),
+      };
+      if (seen.has(next.nodeId)) continue;
+      seen.add(next.nodeId);
+      out.push(next);
+    }
+    return out;
+  }, [deletedAtByNodeId, renamedChatNodes, summaryBoardMembers]);
+  React.useEffect(() => {
+    if (boardDrone && droneScope) pruneDeletedChatsOfDrone(boardDrone);
+    // Keyed like the members: the summary object is rebuilt on every refresh.
+  }, [boardDroneId, boardMemberKey]);
+  React.useEffect(() => {
+    const listed = new Set(summaryBoardMembers.map((member) => member.nodeId));
+    // Done once the summary no longer lists the old name.
+    if (Object.keys(renamedChatNodes).some((nodeId) => !listed.has(nodeId))) {
+      setRenamedChatNodes((prev) => Object.fromEntries(Object.entries(prev).filter(([nodeId]) => listed.has(nodeId))));
+    }
+  }, [renamedChatNodes, summaryBoardMembers]);
   const forkSourceNodeIdByNodeId = React.useMemo(() => {
     const out: Record<string, string> = {};
     for (const member of boardMembers) {
@@ -584,6 +623,8 @@ export function DroneCanvasDock({
   const suppressNodeClickRef = React.useRef(false);
   const cursorClientPointRef = React.useRef<{ x: number; y: number } | null>(null);
   const lastPasteRef = React.useRef<{ x: number; y: number; count: number } | null>(null);
+  /** Pasted clones shown before the server has finished copying them; each settles to whether it was created. */
+  const pendingClonesRef = React.useRef(new Map<string, Promise<boolean>>());
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
   const viewRef = React.useRef({ panX, panY, scale });
   viewRef.current = { panX, panY, scale };
@@ -597,7 +638,7 @@ export function DroneCanvasDock({
   const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
   // Enter and Escape settle a rename themselves; the blur that follows the field going away must not.
   const inlineRenameSettledRef = React.useRef(false);
-  const [deletingChatNodeById, setDeletingChatNodeById] = React.useState<Record<string, boolean>>({});
+  const deletingChatNodeById = useChatDeletionStore((state) => state.deletingByNodeId);
   const [canvasControlsExpanded, setCanvasControlsExpanded] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
@@ -889,6 +930,8 @@ export function DroneCanvasDock({
         const nextChatName = String(result.chatName ?? newName).trim() || newName;
         const nextNodeId = createCanvasChatNodeId(chatRef.droneId, nextChatName);
         if (nextNodeId && nextNodeId !== droneId) {
+          // Applied before the store moves the card, so placement never sees the old name without one.
+          flushSync(() => setRenamedChatNodes((prev) => ({ ...prev, [droneId]: { nodeId: nextNodeId, chatName: nextChatName } })));
           // The chat may sit on both the global board and its drone's board.
           getCanvasBoardActions(null).replaceNodeId(droneId, nextNodeId, nextChatName);
           getCanvasBoardActions(chatRef.droneId).replaceNodeId(droneId, nextNodeId, nextChatName);
@@ -936,7 +979,6 @@ export function DroneCanvasDock({
         return;
       }
       const targets = chatNodeIds.map((nodeId) => parseCanvasChatNodeId(nodeId)!);
-      setDeletingChatNodeById((prev) => Object.assign({ ...prev }, ...chatNodeIds.map((nodeId) => ({ [nodeId]: true }))));
       setMessageError(null);
       try {
         const results = await onDeleteChats(targets);
@@ -955,15 +997,13 @@ export function DroneCanvasDock({
             toRemove.add(createCanvasChatNodeId(result.droneId, result.chatName));
           }
         }
-        if (toRemove.size > 0) removeNodes([...toRemove]);
+        if (toRemove.size > 0) {
+          // Hidden before the cards go, so placement never sees a listed chat without a position.
+          markChatsDeleted([...toRemove].flatMap((nodeId) => parseCanvasChatNodeId(nodeId) ?? []));
+          removeNodes([...toRemove]);
+        }
       } catch (err: any) {
         setMessageError(err?.message ?? String(err));
-      } finally {
-        setDeletingChatNodeById((prev) => {
-          const next = { ...prev };
-          for (const nodeId of chatNodeIds) delete next[nodeId];
-          return next;
-        });
       }
     },
     [nodeOrder, onDeleteChats, removeNodes],
@@ -1505,7 +1545,7 @@ export function DroneCanvasDock({
     if (selectedDroneIds.length === 0) return false;
     const regularNodeIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
     const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
-    const regularTargets = collectUniqueChatTargets(regularNodeIds);
+    let regularTargets = collectUniqueChatTargets(regularNodeIds);
     // Keep regular-message sends single-flight to avoid accidental duplicate broadcasts.
     if (messageSending && draftNodeIds.length === 0) return false;
 
@@ -1678,6 +1718,18 @@ export function DroneCanvasDock({
 
       if (additionalNodesToUpsert.length > 0) {
         upsertNodes(additionalNodesToUpsert);
+      }
+
+      // A just-pasted clone can be messaged (Q right after Ctrl+V) while the server is still copying it:
+      // wait for it, and leave out one that was never created.
+      const failedCloneTargets = new Set<(typeof regularTargets)[number]>();
+      await Promise.all(regularTargets.map(async (target) => {
+        const pending = pendingClonesRef.current.get(createCanvasChatNodeId(target.droneId, target.chatName));
+        if (pending && !(await pending)) failedCloneTargets.add(target);
+      }));
+      if (failedCloneTargets.size > 0) {
+        errors.push(failedCloneTargets.size === 1 ? 'A pasted chat could not be created.' : `${failedCloneTargets.size} pasted chats could not be created.`);
+        regularTargets = regularTargets.filter((target) => !failedCloneTargets.has(target));
       }
 
       if (regularTargets.length > 0) {
@@ -2043,9 +2095,16 @@ export function DroneCanvasDock({
     const drones = collectCloneableDroneIdsFromCanvasSelection(nodeIds)
       .map((droneId) => ({ droneId, nodeId: sourceNodeIdByDroneId[droneId] ?? '' }));
     const chats = collectCloneableChatsFromCanvasSelection(nodeIds);
-    if (drones.length + chats.length > 0) useChatClipboardStore.getState().copy({ chats, drones });
+    if (drones.length + chats.length > 0) {
+      const droneNames: Record<string, string> = {};
+      for (const { droneId } of [...drones, ...chats]) {
+        const name = String(effectiveDroneNameById[droneId] ?? '').trim();
+        if (name) droneNames[droneId] = name;
+      }
+      useChatClipboardStore.getState().copy({ chats, drones, droneNames });
+    }
     return drones.length + chats.length;
-  }, [selectedDroneIds]);
+  }, [effectiveDroneNameById, selectedDroneIds]);
 
   /** Clones what was copied here or in the Chats window. `at` is a client point, e.g. where a menu opened. */
   const pasteCopiedCanvasNodesAsClones = React.useCallback((at?: { x: number; y: number }) => {
@@ -2099,6 +2158,13 @@ export function DroneCanvasDock({
 
     void (async () => {
       const pastedNodeIds: string[] = [];
+      // Clones are selected the moment their cards appear, so Q records into them without waiting for the copy.
+      const shownNodeIds: string[] = [];
+      const showPasted = (nodeId: string) => {
+        if (shownNodeIds.includes(nodeId)) return;
+        shownNodeIds.push(nodeId);
+        setSelectedDroneIds(shownNodeIds.slice());
+      };
       // Drone clones are heavy (each builds a runtime), so they stay sequential.
       const cloneDrones = async () => {
         if (!onCloneDrone) return;
@@ -2114,25 +2180,52 @@ export function DroneCanvasDock({
           if (result.droneName) setOptimisticDroneNameById((prev) => ({ ...prev, [cloneDroneId]: label }));
           upsertNodes([{ droneId: nodeId, label, ...position }]);
           pastedNodeIds.push(nodeId);
+          showPasted(nodeId);
         }
       };
       const cloneChats = () =>
         runWithConcurrency(copiedChats, CHAT_PASTE_CONCURRENCY, async (source) => {
           const position = positionBySourceNodeId[source.nodeId];
           if (!onCloneChat || !position) return;
+          const ownBoard = boardDroneId === source.droneId;
+          const placedNodeIds: string[] = [];
+          let settle: (created: boolean) => void = () => {};
+          const settled = new Promise<boolean>((resolve) => { settle = resolve; });
           const result = await onCloneChat(source.droneId, source.chatName, {
             // Keep keyboard focus on the canvas so another paste works immediately.
             select: false,
-            // On a drone board the clone handler owns the card, so it appears the moment the clone exists.
-            ...(boardDroneId === source.droneId ? { boardPosition: position } : {}),
-          });
+            // On a drone board the clone handler owns the card; on the global board it is placed here.
+            ...(ownBoard ? { boardPosition: position } : {}),
+            onPlaced: (chatName) => {
+              const placedNodeId = createCanvasChatNodeId(source.droneId, chatName);
+              if (!placedNodeId) return;
+              if (!ownBoard) upsertNodes([{ droneId: placedNodeId, label: chatName, ...position }]);
+              placedNodeIds.push(placedNodeId);
+              pendingClonesRef.current.set(placedNodeId, settled);
+              showPasted(placedNodeId);
+            },
+          }).catch(() => ({ ok: false as const, chatName: undefined }));
           const nodeId = result?.ok && result.chatName ? createCanvasChatNodeId(source.droneId, result.chatName) : '';
+          for (const placedNodeId of placedNodeIds) {
+            if (pendingClonesRef.current.get(placedNodeId) === settled) pendingClonesRef.current.delete(placedNodeId);
+          }
+          settle(Boolean(nodeId));
+          // A name that was tried but not created leaves the global board and the selection again.
+          const abandoned = placedNodeIds.filter((placedNodeId) => placedNodeId !== nodeId);
+          if (abandoned.length) {
+            if (!ownBoard) removeNodes(abandoned);
+            for (const id of abandoned) {
+              const index = shownNodeIds.indexOf(id);
+              if (index >= 0) shownNodeIds.splice(index, 1);
+            }
+            setSelectedDroneIds(shownNodeIds.slice());
+          }
           if (!nodeId || !result.chatName) return;
-          if (boardDroneId !== source.droneId) upsertNodes([{ droneId: nodeId, label: result.chatName, ...position }]);
+          if (!ownBoard && !placedNodeIds.includes(nodeId)) upsertNodes([{ droneId: nodeId, label: result.chatName, ...position }]);
           pastedNodeIds.push(nodeId);
+          showPasted(nodeId);
         });
       await Promise.all([cloneDrones(), cloneChats()]);
-      if (pastedNodeIds.length > 0) setSelectedDroneIds(pastedNodeIds);
     })();
   }, [
     boardDroneId,
@@ -2142,6 +2235,7 @@ export function DroneCanvasDock({
     onCloneDrone,
     panX,
     panY,
+    removeNodes,
     scale,
     setSelectedDroneIds,
     upsertNodes,
@@ -2588,6 +2682,8 @@ export function DroneCanvasDock({
             const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const inlineEditing = inlineRenamingDroneId === node.droneId;
+            // A button would treat Space typed in the title field as a click on the card.
+            const CardElement = (inlineEditing ? 'div' : 'button') as 'button';
             const assignmentHoverTarget = assignmentHoverNodeId === node.droneId && assignmentHoverTargetCount > 0;
             const isActiveSidebarChat = Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
             const indicatorState = draftNode
@@ -2596,7 +2692,16 @@ export function DroneCanvasDock({
                 ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
                 : chatNodeStateById[node.droneId] ?? null;
             const lastAgentSnippet = indicatorState?.lastAgentSnippet ?? null;
-            const indicator = renderNodeIndicator(indicatorState);
+            const deleting = Boolean(deletingChatNodeById[node.droneId]);
+            const indicator = deleting ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-[4px] border border-[var(--red-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                <UiSpinner size="small" label={null} inheritColor className="[&>span]:h-2.5 [&>span]:w-2.5" />
+                Deleting
+              </span>
+            ) : renderNodeIndicator(indicatorState);
             const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             const nodeHeight = nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
@@ -2618,9 +2723,9 @@ export function DroneCanvasDock({
               ? Math.min(nodeReadabilityBoost, getChatLabelTextBoost(primaryLabel, nodeWidth))
               : 1;
             return (
-              <button
+              <CardElement
                 key={node.droneId}
-                type="button"
+                type={inlineEditing ? undefined : 'button'}
                 data-canvas-node="1"
                 data-drone-id={node.droneId}
                 data-canvas-node-kind={draftNode ? 'draft' : droneNode ? 'drone' : 'chat'}
@@ -2633,6 +2738,8 @@ export function DroneCanvasDock({
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
                 aria-pressed={selected}
+                aria-busy={deleting || undefined}
+                title={deleting ? 'Deleting…' : undefined}
                 className={`group/canvas-node absolute relative overflow-visible rounded-[var(--radius-medium)] border text-left ${labelTextBoost > 1 ? 'px-2' : 'px-2.5'} shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_14px_26px_var(--shadow-color)]'
@@ -2697,7 +2804,8 @@ export function DroneCanvasDock({
                     {repoBranch}
                   </span>
                 ) : null}
-                <span className="min-w-0 flex-1">
+                {/* The title fades while the chat is being deleted; the Deleting badge above says why. */}
+                <span className={`min-w-0 flex-1 transition-opacity ${deleting ? 'opacity-45' : ''}`}>
                   {inlineEditing ? (
                     <input
                       ref={inlineRenameInputRef}
@@ -2730,6 +2838,8 @@ export function DroneCanvasDock({
                           event.stopPropagation();
                           inlineRenameSettledRef.current = true;
                           void submitInlineRename();
+                          // Canvas keys (Q, Delete, arrows) keep working once the field closes.
+                          focusViewportElement();
                           return;
                         }
                         if (event.key === 'Escape') {
@@ -2737,6 +2847,7 @@ export function DroneCanvasDock({
                           event.stopPropagation();
                           inlineRenameSettledRef.current = true;
                           cancelInlineRename();
+                          focusViewportElement();
                         }
                       }}
                       // Looks like the title it replaces: the card's own border already says it is being edited.
@@ -2773,7 +2884,7 @@ export function DroneCanvasDock({
                     </span>
                   )}
                 </span>
-              </button>
+              </CardElement>
             );
           })}
         </div>

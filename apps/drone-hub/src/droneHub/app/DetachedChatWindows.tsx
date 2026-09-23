@@ -1,3 +1,4 @@
+import { ChatDeletingOverlay } from './ChatDeletingOverlay';
 import { useDesktopChatRequests } from './desktop-chat-requests';
 import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
@@ -105,7 +106,10 @@ export function DetachedChatContent({ chat, drone, context, desktop = false }: {
     onOpenDrone={() => dispatchAssistantOpenDroneChat(drone.id, chat.chatName)} onDeleteDrone={() => {}} focusedNewChatActionId="" columnWidthPx={320} />;
   return <SideChatForkProvider value={{ droneId: drone.id, chatName: chat.chatName, busy: forkBusy, supported: !draft && (agent.kind === 'native' || ['codex', 'claude', 'opencode'].includes(agent.id ?? '')) }}>
     {publishError && <div role="alert" className="shrink-0 px-3 py-2 text-[var(--red)]">{publishError}</div>}
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      {content}
+      <ChatDeletingOverlay droneId={chat.droneId} chatName={chat.chatName} />
+    </div>
   </SideChatForkProvider>;
 }
 
