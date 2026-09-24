@@ -52,6 +52,8 @@ type SelectedChatsComposerProps = {
 
 export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const surface = props.surface ?? 'canvas';
+  const [voiceRecordingActive, setVoiceRecordingActive] = React.useState(false);
+  const expanded = props.expanded || voiceRecordingActive;
   // Clearing canvas selection hides the current composition; it is not a switch
   // from a new-drone draft to the regular broadcast draft.
   const draftPropsRef = React.useRef(props);
@@ -128,7 +130,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
         setPastedDroneNames((current) => ({ ...current, ...pasted.droneNames }));
         addReferences(pasted.references);
       }}
-      hidden={props.selectedCount <= 0 && surface === 'canvas'}
+      hidden={props.selectedCount <= 0 && surface === 'canvas' && !voiceRecordingActive}
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
@@ -146,14 +148,15 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
           event.stopPropagation();
         }
       }}>
-      {!props.expanded ? <button type="button" onClick={props.onExpand}
+      {!expanded ? <button type="button" onClick={props.onExpand}
         className={`mx-auto flex h-7 items-center rounded-md border bg-[var(--panel-overlay)] px-3 text-11 text-[var(--accent)] shadow-lg ${
           dropActive ? 'border-[var(--accent)]' : 'border-[var(--accent-muted)]'}`}>
         Message {targetLabel}
       </button> : null}
       {/* Keep the draft, attachments and recording alive when the bar is collapsed. */}
-      <div hidden={!props.expanded}>
+      <div hidden={!expanded}>
         <ChatInput resetKey={draftProps.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${draftProps.selectionKey}`}
+          onVoiceRecordingActiveChange={setVoiceRecordingActive}
           draftValue={draftProps.draft} onDraftValueChange={draftProps.onDraftChange} onDraftContentChange={draftProps.onDraftContentChange}
           promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
           onSend={async (payload, context) => {

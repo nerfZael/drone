@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { registerAppDialogSurface } from '../../ui/AppConfirmDialog';
 import type { ChatContextTarget } from './ChatContextActions';
+import { registerEditorZoomWindow } from '../files/editor-zoom';
 
 /** Render an additional chat view exclusively in its native desktop window. */
 export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose, children, kind = 'chat' }: {
@@ -69,6 +70,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     child.document.body.appendChild(host);
     // Confirmations raised from this chat open here, not in the Hub window behind it.
     const unregisterDialogSurface = registerAppDialogSurface(child.document);
+    const unregisterEditorZoom = registerEditorZoomWindow(child);
     const focused = () => { host.dataset.desktopChatFocused = 'true'; };
     const blurred = () => { host.dataset.desktopChatFocused = 'false'; };
     host.dataset.desktopChatFocused = String(child.document.hasFocus());
@@ -83,6 +85,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     const closed = () => {
       observer.disconnect();
       unregisterDialogSurface();
+      unregisterEditorZoom();
       removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;
@@ -95,6 +98,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     cleanup.current = () => {
       observer.disconnect();
       unregisterDialogSurface();
+      unregisterEditorZoom();
       removeFocusListeners();
       child.removeEventListener('beforeunload', closed);
       popup.current = null;

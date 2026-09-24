@@ -198,6 +198,8 @@ export type ChatInputProps = {
   draftValue?: string;
   onDraftValueChange?: (next: string) => void;
   onDraftContentChange?: (content: ChatInputDraftContent) => void;
+  /** Keeps host surfaces visible through recording, pauses, and transcription. */
+  onVoiceRecordingActiveChange?: (active: boolean) => void;
   promptError: string | null;
   waiting: boolean;
   disabled?: boolean;
@@ -255,6 +257,7 @@ export function ChatInput({
   draftValue,
   onDraftValueChange,
   onDraftContentChange,
+  onVoiceRecordingActiveChange,
   promptError,
   waiting,
   disabled,
@@ -595,6 +598,10 @@ export function ChatInput({
   }, [draft, resetKey, resizeTextarea]);
 
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  const voiceSessionActive = voiceRecordingActive || voiceActionInFlight;
+  React.useEffect(() => {
+    onVoiceRecordingActiveChange?.(voiceSessionActive);
+  }, [onVoiceRecordingActiveChange, voiceSessionActive]);
   voiceRecordingStatusRef.current = voiceRecordingStatus;
   const continuousVoiceActive = continuousVoice.status !== 'idle';
   const showStopAction = chatResponseStopVisible({
@@ -1593,7 +1600,7 @@ export function ChatInput({
               className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
-              // Typing is allowed while recording; the transcript goes in at the cursor when it stops.
+              // Typing is allowed while recording; the transcript appends to the draft when it stops.
               disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}

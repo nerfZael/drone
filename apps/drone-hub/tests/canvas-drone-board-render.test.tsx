@@ -402,10 +402,29 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     const planBeforeRename = { ...selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')] };
     const edgeCount = () => container.querySelectorAll('svg path[stroke]').length;
     const edgesBeforeRename = edgeCount();
+    const originalWidth = (card('plan') as unknown as HTMLElement).style.width;
+    const originalTransform = (card('plan') as unknown as HTMLElement).style.transform;
     await act(async () => Simulate.doubleClick(card('plan')));
     let input = container.querySelector('[data-canvas-node] input') as unknown as HTMLInputElement;
+    await act(async () => Simulate.change(input, { target: { value: 'A much longer name that should grow while typing' } } as never));
+    expect(parseFloat((card('plan') as unknown as HTMLElement).style.width)).toBeGreaterThan(parseFloat(originalWidth));
+    expect((card('plan') as unknown as HTMLElement).style.transform).toBe(originalTransform);
     await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
-    await act(async () => Simulate.blur(input));
+    expect((card('plan') as unknown as HTMLElement).style.width).toBe(originalWidth);
+    const renamePositions: Array<{ x: number; y: number }> = [];
+    const unsubscribe = useDroneCanvasStore.subscribe((state) => {
+      const renamed = selectCanvasBoard(state, 'alpha').nodesByDroneId[alpha('plan b')];
+      if (renamed) renamePositions.push({ x: renamed.x, y: renamed.y });
+    });
+    try {
+      await act(async () => Simulate.blur(input));
+    } finally {
+      unsubscribe();
+    }
+    expect(renamePositions.length).toBeGreaterThan(0);
+    for (const position of renamePositions) {
+      expect(position).toEqual({ x: planBeforeRename.x, y: planBeforeRename.y });
+    }
     expect(renames).toEqual(['plan b']);
     // Until the summary refreshes, the renamed card stays put with its lines, and the old
     // name is not laid out again as if it were a new chat.
@@ -443,6 +462,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
   const created: any[] = [];
   let failSend = false;
   let recordings = 0;
+  let transcriptionGate: Promise<void> | null = null;
   class Recorder extends dom.EventTarget {
     static isTypeSupported() { return true; }
     state = 'inactive';
@@ -472,6 +492,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes('/transcriptions') && transcriptionGate) await transcriptionGate;
       if (url.includes('/config')) configs.push(JSON.parse(String(init?.body)));
       const body = url.includes('/transcriptions') ? { text: 'Recorded message' }
         : url.includes('/model-catalog') ? { models: [{ id: 'saved-model', label: 'Saved model', reasoningLevels: ['low', 'high'] }, { id: 'other-model', label: 'Other model', reasoningLevels: ['low', 'high'] }] }
@@ -550,16 +571,51 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await key(viewport() as unknown as Element, 'q');
     expect(recordings).toBe(1);
     const recordingComposer = container.querySelector('[data-active-composer-id]');
+    const recordingControl = (label: string) => container.querySelector(`button[aria-label="${label}"]`)!;
+    const expectRecordingVisible = (label: string) => {
+      const control = recordingControl(label);
+      expect(control).not.toBeNull();
+      expect(control.closest('[hidden]')).toBeNull();
+    };
+    await key(viewport() as unknown as Element, 'Escape');
+    expectRecordingVisible('Pause recording');
     await act(async () => getCanvasBoardActions('alpha').clearSelection());
+    expectRecordingVisible('Stop recording and transcribe');
+    expect(container.textContent).toContain('Select chats to message');
+    const sendRecording = recordingControl('Transcribe and send recording') ?? recordingControl('Send');
+    expect((sendRecording as unknown as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => Simulate.click(recordingControl('Pause recording') as unknown as Element));
+    expectRecordingVisible('Resume recording');
+    await act(async () => Simulate.click(recordingControl('Resume recording') as unknown as Element));
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element));
+    expectRecordingVisible('Pause recording');
     expect(container.querySelector('[data-active-composer-id]')).toBe(recordingComposer);
     await key(viewport() as unknown as Element, 's');
     await act(async () => { await settle(); });
     expect(sends.at(-1)).toMatchObject({ payload: { prompt: 'Recorded message' }, context: { deliveryMode: 'queue' } });
-    await act(async () => (viewport() as unknown as HTMLElement).focus());
-    await key(viewport() as unknown as Element, 'q');
-    await key(viewport() as unknown as Element, 'Tab');
+    expect(dom.document.activeElement).toBe(viewport());
+    await key(dom.document.activeElement as unknown as Element, 'q');
+    expect(recordings).toBe(2);
+    await key(dom.document.activeElement as unknown as Element, 'Tab');
     expect(sends.at(-1)).toMatchObject({ payload: { prompt: 'Recorded message' }, context: { deliveryMode: 'asap' } });
+    expect(dom.document.activeElement).toBe(viewport());
+    // With no recipients, stopping still keeps the transcript for a later selection.
+    await key(dom.document.activeElement as unknown as Element, 'q');
+    await act(async () => getCanvasBoardActions('alpha').clearSelection());
+    const sendsBeforeStop = sends.length;
+    let finishTranscription!: () => void;
+    transcriptionGate = new Promise<void>((resolve) => { finishTranscription = resolve; });
+    await act(async () => {
+      Simulate.click(recordingControl('Stop recording and transcribe') as unknown as Element);
+      await settle();
+    });
+    expectRecordingVisible('Discard recording');
+    expect(container.textContent).toContain('Transcribing');
+    await act(async () => { finishTranscription(); await settle(); });
+    transcriptionGate = null;
+    expect(sends).toHaveLength(sendsBeforeStop);
+    await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element));
+    expect((input() as unknown as HTMLTextAreaElement).value).toBe('Recorded message');
     expect(container.textContent).toContain('Model: Unchanged');
     expect(configs).toEqual([]);
     await act(async () => Simulate.change(container.querySelector('select[aria-label="Reasoning override for selected chats"]') as unknown as Element, { target: { value: 'high' } } as never));

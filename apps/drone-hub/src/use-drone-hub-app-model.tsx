@@ -463,23 +463,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   /** Shows a renamed chat under its new name at once, so the open chat keeps its transcript instead of reloading. */
   const rememberOptimisticChatRename = React.useCallback((droneId: string, oldName: string, newName: string) => {
     if (!droneId || !oldName || !newName || oldName === newName) return;
-    // Canvas cards move to the new name first, so a board never sees it listed without a position.
-    const oldNodeId = createCanvasChatNodeId(droneId, oldName);
-    const newNodeId = createCanvasChatNodeId(droneId, newName);
-    if (oldNodeId && newNodeId) {
-      getCanvasBoardActions(null).replaceNodeId(oldNodeId, newNodeId, newName);
-      getCanvasBoardActions(droneId).replaceNodeId(oldNodeId, newNodeId, newName);
-    }
-    // Committed before the caller selects the new name: a render that sees the new name
-    // missing from the summary would drop the chat's cached transcript.
-    flushSync(() => setOptimisticChatRenames((current) => {
-      // A chat renamed again before the summary caught up goes straight to its latest name.
-      const renames = Object.fromEntries(
-        Object.entries(current[droneId] ?? {}).map(([from, to]) => [from, to === oldName ? newName : to]),
-      );
-      if (!Object.values(renames).includes(newName)) renames[oldName] = newName;
-      return { ...current, [droneId]: renames };
-    }));
+    // Publish the new name and both boards' positions in one render. Otherwise
+    // placement can recreate the old name while the summary still lists it.
+    flushSync(() => {
+      const oldNodeId = createCanvasChatNodeId(droneId, oldName);
+      const newNodeId = createCanvasChatNodeId(droneId, newName);
+      if (oldNodeId && newNodeId) {
+        getCanvasBoardActions(null).replaceNodeId(oldNodeId, newNodeId, newName);
+        getCanvasBoardActions(droneId).replaceNodeId(oldNodeId, newNodeId, newName);
+      }
+      setOptimisticChatRenames((current) => {
+        // A chat renamed again before the summary caught up goes straight to its latest name.
+        const renames = Object.fromEntries(
+          Object.entries(current[droneId] ?? {}).map(([from, to]) => [from, to === oldName ? newName : to]),
+        );
+        if (!Object.values(renames).includes(newName)) renames[oldName] = newName;
+        return { ...current, [droneId]: renames };
+      });
+    });
   }, []);
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),

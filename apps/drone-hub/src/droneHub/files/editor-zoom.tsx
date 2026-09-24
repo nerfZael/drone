@@ -96,66 +96,65 @@ export function useEditorZoomLevel(): number {
 }
 
 function editorZoomSurfaceForTarget(target: EventTarget | null): Element | null {
-  const element =
-    target instanceof Element
-      ? target
-      : target instanceof Node
-        ? target.parentElement
-        : null;
+  // Detached windows have their own DOM constructors, so instanceof Element
+  // against the main window would reject their editor surfaces.
+  const node = target as Node | null;
+  const element = node?.nodeType === 1 ? (node as Element) : node?.parentElement;
   return element?.closest('[data-editor-zoom-surface]') ?? null;
 }
 
-export function EditorZoomController(): null {
-  React.useEffect(() => {
-    let accumulatedPixelDelta = 0;
+export function registerEditorZoomWindow(window: Window): () => void {
+  let accumulatedPixelDelta = 0;
 
-    const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      event.preventDefault();
-      if (!editorZoomSurfaceForTarget(event.target) || event.deltaY === 0) return;
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    if (!editorZoomSurfaceForTarget(event.target) || event.deltaY === 0) return;
 
-      if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) {
-        accumulatedPixelDelta = 0;
-        adjustEditorZoomLevel(event.deltaY < 0 ? 1 : -1);
-        return;
-      }
-
-      if (
-        accumulatedPixelDelta !== 0 &&
-        Math.sign(accumulatedPixelDelta) !== Math.sign(event.deltaY)
-      ) {
-        accumulatedPixelDelta = 0;
-      }
-      accumulatedPixelDelta += event.deltaY;
-      if (Math.abs(accumulatedPixelDelta) < 40) return;
-      adjustEditorZoomLevel(accumulatedPixelDelta < 0 ? 1 : -1);
+    if (event.deltaMode !== 0) {
       accumulatedPixelDelta = 0;
-    };
+      adjustEditorZoomLevel(event.deltaY < 0 ? 1 : -1);
+      return;
+    }
 
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== EDITOR_ZOOM_STORAGE_KEY) return;
-      const next = clampEditorZoomLevel(Number(event.newValue));
-      if (next === editorZoomLevel) return;
-      editorZoomLevel = next;
-      for (const listener of listeners) listener();
-    };
+    if (
+      accumulatedPixelDelta !== 0 &&
+      Math.sign(accumulatedPixelDelta) !== Math.sign(event.deltaY)
+    ) {
+      accumulatedPixelDelta = 0;
+    }
+    accumulatedPixelDelta += event.deltaY;
+    if (Math.abs(accumulatedPixelDelta) < 40) return;
+    adjustEditorZoomLevel(accumulatedPixelDelta < 0 ? 1 : -1);
+    accumulatedPixelDelta = 0;
+  };
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((!event.ctrlKey && !event.metaKey) || event.key !== '0') return;
-      if (!editorZoomSurfaceForTarget(event.target)) return;
-      event.preventDefault();
-      resetEditorZoomLevel();
-    };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== EDITOR_ZOOM_STORAGE_KEY) return;
+    const next = clampEditorZoomLevel(Number(event.newValue));
+    if (next === editorZoomLevel) return;
+    editorZoomLevel = next;
+    for (const listener of listeners) listener();
+  };
 
-    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    window.addEventListener('keydown', onKeyDown, { capture: true });
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('wheel', onWheel, { capture: true });
-      window.removeEventListener('keydown', onKeyDown, { capture: true });
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
+  const onKeyDown = (event: KeyboardEvent) => {
+    if ((!event.ctrlKey && !event.metaKey) || event.key !== '0') return;
+    if (!editorZoomSurfaceForTarget(event.target)) return;
+    event.preventDefault();
+    resetEditorZoomLevel();
+  };
 
+  window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+  window.addEventListener('keydown', onKeyDown, { capture: true });
+  window.addEventListener('storage', onStorage);
+  return () => {
+    window.removeEventListener('wheel', onWheel, { capture: true });
+    window.removeEventListener('keydown', onKeyDown, { capture: true });
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+export function EditorZoomController(): null {
+  React.useEffect(() => registerEditorZoomWindow(window), []);
   return null;
 }

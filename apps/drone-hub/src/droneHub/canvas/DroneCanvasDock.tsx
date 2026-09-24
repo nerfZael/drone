@@ -667,6 +667,10 @@ export function DroneCanvasDock({
   const nodeWidthByDroneId = React.useMemo(() => {
     const out: Record<string, number> = {};
     for (const node of nodes) {
+      if (node.droneId === inlineRenamingDroneId) {
+        out[node.droneId] = getNodeWidthPx(inlineRenameDraft);
+        continue;
+      }
       if (isCanvasDraftNodeId(node.droneId)) {
         out[node.droneId] = getNodeWidthPx(node.label);
         continue;
@@ -685,7 +689,7 @@ export function DroneCanvasDock({
       out[node.droneId] = getNodeWidthPx(chatRef.chatName);
     }
     return out;
-  }, [droneById, effectiveDroneNameById, nodes]);
+  }, [effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
   const nodeHeightByDroneId = React.useMemo(() => {
     const out: Record<string, number> = {};
     for (const node of nodes) out[node.droneId] = getNodeHeightPx(node.droneId);
@@ -930,11 +934,13 @@ export function DroneCanvasDock({
         const nextChatName = String(result.chatName ?? newName).trim() || newName;
         const nextNodeId = createCanvasChatNodeId(chatRef.droneId, nextChatName);
         if (nextNodeId && nextNodeId !== droneId) {
-          // Applied before the store moves the card, so placement never sees the old name without one.
-          flushSync(() => setRenamedChatNodes((prev) => ({ ...prev, [droneId]: { nodeId: nextNodeId, chatName: nextChatName } })));
-          // The chat may sit on both the global board and its drone's board.
-          getCanvasBoardActions(null).replaceNodeId(droneId, nextNodeId, nextChatName);
-          getCanvasBoardActions(chatRef.droneId).replaceNodeId(droneId, nextNodeId, nextChatName);
+          // Publish membership and positions together so placement cannot create
+          // either name as a new card between the two updates.
+          flushSync(() => {
+            setRenamedChatNodes((prev) => ({ ...prev, [droneId]: { nodeId: nextNodeId, chatName: nextChatName } }));
+            getCanvasBoardActions(null).replaceNodeId(droneId, nextNodeId, nextChatName);
+            getCanvasBoardActions(chatRef.droneId).replaceNodeId(droneId, nextNodeId, nextChatName);
+          });
         } else {
           const node = nodesByDroneId[droneId];
           if (node) upsertNodes([{ droneId, label: nextChatName, x: node.x, y: node.y }]);
@@ -1766,12 +1772,10 @@ export function DroneCanvasDock({
       const shouldFocusViewport = regularTargets.length === 0 && allDraftCreatesSucceeded;
       const interactionActive =
         draggingNodeId || panning || nodeDragRef.current || panDragRef.current || marqueeDragRef.current;
-      if (!interactionActive) {
-        if (shouldFocusViewport) {
-          focusViewport();
-        } else {
-          focusMessageInput();
-        }
+      // Regular sends preserve focus so canvas recording shortcuts remain
+      // available and an asynchronous send cannot pull focus into the input.
+      if (!interactionActive && shouldFocusViewport) {
+        focusViewport();
       }
       return (regularTargets.length === 0 || regularSendSucceeded) && (draftNodeIds.length === 0 || allDraftCreatesSucceeded);
     } catch (err: any) {
@@ -1784,7 +1788,6 @@ export function DroneCanvasDock({
     draftPromptByNodeId,
     draftSpawnCount,
     draggingNodeId,
-    focusMessageInput,
     focusViewport,
     messageSending,
     nodeHeightByDroneId,
@@ -2717,7 +2720,7 @@ export function DroneCanvasDock({
             const canvasDroneLabel = canvasDroneId
               ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
               : '';
-            const primaryLabel = droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label;
+            const primaryLabel = inlineEditing ? inlineRenameDraft : droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label;
             // Ramps in with the counter-scale so nothing jumps at the threshold.
             const labelTextBoost = !droneNode && nodeReadabilityBoost > 1
               ? Math.min(nodeReadabilityBoost, getChatLabelTextBoost(primaryLabel, nodeWidth))
