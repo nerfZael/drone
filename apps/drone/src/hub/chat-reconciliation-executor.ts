@@ -361,7 +361,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       }
       if (jobState === 'queued' || jobState === 'running') {
         const ownsLiveOutput =
-          jobKind !== 'codex' || !job?.codexAppServer || codexPromptOwnsResponse(job, id);
+          job?.claudeStream?.outputOwner !== false &&
+          (jobKind !== 'codex' || !job?.codexAppServer || codexPromptOwnsResponse(job, id));
         const liveState =
           jobState === 'running' && ownsLiveOutput ? parseLiveAgentState(jobKind, job) : {};
         if (
@@ -503,34 +504,37 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           finishedAt,
         });
         const startedAt = terminalStartedAt ?? promptAt;
+        if (
+          job?.claudeStream?.outputOwner === false ||
+          (jobKind === 'codex' && !codexPromptOwnsResponse(job, id))
+        ) {
+          turns.push({
+            at: promptAt,
+            promptAt,
+            startedAt,
+            completedAt: finishedAt,
+            id,
+            prompt: String(p?.prompt ?? ''),
+            ...(pendingModel ? { model: pendingModel } : {}),
+            ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ok: true,
+            output: '',
+            userOnly: true,
+            ...((p as any).deliveryMode === 'asap' ? { deliveryMode: 'asap' } : {}),
+          });
+          transcriptIds.add(id);
+          pendingList[i] = {
+            ...p,
+            state: 'sent',
+            error: undefined,
+            observability: undefined,
+            updatedAt: nowIso(),
+          };
+          changed = true;
+          continue;
+        }
         if (jobKind === 'codex') {
           const parsed = parseCodexJobTranscript(job);
-          if (!codexPromptOwnsResponse(job, id)) {
-            turns.push({
-              at: promptAt,
-              promptAt,
-              startedAt,
-              completedAt: finishedAt,
-              id,
-              prompt: String(p?.prompt ?? ''),
-              ...(pendingModel ? { model: pendingModel } : {}),
-              ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-              ok: true,
-              output: '',
-              userOnly: true,
-              ...((p as any).deliveryMode === 'asap' ? { deliveryMode: 'asap' } : {}),
-            });
-            transcriptIds.add(id);
-            pendingList[i] = {
-              ...p,
-              state: 'sent',
-              error: undefined,
-              observability: undefined,
-              updatedAt: nowIso(),
-            };
-            changed = true;
-            continue;
-          }
           const turnRuntime = await resolveCodexTurnRuntime({
             parsed,
             pendingModel,
@@ -850,7 +854,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             finishedAt,
           });
           const startedAt = terminalStartedAt ?? promptAt;
-          if (output && parsed.terminalStatus === 'completed') {
+          if (output && parsed.terminalStatus === 'completed' && !job.claudeStream) {
             const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
             const turnReasoning = normalizeChatReasoning(parsed.reasoning);
             turns.push({

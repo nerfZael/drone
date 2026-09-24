@@ -267,6 +267,115 @@ describeRuntimeSuite('prompt daemon transcripts', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
+  test('Claude ASAP reaches the running stream, survives daemon restart, and keeps Queue separate', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `claude-stream-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(dataDir, 'fake-claude.cjs');
+    const receivedPath = path.join(dataDir, 'received.jsonl');
+    const releasePath = path.join(dataDir, 'release');
+    fs.writeFileSync(scriptPath, `
+const fs = require('node:fs');
+const lines = require('node:readline').createInterface({ input: process.stdin });
+const emit = (event) => console.log(JSON.stringify(event));
+let received = [];
+emit({ type: 'system', subtype: 'init', session_id: 'claude-test-session' });
+lines.on('line', (line) => {
+  const event = JSON.parse(line);
+  received.push(event.message.content);
+  fs.appendFileSync(${JSON.stringify(receivedPath)}, JSON.stringify({ pid: process.pid, prompt: event.message.content }) + '\\n');
+  emit(event);
+  if (event.message.content === 'queued') {
+    emit({ type: 'result', subtype: 'success', result: 'Queued reply', session_id: 'claude-test-session' });
+  }
+});
+const timer = setInterval(() => {
+  if (received.includes('second ASAP') && fs.existsSync(${JSON.stringify(releasePath)})) {
+    clearInterval(timer);
+    emit({ type: 'result', subtype: 'success', result: received.join(' | '), session_id: 'claude-test-session' });
+  }
+}, 20);
+lines.on('close', () => { clearInterval(timer); });
+`);
+    const token = 'claude-stream-token';
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const startDaemon = async () => {
+      const daemon = Bun.spawn([
+        process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port),
+        '--data-dir', dataDir, '--token', token,
+      ], { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' });
+      processes.push(daemon);
+      await waitForHealth(baseUrl, token, daemon);
+      return daemon;
+    };
+    const enqueue = async (id: string, prompt: string, deliveryMode: 'queue' | 'asap', sessionKey = 'chat-one') => {
+      const response = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          id, kind: 'claude', cmd: 'node', args: [scriptPath], deliveryMode,
+          claudeStream: { sessionKey, compatibilityKey: 'same-model-and-cwd', prompt },
+        }),
+      });
+      expect(response.ok).toBe(true);
+    };
+    let daemon = await startDaemon();
+    const initial = `claude-initial-${port}`;
+    const first = `claude-asap-one-${port}`;
+    const second = `claude-asap-two-${port}`;
+    const queued = `claude-queued-${port}`;
+    const other = `claude-other-chat-${port}`;
+    await enqueue(initial, 'initial', 'queue');
+    await waitForRunningPromptJob(baseUrl, token, initial, (job) => String(job.stdout).includes('initial'));
+    await enqueue(queued, 'queued', 'queue');
+    await enqueue(other, 'queued', 'asap', 'other-chat');
+    await enqueue(first, 'first ASAP', 'asap');
+    const steered = await waitForRunningPromptJob(baseUrl, token, first, (job) => String(job.stdout).includes('first ASAP'));
+    expect(steered.claudeStream).toMatchObject({ runId: initial, outputOwner: true });
+    const readJob = async (id: string) => (await (await fetch(`${baseUrl}/v1/prompts/${id}`, { headers })).json() as any).job;
+    expect((await readJob(initial)).claudeStream.outputOwner).toBe(false);
+    expect((await readJob(queued)).state).toBe('queued');
+    expect((await readJob(other)).state).toBe('queued');
+
+    daemon.kill();
+    await daemon.exited;
+    // Model a crash between durable stdin acceptance and daemon job linkage.
+    const firstJobPath = path.join(dataDir, 'prompts', 'jobs', `${first}.json`);
+    const unlinked = JSON.parse(fs.readFileSync(firstJobPath, 'utf8'));
+    unlinked.state = 'queued';
+    delete unlinked.claudeStream.runId;
+    fs.writeFileSync(firstJobPath, JSON.stringify(unlinked));
+    daemon = await startDaemon();
+    await enqueue(first, 'first ASAP', 'asap'); // HTTP retry must not replay stdin.
+    await enqueue(second, 'second ASAP', 'asap');
+    const restarted = await waitForRunningPromptJob(baseUrl, token, second, (job) => String(job.stdout).includes('second ASAP'));
+    expect(restarted.claudeStream).toMatchObject({ runId: initial, outputOwner: true });
+    fs.writeFileSync(releasePath, 'go');
+    const result = await waitForPromptJob(baseUrl, token, second);
+    expect(result.transcript.message).toBe('initial | first ASAP | second ASAP');
+    expect((await waitForPromptJob(baseUrl, token, initial)).claudeStream.outputOwner).toBe(false);
+    expect((await waitForPromptJob(baseUrl, token, first)).claudeStream.outputOwner).toBe(false);
+    await waitForPromptJob(baseUrl, token, queued);
+    await waitForPromptJob(baseUrl, token, other);
+    const received = fs.readFileSync(receivedPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(received.map((item) => item.prompt)).toEqual(['initial', 'first ASAP', 'second ASAP', 'queued', 'queued']);
+    expect(new Set(received.slice(0, 3).map((item) => item.pid)).size).toBe(1);
+    expect(new Set(received.map((item) => item.pid)).size).toBe(3);
+
+    // Stopping any member stops the shared run and settles every member.
+    fs.unlinkSync(releasePath);
+    const cancelInitial = `claude-cancel-initial-${port}`;
+    const cancelFollowUp = `claude-cancel-followup-${port}`;
+    await enqueue(cancelInitial, 'initial', 'queue');
+    await waitForRunningPromptJob(baseUrl, token, cancelInitial, (job) => String(job.stdout).includes('initial'));
+    await enqueue(cancelFollowUp, 'first ASAP', 'asap');
+    await waitForRunningPromptJob(baseUrl, token, cancelFollowUp, (job) => String(job.stdout).includes('first ASAP'));
+    const cancelResponse = await fetch(`${baseUrl}/v1/prompts/${cancelFollowUp}/cancel`, { method: 'POST', headers });
+    expect(cancelResponse.ok).toBe(true);
+    expect((await readJob(cancelInitial)).state).toBe('canceled');
+    expect((await readJob(cancelFollowUp)).state).toBe('canceled');
+  }, 30_000);
+
   test('persists the final Codex transcript message when stored stdout is truncated', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-${port}`);

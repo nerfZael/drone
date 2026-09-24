@@ -453,6 +453,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     kind: string;
     script: string;
     prompt?: string;
+    claudeStream?: import('../claude-prompt-stream').ClaudePromptStream;
     deliveryMode?: 'queue' | 'asap';
     signal?: AbortSignal;
     timing?: PromptDeliveryTiming;
@@ -521,6 +522,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               cmd: 'bash',
               args: ['-lc', opts.script],
               ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+              ...(opts.claudeStream ? { claudeStream: opts.claudeStream } : {}),
               ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
             },
             { signal: opts.signal },
@@ -540,6 +542,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             cmd: 'bash',
             args: ['-lc', opts.script],
             ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+            ...(opts.claudeStream ? { claudeStream: opts.claudeStream } : {}),
             ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
           },
           { signal: opts.signal },
@@ -1087,7 +1090,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...(forkMessageId
             ? [`node -e ${bashQuote(claudeCheckpointValidationScript(forkSessionId, forkMessageId))}`]
             : []),
-          `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+          // Older daemons retain one-shot delivery until upgraded. The stream
+          // wrapper sets this flag only when it owns Claude's stdin.
+          'if [ "${DRONE_CLAUDE_STREAM:-}" = "1" ]; then',
+          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${sessionArg}`,
+          'else',
+          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+          'fi',
         ].join('\n');
         await enqueueTranscriptPrompt({
           usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
@@ -1097,6 +1106,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'claude',
           script,
           prompt: effectivePrompt,
+          claudeStream: {
+            sessionKey: `claude:${droneId}:${String(chat.id)}`,
+            compatibilityKey: JSON.stringify([cwd, chatModel ?? null]),
+            prompt: promptWithHistory,
+          },
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
           timing: opts.timing,
@@ -2463,11 +2477,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
 
       const prior = pendingList.slice(0, queuedIndex);
-      // Native agents and Codex can accept ASAP input during an active response.
+      // Native agents, Codex, and streaming Claude accept input during a response.
       // Other agents retain their normal safe delivery point.
       const asapCanSteer =
         p?.deliveryMode === 'asap' &&
-        (agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex'));
+        (agent.kind === 'native' ||
+          (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'claude')));
       const defer =
         !asapCanSteer &&
         hasBlockingPendingPrompt(prior, turns, p?.deliveryMode === 'asap' ? 'asap' : 'queue');

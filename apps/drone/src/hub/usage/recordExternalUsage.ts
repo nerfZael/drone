@@ -24,7 +24,9 @@ export function recordExternalUsage(input: { job: any; droneId: string; chatId: 
   });
   const delivery: UsageDelivery = { execution: { id: job.codexAppServer?.runId
       ? `external:${input.droneId}:${job.codexAppServer.runId}`
-      : `external:${input.droneId}:${job.id}:${job.startedAt ?? job.createdAt}`,
+      : job.claudeStream?.runId
+        ? `external:${input.droneId}:${job.claudeStream.runId}`
+        : `external:${input.droneId}:${job.id}:${job.startedAt ?? job.createdAt}`,
     chatId: input.chatId, droneId: input.droneId, chatName: input.chatName, repo: input.repo,
     agent: job.kind, startedAt: run?.startedAt ?? job.startedAt ?? job.createdAt, status: state,
     snapshotAt: run?.updatedAt ?? job.updatedAt ?? transcript?.parsedAt,

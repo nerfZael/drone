@@ -32,6 +32,13 @@ import { handleDaemonManagedStateRequest } from './daemon-managed-state';
 import { DRONE_DAEMON_CAPABILITIES } from './daemon-capabilities';
 import { selectNextPromptJobId } from './prompt-job-scheduling';
 import {
+  claudeStreamPaths,
+  claudeStreamRunnerScript,
+  readClaudeStreamState,
+  steerClaudeStream,
+  type ClaudePromptStream,
+} from './claude-prompt-stream';
+import {
   CodexPromptRunManager,
   codexPromptRunSummary,
   type CodexPromptEnqueueDisposition,
@@ -98,6 +105,7 @@ type PromptJob = {
   state: PromptJobState;
   deliveryMode?: 'queue' | 'asap';
   session: string;
+  claudeStream?: ClaudePromptStream;
   stdoutPath: string;
   stderrPath: string;
   exitPath: string;
@@ -486,6 +494,15 @@ async function startPromptJob(job: PromptJob): Promise<void> {
   // Run inside tmux so work continues even if this daemon process restarts.
   const quotedCmd = bashQuote(job.cmd);
   const quotedArgs = (job.args ?? []).map((a) => bashQuote(a)).join(' ');
+  let command = `${quotedCmd} ${quotedArgs}`;
+  if (job.claudeStream) {
+    const runnerPath = path.join(path.dirname(job.stdoutPath), `${job.id}.claude-stream.cjs`);
+    await fs.writeFile(runnerPath, claudeStreamRunnerScript({
+      cmd: job.cmd, args: job.args, id: job.id, prompt: job.claudeStream.prompt,
+      ...claudeStreamPaths(job.stdoutPath),
+    }), { mode: 0o600 });
+    command = `node ${bashQuote(runnerPath)}`;
+  }
   const quotedStdoutPath = bashQuote(job.stdoutPath);
   const quotedStderrPath = bashQuote(job.stderrPath);
   const quotedExitPath = bashQuote(job.exitPath);
@@ -570,7 +587,7 @@ async function startPromptJob(job: PromptJob): Promise<void> {
     cd.trimEnd(),
     envLines.trimEnd(),
     // Run and capture exit code.
-    `${quotedCmd} ${quotedArgs} > ${quotedStdoutPath} 2> ${quotedStderrPath}`,
+    `${command} > ${quotedStdoutPath} 2> ${quotedStderrPath}`,
     'code=$?',
     'stop_heartbeat',
     'printf \'%s\\n\' "prompt wrapper: command exited at $(date -Is) with code $code" >> "$wrapper_path" 2>/dev/null || true',
@@ -887,7 +904,7 @@ async function finalizePromptJob(
   }
 
   const terminalStatus =
-    exitCode == null && opts?.allowTerminalSuccess
+    exitCode == null && opts?.allowTerminalSuccess && !job.claudeStream
       ? ((await promptTranscriptTerminalStatus(job)) ?? job.terminalObservedStatus ?? null)
       : null;
   const ok = exitCode === 0 || (exitCode == null && terminalStatus === 'success');
@@ -1158,7 +1175,9 @@ async function advanceRunningPromptJob(job: PromptJob): Promise<PromptJob> {
 
   const now = nowIso();
   const nowMs = Date.parse(now);
-  const terminalStatus = await promptTranscriptTerminalStatus(job);
+  // A streaming Claude run can emit a result while another input is pending.
+  // Its wrapper exit, not an intermediate result, owns completion.
+  const terminalStatus = job.claudeStream ? null : await promptTranscriptTerminalStatus(job);
   const terminalObservedStatus = terminalStatus ?? job.terminalObservedStatus;
   const terminalObservedAt = terminalStatus
     ? terminalStatus === job.terminalObservedStatus
@@ -1669,6 +1688,35 @@ async function main() {
       }
     }
 
+    // Durable receipts make steering idempotent even if the daemon restarts
+    // after stdin delivery but before persisting the follow-up's run linkage.
+    for (const pending of jobById.values()) {
+      if (pending.state !== 'queued' || pending.deliveryMode !== 'asap' || !pending.claudeStream) continue;
+      for (const active of jobById.values()) {
+        if (!active.claudeStream?.runId || active.claudeStream.runId !== active.id ||
+            active.claudeStream.sessionKey !== pending.claudeStream.sessionKey ||
+            active.claudeStream.compatibilityKey !== pending.claudeStream.compatibilityKey ||
+            (active.finishedAt && active.finishedAt < pending.createdAt)) continue;
+        const accepted = (await readClaudeStreamState(active.stdoutPath))?.messageIds.includes(pending.id) ||
+          (active.state === 'running' && await steerClaudeStream(active.stdoutPath, pending.id, pending.claudeStream.prompt));
+        if (!accepted) continue;
+        const linked: PromptJob = {
+          ...pending,
+          state: active.state,
+          startedAt: active.startedAt,
+          updatedAt: nowIso(),
+          session: active.session,
+          stdoutPath: active.stdoutPath, stderrPath: active.stderrPath, exitPath: active.exitPath,
+          wrapperPath: active.wrapperPath, wrapperStatePath: active.wrapperStatePath, heartbeatPath: active.heartbeatPath,
+          ...(active.finishedAt ? { finishedAt: active.finishedAt, exitCode: active.exitCode, error: active.error } : {}),
+          claudeStream: { ...pending.claudeStream, runId: active.id },
+        };
+        await savePromptJob(promptsDir, linked);
+        jobById.set(pending.id, linked);
+        break;
+      }
+    }
+
     // Start next queued if none running.
     const anyRunning = Array.from(jobById.values()).some(
       (job) => job.state === 'running' && !job.codexAppServer,
@@ -1681,7 +1729,10 @@ async function main() {
     const job = await loadPromptJob(promptsDir, startId);
     if (!job) return;
     const startedAt = nowIso();
-    const running: PromptJob = { ...job, state: 'running', startedAt, updatedAt: startedAt };
+    const running: PromptJob = {
+      ...job, state: 'running', startedAt, updatedAt: startedAt,
+      ...(job.claudeStream ? { claudeStream: { ...job.claudeStream, runId: job.id } } : {}),
+    };
     await savePromptJob(promptsDir, running);
     await startPromptJob(running);
   }
@@ -1907,6 +1958,15 @@ async function main() {
           : [];
         const cwd = typeof body?.cwd === 'string' && body.cwd.trim() ? body.cwd.trim() : undefined;
         const kind = String(body?.kind ?? 'shell').trim() || 'shell';
+        const claudeStream: ClaudePromptStream | undefined = kind === 'claude' &&
+          typeof body?.claudeStream?.sessionKey === 'string' && body.claudeStream.sessionKey.trim() &&
+          typeof body?.claudeStream?.compatibilityKey === 'string' &&
+          typeof body?.claudeStream?.prompt === 'string' && body.claudeStream.prompt.trim()
+          ? {
+              sessionKey: body.claudeStream.sessionKey,
+              compatibilityKey: body.claudeStream.compatibilityKey,
+              prompt: body.claudeStream.prompt,
+            } : undefined;
         const deliveryMode = body?.deliveryMode === 'asap' ? 'asap' : 'queue';
         const env =
           body?.env && typeof body.env === 'object' && !Array.isArray(body.env)
@@ -1942,6 +2002,7 @@ async function main() {
           wrapperPath,
           wrapperStatePath,
           heartbeatPath,
+          ...(claudeStream ? { claudeStream } : {}),
         };
         const existing = await withPromptMutationLock(async () => {
           const current = await loadPromptJob(promptsDir, id);
@@ -2086,6 +2147,13 @@ async function main() {
           json(res, 404, { error: 'not found' });
           return;
         }
+        if (job.claudeStream) {
+          const streamState = await readClaudeStreamState(job.stdoutPath);
+          job.claudeStream = {
+            ...job.claudeStream,
+            outputOwner: !streamState || streamState.responseMessageId === job.id,
+          };
+        }
         json(res, 200, { ok: true, job });
         return;
       }
@@ -2141,6 +2209,19 @@ async function main() {
           if (!latest) return null;
           const canceled = await cancelPromptJob(latest);
           await savePromptJob(promptsDir, canceled);
+          if (canceled.state === 'canceled' && latest.claudeStream?.runId) {
+            const index = await loadPromptIndex(promptsDir);
+            for (const peerId of index.order ?? []) {
+              if (peerId === id) continue;
+              const peer = await loadPromptJob(promptsDir, peerId);
+              if (peer?.state === 'running' && peer.claudeStream?.runId === latest.claudeStream.runId) {
+                await savePromptJob(promptsDir, {
+                  ...peer, state: 'canceled', finishedAt: canceled.finishedAt, updatedAt: canceled.updatedAt,
+                  error: canceled.error,
+                });
+              }
+            }
+          }
           return canceled;
         });
         if (!next) {

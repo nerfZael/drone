@@ -12,6 +12,23 @@ const observation = { id: 'request', input: 10, output: 5, cacheRead: 4, cacheWr
   model: 'test', provider: 'test', scope: 'request' as const, complete: true, raw: {} };
 const future = () => new Date(Date.now() + 1000).toISOString();
 
+test('Claude ASAP messages share one usage execution', () => {
+  const store = new UsageStore(':memory:');
+  const journal = new UsageJournal(':memory:');
+  try {
+    const input = { droneId: 'drone', chatId: 'chat', chatName: 'default' };
+    const job = { id: 'first', kind: 'claude', state: 'running', startedAt: store.trackingSince,
+      claudeStream: { runId: 'shared-claude-run' }, transcript: { usage: [observation] } };
+    recordExternalUsage({ ...input, job }, journal, store);
+    recordExternalUsage({ ...input, job: { ...job, id: 'follow-up', state: 'done' } }, journal, store);
+    recordExternalUsage({ ...input, job: { ...job, state: 'done' } }, journal, store);
+    expect(store.analytics().totals.executions).toBe(1);
+    expect(store.analytics().totals.total).toBe(20);
+    expect(store.analytics().totals.running).toBe(0);
+    expect(journal.due(Number.MAX_SAFE_INTEGER)).toHaveLength(0);
+  } finally { journal.close(); store.close(); }
+});
+
 test('steered Codex prompts share one usage execution despite different message start times', () => {
   const store = new UsageStore(':memory:');
   const journal = new UsageJournal(':memory:');

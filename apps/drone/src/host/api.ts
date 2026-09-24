@@ -433,6 +433,7 @@ export async function promptEnqueue(
     cwd?: string;
     env?: Record<string, string>;
     prompt?: string;
+    claudeStream?: import('../claude-prompt-stream').ClaudePromptStream;
     deliveryMode?: 'queue' | 'asap';
   },
   options?: { signal?: AbortSignal },
