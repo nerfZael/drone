@@ -146,16 +146,3 @@ test('mesh timing batches follow session ownership and are not forwarded after r
   expect(h.sockets[1].messages).toHaveLength(1);
   h.live.close();
 });
-
-
-test('access revocation or shutdown during voice-mode lookup cannot start audio', async () => {
-  const h = harness();
-  const pending = h.live.invoke('phone', 'live.start', { sessionId: 'pending' });
-  h.live.revokeDevice('phone');
-  expect(await pending).toEqual({ accepted: false });
-  expect(h.sockets).toHaveLength(0);
-  const closing = h.live.invoke('phone', 'live.start', { sessionId: 'closing' });
-  h.live.close();
-  await expect(closing).rejects.toThrow('shutting down');
-  expect(h.sockets).toHaveLength(0);
-});

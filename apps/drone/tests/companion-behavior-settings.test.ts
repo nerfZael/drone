@@ -3,7 +3,7 @@ import { isGranted } from '@drone/device-protocol';
 import { companionBehaviorSettings } from '../src/hub/device-mesh/companion-behavior-settings';
 import { readCompanionSettings } from '../src/hub/companion/companion-config';
 import { CompanionLiveMeshSessions } from '../src/hub/device-mesh/CompanionLiveMeshSessions';
-import { writeCompanionLiveSettings } from '../src/hub/companion/companion-live-settings';
+import { getHubSettingsRepository } from '../src/host/hub-settings-repository';
 import { withTempDroneDataDir } from './test-helpers';
 
 test('behavior settings patch only edited fields; instructions reject stale revisions', async () => {
@@ -30,13 +30,12 @@ test('running Companion and editing models do not grant behavior or instructions
   }
 });
 
-test('mobile exposes a legacy JEV preference, rejects its startup, and explicitly selects Live or Normal', async () => {
+test('mobile reads a retired JEV preference as Live and explicitly selects Live or Normal', async () => {
   await withTempDroneDataDir('mobile-voice-modes-', async () => {
     const live = new CompanionLiveMeshSessions({ emit: async () => {} });
     try {
-      await writeCompanionLiveSettings({ enabled: true, mode: 'jev' });
-      expect(await live.invoke('phone', 'live.settings.get', {})).toEqual({ enabled: true, mode: 'jev' });
-      await expect(live.invoke('phone', 'live.start', { sessionId: 'session' })).rejects.toThrow('does not support');
+      await (await getHubSettingsRepository()).put('companion-live-voice', { enabled: true, mode: 'jev' });
+      expect(await live.invoke('phone', 'live.settings.get', {})).toEqual({ enabled: true, mode: 'live' });
       expect(await live.invoke('phone', 'live.settings.update', { enabled: true, mode: 'live' })).toEqual({ enabled: true, mode: 'live' });
       expect(await live.invoke('phone', 'live.settings.update', { enabled: false, mode: 'live' })).toEqual({ enabled: false, mode: 'live' });
       await expect(live.invoke('phone', 'live.settings.update', { enabled: true, mode: 'jev' })).rejects.toThrow('Normal and Live');

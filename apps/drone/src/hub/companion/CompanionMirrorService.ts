@@ -51,7 +51,7 @@ export class CompanionMirrorService {
     return () => this.listeners.delete(listener);
   }
 
-  async liveSettingsChanged(settings: { enabled: boolean; mode: 'live' | 'jev' }): Promise<void> {
+  async liveSettingsChanged(settings: { enabled: boolean; mode: 'live' }): Promise<void> {
     const preference = { enabled: settings.enabled, mode: settings.mode };
     for (const listener of this.listeners) listener({ type: 'mirror_live_settings', ...preference });
     await this.emit('live.settings.changed', preference, 'live.settings.get');

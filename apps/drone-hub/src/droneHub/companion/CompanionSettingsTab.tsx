@@ -1,4 +1,3 @@
-import { AiGatewayKeySettings } from '../app/AiGatewayKeySettings';
 import React from 'react';
 import { CompanionShortcutSettings } from './CompanionShortcutSettings';
 import { UiMenuSelect, UiSegmentedControl } from '../../ui/components';
@@ -23,12 +22,6 @@ export function CompanionSettingsTab({ settings, speech }: {
   const companion = useCompanion();
   const live = companion?.live;
   const [livePromptDraft, setLivePromptDraft] = React.useState('');
-  const [jevIntervalDraft, setJevIntervalDraft] = React.useState('250');
-  React.useEffect(() => { setJevIntervalDraft(String(live?.jevDecisionIntervalMs ?? 250)); }, [live?.jevDecisionIntervalMs]);
-  const jevInterval = Number(jevIntervalDraft);
-  const validJevInterval = Number.isInteger(jevInterval) && jevInterval >= 50 && jevInterval <= 10000;
-  const [jevPromptDraft, setJevPromptDraft] = React.useState('');
-  React.useEffect(() => { setJevPromptDraft(live?.jevSystemPrompt ?? ''); }, [live?.jevSystemPrompt]);
   const [livePromptSaved, setLivePromptSaved] = React.useState(false);
   const { data, draft, setDraft, loading, saving, error, saved, dirty, save } = settings;
   React.useEffect(() => {
@@ -87,51 +80,14 @@ export function CompanionSettingsTab({ settings, speech }: {
       <CompanionShortcutSettings />
       <CompanionMirrorSettings />
       {live ? <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
-        <UiSegmentedControl label="Companion voice mode" value={!live.enabled ? 'normal' : live.mode ?? 'live'}
-          options={[{ value: 'normal', label: 'Normal' }, { value: 'live', label: 'Live voice' }, { value: 'jev', label: 'Jev voice' }]}
+        <UiSegmentedControl label="Companion voice mode" value={live.enabled ? 'live' : 'normal'}
+          options={[{ value: 'normal', label: 'Normal' }, { value: 'live', label: 'Live voice' }]}
           disabled={live.loading || live.saving || live.status !== 'idle' || ['starting', 'recording', 'transcribing'].includes(companion.status)}
-          onValueChange={(mode) => void live.saveVoiceMode(mode as 'normal' | 'live' | 'jev')} />
+          onValueChange={(mode) => void live.saveVoiceMode(mode as 'normal' | 'live')} />
         <p className="mt-2 text-xs text-[var(--muted)]">
           Normal records until you send. Live voice uses GPT-Live for conversation and delegation.
-          Jev voice streams transcription while you speak and decides when to send new text to the selected backend. All speech remains in the transcript.
-          Jev requires an OpenAI key for live transcription and an AI Gateway key for decisions. Backend replies appear in Companion.
           Stop voice before switching modes; start the microphone to begin.
         </p>
-        <div className="mt-4 space-y-3">
-          <AiGatewayKeySettings />
-          <label className="block text-xs font-semibold">Jev decision interval (milliseconds)
-            <input type="number" min={50} max={10000} step={50} aria-label="Jev decision interval (milliseconds)"
-              value={jevIntervalDraft} onChange={event => setJevIntervalDraft(event.target.value)} disabled={live.saving}
-              className="mt-2 block w-40 rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-xs" />
-          </label>
-          <p className="text-xs text-[var(--muted)]">Minimum time between decisions while unsent speech remains, including during silence. Lower values respond sooner and can make more requests. Default: 250 ms. Saving applies to the active session; no silence is required.</p>
-          {!validJevInterval ? <p role="alert" className="text-xs text-[var(--red)]">Enter a whole number from 50 to 10000 milliseconds.</p> : null}
-          <button type="button" disabled={live.saving || !validJevInterval || jevInterval === live.jevDecisionIntervalMs}
-            onClick={() => void live.saveJevDecisionInterval(jevInterval)} className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs disabled:opacity-40">Save decision interval</button>
-          <label className="block text-xs font-semibold">Jev delegation instructions
-            <textarea aria-label="Jev delegation instructions" value={jevPromptDraft} maxLength={8000}
-              onChange={event => setJevPromptDraft(event.target.value)} disabled={live.saving}
-              className="mt-2 min-h-36 w-full rounded border border-[var(--border)] bg-[var(--panel)] p-3 text-xs" />
-          </label>
-          <p className="text-xs text-[var(--muted)]">Controls the next decision, including during an active session. Each decision sees all unsent speech, recent earlier delegations, and timing.silenceMs: milliseconds since the last transcript change. For example: wait 1000 ms normally, or 5000 ms for sensitive topics. This estimates silence from transcript arrivals, not microphone activity.</p>
-          <button type="button" onClick={() => setJevPromptDraft(live.defaultJevSystemPrompt)} className="mr-3 text-xs underline">Restore default Jev instructions</button>
-          <button type="button" disabled={live.saving || !jevPromptDraft.trim() || jevPromptDraft === live.jevSystemPrompt}
-            onClick={() => void live.saveJevSystemPrompt(jevPromptDraft)} className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs disabled:opacity-40">Save Jev instructions</button>
-          <fieldset className="space-y-2 rounded border border-[var(--border)] p-3">
-            <legend className="px-1 text-xs font-semibold">Reflex agent autonomy</legend>
-            {([['off', 'Off', 'Speech-only reflexes: decide only whether to send, hold, skip, or cancel what you said. This is the previous behaviour.'],
-              ['observe', 'Observe', 'Also watch the backend, the app, events, and time, and run the autonomous rules, but only record what they would do. Review it in the Agent tab.'],
-              ['act', 'Act', 'Execute autonomous actions: nudge a stalled backend and show notes when work drifts. Switch back to Off at any time.']] as const).map(([value, label, description]) =>
-              <label key={value} className="flex items-start gap-2 text-xs">
-                <input type="radio" name="companion-autonomy" value={value} checked={live.autonomy === value} disabled={live.saving} onChange={() => void live.saveAutonomy(value)} aria-label={`Autonomy ${label}`} className="mt-0.5" />
-                <span><strong>{label}.</strong> {description}</span>
-              </label>)}
-            <label className="flex items-start gap-2 text-xs">
-              <input type="checkbox" checked={live.brain} disabled={live.saving} onChange={event => void live.saveBrain(event.target.checked)} aria-label="Let the brain rewrite the reflex table" className="mt-0.5" />
-              <span><strong>Brain.</strong> Let the Companion helper model rewrite the reflex table when decisions stay uncertain or a cancel fires. Revisions live only in the open Companion; Reset to default in the Agent tab discards them.</span>
-            </label>
-          </fieldset>
-        </div>
         {live.settingsError ? <p role="alert" className="mt-2 text-xs text-[var(--red)]">
           {live.settingsError} <button type="button" className="underline" onClick={() => void live.load()}>Retry</button>
         </p> : null}

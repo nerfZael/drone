@@ -1,22 +1,15 @@
 import React from 'react';
-import type { CompanionAutonomy } from '@drone/assistant-chat';
 import { observeRequest } from '../request-diagnostics';
 import { useCompanionMirror } from './CompanionMirrorContext';
 
 type LiveSettings = {
   enabled: boolean;
-  mode?: 'live' | 'jev';
-  jevSystemPrompt?: string;
-  jevDecisionIntervalMs?: number;
-  autonomy?: CompanionAutonomy;
-  brain?: boolean;
-  defaultJevSystemPrompt?: string;
   systemPrompt: string;
   defaultSystemPrompt: string;
   maxSystemPromptChars: number;
 };
 
-type LiveSettingsUpdate = Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt' | 'mode' | 'jevSystemPrompt' | 'jevDecisionIntervalMs' | 'autonomy' | 'brain'>>;
+type LiveSettingsUpdate = Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt'>>;
 type Snapshot = Required<LiveSettings> & {
   loading: boolean;
   resolved: boolean;
@@ -27,9 +20,8 @@ type Snapshot = Required<LiveSettings> & {
 /** Voice preferences are shared by all desktop sessions; microphone state is not. */
 export class CompanionLiveSettingsStore {
   private snapshot: Snapshot = {
-    enabled: false, mode: 'live', jevDecisionIntervalMs: 250, autonomy: 'off', brain: false,
-    systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 0,
-    jevSystemPrompt: '', defaultJevSystemPrompt: '', loading: true, resolved: false, saving: false, settingsError: '',
+    enabled: false, systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 0,
+    loading: true, resolved: false, saving: false, settingsError: '',
   };
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -48,10 +40,8 @@ export class CompanionLiveSettingsStore {
   }
   private accept(value: LiveSettings) {
     this.update({
-      enabled: value.enabled, mode: value.mode ?? 'live',
+      enabled: value.enabled,
       systemPrompt: value.systemPrompt, defaultSystemPrompt: value.defaultSystemPrompt, maxSystemPromptChars: value.maxSystemPromptChars,
-      jevSystemPrompt: value.jevSystemPrompt ?? '', defaultJevSystemPrompt: value.defaultJevSystemPrompt ?? '',
-      jevDecisionIntervalMs: value.jevDecisionIntervalMs ?? 250, autonomy: value.autonomy ?? 'off', brain: value.brain === true,
       resolved: true, loading: false, settingsError: '',
     });
   }

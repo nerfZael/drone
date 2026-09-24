@@ -68,9 +68,7 @@ with browser autoplay blocked, and with **End voice** pressed during connection.
 
 Mobile Companion settings offer **Normal** (record until sent) and **Live** voice,
 using the same host preference as desktop. Mode changes update both interfaces.
-JEV is not implemented on mobile: if the host has that legacy mode selected, mobile
-shows an explanation and requires an explicit choice of Normal or Live. End an
-active phone voice session before changing modes.
+End an active phone voice session before changing modes.
 
 The selected Hub also exposes **Shared Companion behavior** on mobile: ASAP/Queue
 follow-up delivery, the delegated backend system prompt, enabled tools, and persistent

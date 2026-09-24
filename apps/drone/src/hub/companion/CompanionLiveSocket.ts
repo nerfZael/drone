@@ -1,4 +1,3 @@
-import { CompanionTranscriptionSocket } from './CompanionTranscriptionSocket';
 import type { CompanionLiveTelemetry, HubLiveTiming } from './companion-live-telemetry';
 import { WebSocket } from 'ws';
 import { CompanionPcmLiveSocket } from './CompanionPcmLiveSocket';
@@ -6,20 +5,19 @@ import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 import { readCompanionSettings } from './companion-config';
 import { companionLiveSessionInstructions, readCompanionLiveSettings } from './companion-live-settings';
 
-type LiveMessage = { timingSessionId?: unknown; timingEvents?: unknown; transport?: unknown; mode?: unknown; type?: string; sdp?: unknown; event?: unknown };
+type LiveMessage = { timingSessionId?: unknown; timingEvents?: unknown; transport?: unknown; type?: string; sdp?: unknown; event?: unknown };
 type Dependencies = {
   telemetry?: CompanionLiveTelemetry;
   fetch: typeof fetch;
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
-  enabled(): Promise<{ enabled: boolean; mode?: 'live' | 'jev'; systemPrompt?: string }>;
+  enabled(): Promise<{ enabled: boolean; systemPrompt?: string }>;
   backend(): Promise<{ model: string; provider: string }>;
 };
 
 /** One authenticated browser socket owns one Live session and its cleanup sideband. */
 export class CompanionLiveSocket {
   private timing?: HubLiveTiming;
-  private transcription?: CompanionTranscriptionSocket;
   private pcm: CompanionPcmLiveSocket | undefined;
   private upstream: WebSocket | null = null;
   private starting = false;
@@ -46,13 +44,6 @@ export class CompanionLiveSocket {
   }
 
   handle(message: LiveMessage): void {
-    if (this.transcription) { this.transcription.handle(message); return; }
-    if (message.type === 'live_start' && message.mode === 'jev' && !this.starting && !this.closed) {
-      this.starting = true;
-      this.transcription = new CompanionTranscriptionSocket(this.send);
-      this.transcription.handle(message);
-      return;
-    }
     if (message.type === 'live_start' && !this.starting && !this.closed) {
       this.timing = this.deps.telemetry?.begin(message.timingSessionId);
       this.timing?.mark('hub_start_received');
@@ -91,7 +82,6 @@ export class CompanionLiveSocket {
   }
 
   close(): void {
-    this.transcription?.close();
     this.pcm?.close();
     if (this.closed) return;
     this.closed = true;
@@ -133,7 +123,6 @@ export class CompanionLiveSocket {
     ]);
     if (this.closed) return;
     if (!setting.enabled) throw new Error('Enable Live voice before starting a conversation.');
-    if (setting.mode === 'jev') throw new Error('Jev voice uses desktop continuous transcription. Select Live voice to use this connection.');
     if (!credential.apiKey) throw new Error('Configure an OpenAI API key in Settings to use Live voice. Your Companion backend model can use a different provider.');
     const response = await this.deps.fetch('https://api.openai.com/v1/live/sessions', {
       method: 'POST',

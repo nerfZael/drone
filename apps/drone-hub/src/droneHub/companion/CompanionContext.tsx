@@ -3,7 +3,7 @@ import type { CompanionImageAttachment } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { setCompanionClipboard } from './companion-clipboard';
 import { isCompanionPreviewable } from './companion-attachment-files';
-import { CompanionScreen, type CompanionSenseSources } from '@drone/assistant-chat';
+import { CompanionScreen } from '@drone/assistant-chat';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { companionSessionStore, COMPANION_SLOTS, readCompanionSlots, writeCompanionSlots } from './companion-session-store';
 import { companionSessionShortcut } from './companion-session-shortcut';
@@ -309,7 +309,7 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
     shortcutPress.cancel();
     setShortcutHint(null);
     setPanelVisibility('closed');
-    if (live.mode === 'jev') live.stop(); else live.reset();
+    live.reset();
     voiceSubmissionGenerationRef.current += 1;
     setPendingVoice(0);
     textSubmissionGenerationRef.current += 1;
@@ -321,7 +321,7 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
     const stopping = Promise.all([controller.cancel(), voice.discardRecording({ preserveTranscriptions: true })]).then(() => {});
     voiceSubmissionQueueRef.current = stopping.catch(() => {});
     await stopping;
-  }, [controller, live.reset, live.stop, live.mode, proposalStore, screen, shortcutPress, voice.discardRecording]);
+  }, [controller, live.reset, proposalStore, screen, shortcutPress, voice.discardRecording]);
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
@@ -504,33 +504,14 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
       if (shared.activeSlot.current !== slot || generation !== shared.startGeneration.current) return;
       const context = capturedWorkspace?.getAppContext();
       const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
-      // Senses for the reflex agent: backend progress from the controller snapshot, app context from the capture, and notes on screen.
-      let activityMark = ''; let lastActivityAt: number | null = null;
-      const senses: CompanionSenseSources = {
-        observe: () => {
-          const snapshot = controller.getSnapshot();
-          const activity = snapshot.activity.slice(-5).map(item => `${item.tool}${item.status === 'failed' ? ' (failed)' : item.status === 'running' ? ' (running)' : ''}`);
-          const mark = `${snapshot.activity.length}:${snapshot.activity[snapshot.activity.length - 1]?.status ?? ''}`;
-          if (mark !== activityMark) { activityMark = mark; lastActivityAt = Date.now(); }
-          const app = context ? Object.fromEntries(Object.entries({ selectedDrone: context.selectedDrone, selectedChat: context.selectedChat, repoPath: context.activeRepoPath })
-            .filter(([, value]) => typeof value === 'string' && value)) as Record<string, string> : undefined;
-          return {
-            backend: { status: snapshot.status === 'working' ? 'working' : 'idle', startedAt: snapshot.startedAt, lastActivityAt, activity,
-              ...(snapshot.reply ? { lastReply: snapshot.reply, lastReplyAt: snapshot.endedAt } : {}), ...(snapshot.error ? { error: snapshot.error } : {}) },
-            ...(app && Object.keys(app).length ? { app } : {}),
-            ...(snapshot.trigger === 'subscription' && snapshot.reply && snapshot.endedAt && Date.now() - snapshot.endedAt < 60_000 ? { events: [snapshot.reply.slice(0, 500)] } : {}),
-          };
-        },
-        notify: text => { void screen.execute({ action: 'show', markdown: text }); },
-      };
       const initiallyMuted = shared.liveStartMuted.current;
       shared.liveStartMuted.current = false;
       await live.start(async (prompt, signal, telemetry) => {
         if (signal.aborted) throw new Error('Voice conversation ended.');
         if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
         return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace, telemetry), signal);
-      }, workspaceLabel, () => controller.cancel(), senses, initiallyMuted);
-  }, [captureWorkspace, controller, live.start, run, screen]);
+      }, workspaceLabel, initiallyMuted);
+  }, [captureWorkspace, controller, live.start, run]);
 
   const toggle = React.useCallback(async (finishForModeSwitch = false) => {
     if (live.loading || live.saving || (switchingVoiceRef.current && !finishForModeSwitch)) return;
@@ -617,7 +598,7 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
       setShortcutHint(null);
       return;
     }
-    if (live.enabled && live.mode !== 'jev') {
+    if (live.enabled) {
       // Live voice retains its existing press / double-press behavior.
       const now = Date.now();
       if (isCompanionShortcutDoubleTap(lastLiveShortcutAtRef.current, now)) {
@@ -633,15 +614,7 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
     prepareCompanionRecordingCues();
     // The action is chosen from the state at keydown, not after a preview or
     // asynchronous recorder event. A cancel hold can never become close.
-    const jevAtPress = live.enabled && live.mode === 'jev';
-    const gestureStatus = () => {
-      const current = shortcutActionsRef.current;
-      if (!jevAtPress) return current.voice.status;
-      if (current.live.status === 'connecting') return 'starting';
-      if (current.live.status === 'listening') return current.live.muted ? 'paused' : 'recording';
-      if (current.live.status === 'error' && current.live.capturing) return 'paused';
-      return 'idle';
-    };
+    const gestureStatus = () => shortcutActionsRef.current.voice.status;
     const statusAtPress = gestureStatus();
     let previewed: CompanionHoldAction | null = null;
     shortcutPress.down(gesture => {
@@ -650,12 +623,12 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
       const action = companionHoldAction(gesture, statusAtPress);
       if (!action) return;
       if (previewed !== action) playCompanionRecordingCue(action);
-      if (action === 'cancel') { if (jevAtPress) actions.live.stop(); else void actions.discardRecording(); }
+      if (action === 'cancel') void actions.discardRecording();
       else if (action === 'close') void actions.dismiss();
       else if (action === 'reset') void actions.resetContext();
       else if ((action === 'pause' && gestureStatus() === 'recording') ||
         (action === 'resume' && gestureStatus() === 'paused')) {
-        if (jevAtPress) actions.live.toggleMute(); else actions.voice.toggleRecordingPause();
+        actions.voice.toggleRecordingPause();
       }
     }, gesture => {
       const action = companionHoldAction(gesture, statusAtPress);
@@ -664,13 +637,13 @@ function useCompanionSession(slot: number, shared: SharedRecording): CompanionSe
       setShortcutHint(action);
       playCompanionRecordingCue(action);
     }, useDroneHubUiStore.getState().companionShortcutDurations);
-  }, [close, live.enabled, live.mode, shortcutPress, toggle]);
+  }, [close, live.enabled, shortcutPress, toggle]);
 
   React.useEffect(() => {
     shortcutPress.cancel();
     setShortcutHint(null);
     return () => shortcutPress.cancel();
-  }, [live.enabled, live.mode, shortcutPress]);
+  }, [live.enabled, shortcutPress]);
 
   const toggleLiveVoice = React.useCallback(async () => {
     if (resettingRef.current || switchingVoiceRef.current || live.loading || live.saving ||

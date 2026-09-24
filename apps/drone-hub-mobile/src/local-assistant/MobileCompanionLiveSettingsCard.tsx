@@ -68,10 +68,9 @@ export function MobileCompanionLiveSettingsCard() {
         </Button>
         <Button tone="quiet" disabled={preference.loading || preference.saving || !writable || voiceRunning}
           onPress={() => void preference.save(true)}>
-          {preference.enabled && preference.mode === 'live' ? 'Live ✓' : 'Use Live voice'}
+          {preference.enabled ? 'Live ✓' : 'Use Live voice'}
         </Button>
       </View>
-      {preference.enabled && preference.mode === 'jev' ? <ErrorBanner message="This Hub uses JEV voice, which mobile does not support. Choose Normal or Live above. This also changes the desktop preference." /> : null}
       <Text style={styles.copy}>Normal records until you send. Live supports a two-way conversation. Changes apply to the next voice session; end an active session before changing modes.</Text>
       <Text style={styles.copy}>Off by default. Saves immediately on this Hub and also changes desktop Companion. Tap the Companion microphone to start a two-way Live conversation. The Hub’s Companion model and ASAP/Queue setting still apply.</Text>
       <Text style={styles.copy}>Live uses the Hub’s OpenAI API key. Headset controls can pause and resume Live while the phone is locked.</Text>

@@ -10,7 +10,6 @@ import type { MobileCompanionWorkspaceTarget } from '../src/local-assistant/Mobi
 let headsetCallbacks: { start(): Promise<void>; ended(): void; recordingAction(action: import('../src/local-assistant/mobile-live-controls').RecordingHeadsetAction): Promise<void> };
 mock.module('../src/local-assistant/use-mobile-companion-headset-shortcut', () => ({ useMobileCompanionHeadsetShortcut: () => ({ enabled: false, ended() {} }) }));
 let enabled = false;
-let voiceMode = 'live';
 let livePrompt = 'Speak calmly.';
 let autoApprove = false;
 let rejectSettings = false;
@@ -42,8 +41,8 @@ const mesh = {
     }
     if (operation.startsWith('live.settings')) {
       if (rejectSettings) throw new Error('Hub unavailable');
-      if (operation === 'live.settings.update') { enabled = payload.enabled; voiceMode = payload.mode ?? voiceMode; }
-      return { enabled, mode: voiceMode };
+      if (operation === 'live.settings.update') enabled = payload.enabled;
+      return { enabled, mode: 'live' };
     }
     if (operation.startsWith('live.prompt')) {
       if (rejectSettings) throw new Error('Hub unavailable');
@@ -69,7 +68,7 @@ const { MobileCompanionProvider, useMobileCompanion } = await import('../src/loc
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
 async function harness(settingsOnly = false, executeProposal: MobileCompanionWorkspaceTarget['executeProposal'] = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
-  autoApprove = savedAutoApprove; enabled = false; voiceMode = 'live'; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.hasStarted = false; live.status = 'idle'; calls.length = 0;
+  autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.hasStarted = false; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   let root!: ReactTestRenderer;
@@ -921,22 +920,6 @@ test('manual review selects one proposal and agent discard needs no approval', a
 });
 
 
-test('mobile reports unsupported JEV and explicitly selecting Live updates the shared mode', async () => {
-  const h = await harness();
-  try {
-    enabled = true; voiceMode = 'jev';
-    await act(async () => { await h.context().toggle(); });
-    expect(h.context().error).toContain('JEV');
-    expect(recorded).toBe(0); expect(live.hasStarted).toBe(false);
-    await act(async () => { await h.context().liveSettings.load(); });
-    expect(h.context().liveSettings.mode).toBe('jev');
-    await act(async () => { await h.context().liveSettings.save(true); });
-    expect(voiceMode).toBe('live');
-    await act(async () => { await h.context().toggle(); });
-    expect(live.hasStarted).toBe(true);
-  } finally { await h.cleanup(); }
-});
-
 test('mirror voice commands control the phone without proposals and reject stale or foreign sessions', async () => {
   const originalRequest = mesh.request;
   const originalMute = live.toggleMute;
@@ -980,14 +963,13 @@ test('mobile voice settings follow changes from desktop without restarting the p
   const h = await harness();
   try {
     await act(async () => {
-      for (const listener of listeners) listener({ sourceDeviceId: 'hub', event: 'live.settings.changed', payload: { enabled: true, mode: 'jev' } });
+      for (const listener of listeners) listener({ sourceDeviceId: 'hub', event: 'live.settings.changed', payload: { enabled: true, mode: 'live' } });
     });
     expect(h.context().liveSettings.enabled).toBe(true);
-    expect(h.context().liveSettings.mode).toBe('jev');
     await act(async () => {
       for (const listener of listeners) listener({ sourceDeviceId: 'other-hub', event: 'live.settings.changed', payload: { enabled: false, mode: 'live' } });
     });
-    expect(h.context().liveSettings.mode).toBe('jev');
+    expect(h.context().liveSettings.enabled).toBe(true);
   } finally { await h.cleanup(); }
 });
 

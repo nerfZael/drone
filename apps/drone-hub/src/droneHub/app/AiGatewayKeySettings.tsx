@@ -24,7 +24,7 @@ export function AiGatewayKeySettings() {
   });
   return <section className="space-y-3 rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
     <h3 className="text-sm font-semibold">AI Gateway API key</h3>
-    <p className="text-xs text-[var(--muted)]">Vercel credential for Gateway requests, including Jev evaluations. {query.data?.hasKey ? 'Configured.' : 'No AI Gateway key configured.'}</p>
+    <p className="text-xs text-[var(--muted)]">Vercel credential for Gateway requests, including reflex evaluations. {query.data?.hasKey ? 'Configured.' : 'No AI Gateway key configured.'}</p>
     <input aria-label="AI Gateway API key" name="ai-gateway-api-key" type="password" autoComplete="new-password"
       value={draft} onChange={(event) => setDraft(event.target.value)} disabled={mutation.isPending}
       placeholder="Paste AI Gateway API key" className="w-full rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-sm" />

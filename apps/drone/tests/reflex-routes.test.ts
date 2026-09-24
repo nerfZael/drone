@@ -1,15 +1,17 @@
 import { expect, test } from 'bun:test';
 import { RetryError } from 'ai-evaluation';
-import { companionReflexTable } from '@drone/assistant-chat';
-import { tableQuestions } from '@drone/reflex';
+import type { ReflexQuestion } from '@drone/reflex';
 import { evaluateReflexQuestions, parseReflexEvaluateInput, reflexEvaluationError } from '../src/hub/reflex/reflex-evaluate';
-import { compileReflexTable, parseReflexCompileInput } from '../src/hub/reflex/reflex-compile';
 import { registerReflexRoutes } from '../src/hub/reflex/reflex-routes';
 import { HubRouter } from '../src/hub/hub-router';
 import { upsertStoredProviderApiKey } from '../src/hub/hub-settings';
 import { withTempDroneDataDir } from './test-helpers';
 
-const questions = tableQuestions(companionReflexTable('Send clear requests.'));
+const questions: Record<string, ReflexQuestion> = {
+  delegation: { type: 'choice', instructions: 'Send clear requests.', criteria: { send: 'An actionable request is present.', wait: 'The thought is incomplete.' } },
+  intent: { type: 'choice', instructions: 'What is the speaker doing?', criteria: { request: 'Asking for something.', greeting: 'Saying hello.', correction: 'Fixing an earlier request.', cancel: 'Saying stop or never mind.', chatter: 'Talking to someone else.' } },
+  addressed: { type: 'boolean', instructions: 'Is the speaker addressing the assistant?' },
+};
 const answers = {
   delegation: { type: 'choice', choice: 'send', probabilities: { send: 0.9, wait: 0.1 } },
   intent: { type: 'choice', choice: 'request', probabilities: { request: 0.8, greeting: 0, correction: 0.1, cancel: 0.05, chatter: 0.05 } },
@@ -81,13 +83,11 @@ test('evaluation errors distinguish limits, configuration, and timeouts without 
   }
 });
 
-test('routes reject malformed input, never echo credentials, and pass evaluation and compilation through', async () => {
+test('routes reject malformed input, never echo credentials, and pass evaluation through', async () => {
   let body: unknown; let result: any;
   const router = new HubRouter((_res, status, value) => { result = { status, body: value }; }, async () => body);
-  const base = companionReflexTable('Send clear requests.');
   registerReflexRoutes(router, {
-    evaluate: async input => ({ answers: answers as any, usage: { input: 10, output: 1 }, durationMs: 5, model: 'typesafe-ai/jev' }),
-    compile: async input => ({ table: { ...input.base, version: 2, source: 'brain' }, output: { questions: input.base.questions, rules: [] }, model: 'm', provider: 'openai', durationMs: 7 }),
+    evaluate: async () => ({ answers: answers as any, usage: { input: 10, output: 1 }, durationMs: 5, model: 'typesafe-ai/jev' }),
   });
   const post = (path: string) => router.handle({ method: 'POST' } as any, {} as any, new URL(`http://hub.test${path}`));
   body = { state: 'Open settings', questions, apiKey: 'test-only-secret' };
@@ -96,40 +96,4 @@ test('routes reject malformed input, never echo credentials, and pass evaluation
   expect(JSON.stringify(result)).not.toContain('test-only-secret');
   body = { state: 'x', questions: {} };
   await post('/api/reflex/evaluate'); expect(result.status).toBe(400);
-  body = { purpose: 'p', stateDescription: 's', actions: [{ name: 'send', description: 'd' }, { name: 'skip', description: 'd' }, { name: 'cancel', description: 'd' }, { name: 'wait', description: 'd' }], base, guidance: 'g', apiKey: 'test-only-secret' };
-  await post('/api/reflex/compile');
-  expect(result.status).toBe(200); expect(result.body.table.version).toBe(2);
-  expect(JSON.stringify(result)).not.toContain('test-only-secret');
-  body = { purpose: 'p', stateDescription: 's', actions: [{ name: 'send', description: 'd' }], base };
-  await post('/api/reflex/compile'); expect(result.status).toBe(400); expect(result.body.error).toContain('unknown action');
-});
-
-test('the brain compiles with the Companion helper model and returns a validated versioned table', async () => {
-  const base = companionReflexTable('Send clear requests.');
-  const calls: any[] = [];
-  const { z } = await import('zod');
-  const compiled = await compileReflexTable(parseReflexCompileInput({ purpose: 'p', stateDescription: 's', actions: [{ name: 'send', description: 'd' }, { name: 'skip', description: 'd' }, { name: 'cancel', description: 'd' }, { name: 'wait', description: 'd' }], base, observations: 'Wake reason: low-confidence.' }), {
-    settings: async () => ({ provider: 'openai', model: 'gpt-test' }),
-    credential: async () => ({ apiKey: 'test-only-openai-key' }),
-    runtime: async () => ({ provider: 'openai', z, modelFactory: (id: string) => id, generateObject: async (input: any) => {
-      calls.push(input);
-      const parsed = input.schema.parse({
-        questions: { delegation: base.questions.delegation, intent: base.questions.intent },
-        rules: [
-          { id: 'cancel', when: [{ question: 'intent', is: 'cancel', minProbability: 0.9 }], do: 'cancel', wake: 'cancelled' },
-          { id: 'send', when: [{ question: 'delegation', is: 'send' }], do: 'send' },
-          { id: 'wait', when: [], do: 'wait' },
-        ],
-        notes: 'Dropped addressed; it never fired.',
-      });
-      return { object: parsed };
-    } }) as any,
-  });
-  expect(compiled.table).toMatchObject({ version: 2, source: 'brain', notes: 'Dropped addressed; it never fired.', wake: base.wake });
-  expect(Object.keys(compiled.table.questions)).toEqual(['delegation', 'intent']);
-  expect(compiled.table.rules[0].when).toEqual({ all: [{ question: 'intent', is: 'cancel', minProbability: 0.9 }] });
-  expect(calls[0].model).toBe('gpt-test');
-  expect(calls[0].prompt).toContain('Wake reason: low-confidence.');
-  expect(calls[0].system).toContain('reads literally');
-  expect(() => calls[0].schema.parse({ questions: {}, rules: [{ id: 'x', when: [], do: 'explode' }] })).toThrow();
 });

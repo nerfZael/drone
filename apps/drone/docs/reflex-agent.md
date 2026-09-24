@@ -1,6 +1,8 @@
 # Reflex agent
 
-Status: implemented for Companion's Jev voice mode; other loops can reuse the library.
+> **Note:** Companion's Jev voice mode has been removed. `@drone/reflex` and `POST /api/reflex/evaluate` now serve the entity system (see `entity/docs/`). The Companion integration, the `/api/reflex/compile` route, and the `evaluate-companion-reflex` script described below no longer exist; those sections are kept as design history.
+
+Status: library and evaluate route in use by the entity system; the Companion integration below was removed.
 
 ## Idea
 

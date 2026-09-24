@@ -1,12 +1,9 @@
 import { WebSocket } from 'ws';
-import { resolveEffectiveProviderApiKeySettings, resolveAiGatewayApiKeySettings } from '../hub-settings';
-import { readCompanionLiveSettings } from './companion-live-settings';
+import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 
 type Dependencies = {
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
-  gatewayCredentials(): Promise<{ apiKey: string | null }>;
-  settings(): Promise<{ enabled: boolean; mode?: string }>;
 };
 
 function transcriptionError(error: unknown): string {
@@ -26,7 +23,7 @@ function transcriptionError(error: unknown): string {
   return `${reason} Reconnect to retry; your received transcript is retained.`;
 }
 
-/** Streaming transcription only. Jev receives text; no GPT-Live delegation runs. */
+/** Streaming transcription only; no GPT-Live delegation runs. Currently unwired: kept for the entity speech-in channel. */
 export class CompanionTranscriptionSocket {
   private upstream?: WebSocket;
   private closed = false;
@@ -41,8 +38,6 @@ export class CompanionTranscriptionSocket {
     this.deps = {
       connect: (url, apiKey) => new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` }, handshakeTimeout: 15_000 }),
       credentials: () => resolveEffectiveProviderApiKeySettings('openai'),
-      gatewayCredentials: resolveAiGatewayApiKeySettings,
-      settings: readCompanionLiveSettings,
       ...deps,
     };
   }
@@ -67,7 +62,7 @@ export class CompanionTranscriptionSocket {
     try {
       this.upstream.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: event.audio }));
       this.bufferedAudioBytes += bytes.length;
-      // Bound provider audio turns to ten seconds. Deltas (and Jev decisions) stream
+      // Bound provider audio turns to ten seconds. Deltas stream
       // before commits; this is not a silence threshold or a delegation delay.
       if (this.bufferedAudioBytes >= 24_000 * 2 * 10) {
         this.upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
@@ -85,10 +80,9 @@ export class CompanionTranscriptionSocket {
   }
   private fail(error: string) { if (!this.closed) { this.send({ type: 'live_error', error }); this.close(); } }
   private async start() {
-    const [settings, credential, gateway] = await Promise.all([this.deps.settings(), this.deps.credentials(), this.deps.gatewayCredentials()]);
+    const credential = await this.deps.credentials();
     if (this.closed) return;
-    if (!settings.enabled || settings.mode !== 'jev') { this.fail('Select Jev voice before starting transcription.'); return; }
-    if (!credential.apiKey || !gateway.apiKey) { this.fail('Jev voice requires an OpenAI transcription key and an AI Gateway key in Settings.'); return; }
+    if (!credential.apiKey) { this.fail('Live transcription requires an OpenAI key in Settings.'); return; }
     const upstream = this.deps.connect('wss://api.openai.com/v1/realtime?intent=transcription', credential.apiKey);
     this.upstream = upstream;
     upstream.on('open', () => {
@@ -114,7 +108,7 @@ export class CompanionTranscriptionSocket {
         this.ready = true; clearTimeout(this.timeout); this.lastPing = Date.now();
         this.heartbeat = setInterval(() => { if (Date.now() - this.lastPing > 45_000) this.close(); }, 15_000);
         this.heartbeat.unref?.();
-        this.send({ type: 'live_ready', transport: 'pcm', backendModel: 'typesafe-ai/jev' });
+        this.send({ type: 'live_ready', transport: 'pcm' });
       }
       if (['conversation.item.input_audio_transcription.delta', 'conversation.item.input_audio_transcription.completed', 'input_audio_buffer.committed'].includes(String(event.type))) {
         // Forward transcript fields only, never provider session configuration or credentials.

@@ -374,11 +374,6 @@ export function CompanionOverlay() {
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
       {transcriptDialog.open ? <CompanionTranscriptDialog captions={companion.live?.captions ?? ''}
-        requests={companion.live?.mode === 'jev' ? companion.live.jevRequests : undefined}
-        table={companion.live?.mode === 'jev' ? companion.live.jevTable : undefined}
-        insight={companion.live?.mode === 'jev' ? companion.live.jevInsight : undefined}
-        status={companion.live?.status}
-        onResetTable={companion.live?.mode === 'jev' ? companion.live.resetJevTable : undefined}
         onClose={transcriptDialog.close} portalContainer={companionWindow.portalContainer} /> : null}
       {viewedAttachment ? <CompanionAttachmentDialog attachment={viewedAttachment} onClose={() => setViewedAttachmentId(null)} portalContainer={companionWindow.portalContainer} /> : null}
       {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
@@ -554,8 +549,8 @@ export function CompanionOverlay() {
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           {companion.shortcutHint ? (
             <span role="status" className="text-xs text-[var(--fg)]">
-              {{ pause: companion.live?.mode === 'jev' ? 'Release to pause listening and decisions' : 'Release to pause recording', resume: companion.live?.mode === 'jev' ? 'Release to resume listening and decisions' : 'Release to resume recording',
-                cancel: companion.live?.mode === 'jev' ? 'Release to stop listening · keep transcript' : 'Release to stop and discard recording', close: 'Release to close Companion · keep context',
+              {{ pause: 'Release to pause recording', resume: 'Release to resume recording',
+                cancel: 'Release to stop and discard recording', close: 'Release to close Companion · keep context',
                 reset: 'Release to stop Companion and clear context' }[companion.shortcutHint]}
             </span>
           ) : companion.transcript ? (

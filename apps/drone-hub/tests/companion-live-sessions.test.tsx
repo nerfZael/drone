@@ -7,7 +7,7 @@ import * as approvalModule from '../src/droneHub/companion/use-companion-auto-ap
 import { CompanionProvider, useCompanion } from '../src/droneHub/companion/CompanionContext';
 import { CompanionLiveConnection } from '../src/droneHub/companion/CompanionLiveConnection';
 
-for (const mode of ['live', 'jev']) test(`${mode} session handoff waits for microphone release and closing cancels a waiting start`, async () => {
+test('live session handoff waits for microphone release and closing cancels a waiting start', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const install = (key: string, value: unknown) => {
@@ -15,8 +15,7 @@ for (const mode of ['live', 'jev']) test(`${mode} session handoff waits for micr
     Object.defineProperty(globalThis, key, { configurable: true, value });
   };
   install('window', dom); install('document', dom.document); install('IS_REACT_ACT_ENVIRONMENT', true);
-  install('fetch', async () => Response.json({ ok: true, enabled: true, mode, systemPrompt: '', defaultSystemPrompt: '',
-    jevSystemPrompt: '', defaultJevSystemPrompt: '', jevDecisionIntervalMs: 250, autonomy: 'off', brain: false, maxSystemPromptChars: 8000 }));
+  install('fetch', async () => Response.json({ ok: true, enabled: true, mode: 'live', systemPrompt: '', defaultSystemPrompt: '', maxSystemPromptChars: 8000 }));
   const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue({ status: 'idle', durationMillis: 0,
     startRecording: async () => true, discardRecording: async () => {}, toggleRecordingPause: () => {},
   } as ReturnType<typeof voiceModule.useChatVoiceRecorder>);

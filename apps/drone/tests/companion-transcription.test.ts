@@ -18,8 +18,6 @@ function harness() {
   const session = new CompanionTranscriptionSocket(event => events.push(event), {
     connect: url => { urls.push(url); return upstream as unknown as WebSocket; },
     credentials: async () => ({ apiKey: 'test-openai-key' }),
-    gatewayCredentials: async () => ({ apiKey: 'test-gateway-key' }),
-    settings: async () => ({ enabled: true, mode: 'jev' }),
   });
   return { session, upstream, events, urls };
 }
@@ -42,7 +40,6 @@ test('streams transcript deltas before any completed turn and never configures a
     expect(h.events.at(-1)).toMatchObject({ type: 'live_event', event: { type: 'conversation.item.input_audio_transcription.delta', delta: 'Open settings' } });
     expect(JSON.stringify(h.events)).not.toContain('must-not-forward');
     expect(JSON.stringify(h.events)).not.toContain('test-openai-key');
-    expect(JSON.stringify(h.events)).not.toContain('test-gateway-key');
   } finally { h.session.close(); }
   expect(h.upstream.closed).toBe(true);
 });
@@ -65,8 +62,6 @@ test('cancelling during credential resolution opens no transcription connection'
   const session = new CompanionTranscriptionSocket(() => {}, {
     connect: () => { connected = true; return new Socket() as unknown as WebSocket; },
     credentials: () => new Promise(done => { resolve = done; }),
-    gatewayCredentials: async () => ({ apiKey: 'test-gateway-key' }),
-    settings: async () => ({ enabled: true, mode: 'jev' }),
   });
   session.handle({ type: 'live_start' }); session.close(); resolve({ apiKey: 'test-openai-key' }); await tick();
   expect(connected).toBe(false);

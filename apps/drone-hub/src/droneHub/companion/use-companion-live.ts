@@ -1,7 +1,6 @@
 import { useCompanionLiveSettingsStore, type CompanionLiveSettingsStore } from './companion-live-settings-store';
-import { useCompanionJev } from './use-companion-jev';
 import React from 'react';
-import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionAutonomy, type CompanionClientController, type CompanionSenseSources } from '@drone/assistant-chat';
+import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
 import { CompanionLiveAnnouncement } from './CompanionLiveAnnouncement';
@@ -27,11 +26,8 @@ type ReconnectSchedule = (callback: () => void, delayMs: number) => () => void;
 export function useCompanionLive(controller?: CompanionClientController, reconnectSchedule: ReconnectSchedule = scheduleTimeout, selected = true, sharedSettings?: CompanionLiveSettingsStore) {
   const settingsStore = useCompanionLiveSettingsStore(sharedSettings);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
-  const { mode, enabled, resolved, loading, saving, settingsError, systemPrompt, defaultSystemPrompt, maxSystemPromptChars,
-    jevDecisionIntervalMs, jevSystemPrompt, defaultJevSystemPrompt, autonomy, brain } = settings;
-  const modeRef = React.useMemo(() => ({ get current() { return settingsStore.getSnapshot().mode; } }), [settingsStore]);
+  const { enabled, resolved, loading, saving, settingsError, systemPrompt, defaultSystemPrompt, maxSystemPromptChars } = settings;
   const enabledRef = React.useMemo(() => ({ get current() { return settingsStore.getSnapshot().enabled; } }), [settingsStore]);
-  const jev = useCompanionJev(jevDecisionIntervalMs, jevSystemPrompt || defaultJevSystemPrompt, { autonomy, brain });
   const [state, setState] = React.useState<LiveState>(EMPTY_STATE);
   const active = React.useRef<LiveSession | null>(null);
   const pendingCleanup = React.useRef<Promise<void> | undefined>(undefined);
@@ -50,7 +46,6 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, []);
 
   const stop = React.useCallback(() => {
-    const jevCleanup = jev.stop();
     desiredTarget.current = null;
     desiredMuted.current = false;
     cancelReconnect();
@@ -60,16 +55,15 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     session?.replies?.stop();
     session?.abort.abort();
     session?.conversation.stop();
-    pendingCleanup.current = Promise.all([pendingCleanup.current, jevCleanup, session?.connection.close()]).then(() => undefined);
+    pendingCleanup.current = Promise.all([pendingCleanup.current, session?.connection.close()]).then(() => undefined);
     if (mounted.current) setState((previous) => ({ ...previous, announcing: false, status: 'idle', capturing: false, error: '', muted: false, queued: 0, playbackBlocked: false }));
     return pendingCleanup.current;
-  }, [cancelReconnect, jev.stop]);
+  }, [cancelReconnect]);
 
   const reset = React.useCallback(() => {
     stop();
-    jev.reset();
     if (mounted.current) setState(EMPTY_STATE);
-  }, [stop, jev.reset]);
+  }, [stop]);
 
   React.useEffect(() => {
     mounted.current = true;
@@ -91,7 +85,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     let previous = settingsStore.getSnapshot();
     return settingsStore.subscribe(() => {
       const next = settingsStore.getSnapshot();
-      if (next.mode !== previous.mode || (previous.enabled && !next.enabled)) stop();
+      if (previous.enabled && !next.enabled) stop();
       previous = next;
     });
   }, [settingsStore, stop]);
@@ -127,7 +121,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   }, [reconnectSchedule]);
 
   startAttempt.current = async (target, reconnecting) => {
-    if (active.current || desiredTarget.current !== target || modeRef.current === 'jev' || !enabledRef.current || !pageActive.current) return;
+    if (active.current || desiredTarget.current !== target || !enabledRef.current || !pageActive.current) return;
     if (reconnecting) {
       setState((previous) => ({ ...previous, status: 'connecting', capturing: false, error: '', queued: 0, playbackBlocked: false }));
     } else {
@@ -216,7 +210,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       const next = controller.getSnapshot();
       const completed = next.status === 'completed' && previous.status !== 'completed';
       previous = next;
-      if (!completed || next.trigger !== 'subscription' || !next.reply.trim() || !enabledRef.current || modeRef.current === 'jev' || !mounted.current || !pageActive.current) return;
+      if (!completed || next.trigger !== 'subscription' || !next.reply.trim() || !enabledRef.current || !mounted.current || !pageActive.current) return;
       if (active.current?.announcement) { active.current.announcement.deliver(next.reply); return; }
       // Active conversations and reconnects already own their reply delivery.
       if (active.current || desiredTarget.current) return;
@@ -230,8 +224,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     });
   }, [controller, selected]);
 
-  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string, cancelBackend?: () => Promise<void>, senses?: CompanionSenseSources, initiallyMuted = false) => {
-    if (modeRef.current === 'jev' && enabledRef.current && pageActive.current) { await jev.start(runBackend, cancelBackend, senses, initiallyMuted); return; }
+  const start = React.useCallback(async (runBackend: LiveTarget['runBackend'], workspaceLabel: string, initiallyMuted = false) => {
     if (active.current?.announcement) stop();
     if (active.current || !enabledRef.current || !pageActive.current) return;
     cancelReconnect();
@@ -239,7 +232,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     const target = { runBackend, workspaceLabel };
     desiredTarget.current = target;
     await startAttempt.current(target, false);
-  }, [cancelReconnect, stop, jev.start]);
+  }, [cancelReconnect, stop]);
 
   const toggleMute = React.useCallback(() => {
     const session = active.current;
@@ -255,32 +248,16 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     stop();
   }, [stop]);
 
-  const saveVoiceMode = async (next: 'normal' | 'live' | 'jev') => {
+  const saveVoiceMode = async (next: 'normal' | 'live') => {
     const current = settingsStore.getSnapshot();
     if (current.loading || current.saving) return;
     stop();
-    await settingsStore.save({ enabled: next !== 'normal', mode: next === 'jev' ? 'jev' : 'live' }, 'Could not save voice mode.');
+    await settingsStore.save({ enabled: next === 'live' }, 'Could not save voice mode.');
   };
-  const saveJevSystemPrompt = async (jevSystemPrompt: string) => Boolean(
-    await settingsStore.save({ jevSystemPrompt }, 'Could not save Jev instructions.'));
-  const saveJevDecisionInterval = async (jevDecisionIntervalMs: number) => Boolean(
-    await settingsStore.save({ jevDecisionIntervalMs }, 'Could not save Jev decision interval. Use 50–10000 milliseconds.'));
-  const saveAutonomy = async (autonomy: CompanionAutonomy) => Boolean(
-    await settingsStore.save({ autonomy }, 'Could not save the autonomy level.'));
-  const saveBrain = async (brain: boolean) => Boolean(
-    await settingsStore.save({ brain }, 'Could not save the brain setting.'));
 
   return {
     ...state,
-    autonomy, brain, saveAutonomy, saveBrain,
-    jevRequests: jev.requests,
-    jevTable: jev.table,
-    jevInsight: jev.insight,
-    resetJevTable: jev.resetTable,
-    jevCompiling: jev.compiling,
-    ...(mode === 'jev' ? { captions: jev.captions, error: jev.error, status: jev.status, hasStarted: jev.hasStarted, capturing: jev.capturing, queued: jev.queued, muted: jev.muted, announcing: false, playbackBlocked: false } : {}),
-    jevDecisionIntervalMs, saveJevDecisionInterval,
-    mode, jevSystemPrompt, defaultJevSystemPrompt, saveVoiceMode, saveJevSystemPrompt,
+    saveVoiceMode,
     enabled,
     resolved,
     loading,
@@ -295,7 +272,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     start,
     stop,
     reset,
-    toggleMute: mode === 'jev' ? jev.toggleMute : toggleMute,
+    toggleMute,
     play,
     cancelPending,
   };

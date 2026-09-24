@@ -470,9 +470,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setCheckingVoiceMode(true);
     try {
       const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id,
-        'live.settings.get', undefined, signal) as { enabled?: unknown; mode?: unknown };
+        'live.settings.get', undefined, signal) as { enabled?: unknown };
       if (signal.aborted || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
-      if (preference?.enabled && preference.mode === 'jev') throw new Error('This Hub uses JEV voice. Choose Normal or Live voice in Companion settings; mobile does not support JEV.');
       if (preference?.enabled !== true) throw new Error('Enable Companion Live voice in Drone Hub settings first.');
       await startOwnedAudio(startLive);
     } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
@@ -564,10 +563,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       preparingVoice.current = true;
       setCheckingVoiceMode(true);
       try {
-        const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown; mode?: unknown };
+        const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown };
         if (recordingCancelled() || !controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
         if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
-        if (preference.enabled && preference.mode === 'jev') throw new Error('This Hub uses JEV voice. Choose Normal or Live voice in Companion settings; mobile does not support JEV.');
         if (preference.enabled) {
           await startLive();
           return;

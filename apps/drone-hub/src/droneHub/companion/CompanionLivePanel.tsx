@@ -8,7 +8,7 @@ export function CompanionLivePanel({ onOpenTranscript }: { onOpenTranscript(): v
   const companion = useCompanion();
   const live = companion?.live;
   if (!live || (!live.enabled && !live.settingsError && !live.captions)) return null;
-  const active = live.status === 'connecting' || live.status === 'listening' || (live.mode === 'jev' && live.status === 'error');
+  const active = live.status === 'connecting' || live.status === 'listening';
   return (
     <>
       {live.settingsError ? <div role="alert" className="px-2.5 py-1.5 text-xs text-[var(--red)]">
@@ -18,7 +18,7 @@ export function CompanionLivePanel({ onOpenTranscript }: { onOpenTranscript(): v
       {active ? <>
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 11a7 7 0 0 1-14 0M12 18v3" /></svg>}
-          label={live.mode === 'jev' && live.status === 'error' ? 'Retry pending decision' : 'Microphone'}
+          label="Microphone"
           description={live.announcing ? 'Muted while announcing a subscription update' : live.muted ? 'Unmute microphone' : 'Mute microphone'}
           meta={live.muted ? 'Muted' : 'Live'}
           checked={!live.muted}

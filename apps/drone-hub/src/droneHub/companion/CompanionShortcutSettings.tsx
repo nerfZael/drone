@@ -28,7 +28,6 @@ export function CompanionShortcutSettings() {
         Short hold: pause or resume. Middle hold: discard an active recording and keep the panel open;
         if recording was already stopped when you pressed the key, close the panel and stop the Companion agent without forgetting the conversation.
         Long hold: stop recording and the agent, discard pending audio, and clear context.
-        Jev uses the same holds: pause/resume listening and decisions; stop listening while retaining the transcript (tap to restart); or stop and clear context.
         Release to act; holding longer never performs the shorter actions first.
       </p>
       <p className="mt-2 text-xs text-[var(--muted)]">

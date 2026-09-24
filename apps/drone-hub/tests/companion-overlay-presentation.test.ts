@@ -51,7 +51,7 @@ describe('Companion overlay presentation', () => {
       'utf8',
     );
     expect(source).not.toContain('toggleLiveVoice');
-    expect(menu).toContain("label={live.mode === 'jev' ? 'Jev voice' : 'Live voice'}");
+    expect(menu).toContain('label="Live voice"');
     expect(menu).toContain('checked={live.enabled}');
     expect(menu).toContain('onSelect={() => void companion.toggleLiveVoice()}');
   });

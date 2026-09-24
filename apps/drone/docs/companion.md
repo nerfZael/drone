@@ -4,11 +4,11 @@
 
 Companion has ten independent conversation slots, labeled **1–9, 0**. While Drone Hub or the floating Companion window has focus, press a number to create or select that slot. Slots can be created out of order: pressing **2** first creates only session 2. The number buttons above the bar also select sessions; **+** opens the first unused slot. Indicators show recording, paused, transcribing, working, completed, or error states. Background work keeps its own indicator even while the selected session records.
 
-Starting dictation or Live/Jev capture focuses Companion (or its panel in Drone Hub when docked), including when started with the global Companion shortcut. Further recording updates do not take focus back if you switch to another app. Session numbers are accepted only while the receiving Hub or Companion window has focus.
+Starting dictation or Live capture focuses Companion (or its panel in Drone Hub when docked), including when started with the global Companion shortcut. Further recording updates do not take focus back if you switch to another app. Session numbers are accepted only while the receiving Hub or Companion window has focus.
 
 If Companion is closed, a number opens its session and starts recording. While Companion is open, a number selects an existing session or opens an idle draft without starting recording. A draft is a frontend slot: no backend conversation is created until a prompt is sent. Drafts remain available when focus moves elsewhere and can be removed with the trash button. Pressing the selected number again does not toggle recording. Use the regular Companion shortcut (backtick by default) to start/send, pause/resume, discard, or reset.
 
-An unsent dictation follows the selected slot without restarting the microphone, including while paused. Its workspace capture stays the one from when recording began. Once sent, a clip belongs to that session even if transcription finishes after switching. Different sessions can work concurrently and keep separate replies, subscriptions, attachments, and proposal history. All pending proposals remain above the bar, labeled **S1**, **S2**, etc.; selecting one opens its owning session. Live/Jev voice waits for its old microphone connection to release before starting one for the destination, preserving microphone mute. Rapid switches use the last selected slot; closing Companion cancels any waiting start. Ordinary dictation keeps recording continuously.
+An unsent dictation follows the selected slot without restarting the microphone, including while paused. Its workspace capture stays the one from when recording began. Once sent, a clip belongs to that session even if transcription finishes after switching. Different sessions can work concurrently and keep separate replies, subscriptions, attachments, and proposal history. All pending proposals remain above the bar, labeled **S1**, **S2**, etc.; selecting one opens its owning session. Live voice waits for its old microphone connection to release before starting one for the destination, preserving microphone mute. Rapid switches use the last selected slot; closing Companion cancels any waiting start. Ordinary dictation keeps recording continuously.
 
 The trash button deletes the selected slot's conversation, subscriptions, pending proposals, and current recording, cancelling its work. Other slots retain their numbers and continue working. Deletion is disabled while that session is applying a proposal. Deleting the last slot closes the panel; pressing a number creates a fresh session. Slot numbers, selection, and saved conversation identities survive an app restart. Existing single-session history is restored into slot 1. Subscriptions and pending proposals have the same restart behavior as before.
 
@@ -502,97 +502,6 @@ Android assistant; verify the old content survives rejection, retry succeeds,
 Dismiss works, and End/Mute/Pause stay reachable. Rotate the phone, resize the
 browser, open the keyboard, expand Companion, and test large system text. Confirm
 new dimensions are returned and no content is clipped or shown under controls.
-
-## Jev voice on desktop
-
-Settings → Companion offers Normal, Live voice, and Jev voice. Jev voice streams
-24 kHz microphone audio through the Hub to OpenAI's `gpt-live-transcribe`, with
-minimal transcription delay. It consumes transcript deltas while speech is still
-arriving. It does not run GPT-Live or produce spoken replies.
-
-Configure an OpenAI API key for transcription and a Vercel AI Gateway key for Jev
-in Settings. The Gateway password field is available in Companion and General
-settings. The Hub stores it in its existing settings repository; the settings API
-returns only configuration status, never the key or a key hint. A saved key takes
-precedence over `AI_GATEWAY_API_KEY` in the Hub process environment.
-
-Each new transcript update schedules a `typesafe-ai/jev` decision, with a minimum interval
-between request starts and at most one evaluation in flight. The interval is
-configurable in Settings → Companion → Jev decision interval, from 50 to 10,000 ms
-(default 250 ms). Saving reschedules pending decisions in the active session. Updates
-arriving during evaluation are combined for the next request. There is no fixed
-silence requirement for delegation. The transcriber disables server VAD because
-`gpt-live-transcribe` rejects it and commits every ten seconds of audio to bound
-provider audio items. Jev sees partial text before those commits; they do not
-delay delegation or clear transcript history. General
-settings → Voice input → End thought after (Balanced: 2.5 seconds) controls other
-continuous dictation features and does not control Jev voice.
-
-While unsent speech remains, decisions continue at the configured interval even
-without new words. Each request replaces `timing.silenceMs` with milliseconds since
-the last new or revised transcript text. An identical final transcript does not
-reset it. This estimates silence from transcription arrivals, not acoustic activity.
-Instructions can use different thresholds, such as 1000 ms normally and 5000 ms
-for sensitive subjects. Polling stops when nothing remains unsent, on pause/stop,
-or after an unrecovered error. Only one decision runs at a time.
-
-The Voice transcript menu item opens a large live dialog. The visible transcript
-inserts the decision's frozen `[Silence: 1.25 s]` value immediately before
-`[Sent to backend agent]` at each delegation point, and also shows a single updating
-silence counter in seconds with two decimals. The dialog follows new text until
-you scroll up to read earlier speech. These
-display annotations never enter model transcript text or backend requests; Jev
-receives timing only in its separate metadata field.
-
-The dialog's **Jev requests** tab defaults to send decisions and can show all
-decisions or errors. Successful evaluations include the exact state, effective
-instructions (including the app's timing preamble), send/wait criteria, model,
-probabilities when provided, and elapsed request time. It distinguishes a model
-send decision from actual delegation, since pause or newer speech can invalidate
-a decision. Requests are collected after this version is loaded, in browser
-memory only: up to 50 sends and 50 other results, with a combined two-million-
-character cap. Reset/reload clears the debugger history, independently of its
-separate transcript retention rules. Failed evaluations show attempted inputs
-and a safe error; an unavailable server prompt snapshot is explicitly marked.
-
-Select a successful request to edit its state, effective instructions, or choice
-criteria, then **Replay without delegating**. Replay uses the saved Gateway key
-and can incur model usage, but never starts a backend turn, advances a transcript
-cursor, or changes saved prompts. The original record remains unchanged. The
-authenticated replay endpoint only accepts Jev with bounded state/instructions
-and send/wait criteria; client credentials or provider URLs are not accepted.
-
-Decisions come from a reflex table evaluated by Jev, with code-owned actions: **send**
-delegates the unsent transcript and advances a cursor; **skip** consumes speech that is
-confidently not for Companion, only after two seconds of silence; **cancel** stops the
-running backend request; **wait** retains every word. Every decision includes the
-complete unsent transcript, up to five previous delegated transcripts (up to 16,000
-characters), the silence estimate, and the backend status. A brain (the Companion helper
-model) rewrites the table when the loop is unsure or surprised. See
-[reflex-agent.md](reflex-agent.md) for the architecture, the default table, and the live
-user-story eval. The complete transcript remains visible in Voice transcript, including
-text already sent, skipped, or cancelled. Stopping and restarting Jev voice retains it
-and any brain revision in the open Companion; explicitly resetting/closing Companion or
-reloading the app clears this in-memory history. Final transcription wording is
-reconciled without resending previously delivered prefixes. Backend replies appear in
-Companion and use its existing delivery policy.
-
-Editable Jev delegation instructions seed the table's delegation question and guide the brain; they apply to the next evaluation. The default is four lines that only judge whether the unsent speech is actionable yet. The Voice transcript dialog's Agent tab shows the loop's live state, senses, latest answers, and the current reflex table. Settings → Companion → Reflex agent autonomy (Off, Observe, Act) and the Brain toggle gate the autonomous behaviour described in [reflex-agent.md](reflex-agent.md); both default off, which is the speech-only behaviour. Retryable Gateway
-failures get up to two retries with backoff and provider retry delays, bounded by
-the same 15-second request deadline. Speech continues accumulating during retries;
-only a successful decision can delegate it. Remaining evaluation
-failures pause decisions while retaining speech; use **Retry pending decision**
-to resume. Ending voice cancels pending evaluations, retains transcripts, and does
-not cancel work already submitted to the backend. The full unsent transcript has
-a 120,000-character request limit: reaching it pauses decisions and retains the
-text for review. Earlier retained text is never automatically deleted.
-
-The Hub retains AI SDK 6 for its existing integrations and uses the `ai-evaluation`
-alias for SDK 7's experimental evaluation API. To run the standalone text example,
-enter `AI_GATEWAY_API_KEY` locally in the ignored root `.env.local`, then run
-`bun index.ts` from the repository root. It uses `openai/gpt-5.5`; Jev itself is an
-evaluation model and cannot generate the holiday story. Never commit credentials.
-
 
 ### Spoken messages
 

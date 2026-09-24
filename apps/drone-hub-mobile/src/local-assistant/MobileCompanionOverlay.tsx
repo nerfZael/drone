@@ -287,8 +287,8 @@ export function MobileCompanionOverlay() {
       id: 'live',
       section: 'Voice',
       icon: AudioLines,
-      label: liveSettings.enabled && liveSettings.mode === 'jev' ? 'JEV voice · unavailable on mobile' : `Live voice ${liveSettings.enabled ? 'on' : 'off'}`,
-      detail: liveSettings.enabled && liveSettings.mode === 'jev' ? 'Tap to use Normal voice, or choose Live in Companion settings. Changes the shared Hub preference.' : !liveSettings.supported
+      label: `Live voice ${liveSettings.enabled ? 'on' : 'off'}`,
+      detail: !liveSettings.supported
         ? 'Update the Hub to use Live voice from your phone.'
         : liveSettings.error
           ? liveSettings.error
