@@ -45,8 +45,11 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
   });
 
   test('uses a separate bearer token from the Hub API token', async () => {
-    const noAuth = await fetch(`${baseUrl}/mcp`);
+    const noAuth = await fetch(`${baseUrl}/mcp`, {
+      headers: { 'x-drone-mcp-diagnostics': '1' },
+    });
     expect(noAuth.status).toBe(401);
+    expect(noAuth.headers.get('server-timing')).toBeNull();
 
     const apiAuth = await fetch(`${baseUrl}/mcp`, {
       headers: { authorization: `Bearer ${apiToken}` },
@@ -59,6 +62,7 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
         authorization: `Bearer ${mcpToken}`,
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
+        'x-drone-mcp-diagnostics': '1',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -73,6 +77,9 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     });
 
     expect(init.status).toBe(200);
+    expect(init.headers.get('server-timing')).toMatch(/auth;dur=\d/);
+    expect(init.headers.get('server-timing')).toContain('catalog;dur=');
+    expect(init.headers.get('server-timing')).not.toContain(mcpToken);
     expect(init.headers.get('mcp-session-id')).toBeNull();
 
     const staleSessionRequest = await fetch(`${baseUrl}/mcp`, {
@@ -91,6 +98,7 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
       }),
     });
     expect(staleSessionRequest.status).toBe(200);
+    expect(staleSessionRequest.headers.get('server-timing')).toBeNull();
     expect(await staleSessionRequest.text()).toContain('list_drones');
 
     for (const method of ['GET', 'DELETE']) {

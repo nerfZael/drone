@@ -36,6 +36,14 @@ export class DroneHubMcpHttpTransport {
   }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse, method: string): Promise<void> {
+    const startedAt = performance.now();
+    const phases: string[] = [];
+    let phaseStartedAt = startedAt;
+    const mark = (name: string) => {
+      const now = performance.now();
+      phases.push(`${name};dur=${(now - phaseStartedAt).toFixed(1)}`);
+      phaseStartedAt = now;
+    };
     if (!this.opts.signingSecret) {
       sendJson(res, 404, { ok: false, error: 'MCP endpoint is not enabled' });
       return;
@@ -45,6 +53,7 @@ export class DroneHubMcpHttpTransport {
       bearerTokenFromAuthorizationHeader(req.headers.authorization),
       this.opts.signingSecret,
     );
+    mark('auth');
     if (!identity) {
       this.opts.log('warn', 'unauthorized mcp request', {
         method,
@@ -56,6 +65,11 @@ export class DroneHubMcpHttpTransport {
       return;
     }
 
+    // Explicitly requested, authenticated diagnostics only. Never include
+    // credentials, request bodies, chat names, or tool arguments in timings.
+    const diagnostics = req.headers['x-drone-mcp-diagnostics'] === '1';
+    if (diagnostics) res.setHeader('server-timing', phases.join(', '));
+
     if (method !== 'POST') {
       res.setHeader('allow', 'POST');
       sendJson(res, 405, { ok: false, error: 'method not allowed' });
@@ -66,16 +80,20 @@ export class DroneHubMcpHttpTransport {
 
     try {
       const body = await readJsonBody(req);
+      mark('body');
       server = createDroneHubMcpServer({
         principal: identity,
         speechEnabled: this.opts.speechEnabled !== false,
         hubServices: this.opts.hubServices,
       });
+      mark('catalog');
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
       this.activeServers.add(server);
       await server.connect(transport);
+      mark('connect');
+      if (diagnostics) res.setHeader('server-timing', phases.join(', '));
       await transport.handleRequest(req, res, body);
     } catch (error: any) {
       this.opts.log('warn', 'mcp request failed', {

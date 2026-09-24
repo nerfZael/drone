@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
 import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { getHubDatabase } from '../host/hub-database';
+import { getDroneLifecycleRepository } from '../host/drone-lifecycle-repository';
+import { getTranscriptStore } from './transcript-store';
 import {
   normalizeMcpChatAccessScope,
   type McpChatAccessScope,
@@ -394,30 +396,63 @@ async function authenticateChatMcpToken(
   ) {
     return null;
   }
+  const database = getHubDatabase();
+  if (database) {
+    // Initialize the canonical stores once, then read only current authorization
+    // metadata. Never hydrate the fleet's transcripts just to authenticate a chat.
+    await getDroneLifecycleRepository();
+    getTranscriptStore();
+    return database.read((connection) => {
+      const chatId = resolveRepairedChatIdentity(connection, payload.droneId, payload.chatName, payload.chatId);
+      const row = connection.prepare(`
+        SELECT c.chat_name, c.metadata_json
+        FROM canonical_chats c
+        JOIN hub_canonical_drones d ON d.drone_id = c.drone_id
+        WHERE trim(json_extract(c.metadata_json, '$.id')) = ? AND c.drone_id = ?
+      `).get(chatId, payload.droneId) as { chat_name: string; metadata_json: string } | undefined;
+      if (!row) return null;
+      const chat = JSON.parse(row.metadata_json);
+      return chatMcpIdentity(payload.droneId, chatId, row.chat_name, chat, (droneId) => {
+        const drone = connection.prepare('SELECT name FROM hub_canonical_drones WHERE drone_id = ?')
+          .get(droneId) as { name: string } | undefined;
+        return drone?.name;
+      });
+    });
+  }
+
+  // Legacy runtimes without native SQLite retain their existing registry path.
+  // A missing canonical row above must never resurrect a deleted chat from it.
   const registry: any = await loadRegistry();
-  const chatId = getHubDatabase()?.read((connection) =>
-    resolveRepairedChatIdentity(connection, payload.droneId, payload.chatName, payload.chatId),
-  ) ?? payload.chatId;
+  const chatId = payload.chatId;
   const chats = registry?.drones?.[payload.droneId]?.chats;
   const currentChat = Object.entries(
     chats && typeof chats === 'object' && !Array.isArray(chats) ? chats : {},
   ).find(([, chat]: [string, any]) => normalizeOptionalString(chat?.id) === chatId);
   if (!currentChat) return null;
   const [chatName, chat] = currentChat as [string, any];
+  return chatMcpIdentity(payload.droneId, chatId, chatName, chat, (droneId) => registry?.drones?.[droneId]?.name);
+}
+
+function chatMcpIdentity(
+  droneId: string,
+  chatId: string,
+  chatName: string,
+  chat: any,
+  droneName: (id: string) => unknown,
+): McpTokenIdentity {
   const accessScope = normalizeMcpChatAccessScope(
     chat.droneHubMcpAccessScope,
-    payload.droneId,
+    droneId,
   );
-  const selectedDroneRefs = accessScope.droneIds.flatMap((droneId) => {
-    const drone = registry?.drones?.[droneId];
-    const name = normalizeOptionalString(drone?.name);
-    return name && name !== droneId ? [droneId, name] : [droneId];
+  const selectedDroneRefs = accessScope.droneIds.flatMap((id) => {
+    const name = normalizeOptionalString(droneName(id));
+    return name && name !== id ? [id, name] : [id];
   });
   return {
     kind: 'chat',
     tokenId: `chat:${chatId}`,
-    name: `${payload.droneId}/${chatName} chat`,
-    droneId: payload.droneId,
+    name: `${droneId}/${chatName} chat`,
+    droneId,
     chatName,
     chatId,
     accessScope,

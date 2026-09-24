@@ -1,0 +1,13 @@
+{"phase": "codex-rpc", "method": "initialize", "durationMs": 212.3}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":23.8,"serverTiming":"auth;dur=5.5, body;dur=0.6, catalog;dur=10.9, connect;dur=0.3"}
+{"phase":"hub-request","httpMethod":"POST","status":202,"totalMs":20.4,"serverTiming":"auth;dur=0.7, body;dur=0.1, catalog;dur=17.3, connect;dur=0.1"}
+{"phase":"hub-request","httpMethod":"GET","status":405,"totalMs":1,"serverTiming":"auth;dur=0.7"}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":92.4,"serverTiming":"auth;dur=0.4, body;dur=0.1, catalog;dur=11.5, connect;dur=0.1"}
+{"phase": "codex-rpc", "method": "mcpServerStatus/list", "durationMs": 285.7}
+{"phase": "inventory", "runtimeStatus": null, "toolCount": 65}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":13.3,"serverTiming":"auth;dur=0.9, body;dur=0.3, catalog;dur=9.9, connect;dur=0.1"}
+{"phase":"hub-request","httpMethod":"POST","status":202,"totalMs":10.4,"serverTiming":"auth;dur=0.7, body;dur=0.3, catalog;dur=8.4, connect;dur=0.0"}
+{"phase":"hub-request","httpMethod":"GET","status":405,"totalMs":0.9,"serverTiming":"auth;dur=0.7"}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":81.6,"serverTiming":"auth;dur=1.3, body;dur=0.4, catalog;dur=7.3, connect;dur=0.0"}
+{"phase": "codex-rpc", "method": "mcpServerStatus/list", "durationMs": 232.9}
+{"phase": "inventory", "runtimeStatus": null, "toolCount": 65}

@@ -200,6 +200,10 @@ export class CodexAppServerConnection {
 
   async request(method: string, params: any, timeoutMs = 30_000): Promise<any> {
     const id = this.nextRequestId++;
+    const startedAt = performance.now();
+    const timed = process.env.DRONE_MCP_DIAGNOSTICS === '1' &&
+      ['initialize', 'thread/start', 'thread/resume', 'thread/fork', 'mcpServerStatus/list'].includes(method);
+    let outcome = 'completed';
     const result = new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (!this.pending.delete(id)) return;
@@ -216,7 +220,18 @@ export class CodexAppServerConnection {
       this.pending.delete(id);
       throw error;
     }
-    return await result;
+    try {
+      return await result;
+    } catch (error) {
+      outcome = 'failed';
+      throw error;
+    } finally {
+      if (timed) this.runCallback(() => this.options.onStderr?.(
+        `[DroneMcpTiming] ${JSON.stringify({ at: new Date().toISOString(), phase: 'codex-rpc',
+          id, method, outcome, timeoutMs,
+          durationMs: Math.round((performance.now() - startedAt) * 10) / 10 })}\n`,
+      ));
+    }
   }
 
   async call(method: string, params: any, timeoutMs?: number): Promise<any> {

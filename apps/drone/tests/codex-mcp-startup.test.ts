@@ -237,4 +237,29 @@ describe('managed Codex MCP startup', () => {
     );
     expect(await connection.call('thread/start', {})).toEqual({ thread: { id: 'thread-1' } });
   });
+
+  test('records opted-in discovery timings without RPC arguments', async () => {
+    const previous = process.env.DRONE_MCP_DIAGNOSTICS;
+    process.env.DRONE_MCP_DIAGNOSTICS = '1';
+    const h = harness();
+    const logs: string[] = [];
+    const connection = new CodexAppServerConnection({
+      launchScript: h.launchScript,
+      onStderr: (text) => { logs.push(text); },
+    });
+    try {
+      await connection.call('mcpServerStatus/list', { threadId: 'private-thread' });
+      const timing = logs.find((line) => line.includes('mcpServerStatus/list'))!;
+      expect(timing).toContain('"outcome":"completed"');
+      expect(timing).toContain('"durationMs":');
+      expect(logs.join('')).not.toContain('private-thread');
+      h.setMode('hang');
+      await expect(connection.call('mcpServerStatus/list', {}, 25)).rejects.toThrow('request timed out');
+      expect(logs.at(-1)).toContain('"outcome":"failed"');
+    } finally {
+      connection.stop();
+      if (previous == null) delete process.env.DRONE_MCP_DIAGNOSTICS;
+      else process.env.DRONE_MCP_DIAGNOSTICS = previous;
+    }
+  });
 });

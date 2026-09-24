@@ -44,24 +44,59 @@ export async function startMcpHttpStdioBridge(options?: {
   close: () => Promise<void>;
 }> {
   const connection = managedMcpConnectionFromEnvironment(options?.env);
+  const diagnostics = (options?.env ?? process.env).DRONE_MCP_DIAGNOSTICS === '1';
+  const timing = (phase: string, startedAt: number, details: Record<string, unknown> = {}) => {
+    if (!diagnostics) return;
+    console.error('[DroneMcpTiming]', JSON.stringify({
+      at: new Date().toISOString(), pid: process.pid, phase,
+      durationMs: Math.round((performance.now() - startedAt) * 10) / 10, ...details,
+    }));
+  };
   const remote = connection
     ? new Client({ name: 'Drone Hub managed chat bridge', version: '0.1.0' })
     : null;
   if (remote && connection) {
+    const startedAt = performance.now();
     await remote.connect(
       new StreamableHTTPClientTransport(connection.url, {
-        requestInit: { headers: { Authorization: `Bearer ${connection.token}` } },
+        requestInit: { headers: {
+          Authorization: `Bearer ${connection.token}`,
+          ...(diagnostics ? { 'x-drone-mcp-diagnostics': '1' } : {}),
+        } },
+        ...(diagnostics ? { fetch: async (url: string | URL | Request, init?: RequestInit) => {
+          const startedAt = performance.now();
+          try {
+            const response = await fetch(url, init);
+            timing('http-headers', startedAt, {
+              method: init?.method ?? 'GET', status: response.status,
+              serverTiming: response.headers.get('server-timing'),
+            });
+            return response;
+          } catch (error) {
+            timing('http-headers', startedAt, { outcome: 'failed' });
+            throw error;
+          }
+        } } : {}),
       }),
     );
+    timing('remote-initialize', startedAt);
   }
 
   const local = new Server(
     { name: 'Drone Hub managed chat bridge', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
-  local.setRequestHandler(ListToolsRequestSchema, async () =>
-    remote ? await remote.listTools() : { tools: [] },
-  );
+  local.setRequestHandler(ListToolsRequestSchema, async () => {
+    const startedAt = performance.now();
+    try {
+      const result = remote ? await remote.listTools() : { tools: [] };
+      timing('tools-list', startedAt, { toolCount: result.tools.length });
+      return result;
+    } catch (error) {
+      timing('tools-list', startedAt, { outcome: 'failed' });
+      throw error;
+    }
+  });
   if (remote) {
     local.setRequestHandler(
       CallToolRequestSchema,

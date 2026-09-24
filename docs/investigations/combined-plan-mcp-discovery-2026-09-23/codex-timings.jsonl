@@ -1,0 +1,21 @@
+{"phase": "codex-rpc", "method": "initialize", "durationMs": 224.9}
+{"phase":"loadRegistry","durationMs":2269.6}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":2295.2,"serverTiming":"auth;dur=2271.0, body;dur=0.5, catalog;dur=16.2, connect;dur=0.4"}
+{"phase":"loadRegistry","durationMs":2019.7}
+{"phase":"hub-request","httpMethod":"POST","status":202,"totalMs":2040.1,"serverTiming":"auth;dur=2020.3, body;dur=0.2, catalog;dur=16.4, connect;dur=0.1"}
+{"phase":"loadRegistry","durationMs":1977.6}
+{"phase":"loadRegistry","durationMs":1962}
+{"phase":"hub-request","httpMethod":"GET","status":405,"totalMs":1979.8,"serverTiming":"auth;dur=1978.6"}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":2070.2,"serverTiming":"auth;dur=1963.6, body;dur=0.6, catalog;dur=18.1, connect;dur=0.1"}
+{"phase": "codex-rpc", "method": "mcpServerStatus/list", "durationMs": 6578.6}
+{"phase": "inventory", "runtimeStatus": null, "toolCount": 65}
+{"phase":"loadRegistry","durationMs":2262.2}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":2280.2,"serverTiming":"auth;dur=2263.0, body;dur=0.3, catalog;dur=15.0, connect;dur=0.1"}
+{"phase":"loadRegistry","durationMs":1908.2}
+{"phase":"hub-request","httpMethod":"POST","status":202,"totalMs":1922.6,"serverTiming":"auth;dur=1908.8, body;dur=0.2, catalog;dur=12.0, connect;dur=0.1"}
+{"phase":"loadRegistry","durationMs":2084.2}
+{"phase":"hub-request","httpMethod":"GET","status":405,"totalMs":2085.4,"serverTiming":"auth;dur=2084.9"}
+{"phase":"loadRegistry","durationMs":1959.6}
+{"phase":"hub-request","httpMethod":"POST","status":200,"totalMs":2157.7,"serverTiming":"auth;dur=1961.1, body;dur=0.4, catalog;dur=29.0, connect;dur=0.2"}
+{"phase": "codex-rpc", "method": "mcpServerStatus/list", "durationMs": 8601.6}
+{"phase": "inventory", "runtimeStatus": null, "toolCount": 65}
