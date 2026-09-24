@@ -24,6 +24,15 @@ describe('chat voice recorder helpers', () => {
     expect(mergeDraftWithVoiceTranscript('existing draft', '   ')).toBe('existing draft');
   });
 
+  test('appends successive recordings after all lines and intervening edits', () => {
+    const first = mergeDraftWithVoiceTranscript('first line\nlast line', 'first recording');
+    expect(first).toBe('first line\nlast line\nfirst recording');
+    const edited = `${first}\ntyped while transcribing`;
+    expect(mergeDraftWithVoiceTranscript(edited, 'second recording')).toBe(
+      'first line\nlast line\nfirst recording\ntyped while transcribing\nsecond recording',
+    );
+  });
+
   test('inserts a voice transcript at the caret or over the selected text', () => {
     expect(insertVoiceTranscriptAtSelection('hello world', 'there', 5)).toEqual({
       value: 'hello\nthere world',

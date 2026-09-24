@@ -24,7 +24,7 @@ import {
 } from './chat-input-attachments';
 import {
   formatChatVoiceDuration,
-  insertVoiceTranscriptAtSelection,
+  mergeDraftWithVoiceTranscript,
   useChatVoiceRecorder,
 } from './use-chat-voice-recorder';
 import {
@@ -1046,16 +1046,12 @@ export function ChatInput({
     if (!transcript) {
       return { draft: draftRef.current, caret: composerSelectionRef.current.end };
     }
-    const selection = composerSelectionRef.current;
-    const insertion = insertVoiceTranscriptAtSelection(
-      draftRef.current,
-      transcript,
-      selection.start,
-      selection.end,
-    );
-    setDraft(insertion.value);
-    rememberComposerSelection({ start: insertion.caret, end: insertion.caret });
-    return { draft: insertion.value, caret: insertion.caret };
+    // Append to the latest draft, regardless of the saved cursor or selection.
+    const draft = mergeDraftWithVoiceTranscript(draftRef.current, transcript);
+    const caret = draft.length;
+    setDraft(draft);
+    rememberComposerSelection({ start: caret, end: caret });
+    return { draft, caret };
   }
 
   async function stopVoiceRecordingAndFillDraft() {
