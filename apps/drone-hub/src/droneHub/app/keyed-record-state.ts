@@ -9,13 +9,13 @@ export function removeRecordKey<T extends Record<string, any>>(prev: T, key: str
 
 export function beginRecordBusyKey(
   setBusy: React.Dispatch<React.SetStateAction<Record<string, true>>>,
+  inFlight: Set<string>,
   key: string,
 ): boolean {
-  let shouldStart = false;
-  setBusy((prev) => {
-    if (prev[key]) return prev;
-    shouldStart = true;
-    return { ...prev, [key]: true };
-  });
-  return shouldStart;
+  // React may defer or replay state updaters. Claim the request synchronously,
+  // and keep the updater pure so starting work never depends on rendering.
+  if (inFlight.has(key)) return false;
+  inFlight.add(key);
+  setBusy((prev) => ({ ...prev, [key]: true }));
+  return true;
 }

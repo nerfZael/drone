@@ -225,6 +225,7 @@ export function useChatRuntimeOrchestration({
   const [sendingPromptCountByChatKey, setSendingPromptCountByChatKey] = React.useState<Record<string, number>>({});
   const [promptError, setPromptError] = React.useState<string | null>(null);
   const [cancellingPendingPromptById, setCancellingPendingPromptById] = React.useState<Record<string, true>>({});
+  const cancellingPendingPromptIdsRef = React.useRef(new Set<string>());
   const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<Record<string, string>>({});
   const {
     busyById: resolvingInterruptionById,
@@ -451,7 +452,7 @@ export function useChatRuntimeOrchestration({
       if (!id || !selectedDrone) return;
       const chatName = String(selectedChat ?? '').trim() || 'default';
 
-      if (!beginRecordBusyKey(setCancellingPendingPromptById, id)) return;
+      if (!beginRecordBusyKey(setCancellingPendingPromptById, cancellingPendingPromptIdsRef.current, id)) return;
       setCancelPendingPromptErrorById((prev) => {
         return removeRecordKey(prev, id);
       });
@@ -463,6 +464,7 @@ export function useChatRuntimeOrchestration({
       if (localQueued) {
         removeQueuedPrompt(key, id);
         setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+        cancellingPendingPromptIdsRef.current.delete(id);
         setCancellingPendingPromptById((prev) => {
           return removeRecordKey(prev, id);
         });
@@ -495,6 +497,7 @@ export function useChatRuntimeOrchestration({
           setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: e?.message ?? String(e) }));
         }
       } finally {
+        cancellingPendingPromptIdsRef.current.delete(id);
         setCancellingPendingPromptById((prev) => {
           return removeRecordKey(prev, id);
         });

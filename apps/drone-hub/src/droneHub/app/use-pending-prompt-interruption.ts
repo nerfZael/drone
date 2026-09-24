@@ -12,6 +12,7 @@ export function usePendingPromptInterruption(input: {
   onResolved?: () => void;
 }) {
   const [busyById, setBusyById] = React.useState<Record<string, true>>({});
+  const inFlightIdsRef = React.useRef(new Set<string>());
   const [errorById, setErrorById] = React.useState<Record<string, string>>({});
   const onResolvedRef = React.useRef(input.onResolved);
   onResolvedRef.current = input.onResolved;
@@ -26,7 +27,7 @@ export function usePendingPromptInterruption(input: {
       const promptId = String(promptIdRaw ?? '').trim();
       const droneId = String(input.droneId ?? '').trim();
       const chatName = String(input.chatName ?? '').trim() || 'default';
-      if (!promptId || !droneId || !beginRecordBusyKey(setBusyById, promptId)) return;
+      if (!promptId || !droneId || !beginRecordBusyKey(setBusyById, inFlightIdsRef.current, promptId)) return;
       setErrorById((current) => removeRecordKey(current, promptId));
       try {
         await input.requestJson<{ ok: true }>(
@@ -44,6 +45,7 @@ export function usePendingPromptInterruption(input: {
           [promptId]: error?.message ?? String(error),
         }));
       } finally {
+        inFlightIdsRef.current.delete(promptId);
         setBusyById((current) => removeRecordKey(current, promptId));
       }
     },
