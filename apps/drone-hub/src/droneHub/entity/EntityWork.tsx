@@ -1,13 +1,15 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 
+const EntityWorkCanvas = React.lazy(() => import('./EntityWorkCanvas').then(m => ({ default: m.EntityWorkCanvas })));
+
 /**
  * The Work view: which worker is on which request, whether it is thinking, and how far it has got.
  * Everything comes from the snapshot and the event log (so it also works while replaying a recording),
  * except the done / doing / next steps, which come from `work_summary` events written by a cheap model.
  */
 
-type WorkerState = 'need' | 'think' | 'act' | 'wait' | 'done' | 'stop';
+export type WorkerState = 'need' | 'think' | 'act' | 'wait' | 'done' | 'stop';
 type Limb = EntitySnapshot['limbs'][number];
 
 export interface WorkItem {
@@ -28,6 +30,16 @@ export interface WorkItem {
   tokens: number;
   result?: string;
   lastActivity: number;
+  status: string;
+  /** What the worker was asked to do. */
+  task?: string;
+  createdAt: number;
+  endedAt?: number;
+  replyTo?: number;
+  group?: string;
+  waitFor?: string;
+  /** The worker holding a file this one needs, when blocked. */
+  blockedBy?: string;
 }
 
 const VERBS: Record<string, string> = {
@@ -44,8 +56,8 @@ const GROUPS: { key: string; label: string; of: WorkerState[] }[] = [
   { key: 'fin', label: 'Finished', of: ['done', 'stop'] },
 ];
 
-const STATE_COLOR: Record<WorkerState, string> = {
-  need: 'var(--orange, #e8773a)', think: 'var(--yellow, #d29922)', act: 'var(--accent)', wait: 'var(--muted)', done: 'var(--green, #3fb950)', stop: 'var(--red, #e5534b)',
+export const STATE_COLOR: Record<WorkerState, string> = {
+  need: 'var(--orange, #e8773a)', think: 'var(--yellow, #d29922)', act: 'var(--act, var(--accent))', wait: 'var(--muted)', done: 'var(--green, #3fb950)', stop: 'var(--red, #e5534b)',
 };
 
 /** Derives the Work view from a snapshot and the event log. Pure, so it is cheap to rerun on every event. */
@@ -105,13 +117,16 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
   let since: number | undefined;
   let pulse = false;
   let now: WorkItem['now'];
+  let blockedBy: string | undefined;
   if (l.status === 'done') { state = 'done'; label = 'done'; }
+  else if (l.status === 'queued') { state = 'wait'; label = 'queued'; }
   else if (l.status !== 'running') { state = l.status === 'failed' ? 'need' : 'stop'; label = l.status === 'failed' ? 'failed' : 'stopped'; }
-  else if (l.waitFor) { state = 'wait'; label = `after ${l.waitFor}`; }
+  else if (l.waitFor) { state = 'wait'; label = `after ${nameOf(snapshot, l.waitFor)}`; }
   else if (inFlight) { const n = nowOf(inFlight); state = 'act'; label = n.verb; since = inFlight.t; now = n; }
   else if (failedLast && /^(refused|output stopped)/.test(String(failedLast.data.note))) {
     state = 'need'; label = 'blocked'; since = failedLast.t;
-    now = { verb: 'blocked:', object: String(failedLast.data.note).replace(/^refused: /, '').slice(0, 90), at: failedLast.t };
+    blockedBy = /claimed by (\S+?)[\s(]/.exec(String(failedLast.data.note))?.[1];
+    now = { verb: 'blocked:', object: withNames(snapshot, String(failedLast.data.note).replace(/^refused: /, '').replace(/ since [\d.]+s ago$/, '')).slice(0, 120), at: failedLast.t };
   } else if (l.runs.length) {
     const start = Math.max(...l.runs.map(r => r.startedAt), lastDone?.t ?? -Infinity);
     state = 'think'; label = 'thinking'; since = start; pulse = true;
@@ -133,26 +148,37 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
     cost, tokens,
     result: l.result,
     lastActivity,
+    status: l.status, blockedBy, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor,
   };
 }
 
-const clock = (ms: number) => {
+/** A worker's name for user-facing text; ids are for the runtime. */
+const nameOf = (snapshot: EntitySnapshot, id: string) => snapshot.limbs.find(l => l.id === id)?.name ?? id;
+/** Replaces worker ids in runtime text (like "claimed by worker-3") with their names. */
+const withNames = (snapshot: EntitySnapshot, text: string) => text.replace(/\b(?:worker|task)-\d+\b/g, id => nameOf(snapshot, id));
+
+export const clock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-const ago = (ms: number) => (ms < 1500 ? 'just now' : ms < 60_000 ? `${Math.round(ms / 1000)}s ago` : `${Math.round(ms / 60_000)}m ago`);
-const spend = (cost: number, tokens: number) => (cost > 0 ? `$${cost < 10 ? cost.toFixed(2) : cost.toFixed(0)}` : tokens > 0 ? `${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tok` : '—');
+export const ago = (ms: number) => (ms < 1500 ? 'just now' : ms < 60_000 ? `${Math.round(ms / 1000)}s ago` : `${Math.round(ms / 60_000)}m ago`);
+export const spend = (cost: number, tokens: number) => (cost > 0 ? `$${cost < 10 ? cost.toFixed(2) : cost.toFixed(0)}` : tokens > 0 ? `${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tok` : '—');
 
-export function EntityWork({ snapshot, events, live, onWorker }: {
+export function EntityWork({ snapshot, events, live, onWorker, link, onLink, openWorker, onReroute }: {
   snapshot: EntitySnapshot;
   events: EntityEvent[];
   /** False while replaying a recording: actions are hidden. */
   live: boolean;
   onWorker(id: string, action: 'message' | 'stop', text?: string): void;
+  /** Shared with the chat: what is highlighted, and requests to open a worker. */
+  link?: import('./EntityWorkCanvas').WorkLink;
+  onLink?(link: import('./EntityWorkCanvas').WorkLink): void;
+  openWorker?: { id: string; n: number } | null;
+  onReroute?(seq: number, how: 'separate' | 'fork'): void;
 }) {
   const { workers, head, costTotal, tokensTotal } = React.useMemo(() => deriveWork(snapshot, events), [snapshot, events]);
   const [filter, setFilter] = React.useState<'active' | 'all' | 'need'>('active');
-  const [density, setDensity] = React.useState<'rows' | 'cards'>('rows');
+  const [density, setDensity] = React.useState<'canvas' | 'rows' | 'cards'>('canvas');
   const [open, setOpen] = React.useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set(['fin']));
   const [query, setQuery] = React.useState('');
@@ -168,11 +194,16 @@ export function EntityWork({ snapshot, events, live, onWorker }: {
   };
 
   return (
-    <section className="flex min-h-0 flex-col bg-[var(--panel)]" aria-label="Work">
+    <section className="flex h-full min-h-0 flex-col bg-[var(--panel)]" aria-label="Work">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-1.5">
-        <Segmented<'active' | 'all' | 'need'> value={filter} onChange={setFilter} options={[['active', 'Active'], ['all', 'All'], ['need', 'Needs you']]} label="Show" />
-        <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by name, file or request"
-          className="min-w-[120px] max-w-[240px] flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 text-[12px] text-[var(--fg)] outline-none" />
+        <Segmented<'canvas' | 'rows' | 'cards'> value={density} onChange={setDensity} options={[['canvas', 'Canvas'], ['rows', 'Rows'], ['cards', 'Cards']]} label="View" />
+        {density === 'canvas' ? null : (
+          <>
+            <Segmented<'active' | 'all' | 'need'> value={filter} onChange={setFilter} options={[['active', 'Active'], ['all', 'All'], ['need', 'Needs you']]} label="Show" />
+            <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Filter by name, file or request"
+              className="min-w-[120px] max-w-[240px] flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 text-[12px] text-[var(--fg)] outline-none" />
+          </>
+        )}
         {head ? (
           <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-2 py-0.5 text-[12px]" style={{ color: STATE_COLOR.think }}
             title={`Head is thinking: ${head.reason}`}>
@@ -185,10 +216,13 @@ export function EntityWork({ snapshot, events, live, onWorker }: {
           <span title="Session time">{clock(t)}</span>
           <span title={costTotal > 0 ? 'Model cost this session' : 'Tokens this session (subscription models report no price)'}>{spend(costTotal, tokensTotal)}</span>
         </span>
-        <Segmented<'rows' | 'cards'> value={density} onChange={setDensity} options={[['rows', 'Rows'], ['cards', 'Cards']]} label="Density" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {density === 'canvas' ? (
+        <React.Suspense fallback={<div className="p-4 text-[var(--muted)]">Loading the canvas…</div>}>
+          <div className="entity-work-canvas flex min-h-0 flex-1 flex-col"><EntityWorkCanvas snapshot={snapshot} events={events} live={live} onWorker={onWorker} link={link} onLink={onLink} open={openWorker} onReroute={onReroute} /></div>
+        </React.Suspense>
+      ) : <div className="min-h-0 flex-1 overflow-y-auto">
         {workers.length === 0 ? (
           <div className="p-4 text-[var(--muted)]">No workers yet. Ask for something that takes real work and a worker starts on it.</div>
         ) : GROUPS.map(group => {
@@ -223,12 +257,12 @@ export function EntityWork({ snapshot, events, live, onWorker }: {
             </section>
           );
         })}
-      </div>
+      </div>}
     </section>
   );
 }
 
-function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange(v: T): void; options: [T, string][]; label: string }) {
+export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange(v: T): void; options: [T, string][]; label: string }) {
   return (
     <div role="group" aria-label={label} className="inline-flex rounded border border-[var(--border)] p-px text-[12px]">
       {options.map(([v, text]) => (
@@ -239,11 +273,11 @@ function Segmented<T extends string>({ value, onChange, options, label }: { valu
   );
 }
 
-function Dot({ pulse }: { pulse?: boolean }) {
+export function Dot({ pulse }: { pulse?: boolean }) {
   return <span className={`inline-block h-[7px] w-[7px] shrink-0 rounded-full bg-current ${pulse ? 'motion-safe:animate-pulse' : ''}`} />;
 }
 
-function Status({ w, t }: { w: WorkItem; t: number }) {
+export function Status({ w, t }: { w: WorkItem; t: number }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px]" style={{ color: STATE_COLOR[w.state] }}>
       <Dot pulse={w.pulse} />{w.label}{w.since !== undefined && (w.state === 'think' || w.state === 'act') ? <span className="font-mono text-[11px]">{clock(t - w.since)}</span> : null}
@@ -251,7 +285,7 @@ function Status({ w, t }: { w: WorkItem; t: number }) {
   );
 }
 
-function NowLine({ w, t }: { w: WorkItem; t: number }) {
+export function NowLine({ w, t }: { w: WorkItem; t: number }) {
   if (w.state === 'done' || w.state === 'stop' || w.label === 'failed') return <span className="block truncate text-[var(--muted)]" title={w.result}>{w.result ?? ''}</span>;
   if (!w.now) return <span className="text-[var(--muted)] opacity-70">{w.state === 'wait' ? 'not started' : ''}</span>;
   return (
@@ -263,7 +297,7 @@ function NowLine({ w, t }: { w: WorkItem; t: number }) {
   );
 }
 
-function Pips({ w }: { w: WorkItem }) {
+export function Pips({ w }: { w: WorkItem }) {
   if (!w.steps) return <span />;
   const color = STATE_COLOR[w.state];
   return (
@@ -283,8 +317,8 @@ function WorkerRow({ w, t, depth, open, onToggle }: { w: WorkItem; t: number; de
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
       className="grid cursor-pointer grid-cols-[3px_minmax(0,1fr)_112px_72px_48px_56px] grid-rows-[auto_auto] items-center gap-x-3 py-1 pr-3 hover:bg-[var(--hover)]">
       <span className="row-span-2 self-stretch" style={{ background: STATE_COLOR[w.state] }} />
-      <span className="min-w-0 truncate font-medium" style={{ paddingLeft: depth * 14 }} title={w.name}>
-        {depth ? '↳ ' : ''}{w.name}<span className="ml-1.5 font-mono text-[11px] font-normal text-[var(--muted)] opacity-70">{w.id}</span>
+      <span className="min-w-0 truncate font-medium" style={{ paddingLeft: depth * 14 }} title={`${w.name} (${w.id})`}>
+        {depth ? '↳ ' : ''}{w.name}
       </span>
       <Status w={w} t={t} />
       <Pips w={w} />
@@ -295,7 +329,7 @@ function WorkerRow({ w, t, depth, open, onToggle }: { w: WorkItem; t: number; de
   );
 }
 
-function Steps({ w }: { w: WorkItem }) {
+export function Steps({ w }: { w: WorkItem }) {
   if (!w.steps) return <div className="text-[12px] text-[var(--muted)] opacity-80">No summary yet.</div>;
   const item = (glyph: string, color: string, text: string, key: string, dim?: boolean) => (
     <li key={key} className={`grid grid-cols-[14px_1fr] gap-1.5 ${dim ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary,var(--fg))]'}`}>
@@ -312,12 +346,12 @@ function Steps({ w }: { w: WorkItem }) {
   );
 }
 
-function WorkerDetail({ w, t, live, onWorker }: { w: WorkItem; t: number; live: boolean; onWorker(id: string, action: 'message' | 'stop', text?: string): void }) {
+export function WorkerDetail({ w, t, live, onWorker, hideAsk }: { w: WorkItem; t: number; live: boolean; onWorker(id: string, action: 'message' | 'stop', text?: string): void; hideAsk?: boolean }) {
   const [text, setText] = React.useState('');
   const running = w.state !== 'done' && w.state !== 'stop';
   return (
     <div className="grid gap-1.5 bg-[var(--hover)] py-2 pl-[15px] pr-3" style={{ borderLeft: `3px solid ${STATE_COLOR[w.state]}` }}>
-      {w.ask ? (
+      {w.ask && !hideAsk ? (
         <div className="truncate text-[var(--muted)]">
           <span className="text-[var(--fg-secondary,var(--fg))]">“{w.ask.text}”</span> · #{w.ask.seq}
           {w.ask.routedMs !== undefined ? ` · routed in ${(w.ask.routedMs / 1000).toFixed(1)}s` : ''}{w.model ? ` · ${w.model}` : ''}{w.parent ? ` · forked from ${w.parent}` : ''}

@@ -124,7 +124,7 @@ test('cancel asks a task to wrap up, then kills it after the grace period', asyn
   let taskResult = '';
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
-    if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'task-3' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'worker-3' });
     if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
   });
   h.entity.start();

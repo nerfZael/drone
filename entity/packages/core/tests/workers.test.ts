@@ -27,7 +27,7 @@ test('workers: each message gets a worker at once; workers reply in their own th
     if (input.role === 'head') {
       if (message === 'fix the flaky test') await call('dispatch', { task: 'fix the flaky test', name: 'flaky' });
       if (message === 'add a changelog entry') await call('dispatch', { task: 'add a changelog entry', name: 'changelog' });
-      if (message === "how's the test fix going?") await call('say', { text: 'task-3 is still on it' });
+      if (message === "how's the test fix going?") await call('say', { text: 'worker-3 is still on it' });
     }
     if (input.role === 'task' && ownTask(input) === 'fix the flaky test') {
       await firstBusy;
@@ -45,10 +45,10 @@ test('workers: each message gets a worker at once; workers reply in their own th
   const m2 = h.entity.input('chat_message', { text: 'add a changelog entry' });
   await until(() => h.said().includes('changelog entry added'));
   h.entity.input('chat_message', { text: "how's the test fix going?" });
-  await until(() => h.said().includes('task-3 is still on it'));
+  await until(() => h.said().includes('worker-3 is still on it'));
   releaseFirst();
   await until(() => h.said().includes('fixed: the test raced on a timer'));
-  const replies = h.of('chat_message', b => b.startsWith('task-'));
+  const replies = h.of('chat_message', b => b.startsWith('worker-'));
   expect(replies.find(e => e.data.text === 'fixed: the test raced on a timer')!.data.reply_to).toBe(m1.seq);
   expect(replies.find(e => e.data.text === 'changelog entry added')!.data.reply_to).toBe(m2.seq);
   expect(h.of('task_done')).toHaveLength(2);
@@ -63,25 +63,25 @@ test('workers: steer reaches a busy worker with its next tool result; fork conti
     const message = lastUserMessage(input);
     if (input.role === 'head') {
       if (message === 'refactor auth') await call('dispatch', { task: 'refactor auth', name: 'auth' });
-      if (message === 'keep the old API') await call('steer', { worker: 'task-3', text: 'keep the old API' });
-      if (message === 'do the same for billing') await call('fork', { worker: 'task-3', task: 'do the same for billing' });
-      if (message === 'then write docs') await call('dispatch', { task: 'write docs', after: 'task-3' });
+      if (message === 'keep the old API') await call('steer', { worker: 'worker-3', text: 'keep the old API' });
+      if (message === 'do the same for billing') await call('fork', { worker: 'worker-3', task: 'do the same for billing' });
+      if (message === 'then write docs') await call('dispatch', { task: 'write docs', after: 'worker-3' });
     }
-    if (input.role === 'task' && input.limbId === 'task-3') {
+    if (input.role === 'task' && input.limbId === 'worker-3') {
       await gate;
       seen.push(await call('note', { text: 'working' }));
       await call('finish_task', { result: 'auth refactored' });
     }
-    if (input.role === 'task' && input.limbId !== 'task-3') await call('finish_task', { result: `${input.limbId} done` });
+    if (input.role === 'task' && input.limbId !== 'worker-3') await call('finish_task', { result: `${input.limbId} done` });
   }, {});
   h.entity.start();
   h.entity.input('chat_message', { text: 'refactor auth' });
-  await until(() => h.mind.runs.some(r => r.limbId === 'task-3'));
+  await until(() => h.mind.runs.some(r => r.limbId === 'worker-3'));
   h.entity.input('chat_message', { text: 'keep the old API' });
   await until(() => h.of('steered').length === 1);
   h.entity.input('chat_message', { text: 'then write docs' });
   await until(() => h.of('limb_spawned').length === 2);
-  expect(h.mind.runs.some(r => r.limbId === 'task-6')).toBe(false); // waiting for task-3
+  expect(h.mind.runs.some(r => r.limbId === 'worker-6')).toBe(false); // waiting for worker-3
   go();
   await until(() => h.of('task_done').length === 2);
   expect(seen[0]).toContain('[updates while you worked]');
@@ -89,7 +89,7 @@ test('workers: steer reaches a busy worker with its next tool result; fork conti
   h.entity.input('chat_message', { text: 'do the same for billing' });
   await until(() => h.of('task_done').length === 3);
   expect(h.mind.forks).toHaveLength(1);
-  expect(h.mind.forks[0][0]).toBe('task-3');
+  expect(h.mind.forks[0][0]).toBe('worker-3');
 });
 
 test('workspace: tools stay inside the root, and a file claimed by one worker is refused to another', async () => {
@@ -124,7 +124,7 @@ test('workspace: tools stay inside the root, and a file claimed by one worker is
   expect(results.edit).toStartWith('edited app.ts');
   expect(results.escape).toContain('outside the workspace');
   expect(results.git).toContain('.git');
-  expect(results.b).toContain('claimed by task-3');
+  expect(results.b).toContain('claimed by worker-3');
   expect(readFileSync(path.join(dir, 'app.ts'), 'utf8')).toBe('export const answer = 42;\n');
   await until(() => h.of('task_done').length === 2);
   expect(h.entity.snapshot().limbs.find(l => l.id === 'head')).toBeDefined();
@@ -164,19 +164,19 @@ test('work view data: tool calls are logged with outcomes, busy workers get summ
   h.entity.input('chat_message', { text: 'work' });
   await until(() => h.of('work_summary').length === 1);
   const summary = h.of('work_summary')[0];
-  expect(summary.data).toMatchObject({ limb: 'task-3', done: ['read the file'], doing: ['editing'], next: ['run tests'] });
+  expect(summary.data).toMatchObject({ limb: 'worker-3', done: ['read the file'], doing: ['editing'], next: ['run tests'] });
   expect(summaries[0]).toContain('called note: step 0');
   await until(() => h.of('tool_done').some(e => e.data.ok === false));
-  expect(h.of('tool_called', b => b === 'task-3').map(e => e.data.name)).toContain('press');
-  expect(h.entity.messageWorker('task-3', 'use tabs, not spaces')).toContain('next tool result');
+  expect(h.of('tool_called', b => b === 'worker-3').map(e => e.data.name)).toContain('press');
+  expect(h.entity.messageWorker('worker-3', 'use tabs, not spaces')).toContain('next tool result');
   release();
   await until(() => heard.length === 1);
   expect(heard[0]).toContain('Message from the user: use tabs, not spaces');
   await until(() => h.of('task_done').length === 1);
-  const worker = h.entity.snapshot().limbs.find(l => l.id === 'task-3')!;
+  const worker = h.entity.snapshot().limbs.find(l => l.id === 'worker-3')!;
   expect(worker.endedAt).toBeGreaterThan(worker.createdAt);
   expect(worker.replyTo).toBeGreaterThan(0);
-  expect(h.entity.stopWorker('task-3')).toContain('already done');
+  expect(h.entity.stopWorker('worker-3')).toContain('already done');
 });
 
 test('a worker that runs out of turns is continued with its conversation, then marked failed at the cap; one that ends quietly keeps its last reply as result', async () => {
@@ -200,4 +200,182 @@ test('a worker that runs out of turns is continued with its conversation, then m
   h.entity.input('chat_message', { text: 'short' });
   await until(() => h.of('task_done').length === 2);
   expect(h.of('task_done')[1].data).toMatchObject({ status: 'done', result: 'here is the answer' });
+});
+
+test('workers: dispatch_many starts a batch; past the running limit workers queue and start as others finish; a queued worker can be steered or stopped', async () => {
+  const release = new Map<string, () => void>();
+  const started: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'fix all five') {
+      const result = await call('dispatch_many', { title: 'Open issues', items: [1, 2, 3, 4, 5].map(n => ({ task: `issue ${n}`, name: `#${n}` })) });
+      expect(result).toContain('5 workers (2 started, 3 queued)');
+    }
+    if (input.role === 'task') {
+      started.push(ownTask(input));
+      await new Promise<void>(r => release.set(ownTask(input), r));
+      await call('finish_task', { result: `${ownTask(input)} done` });
+    }
+  }, { config: { maxTasks: 2 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'fix all five' });
+  await until(() => h.of('limb_spawned').length === 5 && started.length === 2);
+  const group = h.of('group_started')[0].data;
+  expect(group).toMatchObject({ title: 'Open issues', count: 5 });
+  const workers = h.entity.snapshot().limbs.filter(l => l.role === 'task');
+  expect(workers.every(l => l.group === group.id)).toBe(true);
+  expect(workers.map(l => l.status)).toEqual(['running', 'running', 'queued', 'queued', 'queued']);
+  expect(h.entity.messageWorker(workers[2].id, 'use the new API')).toContain('queued');
+  expect(h.entity.stopWorker(workers[4].id)).toContain('before it started');
+  release.get('issue 1')!();
+  await until(() => started.length === 3);
+  expect(started[2]).toBe('issue 3');
+  expect(h.mind.runs.find(r => r.limbId === workers[2].id)!.prompt).toContain('use the new API');
+  release.get('issue 2')!();
+  await until(() => started.length === 4);
+  release.get('issue 3')!(); release.get('issue 4')!();
+  await until(() => h.of('task_done').length === 5);
+  expect(h.of('task_done').map(e => e.data.status).sort()).toEqual(['cancelled', 'done', 'done', 'done', 'done']);
+});
+
+test('workers: watches and programs carry a short label', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('set_watch', { watch: { name: 'run tests when quiet', label: 'tests on quiet', on: { event: 'key_down' }, do: { wake: { reason: 'x' } } } });
+    await call('run_program', { name: 'hammer', label: 'reset ×20', code: 'await wait(1000)' });
+  }, {});
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  const labels = h.entity.snapshot().limbs.filter(l => l.kind === 'code').map(l => l.label);
+  expect(labels.sort()).toEqual(['reset ×20', 'tests on quiet']);
+});
+
+test('workers: a batch shows one progress line in the chat; its workers reply in their threads; the front limb hears when it ends', async () => {
+  const release = new Map<string, () => void>();
+  let finished = '';
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'fix three' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('dispatch_many', { title: 'Three fixes', items: [{ task: 'fix a', name: 'a' }, { task: 'fix b', name: 'b' }, { task: 'fix c', name: 'c' }] });
+    }
+    const reason = String(JSON.parse(input.prompt.slice(input.prompt.lastIndexOf('\nTIME\n') + 6)).woken_because);
+    if (input.role === 'head' && reason.startsWith('batch')) finished = reason;
+    if (input.role === 'task') {
+      expect(input.system).toContain('Three fixes');
+      expect(await call('say', { text: `working on ${ownTask(input)}` })).toBe('posted in your thread');
+      await new Promise<void>(r => release.set(ownTask(input), r));
+      await call('finish_task', { result: `${ownTask(input)} done` });
+    }
+  }, { config: { maxTasks: 2 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'fix three' });
+  await until(() => release.size === 2);
+  const line = h.of('chat_message').find(e => e.data.group)!;
+  expect(line.data.text).toBe('Three fixes: 0 of 3 done, 2 running, 1 queued.');
+  // Thread replies are logged but kept out of the chat's state.
+  const chat = h.entity.snapshot().world.chat as { messages: { text: string }[] };
+  expect(chat.messages.map(m => m.text)).toEqual(['fix three', 'Three fixes: 0 of 3 done, 2 running, 1 queued.']);
+  release.get('fix a')!();
+  await until(() => release.size === 3);
+  release.get('fix b')!(); release.get('fix c')!();
+  await until(() => finished !== '');
+  const updates = h.of('chat_message_updated').map(e => e.data.text);
+  expect(updates[updates.length - 1]).toBe('Three fixes: 3 of 3 done.');
+  expect((h.entity.snapshot().world.chat as { messages: { text: string }[] }).messages[1].text).toBe('Three fixes: 3 of 3 done.');
+  expect(finished).toContain('batch "Three fixes" finished. Three fixes: 3 of 3 done.');
+  expect(finished).toContain('c: done: fix c done');
+});
+
+test('workers: a steer for after waits until the worker finishes, then it continues in the same conversation', async () => {
+  let release!: () => void;
+  const prompts: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'build the game') await call('dispatch', { task: 'build the game', name: 'game' });
+    if (input.role === 'head' && lastUserMessage(input) === 'then add tests') expect(await call('steer', { worker: 'worker-3', text: 'add tests', when: 'after' })).toContain('once it finishes');
+    if (input.role === 'task') {
+      prompts.push(input.prompt);
+      if (prompts.length === 1) { await new Promise<void>(r => { release = r; }); await call('finish_task', { result: 'game built' }); }
+      else await call('finish_task', { result: 'tests added' });
+    }
+  }, {});
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'build the game' });
+  await until(() => prompts.length === 1);
+  h.entity.input('chat_message', { text: 'then add tests' });
+  await until(() => h.of('steered').length === 1);
+  await sleep(30);
+  expect(prompts).toHaveLength(1); // not interrupted
+  release();
+  await until(() => h.of('task_done').length === 2);
+  expect(prompts[1]).toContain('queued for after that: Message from the user (via head): add tests');
+  expect(h.of('task_done').map(e => e.data.result)).toEqual(['game built', 'tests added']);
+});
+
+test('review: the front limb\'s answers get a second look; a wrong one is struck and corrected below, the rest count as confirmed', async () => {
+  const reviews: string[] = [];
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.limbId === 'head' && input.prompt.includes('"woken_because":"user message"')) {
+      if (message === 'hi') await call('say', { text: 'hey!' });
+      if (message === 'what is 17 * 3?') await call('say', { text: '17 * 3 is 41' });
+    }
+    if (input.limbId === 'reviewer') {
+      reviews.push(JSON.parse(input.prompt.slice(input.prompt.lastIndexOf('\nTIME\n') + 6)).woken_because);
+      const wrong = h.of('chat_message').find(e => e.data.text === '17 * 3 is 41');
+      if (wrong) expect(await call('amend', { seq: wrong.seq, verdict: 'correct', text: '17 * 3 is 51' })).toContain('corrected');
+    }
+  }, { config: { review: 'separate', reviewQuietMs: 40 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(h.of('message_reviewed')[0].data).toMatchObject({ verdict: 'confirmed', implicit: true });
+  h.entity.input('chat_message', { text: 'what is 17 * 3?' });
+  await until(() => h.of('message_reviewed').length === 2);
+  const wrong = h.of('chat_message').find(e => e.data.text === '17 * 3 is 41')!;
+  const fix = h.of('chat_message').find(e => e.data.corrects === wrong.seq)!;
+  expect(fix).toMatchObject({ by: 'reviewer', data: { text: '17 * 3 is 51' } });
+  expect(h.of('message_reviewed')[1].data).toMatchObject({ seq: wrong.seq, verdict: 'corrected', by: fix.seq });
+  expect(reviews).toHaveLength(2);
+  const chat = h.entity.snapshot().world.chat as { messages: { seq: number; correctedBy?: number }[] };
+  expect(chat.messages.find(m => m.seq === wrong.seq)!.correctedBy).toBe(fix.seq);
+});
+
+test('review: with review "head", the head reviews the voice\'s answers', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'voice' && lastUserMessage(input) === 'capital of Australia?') await call('say', { text: 'Sydney' });
+    if (input.role === 'head' && input.prompt.includes('"woken_because":"review')) {
+      expect(input.tools.some(t => t.name === 'amend')).toBe(true);
+      await call('amend', { seq: h.of('chat_message').find(e => e.data.text === 'Sydney')!.seq, verdict: 'correct', text: 'Canberra, not Sydney.' });
+    }
+  }, { models: { head: 'test/head', task: 'test/task', voice: 'test/voice' }, config: { review: 'head', reviewQuietMs: 40 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'capital of Australia?' });
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(h.said()).toEqual(['Sydney', 'Canberra, not Sydney.']);
+});
+
+test('reroute: a message steered into a worker can be moved to its own worker or a fork, and the steered worker is told', async () => {
+  let release!: () => void;
+  const seen: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'build the game') await call('dispatch', { task: 'build the game', name: 'game' });
+    if (input.role === 'head' && lastUserMessage(input) === 'also nice sprites') await call('steer', { worker: 'worker-3', text: 'also nice sprites' });
+    if (input.role === 'task' && input.limbId === 'worker-3') {
+      await new Promise<void>(r => { release = r; });
+      seen.push(await call('note', { text: 'still going' }));
+      await call('finish_task', { result: 'game' });
+    }
+    if (input.role === 'task' && input.limbId !== 'worker-3') await call('finish_task', { result: 'sprites' });
+  }, {});
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'build the game' });
+  await until(() => h.of('limb_spawned').length === 1);
+  const m2 = h.entity.input('chat_message', { text: 'also nice sprites' });
+  await until(() => h.of('steered').length === 1);
+  expect(h.entity.reroute(m2.seq, 'fork')).toContain('started from worker-3');
+  const spawn = h.of('limb_spawned')[1].data;
+  expect(spawn).toMatchObject({ fork_of: 'worker-3', reply_to: m2.seq });
+  expect(h.of('rerouted')[0].data).toMatchObject({ seq: m2.seq, how: 'fork', from: 'worker-3' });
+  release();
+  await until(() => h.of('task_done').length === 2);
+  expect(seen[0]).toContain('moved their message "also nice sprites" to a separate worker');
 });

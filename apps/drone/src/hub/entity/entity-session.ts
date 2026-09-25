@@ -20,6 +20,8 @@ export interface EntitySessionConfig {
   allowCommands: boolean;
   /** Work view summaries of busy workers, written by a cheap model. */
   summaries: boolean;
+  /** Second looks at the front limb's answers: a separate reviewer on the head's model, the head itself, or none. */
+  review: 'off' | 'separate' | 'head';
 }
 
 /** Where session recordings go: next to hub.log, so other agents on this machine can read them. */
@@ -42,6 +44,7 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
   workspace: '',
   allowCommands: false,
   summaries: true,
+  review: 'separate',
 };
 
 export type EntityStreamMessage =
@@ -78,6 +81,7 @@ export class EntitySession {
     this.entity = new Entity({
       mind: this.createMind(this.config),
       channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: this.config.workspace || defaultEntityWorkspace(), allowCommands: this.config.allowCommands })],
+      config: { review: this.config.review },
       models: { head: this.config.headModel, task: this.config.taskModel, voice: this.config.voiceModel || undefined },
       evaluator: this.config.evaluator === 'off' ? undefined : this.createEvaluator(this.config.evaluator),
       summarizer: this.config.summaries ? createWorkSummarizer() : undefined,
@@ -137,6 +141,11 @@ export class EntitySession {
   /** Work view actions on one worker. */
   worker(id: string, action: 'message' | 'stop', text = ''): string {
     return action === 'message' ? this.entity.messageWorker(id, text) : this.entity.stopWorker(id);
+  }
+
+  /** The user overrides how a message was routed (the Work canvas's corrections). */
+  reroute(seq: number, how: 'separate' | 'fork'): string {
+    return this.entity.reroute(seq, how);
   }
 
   /** Config changes rebuild the entity, so they are only allowed before Start or after Reset. */

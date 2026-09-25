@@ -87,6 +87,14 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
     json(200, { ok: true, result });
   });
 
+  router.post('/api/entity/reroute', async ({ readJson, json, fail }) => {
+    const body = await readJson<{ seq?: number; how?: string }>();
+    if (typeof body?.seq !== 'number' || (body.how !== 'separate' && body.how !== 'fork')) return fail(400, 'seq and how (separate or fork) are required');
+    const result = current().reroute(body.seq, body.how);
+    if (result.startsWith('error')) return fail(400, result.replace(/^error: /, ''));
+    json(200, { ok: true, result });
+  });
+
   router.post('/api/entity/config', async ({ readJson, json, fail }) => {
     const body = await readJson<Partial<EntitySessionConfig>>();
     const update: Partial<EntitySessionConfig> = {};
@@ -98,6 +106,7 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
     }
     if (body?.allowCommands !== undefined) update.allowCommands = body.allowCommands === true;
     if (body?.summaries !== undefined) update.summaries = body.summaries === true;
+    if (body?.review !== undefined) { if (!['off', 'separate', 'head'].includes(body.review)) return fail(400, 'review must be off, separate or head'); update.review = body.review; }
     if (body?.workspace !== undefined) {
       const dir = String(body.workspace).trim();
       if (dir && (!path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory())) return fail(400, 'workspace must be an absolute path to an existing folder (or empty for the scratch folder)');

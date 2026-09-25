@@ -831,6 +831,29 @@ code, pre {
   to { stroke-dashoffset: -100; }
 }
 .brain-comet { stroke-dasharray: 22 200; animation: brain-comet .42s cubic-bezier(.3,0,.2,1) both; }
+@keyframes entity-flash { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); } }
+.entity-flash { animation: entity-flash .9s ease-out; }
+/* Work canvas palette (from the mockup): a darker ground than the cards, a faint dot grid, softer status colours. */
+.entity-work-canvas {
+  --panel: #161920; --panel-alt: #1c1f27; --hover: #1b1e26; --border: #2a2e39;
+  --fg: #e7e9ef; --fg-secondary: #c3c7d2; --muted: #8b91a1; --accent: #9ea2ff; --act: #6ea8ff;
+  --green: #58c27a; --orange: #fb8a4c; --yellow: #e0a84a; --red: #e07a7a;
+  --work-ground: #0f1116;
+  --work-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .25);
+  background: var(--panel); color: var(--fg);
+}
+.entity-work-canvas .react-flow { background: var(--work-ground); }
+.entity-work-canvas .work-card { box-shadow: var(--work-shadow); }
+/* Markdown in the entity views, at the bench's size rather than the main chat's. */
+.dh-markdown.entity-md { font-size: 13px; line-height: 1.5; }
+.dh-markdown.entity-md > :first-child { margin-top: 0; }
+.dh-markdown.entity-md > :last-child { margin-bottom: 0; }
+/* Work canvas: once settled, cards slide to new places instead of jumping; folded work fades out. */
+[data-settled] .react-flow__node { transition: transform .14s ease-out; }
+@keyframes entity-leave { to { opacity: 0; } }
+.react-flow__node.entity-leaving { animation: entity-leave .35s ease forwards; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { [data-settled] .react-flow__node { transition: none; } .react-flow__node.entity-leaving { animation: none; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .entity-flash { animation: none; } }
 @keyframes brain-spark {
   from { offset-distance: 0%; opacity: 1; }
   85% { opacity: 1; }

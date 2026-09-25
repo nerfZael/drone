@@ -18,7 +18,7 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
     m2,
     ev(3100, 'limb_spawned', 'voice', { id: 'task-2', fork_of: 'task-1' }),
     ev(3200, 'tool_called', 'task-2', { run: 'r2', name: 'write_file', summary: 'src/b.ts' }),
-    ev(3300, 'tool_done', 'task-2', { run: 'r2', name: 'write_file', ok: false, note: 'refused: "src/b.ts" is claimed by task-9' }),
+    ev(3300, 'tool_done', 'task-2', { run: 'r2', name: 'write_file', ok: false, note: 'refused: "src/b.ts" is claimed by task-1 (writing) since 2.0s ago' }),
     ev(3400, 'chat_message', 'task-3', { text: 'date-fns or dayjs?', reply_to: m1.seq }),
     ev(3500, 'work_summary', 'system', { limb: 'task-1', done: ['found the bug'], doing: ['fixing a.ts'], next: ['run tests'] }),
     ev(3600, 'run_finished', 'task-4', { usage: { input: 1000, output: 200, cost: 0.12 } }),
@@ -27,7 +27,7 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
     status: 'running', t: 5000,
     limbs: [
       limb('head', { role: 'head', runs: [{ id: 'h', reason: 'claim conflict', startedAt: 4000, voice: true }] }),
-      limb('task-1', { runs: [{ id: 'r1', reason: 'task assigned', startedAt: 2500, voice: true }], replyTo: m1.seq, claims: ['src/a.ts'] }),
+      limb('task-1', { name: 'Login fix', runs: [{ id: 'r1', reason: 'task assigned', startedAt: 2500, voice: true }], replyTo: m1.seq, claims: ['src/a.ts'] }),
       limb('task-2', { runs: [{ id: 'r2', reason: 'forked', startedAt: 3100, voice: true }], replyTo: m2.seq }),
       limb('task-3', { replyTo: m1.seq }),
       limb('task-4', { status: 'done', result: 'tests pass', endedAt: 3700 }),
@@ -46,7 +46,10 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
   expect(w['task-2']).toMatchObject({ state: 'need', label: 'blocked', parent: 'task-1' });
   expect(w['task-3']).toMatchObject({ state: 'need', label: 'asking you' });
   expect(w['task-4']).toMatchObject({ state: 'done', cost: 0.12, durationMs: 3700 });
-  expect(w['task-5']).toMatchObject({ state: 'wait', label: 'after task-1' });
+  // User-facing text names workers; ids stay for the runtime.
+  expect(w['task-5']).toMatchObject({ state: 'wait', label: 'after Login fix' });
+  expect(w['task-2']).toMatchObject({ blockedBy: 'task-1' });
+  expect(w['task-2'].now?.object).toBe('"src/b.ts" is claimed by Login fix (writing)');
   expect(w['task-6']).toMatchObject({ state: 'think', pulse: true, since: 4500 });
   expect(costTotal).toBeCloseTo(0.12);
 });

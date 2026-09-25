@@ -303,7 +303,7 @@ function nodeContent(id: string, compact: boolean, snapshot: EntitySnapshot, lim
   const status = oldest !== null ? `thinking ${seconds(clock() - oldest)}${limb.runs.length > 1 ? ` ×${limb.runs.length}` : ''}` : limb.status;
   const reasons = limb.runs.map((r) => r.reason).filter(Boolean);
   return {
-    name: limb.role === 'task' ? limb.name : limb.role === 'voice' ? 'Voice' : 'Head',
+    name: limb.role === 'task' ? limb.name : limb.role === 'voice' ? 'Voice' : limb.role === 'reviewer' ? 'Reviewer' : 'Head',
     badge: compact ? status : [model, status].filter(Boolean).join(' · '),
     body: (
       <>
@@ -523,7 +523,7 @@ function layoutBrain(width: number, height: number, snapshot: EntitySnapshot): {
   if (!width || !height) return { rects, compact, bands };
   const code = snapshot.limbs.filter((l) => l.kind === 'code');
   const tasks = snapshot.limbs.filter((l) => l.role === 'task');
-  const mind = ['voice', 'head'].flatMap((role) => snapshot.limbs.filter((l) => l.role === role));
+  const mind = ['voice', 'head', 'reviewer'].flatMap((role) => snapshot.limbs.filter((l) => l.role === role));
   const specs: BandSpec[] = [
     { title: 'You', items: [{ id: 'you', h: 40 }], minW: 110, maxW: 170 },
     { title: 'Body', minW: 130, maxW: 240, items: [

@@ -4,14 +4,14 @@ import { EventLog, isEntityActor, matches } from './log.js';
 import type { Mind, ToolSpec } from './mind.js';
 import { describeToolArgs, toolResultOk, type Summarizer, type WorkSummary } from './summary.js';
 import { runProgram, type ProgramOutcome } from './program.js';
-import { headSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
+import { headSystemPrompt, reviewerSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
 import { toJsonSchema, validate } from './schema.js';
 import type { Caller, Capability, EntityEvent, EventMatcher, Schema } from './types.js';
 import { conditionHolds, conditionSenses, eventMatchesTrigger, LevelTracker, levelHolds, senseHolds, templateArgs, watchSchema, type ConditionContext, type StopMode, type StopScope, type WatchSpec } from './watch.js';
 
 export type SessionStatus = 'idle' | 'running' | 'paused';
-export type LimbRole = 'head' | 'voice' | 'task' | 'watch' | 'program';
-export type LimbStatus = 'idle' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
+export type LimbRole = 'head' | 'voice' | 'reviewer' | 'task' | 'watch' | 'program';
+export type LimbStatus = 'idle' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
 
 export interface RunInfo { id: string; reason: string; startedAt: number; firstToolAt?: number; readSeq: number; abort: AbortController; voice: boolean }
 
@@ -34,6 +34,14 @@ export interface Limb {
   seenSeq: number;
   // task limbs
   task?: string;
+  /** Steers queued for when the worker finishes its current work. */
+  later: string[];
+  /** A wake that must wait for the run in flight to end (a worker finishing and continuing at once). */
+  wakeAfterRun?: string;
+  /** A few words saying what a watch or program does. */
+  label?: string;
+  /** The batch a worker belongs to (dispatch_many). */
+  group?: string;
   result?: string;
   crashes: number[];
   cancelRequested?: boolean;
@@ -80,6 +88,10 @@ export interface EntityConfig {
   headMaxSteps: number;
   taskMaxSteps: number;
   maxTasks: number;
+  /** Second looks at the front limb's answers: by a separate reviewer on the head's model, by the head itself, or none. */
+  review: 'off' | 'separate' | 'head';
+  /** How long the front limb must be quiet before its answers are reviewed together. */
+  reviewQuietMs: number;
   maxCodeLimbs: number;
   /** Code limb effect rate limits, per second. */
   reflexPerSecond: number;
@@ -129,16 +141,19 @@ export interface EntitySnapshot {
   limbs: {
     id: string; kind: string; role: LimbRole; name: string; parent?: string; model?: string; status: LimbStatus;
     runs: { id: string; reason: string; startedAt: number; firstToolAt?: number; voice: boolean }[];
-    task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number;
+    task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
     createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
   }[];
   senses: SenseInfo[];
   jev: { available: boolean; calls: number; perMinute: number };
 }
 
+/** Workers waiting for a slot, at most. */
+const MAX_QUEUED = 500;
+
 const DEFAULT_CONFIG: EntityConfig = {
   messageDebounceMs: 150, messageSettleMs: 1000, messageSettleMaxMs: 6000, tickMs: 50, headHeartbeatMs: 180_000, headMaxSteps: 8, taskMaxSteps: 24,
-  maxTasks: 6, maxCodeLimbs: 32, reflexPerSecond: 30, limbPerSecond: 5, cancelGraceMs: 3000,
+  maxTasks: 6, review: 'off', reviewQuietMs: 3000, maxCodeLimbs: 32, reflexPerSecond: 30, limbPerSecond: 5, cancelGraceMs: 3000,
   restartMax: 3, restartWindowMs: 60_000, freezeMaxMs: 600_000, draftAttention: true, codeLimbs: true, keptSessions: 12, taskContinuations: 4, summaryEveryCalls: 4, summaryIntervalMs: 20_000, summaryMax: 200, recentEvents: 40,
 };
 
@@ -175,6 +190,11 @@ export class Entity {
   private lastEvents = new Map<string, number>();
   private claims = new Map<string, Claim>();
   private discoveries: { by: string; text: string; t: number }[] = [];
+  /** Answers of the front limb waiting for a second look, and the batch the reviewer is on. */
+  private unreviewed: number[] = [];
+  private reviewing = new Set<number>();
+  /** Batches from dispatch_many: their title and the chat message that shows their progress. */
+  private batches = new Map<string, { title: string; message?: number; text?: string; ended: boolean }>();
   private keptSessions: string[] = [];
   private summaries = 0;
   private eventWaiters = new Set<{ matcher: EventMatcher; resolve(e: EntityEvent | null): void; timer: ReturnType<typeof setTimeout> }>();
@@ -204,11 +224,17 @@ export class Entity {
     this.claims = new Map();
     this.discoveries = [];
     this.keptSessions = [];
+    this.batches = new Map();
+    this.unreviewed = [];
+    this.reviewing = new Set();
     this.summaries = 0;
     this.jev = new JevService(this.options.evaluator, this.log, this.levels, () => this.renderForJev(), m => this.addHealth(m), this.options.jev);
     this.log.subscribe(event => this.onEvent(event));
     const code: Capability[] = this.config.codeLimbs ? ['set_watch', 'run_program'] : [];
     this.createLimb({ id: 'head', kind: 'llm', role: 'head', name: 'head', model: this.options.models.head, capabilities: ['speak', ...code, 'cancel', 'kill'], restart: 'permanent' });
+    if (this.config.review === 'separate') {
+      this.createLimb({ id: 'reviewer', kind: 'llm', role: 'reviewer', name: 'reviewer', parent: 'head', model: this.options.models.head, capabilities: ['speak'], restart: 'permanent' });
+    }
     if (this.options.models.voice) {
       this.createLimb({ id: 'voice', kind: 'llm', role: 'voice', name: 'voice', parent: 'head', model: this.options.models.voice, capabilities: ['speak', 'cancel'], restart: 'permanent' });
     }
@@ -318,6 +344,52 @@ export class Entity {
     if (this.status !== 'running') return;
     this.runEventWatches(event);
     this.baselineWakes(event);
+    this.queueReview(event);
+  }
+
+  /** Every answer of the front limb gets a second look, not only the ones it thinks might be wrong. */
+  private queueReview(event: EntityEvent): void {
+    if (this.config.review === 'off' || event.type !== 'chat_message' || event.by !== this.frontLimb()) return;
+    if (event.data.thread || event.data.group || event.data.corrects || event.data.expands) return;
+    // The head reviewing its own answers adds nothing; with review 'head', only a separate voice is reviewed.
+    if (this.config.review === 'head' && event.by === 'head') return;
+    this.unreviewed.push(event.seq);
+    queueMicrotask(() => { if (this.status !== 'idle') this.log.append('review_queued', 'system', { seq: event.seq }); });
+  }
+
+  private reviewerId(): string { return this.config.review === 'separate' ? 'reviewer' : 'head'; }
+
+  /** Once the front limb has been quiet for a moment, one reviewer run looks at all its unreviewed answers. */
+  private maybeReview(now: number): void {
+    if (!this.unreviewed.length || this.reviewing.size) return;
+    const front = this.limbs.get(this.frontLimb())!;
+    const reviewer = this.limbs.get(this.reviewerId());
+    if (!reviewer || reviewer.runs.size || front.runs.size) return;
+    if (now - (this.lastEvents.get('entity:chat_message') ?? -Infinity) < this.config.reviewQuietMs) return;
+    const batch = this.unreviewed.splice(0);
+    for (const seq of batch) this.reviewing.add(seq);
+    this.wake(reviewer.id, `review ${batch.map(seq => `#${seq}`).join(', ')}`);
+  }
+
+  /** Answers the reviewer did not amend count as confirmed, so nothing stays "checking" forever. */
+  private finishReview(limb: Limb): void {
+    if (limb.id !== this.reviewerId() || !this.reviewing.size || limb.runs.size) return;
+    for (const seq of this.reviewing) this.log.append('message_reviewed', limb.id, { seq, verdict: 'confirmed', implicit: true });
+    this.reviewing.clear();
+  }
+
+  private amend(limb: Limb, args: { seq: number; verdict: string; text?: string }): string {
+    const original = this.log.all().find(e => e.seq === args.seq && e.type === 'chat_message');
+    if (!original || !isEntityActor(original.by)) return `error: #${args.seq} is not one of the entity's messages`;
+    this.reviewing.delete(args.seq);
+    const text = String(args.text ?? '').trim();
+    if (args.verdict === 'confirm') { this.log.append('message_reviewed', limb.id, { seq: args.seq, verdict: 'confirmed' }); return `#${args.seq} confirmed`; }
+    if (!text) return `error: ${args.verdict} needs text`;
+    const replyTo = typeof original.data.reply_to === 'number' ? { reply_to: original.data.reply_to } : {};
+    const kind = args.verdict === 'correct' ? 'corrects' : 'expands';
+    const posted = this.log.append('chat_message', limb.id, { text, [kind]: args.seq, ...replyTo });
+    this.log.append('message_reviewed', limb.id, { seq: args.seq, verdict: args.verdict === 'correct' ? 'corrected' : 'expanded', by: posted.seq });
+    return `#${args.seq} ${args.verdict === 'correct' ? 'corrected' : 'expanded'} with #${posted.seq}`;
   }
 
   private baselineWakes(event: EntityEvent): void {
@@ -349,7 +421,8 @@ export class Entity {
       if (limb.expiresAt !== undefined && now >= limb.expiresAt) { this.endCodeLimb(limb, 'done', 'expired'); continue; }
       this.checkLevelWatch(limb, now);
     }
-    const active = [...this.limbs.values()].some(l => l.status === 'running' && l.id !== 'head');
+    if (this.config.review !== 'off') this.maybeReview(now);
+    const active = [...this.limbs.values()].some(l => l.status === 'running' && l.id !== 'head' && l.id !== 'reviewer');
     const head = this.limbs.get('head')!;
     if (active && !head.runs.size && now - this.lastHeadRunAt > this.config.headHeartbeatMs) this.wake('head', 'heartbeat');
   }
@@ -405,7 +478,7 @@ export class Entity {
       this.log.append('watch_woke', limb.id, { reason: action.wake.reason, limb: limb.parent });
       if (limb.parent) this.wake(limb.parent, `watch "${limb.name}": ${action.wake.reason}`);
     } else if ('run_program' in action) {
-      this.startProgram(this.limbs.get(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code, limb.decidedAt);
+      this.startProgram(this.limbs.get(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code, limb.decidedAt, action.run_program.label);
     }
     if (watch.once) this.endCodeLimb(limb, 'done', 'fired once');
   }
@@ -424,6 +497,7 @@ export class Entity {
     if (this.countCode() >= this.config.maxCodeLimbs) return `error: too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.`;
     const limb = this.createLimb({ kind: 'code', role: 'watch', name: spec.name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
     limb.watch = spec;
+    limb.label = spec.label;
     limb.builtin = builtin;
     limb.decidedAt = decidedAt;
     limb.tracker = new LevelTracker();
@@ -437,10 +511,11 @@ export class Entity {
 
   // ---------- programs ----------
 
-  private startProgram(author: Limb, name: string, code: string, decidedAt?: number): { limb?: Limb; error?: string; done?: Promise<ProgramOutcome> } {
+  private startProgram(author: Limb, name: string, code: string, decidedAt?: number, label?: string): { limb?: Limb; error?: string; done?: Promise<ProgramOutcome> } {
     if (this.countCode() >= this.config.maxCodeLimbs) return { error: `too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.` };
     const limb = this.createLimb({ kind: 'code', role: 'program', name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
     limb.code = code;
+    limb.label = label;
     limb.decidedAt = decidedAt;
     limb.abort = new AbortController();
     limb.status = 'running';
@@ -653,9 +728,9 @@ export class Entity {
     if (limb.id === 'head') this.lastHeadRunAt = run.startedAt;
     const prompt = this.render(limb, reason);
     this.log.append('run_started', limb.id, { run: run.id, reason });
-    const system = limb.role === 'head' ? headSystemPrompt(this.channels, this.limbs.has('voice')) : limb.role === 'voice' ? voiceSystemPrompt(this.channels) : taskSystemPrompt(this.channels);
+    const system = limb.role === 'reviewer' ? reviewerSystemPrompt(this.channels) : limb.role === 'head' ? headSystemPrompt(this.channels, this.limbs.has('voice'), this.config.review === 'head', this.config.review === 'separate') : limb.role === 'voice' ? voiceSystemPrompt(this.channels, this.config.review !== 'off') : taskSystemPrompt(this.channels, limb.group ? this.batches.get(limb.group)?.title : undefined);
     this.mind.run({
-      limbId: limb.id, runId: run.id, role: limb.role === 'head' || limb.role === 'voice' ? limb.role : 'task', model: limb.model!, system, prompt,
+      limbId: limb.id, runId: run.id, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model!, system, prompt,
       tools: this.toolsFor(limb), signal: run.abort.signal,
       sessionKey: limb.role === 'task' ? limb.id : undefined,
       maxSteps: limb.role === 'task' ? this.config.taskMaxSteps : this.config.headMaxSteps,
@@ -687,6 +762,8 @@ export class Entity {
       },
     }).then(result => {
       limb.runs.delete(run.id);
+      this.wakeIfPending(limb);
+      this.finishReview(limb);
       this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), usage: result.usage ?? null });
       if (limb.role === 'task' && limb.status === 'running' && !run.abort.signal.aborted) {
         if (limb.notices.length) this.wake(limb.id, `updates arrived: ${limb.notices.splice(0).join(' | ').slice(0, 1500)}`);
@@ -700,12 +777,21 @@ export class Entity {
       }
     }, error => {
       limb.runs.delete(run.id);
+      this.wakeIfPending(limb);
+      this.finishReview(limb);
       if (run.abort.signal.aborted || this.status !== 'running') {
         this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), aborted: true });
         return;
       }
       this.crashed(limb, error instanceof Error ? error.message : String(error));
     });
+  }
+
+  private wakeIfPending(limb: Limb): void {
+    if (!limb.wakeAfterRun || limb.runs.size || limb.status !== 'running') return;
+    const reason = limb.wakeAfterRun;
+    limb.wakeAfterRun = undefined;
+    this.wake(limb.id, reason);
   }
 
   private crashed(limb: Limb, message: string): void {
@@ -722,7 +808,7 @@ export class Entity {
   }
 
   private finishTask(limb: Limb, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
-    if (limb.status !== 'running') return;
+    if (limb.status !== 'running' && limb.status !== 'queued') return;
     limb.status = status;
     limb.endedAt = this.now();
     limb.result = result;
@@ -733,7 +819,21 @@ export class Entity {
     this.log.append('task_done', limb.id, { status, result: result.slice(0, 4000), task: limb.task ?? '' });
     // Workers answer the user themselves; the head is only woken to orchestrate.
     for (const waiting of this.limbs.values()) {
-      if (waiting.waitFor === limb.id && waiting.status === 'running') { waiting.waitFor = undefined; this.wake(waiting.id, `${limb.id} finished (${status}): ${result.slice(0, 500)}`); }
+      if (waiting.waitFor === limb.id && waiting.status === 'running') {
+        waiting.waitFor = undefined;
+        if (this.workerSlots() < 0) { waiting.status = 'queued'; waiting.notices.push(`${limb.id} finished (${status}): ${result.slice(0, 500)}`); }
+        else this.wake(waiting.id, `${limb.id} finished (${status}): ${result.slice(0, 500)}`);
+      }
+    }
+    this.startQueued();
+    this.updateBatch(limb.group);
+    if (status === 'done' && limb.later.length) {
+      const notes = limb.later.splice(0);
+      limb.status = 'running';
+      limb.endedAt = undefined;
+      this.log.append('limb_revived', 'system', { id: limb.id, queued: notes.length });
+      const reason = `you finished; next, queued for after that: ${notes.join(' | ').slice(0, 2000)}`;
+      if (limb.runs.size) limb.wakeAfterRun = reason; else this.wake(limb.id, reason);
     }
   }
 
@@ -743,33 +843,99 @@ export class Entity {
   }
 
   /** A worker for one user message, started at once (or when the worker it waits for finishes). */
-  private dispatch(by: Limb, args: { task: string; name?: string; model?: string; after?: string; reply_to?: number; fork_of?: string }): string {
-    const running = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running').length;
-    if (running >= this.config.maxTasks) return `error: ${running} workers already running (max ${this.config.maxTasks}); cancel one or steer an existing worker`;
+  private dispatch(by: Limb, args: { task: string; name?: string; model?: string; after?: string; reply_to?: number; fork_of?: string; group?: string }): string {
+    const queued = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'queued').length;
+    if (queued >= MAX_QUEUED) return `error: ${queued} workers are already queued (max ${MAX_QUEUED}); cancel some first`;
     if (args.after && !this.limbs.get(args.after)) return `error: no worker "${args.after}" to wait for`;
     const source = args.fork_of ? this.limbs.get(args.fork_of) : undefined;
     if (args.fork_of && (!source || source.role !== 'task')) return `error: no worker "${args.fork_of}" to fork`;
     const model = args.model === 'head' ? this.options.models.head : this.options.models.task;
     const caps: Capability[] = ['speak', ...(this.config.codeLimbs ? ['set_watch', 'run_program'] as Capability[] : []), 'cancel'];
-    const limb = this.createLimb({ kind: 'llm', role: 'task', name: args.name ?? (source ? `${source.name} (fork)` : 'worker'), parent: 'head', model, capabilities: caps, restart: 'transient' });
+    const limb = this.createLimb({ id: `worker-${++this.counter}`, kind: 'llm', role: 'task', name: args.name ?? (source ? `${source.name} (fork)` : 'worker'), parent: 'head', model, capabilities: caps, restart: 'transient' });
     limb.task = args.task;
+    limb.group = args.group;
     limb.decidedAt = this.now();
-    limb.status = 'running';
     limb.replyTo = args.reply_to ?? this.lastUserMessageSeq();
-    if (source && !this.mind.fork?.(source.id, limb.id)) return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`;
-    this.log.append('limb_spawned', by.id, { id: limb.id, name: limb.name, task: args.task, model, reply_to: limb.replyTo ?? null, fork_of: source?.id ?? null, after: args.after ?? null });
+    if (source && !this.mind.fork?.(source.id, limb.id)) { this.limbs.delete(limb.id); this.limbs.get('head')?.children.delete(limb.id); return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`; }
     const target = args.after ? this.limbs.get(args.after) : undefined;
-    if (target && target.status === 'running') { limb.waitFor = target.id; return `worker ${limb.id} "${limb.name}" will start when ${target.id} finishes`; }
+    // Workers past the concurrency limit wait in a queue and start, oldest first, as others finish.
+    limb.status = target && (target.status === 'running' || target.status === 'queued') ? 'running' : this.workerSlots() > 0 ? 'running' : 'queued';
+    this.log.append('limb_spawned', by.id, { id: limb.id, name: limb.name, task: args.task, model, reply_to: limb.replyTo ?? null, fork_of: source?.id ?? null, after: args.after ?? null, group: args.group ?? null, queued: limb.status === 'queued' });
+    if (target && (target.status === 'running' || target.status === 'queued')) { limb.waitFor = target.id; return `worker ${limb.id} "${limb.name}" will start when ${target.id} finishes`; }
+    if (limb.status === 'queued') return `worker ${limb.id} "${limb.name}" queued: ${this.config.maxTasks} workers are running; it starts when one finishes`;
     this.wake(limb.id, source ? `forked from ${source.id} for a new request` : 'task assigned');
     return `worker ${limb.id} "${limb.name}" started${source ? ` from ${source.id}'s conversation` : ''}`;
   }
 
+  /** Many workers at once, one per item, as one batch that views can show together. */
+  private dispatchMany(by: Limb, args: { title: string; items: { task: string; name?: string }[]; model?: string }): string {
+    if (!args.items.length) return 'error: items is empty';
+    const group = `group-${++this.counter}`;
+    const replyTo = this.lastUserMessageSeq();
+    this.batches.set(group, { title: args.title, ended: false });
+    this.log.append('group_started', by.id, { id: group, title: args.title, count: args.items.length, reply_to: replyTo ?? null });
+    const results = args.items.map(item => this.dispatch(by, { task: item.task, name: item.name, model: args.model, group }));
+    // One line in the chat for the whole batch, updated as its workers start and finish.
+    const text = this.batchProgress(group);
+    const message = this.log.append('chat_message', by.id, { text, group, ...(replyTo !== undefined ? { reply_to: replyTo } : {}) });
+    Object.assign(this.batches.get(group)!, { message: message.seq, text });
+    const errors = results.filter(r => r.startsWith('error'));
+    const queued = results.filter(r => r.includes(' queued')).length;
+    return `${group} "${args.title}": ${results.length - errors.length} workers (${results.length - errors.length - queued} started, ${queued} queued)${errors.length ? `; ${errors.length} failed: ${errors[0]}` : ''}`;
+  }
+
+  private batchProgress(group: string): string {
+    const batch = this.batches.get(group)!;
+    const members = [...this.limbs.values()].filter(l => l.group === group);
+    const count = (...statuses: LimbStatus[]) => members.filter(l => statuses.includes(l.status)).length;
+    const failed = members.filter(l => l.status === 'failed' || l.status === 'killed');
+    const parts = [`${count('done')} of ${members.length} done`];
+    if (count('running')) parts.push(`${count('running')} running`);
+    if (count('queued')) parts.push(`${count('queued')} queued`);
+    if (failed.length) parts.push(`${failed.length} failed${failed.length <= 3 ? ` (${failed.map(l => l.name).join(', ')})` : ''}`);
+    if (count('cancelled')) parts.push(`${count('cancelled')} cancelled`);
+    return `${batch.title}: ${parts.join(', ')}.`;
+  }
+
+  /** Keeps a batch's progress line current; when the last worker ends, wakes the front limb with the results. */
+  private updateBatch(group: string | undefined): void {
+    const batch = group ? this.batches.get(group) : undefined;
+    if (!group || !batch || batch.message === undefined || batch.ended) return;
+    const text = this.batchProgress(group);
+    if (text !== batch.text) { batch.text = text; this.log.append('chat_message_updated', 'system', { seq: batch.message, text, group }); }
+    const members = [...this.limbs.values()].filter(l => l.group === group);
+    if (members.some(l => l.status === 'running' || l.status === 'queued')) return;
+    batch.ended = true;
+    const results = members.map(l => `${l.name}: ${l.status}${l.result ? `: ${l.result.slice(0, 160)}` : ''}`).slice(0, 60).join('\n');
+    this.wake(this.frontLimb(), `batch "${batch.title}" finished. ${text}\nResults:\n${results}`);
+  }
+
+  /** Running workers that are doing work (not waiting for another) take a slot. */
+  private workerSlots(): number {
+    const busy = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running' && !l.waitFor).length;
+    return this.config.maxTasks - busy;
+  }
+
+  private startQueued(): void {
+    const queue = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'queued').sort((a, b) => a.createdAt - b.createdAt);
+    for (const limb of queue) {
+      if (this.workerSlots() <= 0) return;
+      limb.status = 'running';
+      this.log.append('limb_started', 'system', { id: limb.id });
+      this.updateBatch(limb.group);
+      this.wake(limb.id, limb.notices.length ? `task assigned; updates: ${limb.notices.splice(0).join(' | ').slice(0, 1500)}` : 'task assigned');
+    }
+  }
+
   /** A message for one worker, delivered with its next tool result (or reviving it if idle). */
-  private steer(by: string, id: string, text: string): string {
+  private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now'): string {
     const limb = this.limbs.get(id);
     if (!limb || limb.role !== 'task') return `error: no worker "${id}"`;
-    this.log.append('steered', by, { id, text: text.slice(0, 2000) });
+    this.log.append('steered', by, { id, text: text.slice(0, 2000), ...(when === 'after' ? { when } : {}) });
     const note = by === 'user' ? `Message from the user: ${text}` : `Message from the user (via ${by}): ${text}`;
+    // More work for later: the worker finishes what it is doing first, then continues in the same conversation.
+    if (when === 'after' && (limb.status === 'running' || limb.status === 'queued')) { limb.later.push(note); return `${id} will continue with this once it finishes its current work`; }
+    if (limb.status === 'queued') { limb.notices.push(note); return `${id} is queued; it gets this when it starts`; }
     if (limb.status === 'running' && limb.runs.size) { limb.notices.push(note); return `${id} will get it with its next tool result`; }
     if (limb.status === 'running') { this.wake(limb.id, note.slice(0, 2000)); return `${id} woken with it`; }
     if (limb.status !== 'done' || !this.keptSessions.includes(limb.id)) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
@@ -790,6 +956,31 @@ export class Entity {
       if (!typing || quietFor >= this.config.messageSettleMs || this.now() - started >= this.config.messageSettleMaxMs || this.status !== 'running') return;
       await new Promise(resolve => setTimeout(resolve, Math.min(100, this.config.messageSettleMs - quietFor + 5)));
     }
+  }
+
+  /**
+   * The user overrides how a message was routed: it gets its own fresh worker, or a fork of the worker it was steered to.
+   * A worker that was steered with it is told to leave it to the new one.
+   */
+  reroute(seq: number, how: 'separate' | 'fork'): string {
+    const message = this.log.all().find(e => e.seq === seq && e.type === 'chat_message' && e.by === 'user');
+    if (!message) return `error: #${seq} is not a message from the user`;
+    const next = this.log.all().find(e => e.type === 'chat_message' && e.by === 'user' && e.seq > seq);
+    const steer = this.log.all().find(e => e.type === 'steered' && e.by !== 'user' && e.seq > seq && (!next || e.seq < next.seq));
+    const steered = steer ? this.limbs.get(String(steer.data.id)) : undefined;
+    if (how === 'fork' && !steered) return `error: #${seq} was not sent to a worker, so there is nothing to fork`;
+    const text = String(message.data.text);
+    const head = this.limbs.get('head')!;
+    const result = this.dispatch(head, {
+      task: `${text}\n\n(The user asked for this to be handled by its own worker${how === 'fork' ? `, continuing from ${steered!.id}'s conversation` : ''}.)`,
+      name: text.slice(0, 40), reply_to: seq, fork_of: how === 'fork' ? steered!.id : undefined,
+    });
+    if (result.startsWith('error')) return result;
+    this.log.append('rerouted', 'user', { seq, how, from: steered?.id ?? null });
+    if (steered && (steered.status === 'running' || steered.status === 'queued')) {
+      steered.notices.push(`The user moved their message "${text.slice(0, 200)}" to a separate worker: leave that part to it and carry on with the rest.`);
+    }
+    return result;
   }
 
   /** A message from the user straight to one worker (the Work view's "Message"). */
@@ -888,6 +1079,7 @@ export class Entity {
   stopLimb(id: string, mode: 'cancel' | 'kill', by: string): string {
     const limb = this.limbs.get(id);
     if (!limb || limb.id === 'head') return `error: no limb "${id}" to stop`;
+    if (limb.status === 'queued') { this.finishTask(limb, `${mode === 'kill' ? 'killed' : 'cancelled'} by ${by} before it started`, mode === 'kill' ? 'killed' : 'cancelled'); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'} before it started`; }
     if (limb.status !== 'running') return `${id} is already ${limb.status}`;
     if (limb.kind === 'code') { this.endCodeLimb(limb, mode === 'kill' ? 'killed' : 'cancelled', `${mode} by ${by}`); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'}`; }
     if (mode === 'kill' || !limb.runs.size) {
@@ -924,7 +1116,7 @@ export class Entity {
         if (!has('run_program')) return 'error: you cannot run programs';
         const error = validate(TOOL_SCHEMAS.run_program, args, 'args');
         if (error) return `error: ${error}`;
-        const started = this.startProgram(limb, String(args.name), String(args.code), this.now());
+        const started = this.startProgram(limb, String(args.name), String(args.code), this.now(), args.label === undefined ? undefined : String(args.label));
         if (started.error || !started.limb || !started.done) return `error: ${started.error}`;
         const program = started.limb;
         // Surface compile errors and instant crashes directly in the tool result.
@@ -963,9 +1155,15 @@ export class Entity {
         if (error) return `error: ${error}`;
         return this.dispatch(limb, { ...(args as { task: string }), fork_of: name === 'fork' ? String(args.worker) : undefined });
       }
+      case 'dispatch_many': {
+        if (!this.isFront(limb) && limb.id !== 'head') return 'error: only the front limb dispatches workers';
+        const error = validate(TOOL_SCHEMAS.dispatch_many, args, 'args');
+        if (error) return `error: ${error}`;
+        return this.dispatchMany(limb, args as { title: string; items: { task: string; name?: string }[]; model?: string });
+      }
       case 'steer': {
         if (!this.isFront(limb) && limb.id !== 'head') return 'error: only the front limb steers workers';
-        return this.steer(limb.id, String(args.worker ?? ''), String(args.text ?? ''));
+        return this.steer(limb.id, String(args.worker ?? ''), String(args.text ?? ''), args.when === 'after' ? 'after' : 'now');
       }
       case 'claim': {
         const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
@@ -981,8 +1179,14 @@ export class Entity {
         this.notifyWorkers(limb.id, `${limb.id} shares: ${text}`);
         return 'shared with the other workers';
       }
+      case 'amend': {
+        if (limb.id !== this.reviewerId() || this.config.review === 'off') return 'error: you do not review answers';
+        const error = validate(TOOL_SCHEMAS.amend, args, 'args');
+        if (error) return `error: ${error}`;
+        return this.amend(limb, args as { seq: number; verdict: string; text?: string });
+      }
       case 'handoff':
-        if (limb.role !== 'voice') return 'error: only the voice hands off';
+        if (limb.role !== 'voice' && limb.role !== 'reviewer') return 'error: only the voice and the reviewer hand off';
         this.log.append('handoff', limb.id, { note: String(args.note ?? '').slice(0, 2000) });
         this.wake('head', `voice handed off: ${String(args.note ?? '').slice(0, 300)}`);
         return 'handed off to the head';
@@ -993,6 +1197,7 @@ export class Entity {
         return 'task finished';
       default:
         if (limb.role === 'task' && name === 'say' && args.reply_to === undefined && limb.replyTo !== undefined) args = { ...args, reply_to: limb.replyTo };
+        if (limb.role === 'task' && name === 'say' && limb.group && args.thread === undefined) args = { ...args, thread: true };
         return this.commit(caller, name, args);
     }
   }
@@ -1006,16 +1211,25 @@ export class Entity {
     }
     const router = () => {
       add('dispatch', 'Start a worker (a capable model) on a user request right away. It replies to the user itself. Use "after" to start it only when another worker finishes.');
+      add('dispatch_many', 'Start one worker per item as one batch with a title, for many independent items of the same kind (one per issue, per file). Past the running limit, workers queue.');
       add('fork', 'Start a worker from another worker\'s conversation, for a request that builds on its context.');
       add('steer', 'Send a message to one worker: it gets it with its next tool result (or wakes up with it).');
       add('cancel', 'Cancel a worker by id.');
     };
+    if (limb.role === 'reviewer') {
+      tools.splice(0, tools.length, ...tools.filter(t => this.effects.get(t.name)?.spec.readonly));
+      add('amend', 'Your verdict on one of the answers under review: confirm it, correct it (the original is shown struck through, your text below it), or expand it.');
+      add('handoff', 'Wake the head for work a correction needs (starting a worker, fixing something promised but not done). The note says what.');
+      add('note', 'Keep a short note in your state; you remember nothing else between wakes.');
+      return tools;
+    }
     if (limb.role === 'voice') {
       add('note', 'Keep a short note in your state; you remember nothing else between wakes.');
       router();
       add('handoff', 'Wake the head (slower, smarter) for anything you should not handle yourself. The note says what is needed.');
       return tools;
     }
+    if (limb.role === 'head' && this.config.review === 'head') add('amend', 'Your verdict on one of the voice\'s answers under review: confirm, correct (shown struck through, your text below), or expand.');
     // The head dispatches and steers workers too: as the front limb, or to act on the voice's handoffs.
     if (limb.role === 'head') { router(); tools.splice(tools.findIndex(t => t.name === 'cancel'), 1); }
     if (limb.capabilities.has('set_watch')) add('set_watch', 'Install a watch: a code reflex that reacts in ~0 ms without you.');
@@ -1104,7 +1318,7 @@ export class Entity {
     const limb: Limb = {
       id, kind: init.kind, role: init.role, name: init.name, parent: init.parent, model: init.model,
       capabilities: new Set(init.capabilities), restart: init.restart, status: 'idle', createdAt: this.now(),
-      children: new Set(), runs: new Map(), seenSeq: 0, crashes: [], effectTimes: [], notices: [], callsSinceSummary: 0, lastSummaryAt: -Infinity, continuations: 0,
+      children: new Set(), runs: new Map(), seenSeq: 0, crashes: [], effectTimes: [], notices: [], later: [], callsSinceSummary: 0, lastSummaryAt: -Infinity, continuations: 0,
     };
     this.limbs.set(id, limb);
     if (init.parent) this.limbs.get(init.parent)?.children.add(id);
@@ -1145,7 +1359,7 @@ export class Entity {
       limbs: [...this.limbs.values()].map(l => ({
         id: l.id, kind: l.kind, role: l.role, name: l.name, parent: l.parent, model: l.model, status: l.status,
         runs: [...l.runs.values()].map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt, voice: r.voice })),
-        task: l.task, result: l.result, watch: l.watch, code: l.code, fires: l.fires,
+        task: l.task, result: l.result, watch: l.watch, code: l.code, fires: l.fires, label: l.label, group: l.group,
         createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, waitFor: l.waitFor,
         claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
       })),
@@ -1165,7 +1379,7 @@ const TOOL_SCHEMAS = {
   set_watch: { type: 'object', additionalProperties: false, required: ['watch'], properties: { watch: watchSchema } },
   run_program: {
     type: 'object', additionalProperties: false, required: ['name', 'code'],
-    properties: { name: { type: 'string', maxLength: 80 }, code: { type: 'string', maxLength: 20_000, description: 'Body of an async function' } },
+    properties: { name: { type: 'string', maxLength: 80 }, label: { type: 'string', maxLength: 40, description: 'A few words saying what it does' }, code: { type: 'string', maxLength: 20_000, description: 'Body of an async function' } },
   },
   stop_output: {
     type: 'object', additionalProperties: false, required: ['reason'],
@@ -1179,6 +1393,14 @@ const TOOL_SCHEMAS = {
   },
   cancel: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string' } } },
   kill: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string' } } },
+  amend: {
+    type: 'object', additionalProperties: false, required: ['seq', 'verdict'],
+    properties: {
+      seq: { type: 'integer', description: 'The message under review' },
+      verdict: { type: 'string', enum: ['confirm', 'correct', 'expand'] },
+      text: { type: 'string', maxLength: 4000, description: 'For correct: the corrected answer. For expand: what the answer was missing.' },
+    },
+  },
   handoff: { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string', maxLength: 2000 } } },
   dispatch: {
     type: 'object', additionalProperties: false, required: ['task'],
@@ -1190,11 +1412,28 @@ const TOOL_SCHEMAS = {
       reply_to: { type: 'integer', description: 'The user message seq this answers (default: the latest)' },
     },
   },
+  dispatch_many: {
+    type: 'object', additionalProperties: false, required: ['title', 'items'],
+    properties: {
+      title: { type: 'string', maxLength: 80, description: 'What the batch is, e.g. "Open bug issues"' },
+      items: {
+        type: 'array', maxItems: 200,
+        items: { type: 'object', additionalProperties: false, required: ['task'], properties: { task: { type: 'string', maxLength: 4000 }, name: { type: 'string', maxLength: 60 } } },
+      },
+      model: { type: 'string', enum: ['task', 'head'] },
+    },
+  },
   fork: {
     type: 'object', additionalProperties: false, required: ['worker', 'task'],
     properties: { worker: { type: 'string' }, task: { type: 'string', maxLength: 8000 }, name: { type: 'string', maxLength: 60 }, reply_to: { type: 'integer' } },
   },
-  steer: { type: 'object', additionalProperties: false, required: ['worker', 'text'], properties: { worker: { type: 'string' }, text: { type: 'string', maxLength: 4000 } } },
+  steer: {
+    type: 'object', additionalProperties: false, required: ['worker', 'text'],
+    properties: {
+      worker: { type: 'string' }, text: { type: 'string', maxLength: 4000 },
+      when: { type: 'string', enum: ['now', 'after'], description: 'now (default): the worker hears it with its next tool result. after: it continues with this in the same conversation once it finishes its current work.' },
+    },
+  },
   claim: {
     type: 'object', additionalProperties: false, required: ['paths'],
     properties: { paths: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 50 }, note: { type: 'string', maxLength: 200 } },
