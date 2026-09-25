@@ -26,6 +26,8 @@ interface LimbLive {
   summarizing?: boolean;
   /** A wake that must wait for the run in flight to end (a worker finishing and continuing at once). */
   wakeAfterRun?: string;
+  /** A worker's state sections as it was last shown them, so its next wake shows only what changed. */
+  sent?: Record<string, string>;
 }
 
 export interface EntityConfig {
@@ -712,6 +714,8 @@ export class Entity {
       const aborted = abort.signal.aborted;
       this.log.append('run_finished', limb.id, { run: runId, ms: Math.round(this.now() - startedAt), ...(aborted || this.status !== 'running' ? { aborted: true } : { failed: true }) });
       live.aborts.delete(runId);
+      // The conversation may not hold what this run was shown, so the next wake shows everything again.
+      live.sent = undefined;
       this.wakeIfPending(limb);
       // A review that crashed or was aborted checked nothing: never show its answers as confirmed.
       this.abandonReview(limb, aborted ? 'aborted' : 'failed');
@@ -1151,43 +1155,102 @@ export class Entity {
 
   private ago = (t: number) => `${((this.now() - t) / 1000).toFixed(1)}s ago`;
 
+  /**
+   * A limb's context for one wake, ordered for prompt caching: what rarely changes first, then live state, new events and time.
+   * Reactive limbs get it whole every time. A worker keeps its conversation, so after its first wake it only gets
+   * the parts that changed.
+   */
   private render(limb: LimbState, reason: string): string {
     const now = this.now();
     const ctx = { now, ago: this.ago, levels: this.levels };
-    const stable: Record<string, unknown> = { you: `${limb.id} (${limb.role})`, notes: this.state.notes };
+    const stable: Record<string, unknown> = { you: `${limb.id} (${limb.role})` };
     if (limb.role === 'task') stable.task = limb.task;
-    stable.limbs = this.limbList().filter(l => l.status === 'running' || now - l.createdAt < 60_000).map(l => this.describeLimb(l));
-    const tasks = this.limbList().filter(l => l.role === 'task');
-    if (tasks.length) stable.workers = tasks.map(l => ({
-      id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` for ${l.waitFor}` : '') + (l.runs.length ? ' (working)' : ''),
-      reply_to: l.replyTo, result: l.result, claims: this.claimsOf(l.id),
-    }));
-    if (this.state.discoveries.length) stable.discoveries = this.state.discoveries.map(d => `${d.by}: ${d.text}`);
     const volatile: Record<string, unknown> = {};
     for (const channel of this.channels) {
       const rendered = channel.render(this.world[channel.name] as never, ctx);
       if (rendered.stable !== undefined) stable[channel.name] = rendered.stable;
       if (rendered.volatile !== undefined) volatile[channel.name] = rendered.volatile;
     }
+    stable.notes = this.state.notes;
+    if (this.state.discoveries.length) stable.discoveries = this.state.discoveries.map(d => `${d.by}: ${d.text}`);
+    // Workers have their own section; this lists the rest: the head, voice and reviewer, and watches and programs.
+    const others = this.limbList().filter(l => l.role !== 'task' && (l.status === 'running' || now - l.createdAt < 60_000));
+    if (others.length) stable.limbs = others.map(l => this.describeLimb(l));
+    const workers = this.workerLines(limb);
+    if (workers.length) stable.workers = workers;
+    const busy = this.limbList().filter(l => l.runs.length).map(l => l.id);
+    if (busy.length) volatile.working_now = busy;
+    const fires = Object.fromEntries(others.filter(l => l.role === 'watch' && l.fires).map(l => [l.id, l.fires]));
+    if (Object.keys(fires).length) volatile.watch_fires = fires;
     const levels = this.levels.entries();
     if (levels.length) volatile.levels = Object.fromEntries(levels.map(([name, level]) => [name, `${JSON.stringify(level.value)} for ${((now - level.since) / 1000).toFixed(1)}s`]));
     if (this.state.stops.length) volatile.output_stops = this.state.stops.map(s => ({ ...s, since: this.ago(s.since) }));
     if (this.state.health.length) volatile.health = this.state.health.slice(-5).map(h => `${h.message} (${this.ago(h.t)})`);
+
+    let stableOut = stable;
+    let volatileOut = volatile;
+    let note = '';
+    if (limb.role === 'task') {
+      const live = this.liveOf(limb.id);
+      const sections: Record<string, string> = {};
+      for (const [key, value] of Object.entries(stable)) sections[`stable.${key}`] = JSON.stringify(value);
+      for (const [key, value] of Object.entries(volatile)) sections[`live.${key}`] = JSON.stringify(value);
+      if (live.sent) {
+        const changed = (prefix: string, part: Record<string, unknown>) => {
+          const out: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(part)) if (live.sent![`${prefix}.${key}`] !== sections[`${prefix}.${key}`]) out[key] = value;
+          for (const key of Object.keys(live.sent!)) if (key.startsWith(`${prefix}.`) && !(key in sections)) out[key.slice(prefix.length + 1)] = null;
+          return out;
+        };
+        stableOut = changed('stable', stable);
+        volatileOut = changed('live', volatile);
+        note = ', only what changed since your last wake';
+      }
+      live.sent = sections;
+    }
     const fresh = this.log.since(limb.seenSeq).filter(e => !HIDDEN_EVENTS.has(e.type)).slice(-this.config.recentEvents);
     const time = { now_s: +(now / 1000).toFixed(1), last_spoke: this.lastSpoke(), woken_because: reason };
     return [
-      'STATE (stable)', JSON.stringify(stable, null, 1),
-      'STATE (live)', JSON.stringify(volatile, null, 1),
-      'NEW EVENTS since your last wake', fresh.map(e => `#${e.seq} ${this.ago(e.t)} ${e.by} ${e.type} ${JSON.stringify(e.data)}`).join('\n') || '(none)',
+      `STATE (stable${note})`, JSON.stringify(stableOut),
+      `STATE (live${note})`, JSON.stringify(volatileOut),
+      'NEW EVENTS since your last wake', fresh.map(e => `#${e.seq} ${this.ago(e.t)} ${e.by} ${e.type} ${eventData(e)}`).join('\n') || '(none)',
       'TIME', JSON.stringify(time),
     ].join('\n');
   }
 
+  /**
+   * One line per worker. The front limb and head see every active worker with its task, and recent and kept finished
+   * ones with their result. A worker sees its active siblings without their tasks, and only the last few finished.
+   */
+  private workerLines(viewer: LimbState): string[] {
+    const tasks = this.limbList().filter(l => l.role === 'task' && l.id !== viewer.id);
+    const active = tasks.filter(l => WORKER_ACTIVE.includes(l.status));
+    const finished = tasks.filter(l => !WORKER_ACTIVE.includes(l.status)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+    const worker = viewer.role === 'task';
+    const shownFinished = worker ? finished.slice(0, 5) : finished.filter((l, i) => i < 10 || this.state.kept.includes(l.id));
+    const shownActive = worker ? active.slice(0, 30) : active;
+    const line = (l: LimbState) => {
+      const claims = this.claimsOf(l.id);
+      const batch = l.group ? this.state.batches[l.group]?.title : undefined;
+      return [
+        `${l.id} "${l.name}" ${l.status}${l.waitFor ? ` for ${l.waitFor}` : ''}`,
+        !worker && l.replyTo !== undefined ? `re #${l.replyTo}` : '',
+        batch ? `batch "${batch}"` : '',
+        !worker && !batch && l.task && WORKER_ACTIVE.includes(l.status) ? `task: ${clip(l.task, 240)}` : '',
+        l.result ? `result: ${clip(l.result, 240)}` : '',
+        claims.length ? `claims: ${claims.join(', ')}` : '',
+      ].filter(Boolean).join(' · ');
+    };
+    const lines = [...shownActive, ...shownFinished].map(line);
+    const hidden = active.length - shownActive.length + finished.length - shownFinished.length;
+    if (hidden) lines.push(`(${hidden} more not shown)`);
+    return lines;
+  }
+
   private describeLimb(limb: LimbState): string {
     const base = `${limb.id} ${limb.builtin ? 'built-in ' : ''}${limb.role} "${limb.name}" ${limb.status}${limb.parent ? ` (parent ${limb.parent})` : ''}`;
-    if (limb.role === 'watch') return `${base}: on ${JSON.stringify(limb.watch!.on)} do ${JSON.stringify(limb.watch!.do)}, fired ${limb.fires}x`;
-    if (limb.role === 'program') return `${base}, started ${this.ago(limb.createdAt)}`;
-    if (limb.kind === 'llm') return `${base}${limb.runs.length ? `, ${limb.runs.length} run(s) in flight` : ''}`;
+    if (limb.role === 'watch') return `${base}: on ${JSON.stringify(limb.watch!.on)} do ${JSON.stringify(limb.watch!.do)}`;
+    if (limb.role === 'program') return `${base}, started at ${(limb.createdAt / 1000).toFixed(1)}s`;
     return base;
   }
 
@@ -1343,6 +1406,18 @@ const TOOL_SCHEMAS = {
   share: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 1000 } } },
   finish_task: { type: 'object', additionalProperties: false, required: ['result'], properties: { result: { type: 'string', maxLength: 8000 } } },
 } satisfies Record<string, Schema>;
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/**
+ * An event's data for a context. Long text is clipped, except what the user wrote and a handoff's note, which are the point;
+ * a new worker's task is left out, since the workers in state already show it.
+ */
+function eventData(event: EntityEvent): string {
+  if ((event.type === 'chat_message' && event.by === 'user') || event.type === 'handoff') return JSON.stringify(event.data);
+  const data = event.type === 'limb_spawned' ? { ...event.data, task: undefined } : event.data;
+  return JSON.stringify(data, (_key, value) => (typeof value === 'string' ? clip(value, 300) : value));
+}
 
 function clean(summary: WorkSummary): Record<string, unknown> {
   const list = (items: unknown) => (Array.isArray(items) ? items : []).map(String).map(s => s.trim()).filter(Boolean).slice(0, 5).map(s => s.slice(0, 160));

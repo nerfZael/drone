@@ -19,14 +19,14 @@ The log is append-only and never rewritten. Reset starts a new log. Every event 
 
 Channels (see [host-api.md](host-api.md)) reduce events into their own state: `chat` (recent messages, the user's unsent draft, the entity's own draft), `keypad` (held keys, recent presses) and `workspace`. The core keeps levels, notes, output stops, health, claims, discoveries and the limbs.
 
-Every LLM limb gets the same render, which ends up in this order:
+Every LLM limb gets a render in this order:
 
-1. **Stable**: who it is (`you`), notes (the last 20 `note`s), the limbs that are running or started in the last minute (one line each: id, role, name, status, parent, and fires for watches), the workers (task, status, the message they answer, result, claims), shared discoveries, and each channel's stable part. A worker also sees its own `task`.
-2. **Live**: each channel's volatile part (for chat: recent messages, by default the last 12, the unsent draft, the entity's own draft), levels with how long they have held, active output stops, and recent health warnings.
-3. **New events** since this limb last read, at most the last 40, without internal noise.
+1. **Stable**: who it is (`you`), a worker's own `task`, each channel's stable part, notes (the last 20 `note`s), shared discoveries, the other limbs that are running or started in the last minute (one line each: id, role, name, status, parent, and a watch's condition), and the workers, one line each. Nothing here carries an age or a counter, so it only changes when something actually happens.
+2. **Live**: each channel's volatile part (for chat: recent messages, by default the last 12, the unsent draft, the entity's own draft), which limbs have a run in flight, watch fire counts, levels with how long they have held, active output stops, and recent health warnings.
+3. **New events** since this limb last read, at most the last 40, without internal noise. Long text in them is clipped to 300 characters, except what the user wrote and handoff notes; a new worker's task is left out, since the workers line shows it. A new worker's events start when it was spawned.
 4. **Time**: `now_s`, when the entity last spoke, and why this run was woken.
 
-There are no per-limb views yet: what differs between limbs is `you`, a worker's `task`, and which events are new to it. Older history stays in the log; `read_chat(before_seq, limit)` pages back through chat.
+Views differ by role. The front limb and the head see every active worker with its task (a batch worker shows its batch title instead), and the 10 most recently finished plus any whose conversation is kept, with their result. A worker sees up to 30 active siblings without their tasks and the last 5 finished. A worker keeps its conversation, so after its first wake its render shows only the stable and live parts that changed. Older history stays in the log; `read_chat(before_seq, limit)` pages back through chat.
 
 Programs read the log with `nextEvent(matcher, timeoutMs)` through their own cursor: events come in order from where the program started, and nothing that happens between two calls is missed. Events are strict: reading a field an event doesn't have fails the program with the fields it does have. Keypad events carry derived timing (`held_ms` on `key_up`, `gap_ms` on `key_down`), so a Morse decoder needs no timing arithmetic of its own.
 

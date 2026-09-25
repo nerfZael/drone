@@ -18,7 +18,7 @@ Today's shape is one head, an optional voice and reviewer, workers and code limb
 - **Budgets that flow down the tree.** Tokens and money per limb, handed from parent to child, with caps that freeze work at the limit, depth caps, and the entity seeing its own spend rate so it can choose cheaper limbs or slower heartbeats. Today there are the Jev caps, the worker queue, and cost shown per worker on the Work canvas.
 - **Backup models.** A limb whose model keeps failing falls back to another (see [plan.md](plan.md#open-questions)).
 - **One abort signal per running period**, shared by every run, Jev call, timer and program, so Pause is a single abort nothing outlives.
-- **Per-limb views**: each limb renders only the sections it needs (a keypad limb sees keys and recent chat).
+- **Per-limb views**, beyond today's per-role worker lists: each limb renders only the sections it needs (a keypad limb sees keys and recent chat).
 - **Resumable sessions** are the next milestone ([plan.md](plan.md#milestones)).
 
 ## Arbitration

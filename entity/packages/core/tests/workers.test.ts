@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { chatChannel, keypadChannel, workspaceChannel } from '../src/index.js';
-import { lastUserMessage, makeEntity, ownTask, sleep, until } from './helpers.js';
+import { chatChannel, keypadChannel, workspaceChannel, type MindRunInput } from '../src/index.js';
+import { lastUserMessage, makeEntity, ownTask, sleep, stableState, until } from './helpers.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const c of cleanups.splice(0)) c(); });
@@ -181,16 +181,19 @@ test('work view data: tool calls are logged with outcomes, busy workers get summ
 
 test('a worker that runs out of turns is continued with its conversation, then marked failed at the cap; one that ends quietly keeps its last reply as result', async () => {
   let turns = 0;
+  // A worker's later wakes show only what changed, so its task is known from its first one.
+  const tasks = new Map<string, string>();
+  const taskOf = (input: MindRunInput) => { if (!tasks.has(input.limbId)) tasks.set(input.limbId, ownTask(input)); return tasks.get(input.limbId); };
   const h = setup(async (input, call) => {
     const message = lastUserMessage(input);
     if (input.role === 'head' && message === 'long') await call('dispatch', { task: 'long work', name: 'long' });
     if (input.role === 'head' && message === 'short') await call('dispatch', { task: 'short work', name: 'short' });
-    if (input.role === 'task' && ownTask(input) === 'long work') { turns++; return; }
-    if (input.role === 'task' && ownTask(input) === 'short work') await call('say', { text: 'here is the answer' });
+    if (input.role === 'task' && taskOf(input) === 'long work') { turns++; return; }
+    if (input.role === 'task' && taskOf(input) === 'short work') await call('say', { text: 'here is the answer' });
   }, { config: { taskContinuations: 2 } });
   // The scripted mind reports running out of turns for the long worker.
   const run = h.mind.run.bind(h.mind);
-  h.mind.run = async input => ({ ...(await run(input)), ...(input.role === 'task' && ownTask(input) === 'long work' ? { stopReason: 'max_steps' as const } : {}) });
+  h.mind.run = async input => ({ ...(await run(input)), ...(input.role === 'task' && taskOf(input) === 'long work' ? { stopReason: 'max_steps' as const } : {}) });
   h.entity.start();
   h.entity.input('chat_message', { text: 'long' });
   await until(() => h.of('task_done').length === 1);
@@ -445,3 +448,57 @@ test('review: with review "head", a verdict is not superseded by a newer head ru
   expect(h.said()).toEqual(['Sydney', 'Canberra.']);
 });
 
+test('context: in a big batch, a worker sees its siblings without their tasks, and the front limb sees one line per worker', async () => {
+  const release: (() => void)[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'fix all of them') {
+      await call('dispatch_many', { title: 'Fix files', items: Array.from({ length: 40 }, (_, i) => ({ task: `fix file ${i}: ${'x'.repeat(2000)}`, name: `file ${i}` })) });
+    }
+    if (input.role === 'task') await new Promise<void>(r => release.push(r));
+  }, { config: { maxTasks: 40 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'fix all of them' });
+  await until(() => h.mind.runs.filter(r => r.role === 'task').length === 40);
+  const worker = h.mind.runs.filter(r => r.role === 'task').at(-1)!; // the last one started sees all 39 siblings
+  expect(worker.prompt.split('x'.repeat(2000)).length - 1).toBe(1); // only its own task in full
+  expect(worker.prompt.length).toBeLessThan(10_000);
+  const siblings = stableState(worker).workers as string[];
+  expect(siblings).toHaveLength(31); // 30 shown, then "(9 more not shown)"
+  h.entity.wake('head', 'look');
+  await until(() => h.mind.runs.filter(r => r.role === 'head').length === 3);
+  const head = h.mind.runs.filter(r => r.role === 'head').at(-1)!;
+  expect(stableState(head).workers).toHaveLength(40);
+  expect(head.prompt.length).toBeLessThan(12_000); // batch members show the batch title, not their tasks
+  for (const r of release) r();
+});
+
+test('context: a worker\'s later wakes show only the state that changed; the stable part holds no ages', async () => {
+  let release!: () => void;
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'the job', name: 'job' });
+    if (input.role === 'head' && lastUserMessage(input) === 'note it') await call('note', { text: 'remember the blue one' });
+    if (input.role === 'task' && ownTask(input) === 'the job') await new Promise<void>(r => { release = r; });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => !!release);
+  release();
+  await until(() => h.of('task_done').length === 1);
+  h.entity.input('chat_message', { text: 'note it' });
+  await until(() => h.of('note').length === 1);
+  expect(h.entity.messageWorker('worker-3', 'one more thing')).toContain('picked the conversation back up');
+  await until(() => h.mind.runs.filter(r => r.limbId === 'worker-3').length === 2);
+  const [first, second] = h.mind.runs.filter(r => r.limbId === 'worker-3');
+  expect(stableState(first).task).toBe('the job');
+  expect(second.prompt).toContain('STATE (stable, only what changed since your last wake)');
+  expect(stableState(second)).toEqual({ notes: ['remember the blue one'] });
+  expect(second.prompt).toContain('Message from the user: one more thing');
+  await until(() => h.of('task_done').length === 2);
+  // The head's stable part is the same from wake to wake when only time passes.
+  h.entity.wake('head', 'a');
+  await sleep(20);
+  h.entity.wake('head', 'b');
+  await sleep(20);
+  const heads = h.mind.runs.filter(r => r.role === 'head').slice(-2).map(r => JSON.stringify(stableState(r)));
+  expect(heads[0]).toBe(heads[1]);
+});

@@ -58,4 +58,11 @@ export const lastUserMessage = (input: MindRunInput) => {
 };
 
 /** A task limb's own task (the top-level "task" in its state, not the workers list). */
-export const ownTask = (input: MindRunInput) => /\n "task": "([^"]*)"/.exec(input.prompt)?.[1] ?? '';
+export const ownTask = (input: MindRunInput) => stableState(input).task as string ?? '';
+
+/** The STATE (stable) part of a prompt. For a worker's later wakes, only what changed since its last one. */
+export const stableState = (input: MindRunInput): Record<string, unknown> => {
+  const lines = input.prompt.split('\n');
+  const at = lines.findIndex(line => line.startsWith('STATE (stable'));
+  return at < 0 ? {} : JSON.parse(lines[at + 1]);
+};

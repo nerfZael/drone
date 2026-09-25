@@ -181,6 +181,8 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
         capabilities: workerCapabilities(state.setup.codeLimbs), status, createdAt: t, decidedAt: t,
         task: String(data.task), replyTo: typeof data.reply_to === 'number' ? data.reply_to : undefined,
         waitFor: status === 'waiting' ? str(data.after) : undefined, group: str(data.group),
+        // What happened before it existed is in its state and task, not news to it.
+        seenSeq: event.seq,
       });
       return;
     }
