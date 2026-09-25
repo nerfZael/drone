@@ -5,75 +5,28 @@ import type { Mind, ToolSpec } from './mind.js';
 import { describeToolArgs, toolResultOk, type Summarizer, type WorkSummary } from './summary.js';
 import { runProgram, type ProgramOutcome } from './program.js';
 import { headSystemPrompt, reviewerSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
+import { initialRuntimeState, reduceRuntime, WORKER_ACTIVE, type Claim, type LimbRole, type LimbState, type LimbStatus, type OutputStop, type RuntimeSetup, type RuntimeState } from './runtime-state.js';
 import { toJsonSchema, validate } from './schema.js';
 import type { Caller, Capability, EntityEvent, EventMatcher, Schema } from './types.js';
 import { conditionHolds, conditionSenses, eventMatchesTrigger, LevelTracker, levelHolds, senseHolds, templateArgs, watchSchema, type ConditionContext, type StopMode, type StopScope, type WatchSpec } from './watch.js';
 
 export type SessionStatus = 'idle' | 'running' | 'paused';
-export type LimbRole = 'head' | 'voice' | 'reviewer' | 'task' | 'watch' | 'program';
-/** A worker is `waiting` while it waits for another worker to finish (dispatch with `after`), and `queued` while it waits for a free slot. */
-export type LimbStatus = 'idle' | 'queued' | 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
 
-export interface RunInfo { id: string; reason: string; startedAt: number; firstToolAt?: number; readSeq: number; abort: AbortController; voice: boolean }
-
-export interface Limb {
-  id: string;
-  kind: 'llm' | 'code';
-  role: LimbRole;
-  name: string;
-  parent?: string;
-  model?: string;
-  capabilities: Set<Capability>;
-  restart: 'permanent' | 'transient';
-  status: LimbStatus;
-  createdAt: number;
-  /** When an LLM decided to start this (a tool call; for a program a watch launched, when the watch was decided). Output stops issued before then do not cover it. */
-  decidedAt?: number;
-  children: Set<string>;
-  runs: Map<string, RunInfo>;
-  /** Log position up to which this limb has already been shown events. */
-  seenSeq: number;
-  // task limbs
-  task?: string;
-  /** Steers queued for when the worker finishes its current work. */
-  later: string[];
-  /** A wake that must wait for the run in flight to end (a worker finishing and continuing at once). */
-  wakeAfterRun?: string;
-  /** A few words saying what a watch or program does. */
-  label?: string;
-  /** The batch a worker belongs to (dispatch_many). */
-  group?: string;
-  result?: string;
-  crashes: number[];
-  cancelRequested?: boolean;
-  // code limbs
-  watch?: WatchSpec;
+/** What a limb needs that cannot live in the log: abort controllers, trackers, rate limits. Lost on restart, rebuilt as needed. */
+interface LimbLive {
+  aborts: Map<string, AbortController>;
+  /** A program's sandbox. */
+  program?: AbortController;
   tracker?: LevelTracker;
   sense?: SenseInfo;
-  fires?: number;
-  code?: string;
-  abort?: AbortController;
   effectTimes: number[];
-  expiresAt?: number;
-  /** Installed by the runtime itself; limbs cannot cancel it. */
-  builtin?: boolean;
-  /** Parallel conversation: the user message this worker answers, a worker it waits for, updates for its next tool result. */
-  replyTo?: number;
-  waitFor?: string;
-  notices: string[];
-  /** When a task or code limb stopped running. */
-  endedAt?: number;
-  /** Times this task was continued after running out of turns. */
-  continuations: number;
   /** Work view summaries: tool calls since the last one, and whether one is being written. */
   callsSinceSummary: number;
   lastSummaryAt: number;
   summarizing?: boolean;
+  /** A wake that must wait for the run in flight to end (a worker finishing and continuing at once). */
+  wakeAfterRun?: string;
 }
-
-export interface Claim { path: string; limb: string; note: string; since: number }
-
-export interface OutputStop { id: string; owner: string; scope: StopScope; mode: StopMode; reason: string; since: number; by: string }
 
 export interface EntityConfig {
   /** Debounce before a user message wakes the head, so bursts arrive together. */
@@ -84,7 +37,7 @@ export interface EntityConfig {
   messageSettleMaxMs: number;
   /** How often levels are re-checked for duration triggers. */
   tickMs: number;
-  /** How often the heartbeat may wake the head while something is active. */
+  /** How often the heartbeat may wake the head while workers are active. */
   headHeartbeatMs: number;
   headMaxSteps: number;
   taskMaxSteps: number;
@@ -141,7 +94,7 @@ export interface EntitySnapshot {
   health: { t: number; message: string }[];
   limbs: {
     id: string; kind: string; role: LimbRole; name: string; parent?: string; model?: string; status: LimbStatus;
-    runs: { id: string; reason: string; startedAt: number; firstToolAt?: number; voice: boolean }[];
+    runs: { id: string; reason: string; startedAt: number; firstToolAt?: number }[];
     task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
     createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
   }[];
@@ -160,7 +113,10 @@ const DEFAULT_CONFIG: EntityConfig = {
 
 class Stopped extends Error {}
 
-/** The realtime entity: event log, limbs, code limbs, channels and user controls. See entity/docs. */
+/**
+ * The realtime entity: event log, limbs, code limbs, channels and user controls. See entity/docs.
+ * Its state is a projection of the log (`reduceRuntime`): every change is an event first.
+ */
 export class Entity {
   private readonly config: EntityConfig;
   private readonly mind: Mind;
@@ -173,30 +129,15 @@ export class Entity {
   log!: EventLog;
   levels!: Levels;
   private world: Record<string, unknown> = {};
-  private notes: string[] = [];
-  private limbs = new Map<string, Limb>();
-  private stops: OutputStop[] = [];
-  private health: { t: number; message: string }[] = [];
+  private state!: RuntimeState;
+  private live = new Map<string, LimbLive>();
   private jev!: JevService;
-  /** The newest run of each speaking limb: older runs of that limb are superseded. */
-  private latestRun = new Map<string, string>();
-  private counter = 0;
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private messageTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
-  private lastHeadRunAt = 0;
   private pausedAt = 0;
   private pauseWaiters: (() => void)[] = [];
   private resumeWaiters: (() => void)[] = [];
-  private lastEvents = new Map<string, number>();
-  private claims = new Map<string, Claim>();
-  private discoveries: { by: string; text: string; t: number }[] = [];
-  /** Answers of the front limb waiting for a second look, and the batch the reviewer is on. */
-  private unreviewed: number[] = [];
-  private reviewing = new Set<number>();
-  /** Batches from dispatch_many: their title and the chat message that shows their progress. */
-  private batches = new Map<string, { title: string; message?: number; text?: string; ended: boolean }>();
-  private keptSessions: string[] = [];
   private summaries = 0;
   private eventWaiters = new Set<{ matcher: EventMatcher; resolve(e: EntityEvent | null): void; timer: ReturnType<typeof setTimeout> }>();
   private pausable = new Set<{ remaining: number; startedAt: number; timer: ReturnType<typeof setTimeout> | null; fire(): void }>();
@@ -216,40 +157,27 @@ export class Entity {
     this.log = new EventLog(() => this.now());
     this.levels = new Levels(() => this.now());
     this.world = Object.fromEntries(this.channels.map(c => [c.name, c.init()]));
-    this.notes = [];
-    this.limbs = new Map();
-    this.stops = [];
-    this.health = [];
-    this.latestRun = new Map();
-    this.lastEvents = new Map();
-    this.claims = new Map();
-    this.discoveries = [];
-    this.keptSessions = [];
-    this.batches = new Map();
-    this.unreviewed = [];
-    this.reviewing = new Set();
+    const { head, task, voice } = this.options.models;
+    const setup: RuntimeSetup = { models: { head, task, ...(voice ? { voice } : {}) }, review: this.config.review, codeLimbs: this.config.codeLimbs, keptSessions: this.config.keptSessions };
+    this.state = initialRuntimeState(setup);
+    this.live = new Map();
     this.summaries = 0;
     this.jev = new JevService(this.options.evaluator, this.log, this.levels, () => this.renderForJev(), m => this.addHealth(m), this.options.jev);
     this.log.subscribe(event => this.onEvent(event));
-    const code: Capability[] = this.config.codeLimbs ? ['set_watch', 'run_program'] : [];
-    this.createLimb({ id: 'head', kind: 'llm', role: 'head', name: 'head', model: this.options.models.head, capabilities: ['speak', ...code, 'cancel', 'kill'], restart: 'permanent' });
-    if (this.config.review === 'separate') {
-      this.createLimb({ id: 'reviewer', kind: 'llm', role: 'reviewer', name: 'reviewer', parent: 'head', model: this.options.models.head, capabilities: ['speak'], restart: 'permanent' });
-    }
-    if (this.options.models.voice) {
-      this.createLimb({ id: 'voice', kind: 'llm', role: 'voice', name: 'voice', parent: 'head', model: this.options.models.voice, capabilities: ['speak', 'cancel'], restart: 'permanent' });
-    }
   }
 
   now(): number { return Math.round((performance.now() - this.startedAt) * 100) / 100; }
 
+  /** The runtime state, as projected from the log. Read-only for callers. */
+  runtime(): Readonly<RuntimeState> { return this.state; }
+
   start(): void {
     if (this.status !== 'idle') return;
     this.status = 'running';
-    this.log.append('session_started', 'user', {});
+    this.log.append('session_started', 'user', { setup: this.state.setup as unknown as Record<string, unknown> });
     if (this.jev.available && this.config.draftAttention) {
       // The runtime's own default sense: Jev can add wakes, never suppress them.
-      this.installWatch(this.limbs.get(this.frontLimb())!, {
+      this.installWatch(this.limb(this.frontLimb())!, {
         name: 'draft attention',
         on: { sense: DRAFT_ATTENTION_QUESTION, above: 0.4 },
         // Only once the user pauses, so a half-typed question is not answered (M3, E3).
@@ -266,7 +194,7 @@ export class Entity {
     this.status = 'paused';
     this.pausedAt = this.now();
     if (this.messageTimer) { clearTimeout(this.messageTimer); this.messageTimer = null; }
-    for (const limb of this.limbs.values()) for (const run of limb.runs.values()) run.abort.abort();
+    for (const live of this.live.values()) for (const abort of live.aborts.values()) abort.abort();
     for (const wait of this.pausable) if (wait.timer) { clearTimeout(wait.timer); wait.timer = null; wait.remaining -= performance.now() - wait.startedAt; }
     this.log.append('session_paused', 'user', {});
   }
@@ -279,7 +207,7 @@ export class Entity {
     for (const wait of this.pausable) this.schedulePausable(wait);
     for (const resolve of this.pauseWaiters.splice(0)) resolve();
     this.wake('head', `resumed after ${Math.round(pausedFor / 1000)} s pause`);
-    for (const limb of this.limbs.values()) if (limb.role === 'task' && limb.status === 'running' && !limb.runs.size) this.wake(limb.id, 'resumed');
+    for (const limb of this.limbList()) if (limb.role === 'task' && limb.status === 'running' && !limb.runs.length) this.wake(limb.id, 'resumed');
   }
 
   /** Aborts everything and starts a clean session. Returns the old log so the host can archive it. */
@@ -305,9 +233,9 @@ export class Entity {
     for (const waiter of this.eventWaiters) { clearTimeout(waiter.timer); waiter.resolve(null); }
     this.eventWaiters.clear();
     for (const resolve of this.pauseWaiters.splice(0)) resolve();
-    for (const limb of this.limbs.values()) {
-      limb.abort?.abort();
-      for (const run of limb.runs.values()) run.abort.abort();
+    for (const live of this.live.values()) {
+      live.program?.abort();
+      for (const abort of live.aborts.values()) abort.abort();
     }
     this.jev.close();
   }
@@ -332,11 +260,8 @@ export class Entity {
   // ---------- events ----------
 
   private onEvent(event: EntityEvent): void {
-    this.lastEvents.set(`any:${event.type}`, event.t);
-    if (event.by === 'user') this.lastEvents.set(`user:${event.type}`, event.t);
-    else if (isEntityActor(event.by)) this.lastEvents.set(`entity:${event.type}`, event.t);
+    reduceRuntime(this.state, event);
     for (const channel of this.channels) channel.reduce(this.world[channel.name] as never, event, { levels: this.levels, now: event.t });
-    if (event.type === 'note') { this.notes.push(String(event.data.text)); if (this.notes.length > 20) this.notes.shift(); }
     for (const listener of this.listeners) listener(event);
     for (const waiter of [...this.eventWaiters]) {
       if (matches(event, waiter.matcher)) { this.eventWaiters.delete(waiter); clearTimeout(waiter.timer); waiter.resolve(event); }
@@ -354,45 +279,41 @@ export class Entity {
     if (event.data.thread || event.data.group || event.data.corrects || event.data.expands) return;
     // The head reviewing its own answers adds nothing; with review 'head', only a separate voice is reviewed.
     if (this.config.review === 'head' && event.by === 'head') return;
-    this.unreviewed.push(event.seq);
-    queueMicrotask(() => { if (this.status !== 'idle') this.log.append('review_queued', 'system', { seq: event.seq }); });
+    this.log.append('review_queued', 'system', { seq: event.seq });
   }
 
   private reviewerId(): string { return this.config.review === 'separate' ? 'reviewer' : 'head'; }
 
   /** Once the front limb has been quiet for a moment, one reviewer run looks at all its unreviewed answers. */
   private maybeReview(now: number): void {
-    if (!this.unreviewed.length || this.reviewing.size) return;
-    const front = this.limbs.get(this.frontLimb())!;
-    const reviewer = this.limbs.get(this.reviewerId());
-    if (!reviewer || reviewer.runs.size || front.runs.size) return;
-    if (now - (this.lastEvents.get('entity:chat_message') ?? -Infinity) < this.config.reviewQuietMs) return;
-    const batch = this.unreviewed.splice(0);
-    for (const seq of batch) this.reviewing.add(seq);
-    this.wake(reviewer.id, `review ${batch.map(seq => `#${seq}`).join(', ')}`);
+    const { unreviewed, reviewing } = this.state;
+    if (!unreviewed.length || reviewing.length) return;
+    const front = this.limb(this.frontLimb())!;
+    const reviewer = this.limb(this.reviewerId());
+    if (!reviewer || reviewer.runs.length || front.runs.length) return;
+    if (now - (this.state.lastEvents['entity:chat_message'] ?? -Infinity) < this.config.reviewQuietMs) return;
+    const seqs = [...unreviewed];
+    this.log.append('review_started', 'system', { seqs });
+    this.wake(reviewer.id, `review ${seqs.map(seq => `#${seq}`).join(', ')}`);
   }
 
   /** Answers the reviewer did not amend count as confirmed, so nothing stays "checking" forever. */
-  private finishReview(limb: Limb): void {
-    if (limb.id !== this.reviewerId() || !this.reviewing.size || limb.runs.size) return;
-    for (const seq of this.reviewing) this.log.append('message_reviewed', limb.id, { seq, verdict: 'confirmed', implicit: true });
-    this.reviewing.clear();
+  private finishReview(limb: LimbState): void {
+    if (limb.id !== this.reviewerId() || !this.state.reviewing.length || limb.runs.length) return;
+    for (const seq of [...this.state.reviewing]) this.log.append('message_reviewed', limb.id, { seq, verdict: 'confirmed', implicit: true });
   }
 
   /** Answers of a review run that did not complete: requeued after a pause, otherwise marked unchecked. */
-  private abandonReview(limb: Limb, why: 'aborted' | 'failed'): void {
-    if (limb.id !== this.reviewerId() || !this.reviewing.size || limb.runs.size) return;
-    const seqs = [...this.reviewing];
-    this.reviewing.clear();
-    if (why === 'aborted' && this.status === 'paused') { this.unreviewed.unshift(...seqs); return; }
-    if (this.status === 'idle') return;
+  private abandonReview(limb: LimbState, why: 'aborted' | 'failed'): void {
+    if (limb.id !== this.reviewerId() || !this.state.reviewing.length || limb.runs.length || this.status === 'idle') return;
+    const seqs = [...this.state.reviewing];
+    if (why === 'aborted' && this.status === 'paused') { this.log.append('review_requeued', 'system', { seqs }); return; }
     for (const seq of seqs) this.log.append('message_reviewed', limb.id, { seq, verdict: 'unchecked', reason: why });
   }
 
-  private amend(limb: Limb, args: { seq: number; verdict: string; text?: string }): string {
+  private amend(limb: LimbState, args: { seq: number; verdict: string; text?: string }): string {
     const original = this.log.all().find(e => e.seq === args.seq && e.type === 'chat_message');
     if (!original || !isEntityActor(original.by)) return `error: #${args.seq} is not one of the entity's messages`;
-    this.reviewing.delete(args.seq);
     const text = String(args.text ?? '').trim();
     if (args.verdict === 'confirm') { this.log.append('message_reviewed', limb.id, { seq: args.seq, verdict: 'confirmed' }); return `#${args.seq} confirmed`; }
     if (!text) return `error: ${args.verdict} needs text`;
@@ -412,7 +333,7 @@ export class Entity {
       const check = () => {
         this.messageTimer = null;
         const typing = this.levels.get('user.typing') !== undefined;
-        const lastKey = this.lastEvents.get('user:draft_changed') ?? -Infinity;
+        const lastKey = this.state.lastEvents['user:draft_changed'] ?? -Infinity;
         const now = this.now();
         if (typing && now - lastKey < this.config.messageSettleMs && now - sentAt < this.config.messageSettleMaxMs) {
           this.messageTimer = setTimeout(check, Math.min(150, this.config.messageSettleMs));
@@ -427,22 +348,22 @@ export class Entity {
   private tick(): void {
     if (this.status !== 'running') return;
     const now = this.now();
-    for (const limb of [...this.limbs.values()]) {
+    for (const limb of this.limbList()) {
       if (limb.role !== 'watch' || limb.status !== 'running' || !limb.watch) continue;
       if (limb.expiresAt !== undefined && now >= limb.expiresAt) { this.endCodeLimb(limb, 'done', 'expired'); continue; }
       this.checkLevelWatch(limb, now);
     }
     if (this.config.review !== 'off') this.maybeReview(now);
     // Standing watches and programs of the head (a mirror, the draft sense) need no heartbeat; only work in progress does.
-    const active = [...this.limbs.values()].some(l => l.role === 'task' && (l.status === 'running' || l.status === 'queued' || l.status === 'waiting'));
-    const head = this.limbs.get('head')!;
-    if (active && !head.runs.size && now - this.lastHeadRunAt > this.config.headHeartbeatMs) this.wake('head', 'heartbeat');
+    const active = this.limbList().some(l => l.role === 'task' && WORKER_ACTIVE.includes(l.status));
+    const head = this.limb('head')!;
+    if (active && !head.runs.length && now - (head.lastRunAt ?? 0) > this.config.headHeartbeatMs) this.wake('head', 'heartbeat');
   }
 
   // ---------- watches ----------
 
   private runEventWatches(event: EntityEvent): void {
-    for (const limb of [...this.limbs.values()]) {
+    for (const limb of this.limbList()) {
       if (limb.role !== 'watch' || limb.status !== 'running' || !limb.watch) continue;
       const on = limb.watch.on;
       if ('event' in on) {
@@ -451,14 +372,15 @@ export class Entity {
     }
   }
 
-  private checkLevelWatch(limb: Limb, now: number): void {
+  private checkLevelWatch(limb: LimbState, now: number): void {
     const on = limb.watch!.on;
     if ('event' in on) return;
-    const triggered = 'level' in on ? levelHolds(on, this.levels, isEntityActor) : senseHolds(this.levels.get(limb.sense!.level)?.value as number | undefined, on);
-    if (limb.tracker!.update(triggered && this.whenHolds(limb, now), now, on.for_ms ?? 0)) this.fireWatch(limb, undefined);
+    const live = this.liveOf(limb.id);
+    const triggered = 'level' in on ? levelHolds(on, this.levels, isEntityActor) : senseHolds(this.levels.get(live.sense!.level)?.value as number | undefined, on);
+    if (live.tracker!.update(triggered && this.whenHolds(limb, now), now, on.for_ms ?? 0)) this.fireWatch(limb, undefined);
   }
 
-  private whenHolds(limb: Limb, now: number): boolean {
+  private whenHolds(limb: LimbState, now: number): boolean {
     const when = limb.watch?.when;
     return !when || conditionHolds(when, this.conditionContext(now));
   }
@@ -469,13 +391,13 @@ export class Entity {
       now,
       isEntity: isEntityActor,
       senseValue: question => { const info = this.jev.find(question); return info ? this.levels.get(info.level)?.value as number | undefined : undefined; },
-      lastEvent: (type, by) => this.lastEvents.get(`${by}:${type}`),
+      lastEvent: (type, by) => this.state.lastEvents[`${by}:${type}`],
     };
   }
 
-  private fireWatch(limb: Limb, event: EntityEvent | undefined): void {
+  private fireWatch(limb: LimbState, event: EntityEvent | undefined): void {
     const watch = limb.watch!;
-    limb.fires = (limb.fires ?? 0) + 1;
+    this.log.append('watch_fired', 'system', { id: limb.id });
     const caller: Caller = { limbId: limb.id, kind: 'code', readSeq: this.log.length };
     const action = watch.do;
     if ('effect' in action) {
@@ -490,49 +412,43 @@ export class Entity {
       this.log.append('watch_woke', limb.id, { reason: action.wake.reason, limb: limb.parent });
       if (limb.parent) this.wake(limb.parent, `watch "${limb.name}": ${action.wake.reason}`);
     } else if ('run_program' in action) {
-      this.startProgram(this.limbs.get(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code, limb.decidedAt, action.run_program.label);
+      this.startProgram(this.limb(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code, limb.decidedAt, action.run_program.label);
     }
     if (watch.once) this.endCodeLimb(limb, 'done', 'fired once');
   }
 
-  private installWatch(author: Limb, spec: WatchSpec, builtin = false, decidedAt?: number): string {
+  private installWatch(author: LimbState, spec: WatchSpec, builtin = false, decidedAt?: number): string {
     const error = validate(watchSchema, spec, 'watch');
     if (error) return `error: invalid watch: ${error}. Nothing installed.`;
     const action = spec.do;
     if ('effect' in action) {
       const effect = this.effects.get(action.effect);
       if (!effect) return `error: unknown effect "${action.effect}" (known: ${[...this.effects.keys()].join(', ')}). Nothing installed.`;
-      if (effect.spec.voice && !author.capabilities.has('speak')) return `error: you cannot give a watch "${action.effect}": you don't have the speak capability. Nothing installed.`;
+      if (effect.spec.voice && !author.capabilities.includes('speak')) return `error: you cannot give a watch "${action.effect}": you don't have the speak capability. Nothing installed.`;
     }
     const senses = [...('sense' in spec.on ? [spec.on.sense] : []), ...conditionSenses(spec.when)];
     if (senses.length && !this.jev.available) return 'error: sense watches need Jev, which is not configured in this session. Nothing installed.';
     if (this.countCode() >= this.config.maxCodeLimbs) return `error: too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.`;
-    const limb = this.createLimb({ kind: 'code', role: 'watch', name: spec.name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
-    limb.watch = spec;
-    limb.label = spec.label;
-    limb.builtin = builtin;
-    limb.decidedAt = decidedAt;
-    limb.tracker = new LevelTracker();
-    limb.status = 'running';
-    if (spec.expires_s) limb.expiresAt = this.now() + spec.expires_s * 1000;
-    if ('sense' in spec.on) limb.sense = this.jev.sense(spec.on.sense, limb.id);
-    for (const question of conditionSenses(spec.when)) this.jev.sense(question, limb.id);
-    this.log.append('watch_installed', author.id, { id: limb.id, name: spec.name, watch: spec as unknown as Record<string, unknown> });
-    return `watch ${limb.id} "${spec.name}" installed${limb.sense ? ` (sense level ${limb.sense.level})` : ''}`;
+    const id = this.nextId('watch');
+    // Ready before the install is logged: the new watch already sees that event.
+    const live = this.liveOf(id);
+    live.tracker = new LevelTracker();
+    if ('sense' in spec.on) live.sense = this.jev.sense(spec.on.sense, id);
+    for (const question of conditionSenses(spec.when)) this.jev.sense(question, id);
+    this.log.append('watch_installed', author.id, { id, name: spec.name, watch: spec as unknown as Record<string, unknown>, ...(builtin ? { builtin } : {}), ...(decidedAt !== undefined ? { decided_at: decidedAt } : {}) });
+    return `watch ${id} "${spec.name}" installed${live.sense ? ` (sense level ${live.sense.level})` : ''}`;
   }
 
   // ---------- programs ----------
 
-  private startProgram(author: Limb, name: string, code: string, decidedAt?: number, label?: string): { limb?: Limb; error?: string; done?: Promise<ProgramOutcome> } {
+  private startProgram(author: LimbState, name: string, code: string, decidedAt?: number, label?: string): { limb?: LimbState; error?: string; done?: Promise<ProgramOutcome> } {
     if (this.countCode() >= this.config.maxCodeLimbs) return { error: `too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.` };
-    const limb = this.createLimb({ kind: 'code', role: 'program', name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
-    limb.code = code;
-    limb.label = label;
-    limb.decidedAt = decidedAt;
-    limb.abort = new AbortController();
-    limb.status = 'running';
-    this.log.append('program_started', author.id, { id: limb.id, name, code });
-    const done = runProgram(code, this.programApi(limb), limb.abort.signal).then(outcome => {
+    const id = this.nextId('program');
+    const abort = new AbortController();
+    this.liveOf(id).program = abort;
+    this.log.append('program_started', author.id, { id, name, code, ...(label !== undefined ? { label } : {}), ...(decidedAt !== undefined ? { decided_at: decidedAt } : {}) });
+    const limb = this.limb(id)!;
+    const done = runProgram(code, this.programApi(limb), abort.signal).then(outcome => {
       if (limb.status !== 'running') return outcome;
       if (outcome.status === 'finished') {
         this.endCodeLimb(limb, 'done', 'finished', outcome.result);
@@ -547,7 +463,7 @@ export class Entity {
     return { limb, done };
   }
 
-  private programApi(limb: Limb) {
+  private programApi(limb: LimbState) {
     // Programs read the log in order from where they started: events that happen between two
     // nextEvent calls are buffered, never missed.
     let cursor = this.log.length;
@@ -587,7 +503,7 @@ export class Entity {
       now: () => this.now(),
       // A program cannot think; it can hand what it found to its author. At most once a second, so a loop cannot flood the author with runs.
       wake: (reason: string) => {
-        const author = limb.parent ? this.limbs.get(limb.parent) : undefined;
+        const author = limb.parent ? this.limb(limb.parent) : undefined;
         if (!author || author.kind !== 'llm' || limb.status !== 'running') return 'error: no author to wake';
         if (this.now() - lastWake < 1000) return 'rate limited: at most one wake per second';
         lastWake = this.now();
@@ -599,15 +515,16 @@ export class Entity {
   }
 
   /** Programs are slowed down to their rate limit instead of losing effects. Watches drop instead. */
-  private async throttle(limb: Limb, name: string): Promise<void> {
+  private async throttle(limb: LimbState, name: string): Promise<void> {
     const spec = this.effects.get(name)?.spec;
     if (!spec || spec.readonly) return;
     const limit = spec.risk === 'reflex' ? this.config.reflexPerSecond : this.config.limbPerSecond;
+    const live = this.liveOf(limb.id);
     for (;;) {
       const now = performance.now();
-      limb.effectTimes = limb.effectTimes.filter(t => now - t < 1000);
-      if (limb.effectTimes.length < limit) return;
-      await this.pausableWait(1000 - (now - limb.effectTimes[0]) + 1);
+      live.effectTimes = live.effectTimes.filter(t => now - t < 1000);
+      if (live.effectTimes.length < limit) return;
+      await this.pausableWait(1000 - (now - live.effectTimes[0]) + 1);
     }
   }
 
@@ -631,39 +548,36 @@ export class Entity {
   // ---------- output stops ----------
 
   private stopOutput(owner: string, scope: StopScope, mode: StopMode, reason: string, by: string): OutputStop {
-    const stop: OutputStop = { id: `stop-${++this.counter}`, owner, scope, mode, reason, since: this.now(), by };
-    this.stops.push(stop);
+    const id = this.nextId('stop');
+    this.log.append('output_stopped', by, { id, owner, scope, mode, reason });
     if (mode === 'stop') {
-      for (const limb of this.limbs.values()) {
+      for (const limb of this.limbList()) {
         if (limb.role !== 'program' || limb.status !== 'running') continue;
         if (scope === 'entity' || this.isWithin(limb.id, owner)) this.endCodeLimb(limb, 'cancelled', `output stopped: ${reason}`);
       }
     }
-    this.log.append('output_stopped', by, { id: stop.id, owner, scope, mode, reason });
-    const ownerLimb = this.limbs.get(owner);
+    const ownerLimb = this.limb(owner);
     // Wake the owner so it can react, unless it stopped its own output and already knows.
     if (ownerLimb?.kind === 'llm' && by !== owner) this.wake(owner, `output stopped: ${reason}`);
-    return stop;
+    return this.state.stops.find(s => s.id === id)!;
   }
 
   private resumeOutput(limbId: string, by: string): number {
-    const before = this.stops.length;
-    this.stops = this.stops.filter(stop => !(limbId === 'head' || this.isWithin(stop.owner, limbId)));
-    const removed = before - this.stops.length;
-    if (removed) this.log.append('output_resumed', by, { count: removed });
+    const ids = this.state.stops.filter(stop => limbId === 'head' || this.isWithin(stop.owner, limbId)).map(stop => stop.id);
+    if (ids.length) this.log.append('output_resumed', by, { count: ids.length, ids });
     for (const resolve of this.resumeWaiters.splice(0)) resolve();
-    return removed;
+    return ids.length;
   }
 
   private stoppedBy(caller: Caller): OutputStop | undefined {
-    const limb = this.limbs.get(caller.limbId);
-    return this.stops.find(stop => {
+    const limb = this.limb(caller.limbId);
+    return this.state.stops.find(stop => {
       // A stop halts the work in flight when it was issued. Work a limb deliberately starts afterwards is a new decision.
       if (limb?.decidedAt !== undefined && limb.decidedAt > stop.since) return false;
       if (stop.scope === 'entity') return true;
       if (!this.isWithin(caller.limbId, stop.owner)) return false;
       // The voice is not the head's "work": only a subtree or entity stop silences it.
-      return stop.scope === 'subtree' || (caller.limbId !== stop.owner && this.limbs.get(caller.limbId)?.role !== 'voice');
+      return stop.scope === 'subtree' || (caller.limbId !== stop.owner && limb?.role !== 'voice');
     });
   }
 
@@ -676,11 +590,11 @@ export class Entity {
     const { spec, channel } = entry;
     const error = validate(spec.parameters, args, name);
     if (error) return `error: ${error}. Nothing was done.`;
-    const limb = this.limbs.get(caller.limbId);
+    const limb = this.limb(caller.limbId);
     if (!limb || (limb.kind === 'code' && limb.status !== 'running')) return 'error: this limb is no longer running';
     if (this.status === 'paused' && !spec.readonly) return 'error: the session is paused';
     if (spec.risk === 'confirm') return `error: "${name}" needs the user's approval, which this session does not support yet`;
-    if (spec.voice && !limb.capabilities.has('speak')) return `error: you cannot use "${name}": only limbs that talk to the user can.`;
+    if (spec.voice && !limb.capabilities.includes('speak')) return `error: you cannot use "${name}": only limbs that talk to the user can.`;
     if (!spec.readonly && spec.output !== false) {
       // A freeze pauses programs and task limbs at this effect until it lifts; watches and the voice are rejected instead.
       for (let stop = this.stoppedBy(caller); stop; stop = this.stoppedBy(caller)) {
@@ -693,15 +607,12 @@ export class Entity {
         if (!resumed || limb.status !== 'running' || this.status === 'idle') return `output stopped: ${stop.reason}. Nothing was done.`;
       }
     }
-    if (spec.voice && caller.kind === 'llm' && caller.runId && caller.runId !== this.latestRun.get(caller.limbId)) {
-      return 'superseded: a newer run is handling this. Nothing was sent.';
-    }
     if (spec.dependsOn) {
       const stale = this.log.since(caller.readSeq).find(event => spec.dependsOn!(args).some(m => matches(event, m)));
       if (stale) return `stale: "${stale.type}" happened after you read the state (#${stale.seq}). Nothing was done; re-check and retry if still right.`;
     }
     if (spec.paths) {
-      const refused = this.claimPaths(limb.kind === 'code' && limb.parent ? this.limbs.get(limb.parent)! : limb, spec.paths(args), 'writing');
+      const refused = this.claimPaths(limb.kind === 'code' && limb.parent ? this.limb(limb.parent)! : limb, spec.paths(args), 'writing');
       if (refused) {
         this.wake('head', `claim conflict: ${caller.limbId} tried to write ${refused}`);
         return `refused: ${refused}. Nothing was written. Coordinate (share a note, wait, or work elsewhere) instead of overwriting.`;
@@ -709,10 +620,11 @@ export class Entity {
     }
     if (limb.kind === 'code' && !spec.readonly) {
       const limit = spec.risk === 'reflex' ? this.config.reflexPerSecond : this.config.limbPerSecond;
+      const live = this.liveOf(limb.id);
       const now = performance.now();
-      limb.effectTimes = limb.effectTimes.filter(t => now - t < 1000);
-      if (limb.effectTimes.length >= limit) return `rate limited: at most ${limit} "${spec.risk}" effects per second for a watch or program`;
-      limb.effectTimes.push(now);
+      live.effectTimes = live.effectTimes.filter(t => now - t < 1000);
+      if (live.effectTimes.length >= limit) return `rate limited: at most ${limit} "${spec.risk}" effects per second for a watch or program`;
+      live.effectTimes.push(now);
     }
     try {
       return await spec.apply(args, {
@@ -729,26 +641,32 @@ export class Entity {
 
   // ---------- LLM limbs ----------
 
-  /** Wakes an LLM limb with a fresh run. A busy limb gets a parallel run instead of a queue. */
+  /**
+   * Wakes an LLM limb with a fresh run. A busy limb gets a parallel run instead of a queue.
+   * A worker's pending updates (steers, discoveries, claims) come with the wake.
+   */
   wake(limbId: string, reason: string): void {
-    const limb = this.limbs.get(limbId);
+    const limb = this.limb(limbId);
     if (!limb || limb.kind !== 'llm' || this.status !== 'running') return;
-    if (limb.role === 'task' && (limb.status !== 'running' || limb.runs.size)) return;
-    const run: RunInfo = { id: `run-${++this.counter}`, reason, startedAt: this.now(), readSeq: this.log.length, abort: new AbortController(), voice: limb.capabilities.has('speak') };
-    limb.runs.set(run.id, run);
-    if (run.voice) this.latestRun.set(limb.id, run.id);
-    if (limb.id === 'head') this.lastHeadRunAt = run.startedAt;
-    const prompt = this.render(limb, reason);
-    this.log.append('run_started', limb.id, { run: run.id, reason });
-    const system = limb.role === 'reviewer' ? reviewerSystemPrompt(this.channels) : limb.role === 'head' ? headSystemPrompt(this.channels, this.limbs.has('voice'), this.config.review === 'head', this.config.review === 'separate') : limb.role === 'voice' ? voiceSystemPrompt(this.channels, this.config.review !== 'off') : taskSystemPrompt(this.channels, limb.group ? this.batches.get(limb.group)?.title : undefined);
+    if (limb.role === 'task' && (limb.status !== 'running' || limb.runs.length)) return;
+    const runId = this.nextId('run');
+    const abort = new AbortController();
+    const live = this.liveOf(limb.id);
+    live.aborts.set(runId, abort);
+    const notices = limb.role === 'task' ? [...limb.notices] : [];
+    const why = [reason, ...notices].filter(Boolean).join(' | ').slice(0, 3000);
+    const readSeq = this.log.length;
+    const prompt = this.render(limb, why);
+    this.log.append('run_started', limb.id, { run: runId, reason: why, ...(notices.length ? { notices: notices.length } : {}) });
+    const startedAt = this.now();
+    const system = limb.role === 'reviewer' ? reviewerSystemPrompt(this.channels) : limb.role === 'head' ? headSystemPrompt(this.channels, !!this.limb('voice'), this.config.review === 'head', this.config.review === 'separate') : limb.role === 'voice' ? voiceSystemPrompt(this.channels, this.config.review !== 'off') : taskSystemPrompt(this.channels, limb.group ? this.state.batches[limb.group]?.title : undefined);
     this.mind.run({
-      limbId: limb.id, runId: run.id, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model!, system, prompt,
-      tools: this.toolsFor(limb), signal: run.abort.signal,
+      limbId: limb.id, runId, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model!, system, prompt,
+      tools: this.toolsFor(limb), signal: abort.signal,
       sessionKey: limb.role === 'task' ? limb.id : undefined,
       maxSteps: limb.role === 'task' ? this.config.taskMaxSteps : this.config.headMaxSteps,
       callTool: async (name, args) => {
-        run.firstToolAt ??= this.now();
-        if (run.abort.signal.aborted) return 'error: this run was stopped';
+        if (abort.signal.aborted) return 'error: this run was stopped';
         // A cancelled worker may still tell the user where it got to and finish; everything else is refused.
         if (limb.cancelRequested && name !== 'say' && name !== 'finish_task' && name !== 'note' && !this.effects.get(name)?.spec.readonly) {
           return 'cancel requested: wrap up now: say briefly where you got to if useful, then call finish_task with what you have.';
@@ -758,159 +676,141 @@ export class Entity {
         if (this.isFront(limb) && name !== 'note' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
           await this.userSettled();
           // A user message this run has not read will wake a newer run; acting now would answer a stale picture.
-          if (this.log.since(run.readSeq).some(e => e.type === 'chat_message' && e.by === 'user')) {
+          if (this.log.since(readSeq).some(e => e.type === 'chat_message' && e.by === 'user')) {
             return 'superseded: the user sent another message after you read the state; a newer run will handle both. Nothing was done. Leave a note if you know something it should, then stop.';
           }
         }
         // A verdict on a given message stays valid whatever newer run started, so amend is never superseded.
-        if (run.voice && run.id !== this.latestRun.get(limb.id) && name !== 'note' && name !== 'handoff' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
+        if (runId !== limb.latestRun && name !== 'note' && name !== 'handoff' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
           return 'superseded: a newer run of you has woken with newer events and is handling things now. Nothing was done. Leave a note if you know something it should, then stop.';
         }
-        const summary = describeToolArgs(name, args ?? {});
-        this.log.append('tool_called', limb.id, { run: run.id, name, summary });
-        const result = await this.callTool(limb, run, name, args ?? {});
+        this.log.append('tool_called', limb.id, { run: runId, name, summary: describeToolArgs(name, args ?? {}) });
+        const result = await this.callTool(limb, runId, readSeq, abort, name, args ?? {});
         const ok = toolResultOk(result);
-        this.log.append('tool_done', limb.id, { run: run.id, name, ok, ...(ok ? {} : { note: result.slice(0, 200) }) });
-        if (limb.role === 'task') this.maybeSummarize(limb);
         // Busy workers hear about steers, discoveries and claims with their next tool result, without being stopped.
-        if (limb.role === 'task' && limb.notices.length) return `${result}\n\n[updates while you worked]\n${limb.notices.splice(0).join('\n')}`;
-        return result;
+        const notices = limb.role === 'task' && limb.status === 'running' && !abort.signal.aborted ? [...limb.notices] : [];
+        this.log.append('tool_done', limb.id, { run: runId, name, ok, ...(ok ? {} : { note: result.slice(0, 200) }), ...(notices.length ? { notices: notices.length } : {}) });
+        if (limb.role === 'task') this.maybeSummarize(limb);
+        return notices.length ? `${result}\n\n[updates while you worked]\n${notices.join('\n')}` : result;
       },
     }).then(result => {
-      limb.runs.delete(run.id);
+      this.log.append('run_finished', limb.id, { run: runId, ms: Math.round(this.now() - startedAt), usage: result.usage ?? null });
+      live.aborts.delete(runId);
       this.wakeIfPending(limb);
       this.finishReview(limb);
-      this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), usage: result.usage ?? null });
-      if (limb.role === 'task' && limb.status === 'running' && !run.abort.signal.aborted) {
-        if (limb.notices.length) this.wake(limb.id, `updates arrived: ${limb.notices.splice(0).join(' | ').slice(0, 1500)}`);
+      if (limb.role === 'task' && limb.status === 'running' && !abort.signal.aborted) {
+        if (limb.notices.length) this.wake(limb.id, 'updates arrived');
         else if (result.stopReason === 'max_steps') {
           // Out of turns while still working: continue with the same conversation, up to a cap.
-          if (limb.continuations++ < this.config.taskContinuations) {
-            this.log.append('task_continued', limb.id, { continuations: limb.continuations });
+          if (limb.continuations < this.config.taskContinuations) {
+            this.log.append('task_continued', limb.id, { continuations: limb.continuations + 1 });
             this.wake(limb.id, 'you ran out of turns in your last run; continue where you left off, and call finish_task when done');
           } else this.finishTask(limb, `stopped after ${limb.continuations} continuations without finishing (step limit)`, 'failed');
         } else this.finishTask(limb, result.text?.trim() || this.lastSaidBy(limb.id) || 'ended without a summary', limb.cancelRequested ? 'cancelled' : 'done');
       }
     }, error => {
-      limb.runs.delete(run.id);
+      const aborted = abort.signal.aborted;
+      this.log.append('run_finished', limb.id, { run: runId, ms: Math.round(this.now() - startedAt), ...(aborted || this.status !== 'running' ? { aborted: true } : { failed: true }) });
+      live.aborts.delete(runId);
       this.wakeIfPending(limb);
       // A review that crashed or was aborted checked nothing: never show its answers as confirmed.
-      this.abandonReview(limb, run.abort.signal.aborted ? 'aborted' : 'failed');
-      if (run.abort.signal.aborted || this.status !== 'running') {
-        this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), aborted: true });
+      this.abandonReview(limb, aborted ? 'aborted' : 'failed');
+      if (aborted || this.status !== 'running') {
         // Paused mid-run: if the session was resumed before this run wound down, resume() found it still busy and skipped it.
-        if (this.status === 'running' && limb.role === 'task' && limb.status === 'running' && !limb.runs.size) this.wake(limb.id, 'resumed');
+        if (this.status === 'running' && limb.role === 'task' && limb.status === 'running' && !limb.runs.length) this.wake(limb.id, 'resumed');
         return;
       }
       this.crashed(limb, error instanceof Error ? error.message : String(error));
     });
   }
 
-  private wakeIfPending(limb: Limb): void {
-    if (!limb.wakeAfterRun || limb.runs.size || limb.status !== 'running') return;
-    const reason = limb.wakeAfterRun;
-    limb.wakeAfterRun = undefined;
+  private wakeIfPending(limb: LimbState): void {
+    const live = this.liveOf(limb.id);
+    if (!live.wakeAfterRun || limb.runs.length || limb.status !== 'running') return;
+    const reason = live.wakeAfterRun;
+    live.wakeAfterRun = undefined;
     this.wake(limb.id, reason);
   }
 
-  private crashed(limb: Limb, message: string): void {
-    const now = this.now();
-    limb.crashes = limb.crashes.filter(t => now - t < this.config.restartWindowMs);
-    limb.crashes.push(now);
+  private crashed(limb: LimbState, message: string): void {
     this.log.append('limb_failed', limb.id, { error: message.slice(0, 500) });
     this.addHealth(`${limb.id} crashed: ${message.slice(0, 200)}`);
-    if (limb.crashes.length > this.config.restartMax) {
+    const now = this.now();
+    if (limb.crashes.filter(t => now - t < this.config.restartWindowMs).length > this.config.restartMax) {
       if (limb.role === 'task') this.finishTask(limb, `failed: ${message}`, 'failed');
       return; // the head stays up but is not retried; the next event wakes it again
     }
     if (limb.role === 'task' && limb.status === 'running') this.wake(limb.id, `restart after crash: ${message.slice(0, 200)}`);
   }
 
-  private finishTask(limb: Limb, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
-    if (limb.status !== 'running' && limb.status !== 'queued' && limb.status !== 'waiting') return;
-    limb.status = status;
-    limb.endedAt = this.now();
-    limb.result = result;
-    for (const child of limb.children) this.stopLimb(child, 'cancel', limb.id);
-    this.releaseClaims(limb.id);
-    if (status === 'done') this.keepSession(limb.id);
-    else this.mind.forget?.(limb.id);
+  private finishTask(limb: LimbState, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
+    if (!WORKER_ACTIVE.includes(limb.status)) return;
+    const keptBefore = [...this.state.kept];
     this.log.append('task_done', limb.id, { status, result: result.slice(0, 4000), task: limb.task ?? '' });
+    // Conversations are kept for the most recent finished workers only; failed and stopped ones are dropped at once.
+    for (const id of keptBefore) if (!this.state.kept.includes(id) && id !== limb.id) this.mind.forget?.(id);
+    if (status !== 'done') this.mind.forget?.(limb.id);
+    for (const child of this.children(limb.id)) this.stopLimb(child.id, 'cancel', limb.id);
+    this.releaseClaims(limb.id);
     // Workers answer the user themselves; the head is only woken to orchestrate.
-    for (const waiting of this.limbs.values()) {
-      if (waiting.waitFor === limb.id && waiting.status === 'waiting') {
-        waiting.waitFor = undefined;
-        const released = `${limb.id} finished (${status}): ${result.slice(0, 500)}`;
-        if (this.workerSlots() <= 0) { waiting.status = 'queued'; waiting.notices.push(released); continue; }
-        waiting.status = 'running';
-        this.log.append('limb_started', 'system', { id: waiting.id, after: limb.id });
-        this.wake(waiting.id, waiting.notices.length ? `${released}; updates: ${waiting.notices.splice(0).join(' | ').slice(0, 1500)}` : released);
-      }
+    for (const waiting of this.limbList()) {
+      if (waiting.waitFor !== limb.id || waiting.status !== 'waiting') continue;
+      const released = `${limb.id} finished (${status}): ${result.slice(0, 500)}`;
+      if (this.workerSlots() <= 0) { this.log.append('limb_queued', 'system', { id: waiting.id, after: limb.id, note: released }); continue; }
+      this.log.append('limb_started', 'system', { id: waiting.id, after: limb.id });
+      this.wake(waiting.id, released);
     }
     this.startQueued();
     this.updateBatch(limb.group);
     if (status === 'done' && limb.later.length) {
-      const notes = limb.later.splice(0);
-      limb.status = 'running';
-      limb.endedAt = undefined;
-      this.log.append('limb_revived', 'system', { id: limb.id, queued: notes.length });
-      const reason = `you finished; next, queued for after that: ${notes.join(' | ').slice(0, 2000)}`;
-      if (limb.runs.size) limb.wakeAfterRun = reason; else this.wake(limb.id, reason);
+      this.log.append('limb_revived', 'system', { id: limb.id, later: limb.later.length });
+      const reason = 'you finished; next, continue with what was queued for after that';
+      if (limb.runs.length) this.liveOf(limb.id).wakeAfterRun = reason; else this.wake(limb.id, reason);
     }
   }
 
-  private keepSession(id: string): void {
-    this.keptSessions = [...this.keptSessions.filter(k => k !== id), id];
-    while (this.keptSessions.length > this.config.keptSessions) this.mind.forget?.(this.keptSessions.shift()!);
-  }
-
   /** A worker for one user message, started at once (or when the worker it waits for finishes). */
-  private dispatch(by: Limb, args: { task: string; name?: string; model?: string; after?: string; reply_to?: number; fork_of?: string; group?: string }): string {
-    const queued = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'queued').length;
+  private dispatch(by: LimbState, args: { task: string; name?: string; model?: string; after?: string; reply_to?: number; fork_of?: string; group?: string }): string {
+    const queued = this.limbList().filter(l => l.role === 'task' && l.status === 'queued').length;
     if (queued >= MAX_QUEUED) return `error: ${queued} workers are already queued (max ${MAX_QUEUED}); cancel some first`;
-    if (args.after && !this.limbs.get(args.after)) return `error: no worker "${args.after}" to wait for`;
-    const source = args.fork_of ? this.limbs.get(args.fork_of) : undefined;
+    if (args.after && !this.limb(args.after)) return `error: no worker "${args.after}" to wait for`;
+    const source = args.fork_of ? this.limb(args.fork_of) : undefined;
     if (args.fork_of && (!source || source.role !== 'task')) return `error: no worker "${args.fork_of}" to fork`;
+    const id = this.nextId('worker');
+    if (source && !this.mind.fork?.(source.id, id)) return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`;
     const model = args.model === 'head' ? this.options.models.head : this.options.models.task;
-    const caps: Capability[] = ['speak', ...(this.config.codeLimbs ? ['set_watch', 'run_program'] as Capability[] : []), 'cancel'];
-    const limb = this.createLimb({ id: `worker-${++this.counter}`, kind: 'llm', role: 'task', name: args.name ?? (source ? `${source.name} (fork)` : 'worker'), parent: 'head', model, capabilities: caps, restart: 'transient' });
-    limb.task = args.task;
-    limb.group = args.group;
-    limb.decidedAt = this.now();
-    limb.replyTo = args.reply_to ?? this.lastUserMessageSeq();
-    if (source && !this.mind.fork?.(source.id, limb.id)) { this.limbs.delete(limb.id); this.limbs.get('head')?.children.delete(limb.id); return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`; }
-    const target = args.after ? this.limbs.get(args.after) : undefined;
-    const gated = !!target && (target.status === 'running' || target.status === 'queued' || target.status === 'waiting');
+    const name = args.name ?? (source ? `${source.name} (fork)` : 'worker');
+    const target = args.after ? this.limb(args.after) : undefined;
+    const gated = !!target && WORKER_ACTIVE.includes(target.status);
     // Workers past the concurrency limit wait in a queue and start, oldest first, as others finish.
-    limb.status = gated ? 'waiting' : this.workerSlots() > 0 ? 'running' : 'queued';
-    if (gated) limb.waitFor = target.id;
-    this.log.append('limb_spawned', by.id, { id: limb.id, name: limb.name, task: args.task, model, reply_to: limb.replyTo ?? null, fork_of: source?.id ?? null, after: args.after ?? null, group: args.group ?? null, queued: limb.status === 'queued' });
-    if (gated) return `worker ${limb.id} "${limb.name}" will start when ${target.id} finishes`;
-    if (limb.status === 'queued') return `worker ${limb.id} "${limb.name}" queued: ${this.config.maxTasks} workers are running; it starts when one finishes`;
-    this.wake(limb.id, source ? `forked from ${source.id} for a new request` : 'task assigned');
-    return `worker ${limb.id} "${limb.name}" started${source ? ` from ${source.id}'s conversation` : ''}`;
+    const status: LimbStatus = gated ? 'waiting' : this.workerSlots() > 0 ? 'running' : 'queued';
+    this.log.append('limb_spawned', by.id, {
+      id, name, task: args.task, model, status, reply_to: args.reply_to ?? this.lastUserMessageSeq() ?? null,
+      fork_of: source?.id ?? null, after: args.after ?? null, group: args.group ?? null,
+    });
+    if (gated) return `worker ${id} "${name}" will start when ${target.id} finishes`;
+    if (status === 'queued') return `worker ${id} "${name}" queued: ${this.config.maxTasks} workers are running; it starts when one finishes`;
+    this.wake(id, source ? `forked from ${source.id} for a new request` : 'task assigned');
+    return `worker ${id} "${name}" started${source ? ` from ${source.id}'s conversation` : ''}`;
   }
 
   /** Many workers at once, one per item, as one batch that views can show together. */
-  private dispatchMany(by: Limb, args: { title: string; items: { task: string; name?: string }[]; model?: string }): string {
+  private dispatchMany(by: LimbState, args: { title: string; items: { task: string; name?: string }[]; model?: string }): string {
     if (!args.items.length) return 'error: items is empty';
-    const group = `group-${++this.counter}`;
+    const group = this.nextId('group');
     const replyTo = this.lastUserMessageSeq();
-    this.batches.set(group, { title: args.title, ended: false });
     this.log.append('group_started', by.id, { id: group, title: args.title, count: args.items.length, reply_to: replyTo ?? null });
     const results = args.items.map(item => this.dispatch(by, { task: item.task, name: item.name, model: args.model, group }));
     // One line in the chat for the whole batch, updated as its workers start and finish.
-    const text = this.batchProgress(group);
-    const message = this.log.append('chat_message', by.id, { text, group, ...(replyTo !== undefined ? { reply_to: replyTo } : {}) });
-    Object.assign(this.batches.get(group)!, { message: message.seq, text });
+    this.log.append('chat_message', by.id, { text: this.batchProgress(group), group, ...(replyTo !== undefined ? { reply_to: replyTo } : {}) });
     const errors = results.filter(r => r.startsWith('error'));
     const queued = results.filter(r => r.includes(' queued')).length;
     return `${group} "${args.title}": ${results.length - errors.length} workers (${results.length - errors.length - queued} started, ${queued} queued)${errors.length ? `; ${errors.length} failed: ${errors[0]}` : ''}`;
   }
 
   private batchProgress(group: string): string {
-    const batch = this.batches.get(group)!;
-    const members = [...this.limbs.values()].filter(l => l.group === group);
+    const batch = this.state.batches[group];
+    const members = this.limbList().filter(l => l.group === group);
     const count = (...statuses: LimbStatus[]) => members.filter(l => statuses.includes(l.status)).length;
     const failed = members.filter(l => l.status === 'failed' || l.status === 'killed');
     const parts = [`${count('done')} of ${members.length} done`];
@@ -923,51 +823,46 @@ export class Entity {
 
   /** Keeps a batch's progress line current; when the last worker ends, wakes the front limb with the results. */
   private updateBatch(group: string | undefined): void {
-    const batch = group ? this.batches.get(group) : undefined;
+    const batch = group ? this.state.batches[group] : undefined;
     if (!group || !batch || batch.message === undefined || batch.ended) return;
     const text = this.batchProgress(group);
-    if (text !== batch.text) { batch.text = text; this.log.append('chat_message_updated', 'system', { seq: batch.message, text, group }); }
-    const members = [...this.limbs.values()].filter(l => l.group === group);
-    if (members.some(l => l.status === 'running' || l.status === 'queued' || l.status === 'waiting')) return;
-    batch.ended = true;
+    if (text !== batch.text) this.log.append('chat_message_updated', 'system', { seq: batch.message, text, group });
+    const members = this.limbList().filter(l => l.group === group);
+    if (members.some(l => WORKER_ACTIVE.includes(l.status))) return;
+    this.log.append('group_finished', 'system', { id: group });
     const results = members.map(l => `${l.name}: ${l.status}${l.result ? `: ${l.result.slice(0, 160)}` : ''}`).slice(0, 60).join('\n');
     this.wake(this.frontLimb(), `batch "${batch.title}" finished. ${text}\nResults:\n${results}`);
   }
 
   /** Running workers take a slot; queued and waiting ones don't. */
   private workerSlots(): number {
-    const busy = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running').length;
-    return this.config.maxTasks - busy;
+    return this.config.maxTasks - this.limbList().filter(l => l.role === 'task' && l.status === 'running').length;
   }
 
   private startQueued(): void {
-    const queue = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'queued').sort((a, b) => a.createdAt - b.createdAt);
+    const queue = this.limbList().filter(l => l.role === 'task' && l.status === 'queued').sort((a, b) => a.createdAt - b.createdAt);
     for (const limb of queue) {
       if (this.workerSlots() <= 0) return;
-      limb.status = 'running';
       this.log.append('limb_started', 'system', { id: limb.id });
       this.updateBatch(limb.group);
-      this.wake(limb.id, limb.notices.length ? `task assigned; updates: ${limb.notices.splice(0).join(' | ').slice(0, 1500)}` : 'task assigned');
+      this.wake(limb.id, 'task assigned');
     }
   }
 
   /** A message for one worker, delivered with its next tool result (or reviving it if idle). */
   private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now'): string {
-    const limb = this.limbs.get(id);
+    const limb = this.limb(id);
     if (!limb || limb.role !== 'task') return `error: no worker "${id}"`;
-    this.log.append('steered', by, { id, text: text.slice(0, 2000), ...(when === 'after' ? { when } : {}) });
-    const note = by === 'user' ? `Message from the user: ${text}` : `Message from the user (via ${by}): ${text}`;
+    const active = WORKER_ACTIVE.includes(limb.status);
+    if (!active && (limb.status !== 'done' || !this.state.kept.includes(limb.id))) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
+    this.log.append('steered', by, { id, text, ...(when === 'after' ? { when } : {}) });
     // More work for later: the worker finishes what it is doing first, then continues in the same conversation.
-    if (when === 'after' && (limb.status === 'running' || limb.status === 'queued' || limb.status === 'waiting')) { limb.later.push(note); return `${id} will continue with this once it finishes its current work`; }
-    if (limb.status === 'queued' || limb.status === 'waiting') { limb.notices.push(note); return `${id} is ${limb.status === 'queued' ? 'queued' : `waiting for ${limb.waitFor}`}; it gets this when it starts`; }
-    if (limb.status === 'running' && limb.runs.size) { limb.notices.push(note); return `${id} will get it with its next tool result`; }
-    if (limb.status === 'running') { this.wake(limb.id, note.slice(0, 2000)); return `${id} woken with it`; }
-    if (limb.status !== 'done' || !this.keptSessions.includes(limb.id)) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
-    limb.status = 'running';
-    limb.endedAt = undefined;
-    limb.replyTo = this.lastUserMessageSeq();
-    this.log.append('limb_revived', by, { id });
-    this.wake(limb.id, note.slice(0, 2000));
+    if (when === 'after' && active) return `${id} will continue with this once it finishes its current work`;
+    if (limb.status === 'queued' || limb.status === 'waiting') return `${id} is ${limb.status === 'queued' ? 'queued' : `waiting for ${limb.waitFor}`}; it gets this when it starts`;
+    if (limb.status === 'running' && limb.runs.length) return `${id} will get it with its next tool result`;
+    if (limb.status === 'running') { this.wake(limb.id, ''); return `${id} woken with it`; }
+    this.log.append('limb_revived', by, { id, reply_to: this.lastUserMessageSeq() ?? null });
+    this.wake(limb.id, '');
     return `${id} picked the conversation back up`;
   }
 
@@ -976,7 +871,7 @@ export class Entity {
     const started = this.now();
     for (;;) {
       const typing = this.levels.get('user.typing') !== undefined;
-      const quietFor = this.now() - (this.lastEvents.get('user:draft_changed') ?? -Infinity);
+      const quietFor = this.now() - (this.state.lastEvents['user:draft_changed'] ?? -Infinity);
       if (!typing || quietFor >= this.config.messageSettleMs || this.now() - started >= this.config.messageSettleMaxMs || this.status !== 'running') return;
       await new Promise(resolve => setTimeout(resolve, Math.min(100, this.config.messageSettleMs - quietFor + 5)));
     }
@@ -991,19 +886,15 @@ export class Entity {
     if (!message) return `error: #${seq} is not a message from the user`;
     const next = this.log.all().find(e => e.type === 'chat_message' && e.by === 'user' && e.seq > seq);
     const steer = this.log.all().find(e => e.type === 'steered' && e.by !== 'user' && e.seq > seq && (!next || e.seq < next.seq));
-    const steered = steer ? this.limbs.get(String(steer.data.id)) : undefined;
+    const steered = steer ? this.limb(String(steer.data.id)) : undefined;
     if (how === 'fork' && !steered) return `error: #${seq} was not sent to a worker, so there is nothing to fork`;
     const text = String(message.data.text);
-    const head = this.limbs.get('head')!;
-    const result = this.dispatch(head, {
+    const result = this.dispatch(this.limb('head')!, {
       task: `${text}\n\n(The user asked for this to be handled by its own worker${how === 'fork' ? `, continuing from ${steered!.id}'s conversation` : ''}.)`,
       name: text.slice(0, 40), reply_to: seq, fork_of: how === 'fork' ? steered!.id : undefined,
     });
     if (result.startsWith('error')) return result;
-    this.log.append('rerouted', 'user', { seq, how, from: steered?.id ?? null });
-    if (steered && (steered.status === 'running' || steered.status === 'queued' || steered.status === 'waiting')) {
-      steered.notices.push(`The user moved their message "${text.slice(0, 200)}" to a separate worker: leave that part to it and carry on with the rest.`);
-    }
+    this.log.append('rerouted', 'user', { seq, how, from: steered?.id ?? null, text: text.slice(0, 200) });
     return result;
   }
 
@@ -1012,29 +903,30 @@ export class Entity {
 
   /** Stops a worker on the user's request (the Work view's "Stop"). */
   stopWorker(id: string): string {
-    if (this.limbs.get(id)?.role !== 'task') return `error: no worker "${id}"`;
+    if (this.limb(id)?.role !== 'task') return `error: no worker "${id}"`;
     return this.stopLimb(id, 'cancel', 'user');
   }
 
-  private maybeSummarize(limb: Limb): void {
+  private maybeSummarize(limb: LimbState): void {
     const summarizer = this.options.summarizer;
-    limb.callsSinceSummary++;
-    if (!summarizer || limb.summarizing || limb.status !== 'running' || this.summaries >= this.config.summaryMax) return;
-    if (limb.callsSinceSummary < this.config.summaryEveryCalls || this.now() - limb.lastSummaryAt < this.config.summaryIntervalMs) return;
-    limb.summarizing = true;
-    limb.callsSinceSummary = 0;
-    limb.lastSummaryAt = this.now();
+    const live = this.liveOf(limb.id);
+    live.callsSinceSummary++;
+    if (!summarizer || live.summarizing || limb.status !== 'running' || this.summaries >= this.config.summaryMax) return;
+    if (live.callsSinceSummary < this.config.summaryEveryCalls || this.now() - live.lastSummaryAt < this.config.summaryIntervalMs) return;
+    live.summarizing = true;
+    live.callsSinceSummary = 0;
+    live.lastSummaryAt = this.now();
     this.summaries++;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
     summarizer.summarize({ task: limb.task ?? '', activity: this.activityOf(limb) }, controller.signal)
       .then(summary => { if (this.status !== 'idle') this.log.append('work_summary', 'system', { limb: limb.id, ...clean(summary) }); })
       .catch(error => { if (this.status !== 'idle') this.addHealth(`summary for ${limb.id} failed: ${error instanceof Error ? error.message : String(error)}`); })
-      .finally(() => { clearTimeout(timer); limb.summarizing = false; });
+      .finally(() => { clearTimeout(timer); live.summarizing = false; });
   }
 
   /** What a worker has done so far, in order, for the summarizer. */
-  private activityOf(limb: Limb): string {
+  private activityOf(limb: LimbState): string {
     const lines: string[] = [];
     for (const e of this.log.all()) {
       if (e.by === limb.id && e.type === 'tool_called') lines.push(`called ${e.data.name}${e.data.summary ? `: ${e.data.summary}` : ''}`);
@@ -1058,21 +950,12 @@ export class Entity {
     return undefined;
   }
 
-  private notifyWorkers(except: string, text: string): void {
-    for (const limb of this.limbs.values()) if (limb.role === 'task' && limb.status === 'running' && limb.id !== except) limb.notices.push(text);
-  }
-
-  private claimPaths(limb: Limb, paths: string[], note: string): string | null {
+  private claimPaths(limb: LimbState, paths: string[], note: string): string | null {
     for (const path of paths) {
       const holder = this.claimHolder(path, limb.id);
       if (holder) return `"${path}" is claimed by ${holder.limb} (${holder.note || 'no note'}) since ${this.ago(holder.since)}`;
     }
-    for (const path of paths) {
-      if (this.claims.get(path)?.limb === limb.id) continue;
-      this.claims.set(path, { path, limb: limb.id, note, since: this.now() });
-      this.log.append('claimed', limb.id, { path, note });
-      this.notifyWorkers(limb.id, `${limb.id} claimed ${path}${note ? ` (${note})` : ''}`);
-    }
+    for (const path of paths) if (this.state.claims[path]?.limb !== limb.id) this.log.append('claimed', limb.id, { path, note });
     return null;
   }
 
@@ -1080,58 +963,53 @@ export class Entity {
   private claimHolder(path: string, self: string): Claim | undefined {
     const norm = (p: string) => p.replace(/^\.?\/+/, '').replace(/\/+$/, '');
     const target = norm(path);
-    for (const claim of this.claims.values()) {
-      if (claim.limb === self || this.limbs.get(claim.limb)?.status !== 'running') continue;
+    for (const claim of Object.values(this.state.claims)) {
+      if (claim.limb === self || this.limb(claim.limb)?.status !== 'running') continue;
       const held = norm(claim.path);
-      if (held === target || target.startsWith(`${held}/`) || held.startsWith(`${target}/`) || held === '' ) return claim;
+      if (held === target || target.startsWith(`${held}/`) || held.startsWith(`${target}/`) || held === '') return claim;
     }
     return undefined;
   }
 
   private releaseClaims(limbId: string, paths?: string[]): number {
-    let released = 0;
-    for (const [path, claim] of [...this.claims]) {
-      if (claim.limb !== limbId || (paths && !paths.includes(path))) continue;
-      this.claims.delete(path);
-      released++;
-    }
-    if (released) this.log.append('released', limbId, { count: released });
-    return released;
+    const released = Object.values(this.state.claims).filter(c => c.limb === limbId && (!paths || paths.includes(c.path))).map(c => c.path);
+    if (released.length) this.log.append('released', limbId, { count: released.length, paths: released });
+    return released.length;
   }
 
   /** Cancel (graceful, then kill after a grace period) or kill (immediate). */
   stopLimb(id: string, mode: 'cancel' | 'kill', by: string): string {
-    const limb = this.limbs.get(id);
+    const limb = this.limb(id);
     if (!limb || limb.id === 'head') return `error: no limb "${id}" to stop`;
-    if (limb.status === 'queued' || limb.status === 'waiting') { this.finishTask(limb, `${mode === 'kill' ? 'killed' : 'cancelled'} by ${by} before it started`, mode === 'kill' ? 'killed' : 'cancelled'); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'} before it started`; }
+    const ended = mode === 'kill' ? 'killed' : 'cancelled';
+    if (limb.status === 'queued' || limb.status === 'waiting') { this.finishTask(limb, `${ended} by ${by} before it started`, ended); return `${id} ${ended} before it started`; }
     if (limb.status !== 'running') return `${id} is already ${limb.status}`;
-    if (limb.kind === 'code') { this.endCodeLimb(limb, mode === 'kill' ? 'killed' : 'cancelled', `${mode} by ${by}`); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'}`; }
-    if (mode === 'kill' || !limb.runs.size) {
-      for (const run of limb.runs.values()) run.abort.abort();
-      this.finishTask(limb, limb.result ?? `${mode === 'kill' ? 'killed' : 'cancelled'} by ${by}`, mode === 'kill' ? 'killed' : 'cancelled');
-      return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'}`;
+    if (limb.kind === 'code') { this.endCodeLimb(limb, ended, `${mode} by ${by}`); return `${id} ${ended}`; }
+    if (mode === 'kill' || !limb.runs.length) {
+      for (const abort of this.liveOf(limb.id).aborts.values()) abort.abort();
+      this.finishTask(limb, limb.result ?? `${ended} by ${by}`, ended);
+      return `${id} ${ended}`;
     }
-    limb.cancelRequested = true;
+    this.log.append('cancel_requested', by, { id });
     const timer = setTimeout(() => { this.timers.delete(timer); if (limb.status === 'running') this.stopLimb(id, 'kill', `${by} (grace period over)`); }, this.config.cancelGraceMs);
     this.timers.add(timer);
     return `${id}: cancel requested; it will be killed in ${this.config.cancelGraceMs / 1000} s if it does not finish`;
   }
 
-  private endCodeLimb(limb: Limb, status: LimbStatus, reason: string, result?: unknown): void {
+  private endCodeLimb(limb: LimbState, status: LimbStatus, reason: string, result?: unknown): void {
     if (limb.status !== 'running') return;
-    limb.status = status;
-    limb.endedAt = this.now();
-    limb.abort?.abort();
-    if (limb.sense || limb.role === 'program') this.jev.release(limb.id);
+    const live = this.liveOf(limb.id);
+    live.program?.abort();
+    if (live.sense || limb.role === 'program') this.jev.release(limb.id);
     const type = limb.role === 'program'
       ? status === 'done' ? 'program_finished' : status === 'failed' ? 'program_failed' : 'program_cancelled'
       : 'watch_removed';
-    this.log.append(type, limb.id, { id: limb.id, name: limb.name, reason, ...(result !== undefined ? { result: result as never } : {}) });
+    this.log.append(type, limb.id, { id: limb.id, name: limb.name, status, reason, ...(result !== undefined ? { result: result as never } : {}) });
   }
 
-  private callTool(limb: Limb, run: RunInfo, name: string, args: Record<string, unknown>): Promise<string> | string {
-    const caller: Caller = { limbId: limb.id, kind: 'llm', runId: run.id, readSeq: run.readSeq };
-    const has = (cap: Capability) => limb.capabilities.has(cap);
+  private callTool(limb: LimbState, runId: string, readSeq: number, abort: AbortController, name: string, args: Record<string, unknown>): Promise<string> | string {
+    const caller: Caller = { limbId: limb.id, kind: 'llm', runId, readSeq };
+    const has = (cap: Capability) => limb.capabilities.includes(cap);
     switch (name) {
       case 'set_watch':
         if (!has('set_watch')) return 'error: you cannot install watches';
@@ -1167,9 +1045,9 @@ export class Entity {
       case 'kill': {
         if (!has(name)) return `error: you cannot ${name} limbs`;
         const target = String(args.id ?? '');
-        const frontOnWorker = (this.isFront(limb) || limb.id === 'head') && this.limbs.get(target)?.role === 'task';
+        const frontOnWorker = (this.isFront(limb) || limb.id === 'head') && this.limb(target)?.role === 'task';
         if (!frontOnWorker && (!this.isWithin(target, limb.id) || target === limb.id)) return `error: ${target} is not one of your children`;
-        if (this.limbs.get(target)?.builtin) return `error: ${target} is built into the runtime and cannot be cancelled`;
+        if (this.limb(target)?.builtin) return `error: ${target} is built into the runtime and cannot be cancelled`;
         return this.stopLimb(target, name, limb.id);
       }
       case 'dispatch':
@@ -1195,14 +1073,9 @@ export class Entity {
         return refused ? `refused: ${refused}` : `claimed ${paths.join(', ')}`;
       }
       case 'release': return `released ${this.releaseClaims(limb.id, Array.isArray(args.paths) ? args.paths.map(String) : undefined)} claim(s)`;
-      case 'share': {
-        const text = String(args.text ?? '').slice(0, 1000);
-        this.discoveries.push({ by: limb.id, text, t: this.now() });
-        if (this.discoveries.length > 20) this.discoveries.shift();
-        this.log.append('discovery', limb.id, { text });
-        this.notifyWorkers(limb.id, `${limb.id} shares: ${text}`);
+      case 'share':
+        this.log.append('discovery', limb.id, { text: String(args.text ?? '').slice(0, 1000) });
         return 'shared with the other workers';
-      }
       case 'amend': {
         if (limb.id !== this.reviewerId() || this.config.review === 'off') return 'error: you do not review answers';
         const error = validate(TOOL_SCHEMAS.amend, args, 'args');
@@ -1216,7 +1089,7 @@ export class Entity {
         return 'handed off to the head';
       case 'finish_task':
         if (limb.role !== 'task') return 'error: only task limbs finish tasks';
-        run.abort.abort();
+        abort.abort();
         this.finishTask(limb, String(args.result ?? ''), limb.cancelRequested ? 'cancelled' : 'done');
         return 'task finished';
       default:
@@ -1226,11 +1099,12 @@ export class Entity {
     }
   }
 
-  private toolsFor(limb: Limb): ToolSpec[] {
+  private toolsFor(limb: LimbState): ToolSpec[] {
     const tools: ToolSpec[] = [];
+    const has = (cap: Capability) => limb.capabilities.includes(cap);
     const add = (name: keyof typeof TOOL_SCHEMAS, description: string) => tools.push({ name, description, parameters: toJsonSchema(TOOL_SCHEMAS[name]) });
     for (const { spec } of this.effects.values()) {
-      if (spec.voice && !limb.capabilities.has('speak')) continue;
+      if (spec.voice && !has('speak')) continue;
       tools.push({ name: spec.name, description: `${spec.description}${spec.risk === 'reflex' ? ' (reflex-safe)' : ''}`, parameters: toJsonSchema(spec.parameters) });
     }
     const router = () => {
@@ -1256,14 +1130,14 @@ export class Entity {
     if (limb.role === 'head' && this.config.review === 'head') add('amend', 'Your verdict on one of the voice\'s answers under review: confirm, correct (shown struck through, your text below), or expand.');
     // The head dispatches and steers workers too: as the front limb, or to act on the voice's handoffs.
     if (limb.role === 'head') { router(); tools.splice(tools.findIndex(t => t.name === 'cancel'), 1); }
-    if (limb.capabilities.has('set_watch')) add('set_watch', 'Install a watch: a code reflex that reacts in ~0 ms without you.');
-    if (limb.capabilities.has('run_program')) add('run_program', 'Run a JavaScript program (the body of an async function) as a code limb.');
+    if (has('set_watch')) add('set_watch', 'Install a watch: a code reflex that reacts in ~0 ms without you.');
+    if (has('run_program')) add('run_program', 'Run a JavaScript program (the body of an async function) as a code limb.');
     add('stop_output', 'Stop output. scope "work" (default): your programs, watches and task limbs, not you; "subtree": you too. mode "stop" (default) cancels programs; "freeze" pauses everything at its next action until resume_output.');
     add('resume_output', 'Resume output after a stop.');
     add('note', 'Keep a short note in your state; you remember nothing else between wakes.');
     add('set_timer', 'Be woken after a delay.');
-    if (limb.capabilities.has('cancel')) add('cancel', 'Cancel one of your watches, programs or task limbs by id.');
-    if (limb.capabilities.has('kill')) add('kill', 'Stop one of your children immediately, dropping partial work.');
+    if (has('cancel')) add('cancel', 'Cancel one of your watches, programs or task limbs by id.');
+    if (has('kill')) add('kill', 'Stop one of your children immediately, dropping partial work.');
     if (limb.role === 'task') {
       add('claim', 'Claim files or folders you are working on, so other workers leave them alone. Writing a file claims it automatically.');
       add('release', 'Release your claims (all, or the given paths).');
@@ -1277,18 +1151,18 @@ export class Entity {
 
   private ago = (t: number) => `${((this.now() - t) / 1000).toFixed(1)}s ago`;
 
-  private render(limb: Limb, reason: string): string {
+  private render(limb: LimbState, reason: string): string {
     const now = this.now();
     const ctx = { now, ago: this.ago, levels: this.levels };
-    const stable: Record<string, unknown> = { you: `${limb.id} (${limb.role})`, notes: this.notes };
+    const stable: Record<string, unknown> = { you: `${limb.id} (${limb.role})`, notes: this.state.notes };
     if (limb.role === 'task') stable.task = limb.task;
-    stable.limbs = [...this.limbs.values()].filter(l => l.status === 'running' || now - l.createdAt < 60_000).map(l => this.describeLimb(l));
-    const tasks = [...this.limbs.values()].filter(l => l.role === 'task');
+    stable.limbs = this.limbList().filter(l => l.status === 'running' || now - l.createdAt < 60_000).map(l => this.describeLimb(l));
+    const tasks = this.limbList().filter(l => l.role === 'task');
     if (tasks.length) stable.workers = tasks.map(l => ({
-      id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` for ${l.waitFor}` : '') + (l.runs.size ? ' (working)' : ''),
-      reply_to: l.replyTo, result: l.result, claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
+      id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` for ${l.waitFor}` : '') + (l.runs.length ? ' (working)' : ''),
+      reply_to: l.replyTo, result: l.result, claims: this.claimsOf(l.id),
     }));
-    if (this.discoveries.length) stable.discoveries = this.discoveries.map(d => `${d.by}: ${d.text}`);
+    if (this.state.discoveries.length) stable.discoveries = this.state.discoveries.map(d => `${d.by}: ${d.text}`);
     const volatile: Record<string, unknown> = {};
     for (const channel of this.channels) {
       const rendered = channel.render(this.world[channel.name] as never, ctx);
@@ -1297,10 +1171,9 @@ export class Entity {
     }
     const levels = this.levels.entries();
     if (levels.length) volatile.levels = Object.fromEntries(levels.map(([name, level]) => [name, `${JSON.stringify(level.value)} for ${((now - level.since) / 1000).toFixed(1)}s`]));
-    if (this.stops.length) volatile.output_stops = this.stops.map(s => ({ ...s, since: this.ago(s.since) }));
-    if (this.health.length) volatile.health = this.health.slice(-5).map(h => `${h.message} (${this.ago(h.t)})`);
+    if (this.state.stops.length) volatile.output_stops = this.state.stops.map(s => ({ ...s, since: this.ago(s.since) }));
+    if (this.state.health.length) volatile.health = this.state.health.slice(-5).map(h => `${h.message} (${this.ago(h.t)})`);
     const fresh = this.log.since(limb.seenSeq).filter(e => !HIDDEN_EVENTS.has(e.type)).slice(-this.config.recentEvents);
-    limb.seenSeq = this.log.length;
     const time = { now_s: +(now / 1000).toFixed(1), last_spoke: this.lastSpoke(), woken_because: reason };
     return [
       'STATE (stable)', JSON.stringify(stable, null, 1),
@@ -1310,11 +1183,11 @@ export class Entity {
     ].join('\n');
   }
 
-  private describeLimb(limb: Limb): string {
+  private describeLimb(limb: LimbState): string {
     const base = `${limb.id} ${limb.builtin ? 'built-in ' : ''}${limb.role} "${limb.name}" ${limb.status}${limb.parent ? ` (parent ${limb.parent})` : ''}`;
-    if (limb.role === 'watch') return `${base}: on ${JSON.stringify(limb.watch!.on)} do ${JSON.stringify(limb.watch!.do)}, fired ${limb.fires ?? 0}x`;
+    if (limb.role === 'watch') return `${base}: on ${JSON.stringify(limb.watch!.on)} do ${JSON.stringify(limb.watch!.do)}, fired ${limb.fires}x`;
     if (limb.role === 'program') return `${base}, started ${this.ago(limb.createdAt)}`;
-    if (limb.kind === 'llm') return `${base}${limb.runs.size ? `, ${limb.runs.size} run(s) in flight` : ''}`;
+    if (limb.kind === 'llm') return `${base}${limb.runs.length ? `, ${limb.runs.length} run(s) in flight` : ''}`;
     return base;
   }
 
@@ -1337,37 +1210,41 @@ export class Entity {
     return result;
   }
 
-  private createLimb(init: { id?: string; kind: 'llm' | 'code'; role: LimbRole; name: string; parent?: string; model?: string; capabilities: Capability[]; restart: 'permanent' | 'transient' }): Limb {
-    const id = init.id ?? `${init.role}-${++this.counter}`;
-    const limb: Limb = {
-      id, kind: init.kind, role: init.role, name: init.name, parent: init.parent, model: init.model,
-      capabilities: new Set(init.capabilities), restart: init.restart, status: 'idle', createdAt: this.now(),
-      children: new Set(), runs: new Map(), seenSeq: 0, crashes: [], effectTimes: [], notices: [], later: [], callsSinceSummary: 0, lastSummaryAt: -Infinity, continuations: 0,
-    };
-    this.limbs.set(id, limb);
-    if (init.parent) this.limbs.get(init.parent)?.children.add(id);
-    return limb;
+  /** The next id with this prefix. Ids count up across all kinds, and the log is what advances the counter. */
+  private nextId(prefix: string): string { return `${prefix}-${this.state.counter + 1}`; }
+
+  private limb(id: string): LimbState | undefined { return this.state.limbs[id]; }
+  private limbList(): LimbState[] { return Object.values(this.state.limbs); }
+  private children(id: string): LimbState[] { return this.limbList().filter(l => l.parent === id); }
+  private claimsOf(id: string): string[] { return Object.values(this.state.claims).filter(c => c.limb === id).map(c => c.path); }
+
+  private liveOf(id: string): LimbLive {
+    let live = this.live.get(id);
+    if (!live) { live = { aborts: new Map(), effectTimes: [], callsSinceSummary: 0, lastSummaryAt: -Infinity }; this.live.set(id, live); }
+    return live;
   }
 
-  private isFront(limb: Limb): boolean { return limb.id === this.frontLimb(); }
+  private isFront(limb: LimbState): boolean { return limb.id === this.frontLimb(); }
 
   /** Who answers first: the voice limb when configured, otherwise the head. */
-  private frontLimb(): string { return this.limbs.has('voice') ? 'voice' : 'head'; }
+  private frontLimb(): string { return this.limb('voice') ? 'voice' : 'head'; }
 
   private isWithin(id: string, ancestor: string): boolean {
-    for (let current: string | undefined = id; current; current = this.limbs.get(current)?.parent) if (current === ancestor) return true;
+    for (let current: string | undefined = id; current; current = this.limb(current)?.parent) if (current === ancestor) return true;
     return false;
   }
 
-  private countCode(): number { return [...this.limbs.values()].filter(l => l.kind === 'code' && l.status === 'running').length; }
+  private countCode(): number { return this.limbList().filter(l => l.kind === 'code' && l.status === 'running').length; }
 
   private addHealth(message: string): void {
-    this.health.push({ t: this.now(), message });
-    if (this.health.length > 50) this.health.shift();
+    // The same warning over and over (a Jev cap, a failing watch) is logged once every few seconds, not per occurrence.
+    const last = this.state.health[this.state.health.length - 1];
+    if (last && last.message === message && this.now() - last.t < 5000) return;
+    this.log.append('health', 'system', { message });
   }
 
   private snapshotWorld(): Record<string, unknown> {
-    return JSON.parse(JSON.stringify({ world: this.world, levels: Object.fromEntries(this.levels.entries()), notes: this.notes }));
+    return JSON.parse(JSON.stringify({ world: this.world, levels: Object.fromEntries(this.levels.entries()), notes: this.state.notes }));
   }
 
   snapshot(): EntitySnapshot {
@@ -1376,16 +1253,16 @@ export class Entity {
       status: this.status,
       t: this.now(),
       world: JSON.parse(JSON.stringify(this.world)),
-      self: { notes: [...this.notes] },
+      self: { notes: [...this.state.notes] },
       levels: Object.fromEntries(this.levels.entries()),
-      stops: [...this.stops],
-      health: [...this.health],
-      limbs: [...this.limbs.values()].map(l => ({
+      stops: [...this.state.stops],
+      health: [...this.state.health],
+      limbs: this.limbList().map(l => ({
         id: l.id, kind: l.kind, role: l.role, name: l.name, parent: l.parent, model: l.model, status: l.status,
-        runs: [...l.runs.values()].map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt, voice: r.voice })),
+        runs: l.runs.map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt })),
         task: l.task, result: l.result, watch: l.watch, code: l.code, fires: l.fires, label: l.label, group: l.group,
         createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, waitFor: l.waitFor,
-        claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
+        claims: this.claimsOf(l.id),
       })),
       senses: this.jev.list(),
       jev: { available: this.jev.available, calls: jev.calls, perMinute: jev.perMinute },
@@ -1397,7 +1274,7 @@ export class Entity {
 export const DRAFT_PAUSE_MS = 700;
 export const DRAFT_ATTENTION_QUESTION = 'Does the unsent draft already contain a question or request to the entity that is clear enough to answer or act on?';
 
-const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary']);
+const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'review_started', 'review_requeued']);
 
 const TOOL_SCHEMAS = {
   set_watch: { type: 'object', additionalProperties: false, required: ['watch'], properties: { watch: watchSchema } },

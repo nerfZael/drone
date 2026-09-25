@@ -1,4 +1,5 @@
-import { chatChannel, Entity, keypadChannel, type EntityEvent, type EntityOptions, type Mind, type MindRunInput } from '../src/index.js';
+import { expect } from 'bun:test';
+import { chatChannel, Entity, keypadChannel, replayRuntime, type EntityEvent, type EntityOptions, type Mind, type MindRunInput } from '../src/index.js';
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -45,7 +46,9 @@ export function makeEntity(script: Script, options: Partial<EntityOptions> = {})
   const of = (type: string, by?: (b: string) => boolean) => events().filter(e => e.type === type && (!by || by(e.by)));
   const entityKeys = (type: 'key_down' | 'key_up', after = 0) => of(type, b => b !== 'user').filter(e => e.seq > after);
   const said = () => of('chat_message', b => b !== 'user').map(e => String(e.data.text));
-  return { entity, mind, events, of, entityKeys, said };
+  /** The log is the only source of truth: replaying it must rebuild exactly the runtime state the entity holds. */
+  const expectReplayable = () => expect(replayRuntime(events(), entity.runtime().setup)).toEqual(entity.runtime() as ReturnType<typeof replayRuntime>);
+  return { entity, mind, events, of, entityKeys, said, expectReplayable };
 }
 
 export const lastUserMessage = (input: MindRunInput) => {

@@ -8,6 +8,7 @@ export * from './jev.js';
 export * from './summary.js';
 export * from './mind.js';
 export * from './prompts.js';
+export * from './runtime-state.js';
 export * from './entity.js';
 export * from './channels/chat.js';
 export * from './channels/keypad.js';

@@ -9,7 +9,7 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const c of cleanups.splice(0)) c(); });
 function setup(...args: Parameters<typeof makeEntity>) {
   const h = makeEntity(...args);
-  cleanups.push(() => h.entity.close());
+  cleanups.push(() => { h.expectReplayable(); h.entity.close(); });
   return h;
 }
 function workspace() {
@@ -306,7 +306,7 @@ test('workers: a steer for after waits until the worker finishes, then it contin
   expect(prompts).toHaveLength(1); // not interrupted
   release();
   await until(() => h.of('task_done').length === 2);
-  expect(prompts[1]).toContain('queued for after that: Message from the user (via head): add tests');
+  expect(prompts[1]).toContain('queued for after that | Message from the user (via head): add tests');
   expect(h.of('task_done').map(e => e.data.result)).toEqual(['game built', 'tests added']);
 });
 

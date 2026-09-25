@@ -2,7 +2,7 @@
 
 Every entity bench session is recorded, from **Start** until **Reset**. The bench can replay any recorded session, and the files are plain JSON Lines, so an agent debugging the entity can read them directly.
 
-Sessions are **not resumable**. The live session lives in the Hub's memory: after a Hub restart the bench starts a fresh session with the default settings, and an earlier session can only be replayed. Resuming would need worker conversations and the runtime's own bookkeeping saved next to the recording ([context-and-memory.md](context-and-memory.md)).
+Sessions are **not resumable**. The live session lives in the Hub's memory: after a Hub restart the bench starts a fresh session with the default settings, and an earlier session can only be replayed. Resuming needs worker conversations saved next to the recording; the runtime state can already be rebuilt from the log ([context-and-memory.md](context-and-memory.md)).
 
 ## Where they are
 
@@ -18,7 +18,7 @@ The Hub also serves them: `GET /api/entity/sessions` lists them (newest first, w
 | `events.jsonl` | The event log, one event per line, in order: `{ seq, t, at, type, by, data }`. `t` is ms since the session started, `at` is epoch ms, `by` is `user`, `host`, `system` or a limb id (`head`, `voice`, `reviewer`, `worker-3`, `watch-5`). This is the source of truth ([core-model.md](core-model.md)). |
 | `frames.jsonl` | Runtime snapshots: `{ seq, t, patch }`. `patch` holds only the snapshot sections that changed (`status`, `world`, `self`, `levels`, `stops`, `health`, `limbs`, `senses`, `jev`). `world`, `levels` and `self` are captured at every event, because the runtime reduces them before anything else sees the event; the other sections once the runtime has finished handling the events of that turn. Frame 0 (`seq` 0) is the full state at Start. |
 
-The snapshot after event N is every frame with `seq <= N` applied in order, each patch replacing whole sections (several frames can share a `seq`). So channel state (chat, keypad, held keys) is exact at every step, while a limb's status can show the end of the turn it was part of. Frames carry what the log alone does not: limb status and runs, watch and program definitions, sense values and owners, output stops.
+The snapshot after event N is every frame with `seq <= N` applied in order, each patch replacing whole sections (several frames can share a `seq`). So channel state (chat, keypad, held keys) is exact at every step, while a limb's status can show the end of the turn it was part of. Frames carry what the log alone does not: channel state and levels at each step, and sense values and owners. The runtime's own state (limb status and runs, watches and programs, output stops, claims) can also be rebuilt from `events.jsonl` alone with `replayRuntime` from `@entity/core`; the bench's replay still reads it from frames.
 
 The live view keeps the last 2000 events from the server; replay loads a session's whole log.
 

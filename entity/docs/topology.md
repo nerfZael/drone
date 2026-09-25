@@ -39,7 +39,7 @@ The front limb (and the head) may cancel any worker; other limbs only their own 
 Lifecycle borrows from Erlang/OTP supervision trees: parents supervise their children.
 
 - **Cancel and kill.** Cancel (the default) lets the child finish within a grace period; kill drops its partial work. Everything up to the kill stays in the log. Jev can do neither: it only returns numbers.
-- **Restarts.** A worker whose run crashes is woken again, at most 3 times in a minute; past that it is finished as failed. Every crash is logged as `limb_failed`. The head is not restarted; the next event wakes it. Code limbs are not restarted. The `permanent` / `transient` marking on each limb is recorded but not otherwise used yet.
+- **Restarts.** A worker whose run crashes is woken again, at most 3 times in a minute; past that it is finished as failed. Every crash is logged as `limb_failed`. The head is not restarted; the next event wakes it. Code limbs are not restarted.
 
 ## Rules
 

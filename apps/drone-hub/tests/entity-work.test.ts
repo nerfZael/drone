@@ -26,13 +26,13 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
   const snapshot = {
     status: 'running', t: 5000,
     limbs: [
-      limb('head', { role: 'head', runs: [{ id: 'h', reason: 'claim conflict', startedAt: 4000, voice: true }] }),
-      limb('task-1', { name: 'Login fix', runs: [{ id: 'r1', reason: 'task assigned', startedAt: 2500, voice: true }], replyTo: m1.seq, claims: ['src/a.ts'] }),
-      limb('task-2', { runs: [{ id: 'r2', reason: 'forked', startedAt: 3100, voice: true }], replyTo: m2.seq }),
+      limb('head', { role: 'head', runs: [{ id: 'h', reason: 'claim conflict', startedAt: 4000 }] }),
+      limb('task-1', { name: 'Login fix', runs: [{ id: 'r1', reason: 'task assigned', startedAt: 2500 }], replyTo: m1.seq, claims: ['src/a.ts'] }),
+      limb('task-2', { runs: [{ id: 'r2', reason: 'forked', startedAt: 3100 }], replyTo: m2.seq }),
       limb('task-3', { replyTo: m1.seq }),
       limb('task-4', { status: 'done', result: 'tests pass', endedAt: 3700 }),
       limb('task-5', { status: 'waiting', waitFor: 'task-1' }),
-      limb('task-6', { runs: [{ id: 'r6', reason: 'task assigned', startedAt: 4500, voice: true }] }),
+      limb('task-6', { runs: [{ id: 'r6', reason: 'task assigned', startedAt: 4500 }] }),
     ],
   } as unknown as EntitySnapshot;
 

@@ -6,7 +6,7 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const c of cleanups.splice(0)) c(); });
 function setup(...args: Parameters<typeof makeEntity>) {
   const h = makeEntity(...args);
-  cleanups.push(() => h.entity.close());
+  cleanups.push(() => { h.expectReplayable(); h.entity.close(); });
   return h;
 }
 

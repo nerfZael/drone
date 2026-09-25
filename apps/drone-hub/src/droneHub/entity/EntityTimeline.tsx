@@ -15,7 +15,7 @@ type SnapshotFrame = { seq: number; t: number; patch: Partial<EntitySnapshot> };
 type Recording = { meta: SessionMeta; events: EntityEvent[]; frames: SnapshotFrame[] };
 
 /** Frequent low-level events that "skip noise" steps over. */
-const NOISE = new Set(['draft_changed', 'sensed', 'program_log', 'run_finished', 'entity_draft', 'timer']);
+const NOISE = new Set(['draft_changed', 'sensed', 'program_log', 'run_finished', 'entity_draft', 'timer', 'watch_fired', 'health']);
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
 /** Longest wait between two events during playback: idle stretches are compressed. */
 const MAX_GAP_MS = 1500;

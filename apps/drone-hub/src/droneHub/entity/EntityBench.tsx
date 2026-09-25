@@ -373,7 +373,7 @@ function LimbsView({ snapshot }: { snapshot: EntitySnapshot }) {
   return <div>{render(undefined, 0)}</div>;
 }
 
-const NOISE = new Set(['draft_changed', 'sensed', 'run_finished', 'program_log']);
+const NOISE = new Set(['draft_changed', 'sensed', 'run_finished', 'program_log', 'watch_fired', 'health']);
 
 function EventsView({ events, onOpenFile }: { events: EntityEvent[]; onOpenFile(path: string): void }) {
   const [all, setAll] = React.useState(false);

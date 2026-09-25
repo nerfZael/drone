@@ -11,6 +11,8 @@ flowchart LR
   L --> U[Bench: chat, canvas, inspector]
 ```
 
+The runtime's own state (limbs and their status, claims, output stops, batches, notes, the review queue) is `reduceRuntime` over the log (`runtime-state.ts`): every change is an event first, so `replayRuntime(events)` rebuilds it exactly, and every core test checks that it does. Only what a log cannot hold stays outside it: abort controllers, timers, program sandboxes and rate limits. Jev's sense levels are the one exception still set directly.
+
 The log is append-only and never rewritten. Reset starts a new log. Every event carries a sequence number, the entity clock `t` (ms since the session started), the wall clock `at`, a type, and `by`: `user`, `host`, `system`, or a limb id.
 
 ## State and what a limb sees
@@ -39,7 +41,7 @@ Borrowed from functional reactive programming, the world has two kinds of facts:
 
 Levels are derived from events by the channels (a key is held from its `key_down` to its `key_up`), so they cost nothing extra. **Sensed levels** are the exception: the runtime keeps them up to date by asking Jev (see [architecture.md](architecture.md#sense-language-becomes-levels)). Levels give time directly to watches and renders: "5 held for over 2 s" and "typing for 30 s" are plain conditions, not timer bookkeeping.
 
-Besides channel events, the runtime logs its own: tool calls (`tool_called`, `tool_done`), runs (`run_started`, `run_finished` with usage), workers (`limb_spawned`, `limb_started`, `limb_revived`, `task_continued`, `task_done`, `work_summary`), routing (`steered`, `rerouted`, `group_started`), coordination (`claimed`, `released`, `discovery`, `handoff`), code limbs (`watch_installed`, `watch_woke`, `program_started`, `program_woke`, `program_finished`), review (`review_queued`, `message_reviewed`), chat updates (`chat_message_updated`), and the session (`session_started`, `session_paused`, `session_resumed`).
+Besides channel events, the runtime logs its own: tool calls (`tool_called`, `tool_done`), runs (`run_started`, `run_finished` with usage), workers (`limb_spawned`, `limb_started`, `limb_queued`, `limb_revived`, `task_continued`, `cancel_requested`, `task_done`, `work_summary`), routing (`steered`, `rerouted`, `group_started`, `group_finished`), coordination (`claimed`, `released`, `discovery`, `handoff`), code limbs (`watch_installed`, `watch_fired`, `watch_woke`, `program_started`, `program_woke`, `program_finished`), review (`review_queued`, `review_started`, `review_requeued`, `message_reviewed`), health warnings (`health`), chat updates (`chat_message_updated`), and the session (`session_started`, `session_paused`, `session_resumed`).
 
 ## Effects and tools
 

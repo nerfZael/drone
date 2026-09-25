@@ -14,7 +14,7 @@ What a render includes is bounded: the last 12 chat messages, the last 40 new ev
 **Not built yet:**
 
 - **Checkpoints instead of compaction.** A worker whose conversation outgrows its budget would append a checkpoint of its task and restart fresh from state, so no separate compaction pipeline is needed. Today a worker's conversation grows without limit.
-- **Surviving a restart.** Worker conversations live in memory, so a Hub restart loses them, and the session can only be replayed ([session-logs.md](session-logs.md)). Saving conversations and the runtime's own bookkeeping next to the recording would make sessions resumable.
+- **Surviving a restart.** Worker conversations live in memory, so a Hub restart loses them, and the session can only be replayed ([session-logs.md](session-logs.md)). Saving conversations next to the recording would make sessions resumable; the runtime state is already rebuilt by replaying the log.
 
 ## Memory
 
