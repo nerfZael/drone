@@ -543,3 +543,21 @@ test('cancel with now stops a worker at once, dropping partial work', async () =
   expect(h.of('task_done')[0].data.status).toBe('killed');
   expect(h.of('cancel_requested')).toHaveLength(0);
 });
+
+test('sensed levels come from the log; a sense asked only in a condition is dropped with its watch', async () => {
+  const evaluator = { async evaluate(questions: { id: string }[]) { return Object.fromEntries(questions.map(q => [q.id, 0.8])); } };
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'watch') {
+      await call('set_watch', { watch: { name: 'confused keys', on: { event: 'key_down' }, when: { sense: 'is the user confused?', above: 0.5 }, do: { effect: 'press', args: { keys: '0' } } } });
+    }
+    if (lastUserMessage(input) === 'drop it') await call('cancel', { id: h.of('watch_installed', b => b === 'head').at(-1)!.data.id as string });
+  }, { evaluator, jev: { senseIntervalMs: 5 }, config: { draftAttention: false } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'watch' });
+  await until(() => h.entity.levels.get('sense.is_the_user_confused') !== undefined);
+  expect(h.entity.levels.get('sense.is_the_user_confused')).toMatchObject({ value: 0.8, by: 'jev' });
+  h.entity.input('chat_message', { text: 'drop it' });
+  await until(() => h.of('senses_dropped').length === 1);
+  expect(h.of('senses_dropped')[0].data.levels).toEqual(['sense.is_the_user_confused']);
+  expect(h.entity.levels.get('sense.is_the_user_confused')).toBeUndefined();
+});

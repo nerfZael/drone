@@ -1,4 +1,3 @@
-import type { Levels } from './channel.js';
 import type { EventLog } from './log.js';
 import type { EntityEvent } from './types.js';
 
@@ -54,7 +53,6 @@ export class JevService {
   constructor(
     private readonly evaluator: Evaluator | undefined,
     private readonly log: EventLog,
-    private readonly levels: Levels,
     private readonly renderState: () => string,
     private readonly health: (message: string) => void,
     options: JevOptions = {},
@@ -93,11 +91,14 @@ export class JevService {
     return info;
   }
 
-  release(owner: string): void {
+  /** Drops an owner's senses. Returns the levels of senses nobody asks any more, for the caller to clear through the log. */
+  release(owner: string): string[] {
+    const dropped: string[] = [];
     for (const [key, info] of this.senses) {
       info.owners = info.owners.filter(o => o !== owner);
-      if (!info.owners.length) { this.senses.delete(key); this.levels.clear(info.level); }
+      if (!info.owners.length) { this.senses.delete(key); dropped.push(info.level); }
     }
+    return dropped;
   }
 
   list(): SenseInfo[] { return [...this.senses.values()]; }
@@ -141,7 +142,6 @@ export class JevService {
         if (typeof p !== 'number') continue;
         info.value = p;
         info.askedAt = now;
-        this.levels.set(info.level, p, 'jev');
       }
       this.log.append('sensed', 'system', { answers: Object.fromEntries(infos.filter(i => typeof answers[i.id] === 'number').map(i => [i.level, answers[i.id]])) });
     }

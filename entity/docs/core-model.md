@@ -11,7 +11,7 @@ flowchart LR
   L --> U[Bench: chat, canvas, inspector]
 ```
 
-The runtime's own state (limbs and their status, claims, output stops, batches, notes, the review queue) is `reduceRuntime` over the log (`runtime-state.ts`): every change is an event first, so `replayRuntime(events)` rebuilds it exactly, and every core test checks that it does. Only what a log cannot hold stays outside it: abort controllers, timers, program sandboxes and rate limits. Jev's sense levels are the one exception still set directly.
+The runtime's own state (limbs and their status, claims, output stops, batches, notes, the review queue) is `reduceRuntime` over the log (`runtime-state.ts`): every change is an event first, so `replayRuntime(events)` rebuilds it exactly, and every core test checks that it does. Only what a log cannot hold stays outside it: abort controllers, timers, program sandboxes and rate limits. Levels come from the log too: channels derive theirs from events, and sensed levels are set from `sensed` events and cleared by `senses_dropped`.
 
 The log is append-only and never rewritten. Reset starts a new log. Every event carries a sequence number, the entity clock `t` (ms since the session started), the wall clock `at`, a type, and `by`: `user`, `host`, `system`, or a limb id.
 

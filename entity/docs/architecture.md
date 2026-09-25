@@ -36,7 +36,7 @@ The runtime's `JevService` handles what each piece of code would otherwise get w
 
 - **Coalescing and re-asking.** `sense` questions are re-asked when relevant state changes, at most once per interval, with one call in flight per question. Judges asked in the same moment go out together.
 - **Timeouts and defaults.** A call that doesn't answer in time resolves to its default, and the failure shows up in health.
-- **Logging.** Every question and answer is appended to the log (`judged`, `sensed`).
+- **Logging.** Every question and answer is appended to the log (`judged`, `sensed`), and sensed levels are set from that event, so a replay rebuilds them. A sense nobody asks any more is dropped with `senses_dropped`.
 - **Cost.** Jev is billed per call through the AI Gateway, not on a subscription, so the runtime enforces entity-wide caps (60 calls a minute, 2000 a session) and the bench shows the count.
 
 Jev only returns numbers. It cannot act, wake or stop anything. Whatever the code does with the answer is governed by what that code limb's author may do, so "Jev signals, never commands" is true by construction.

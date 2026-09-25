@@ -160,7 +160,7 @@ export class Entity {
     this.state = initialRuntimeState(setup);
     this.live = new Map();
     this.summaries = 0;
-    this.jev = new JevService(this.options.evaluator, this.log, this.levels, () => this.renderForJev(), m => this.addHealth(m), this.options.jev);
+    this.jev = new JevService(this.options.evaluator, this.log, () => this.renderForJev(), m => this.addHealth(m), this.options.jev);
     this.log.subscribe(event => this.onEvent(event));
   }
 
@@ -259,6 +259,9 @@ export class Entity {
 
   private onEvent(event: EntityEvent): void {
     reduceRuntime(this.state, event);
+    // Sensed levels come from the log like every other level, so a replay rebuilds them too.
+    if (event.type === 'sensed') for (const [level, p] of Object.entries(event.data.answers as Record<string, number>)) this.levels.set(level, p, 'jev', event.t);
+    if (event.type === 'senses_dropped') for (const level of event.data.levels as string[]) this.levels.clear(level);
     for (const channel of this.channels) channel.reduce(this.world[channel.name] as never, event, { levels: this.levels, now: event.t });
     for (const listener of this.listeners) listener(event);
     for (const waiter of [...this.eventWaiters]) {
@@ -1024,7 +1027,9 @@ export class Entity {
     if (limb.status !== 'running') return;
     const live = this.liveOf(limb.id);
     live.program?.abort();
-    if (live.sense || limb.role === 'program') this.jev.release(limb.id);
+    // Every sense it asked, as a trigger, a condition or from code; the ones nobody asks any more are cleared through the log.
+    const dropped = this.jev.release(limb.id);
+    if (dropped.length) this.log.append('senses_dropped', 'system', { levels: dropped });
     const type = limb.role === 'program'
       ? status === 'done' ? 'program_finished' : status === 'failed' ? 'program_failed' : 'program_cancelled'
       : 'watch_removed';
@@ -1309,7 +1314,7 @@ export class Entity {
 export const DRAFT_PAUSE_MS = 700;
 export const DRAFT_ATTENTION_QUESTION = 'Does the unsent draft already contain a question or request to the entity that is clear enough to answer or act on?';
 
-const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'review_started', 'review_requeued']);
+const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'senses_dropped', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'review_started', 'review_requeued']);
 
 
 
