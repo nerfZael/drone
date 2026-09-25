@@ -1,0 +1,210 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { EntityEvent, EntitySnapshot } from '@entity/core';
+
+/**
+ * Session recording for the entity bench: every event, plus snapshot frames, on disk under the
+ * Hub's data directory so the bench can replay a session and other agents can read it.
+ * The format is described in sessions-readme below (written next to the sessions) and in
+ * entity/docs/session-logs.md.
+ */
+
+/** Snapshot sections a frame can carry. `t` travels on the frame itself. */
+const SECTIONS = ['status', 'world', 'self', 'levels', 'stops', 'health', 'limbs', 'senses', 'jev'] as const;
+type Section = (typeof SECTIONS)[number];
+/**
+ * The runtime reduces these into state before it notifies listeners, so they are exact at every
+ * event. The rest (limbs, senses, stops …) settle while the runtime handles the event, so they are
+ * captured once it has finished the turn.
+ */
+const PER_EVENT: readonly Section[] = ['world', 'levels', 'self'];
+
+/** The snapshot after event `seq`: only the sections that changed since the previous frame. */
+export interface SnapshotFrame { seq: number; t: number; patch: Partial<Pick<EntitySnapshot, Section>> }
+
+export type SessionStatus = 'live' | 'ended' | 'interrupted';
+
+export interface SessionMeta {
+  id: string;
+  status: SessionStatus;
+  startedAt: string;
+  endedAt?: string;
+  endReason?: string;
+  config: Record<string, unknown>;
+  events: number;
+  frames: number;
+  /** The user's first chat message, to tell sessions apart in a list. */
+  firstMessage?: string;
+}
+
+export interface SessionRecording { meta: SessionMeta; events: EntityEvent[]; frames: SnapshotFrame[] }
+
+const KEEP_SESSIONS = 200;
+const ID_PATTERN = /^\d{8}-\d{6}-[a-z0-9]{4}$/;
+
+export const isSessionId = (id: string) => ID_PATTERN.test(id);
+
+function newSessionId(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${stamp}-${Math.random().toString(36).slice(2, 6).padEnd(4, '0')}`;
+}
+
+/** Records one entity session, from Start until Reset or Hub shutdown. */
+export class EntityRecorder {
+  readonly meta: SessionMeta;
+  readonly dir: string;
+  readonly events: EntityEvent[] = [];
+  readonly frames: SnapshotFrame[] = [];
+  private readonly last = new Map<Section, string>();
+  private readonly eventsOut: fs.WriteStream;
+  private readonly framesOut: fs.WriteStream;
+  private capturePending = false;
+  private finished = false;
+
+  constructor(root: string, config: Record<string, unknown>, private readonly snapshot: () => EntitySnapshot) {
+    fs.mkdirSync(root, { recursive: true });
+    writeSessionsReadme(root);
+    pruneSessions(root, KEEP_SESSIONS - 1);
+    this.meta = { id: newSessionId(), status: 'live', startedAt: new Date().toISOString(), config, events: 0, frames: 0 };
+    this.dir = path.join(root, this.meta.id);
+    fs.mkdirSync(this.dir, { recursive: true });
+    this.eventsOut = fs.createWriteStream(path.join(this.dir, 'events.jsonl'), { flags: 'a' });
+    this.framesOut = fs.createWriteStream(path.join(this.dir, 'frames.jsonl'), { flags: 'a' });
+    this.writeMeta();
+    // Frame zero: the full state before the first event.
+    this.capture(0);
+  }
+
+  get id(): string { return this.meta.id; }
+
+  record(event: EntityEvent): void {
+    if (this.finished) return;
+    this.events.push(event);
+    this.eventsOut.write(`${JSON.stringify(event)}\n`);
+    this.meta.events = this.events.length;
+    this.capture(event.seq, PER_EVENT);
+    if (!this.meta.firstMessage && event.type === 'chat_message' && event.by === 'user') {
+      this.meta.firstMessage = String(event.data.text ?? '').slice(0, 200);
+      this.writeMeta();
+    }
+    // Snapshot once the runtime has finished handling this event (and any it appended in the same turn).
+    if (this.capturePending) return;
+    this.capturePending = true;
+    queueMicrotask(() => {
+      this.capturePending = false;
+      const last = this.events[this.events.length - 1];
+      if (last) this.capture(last.seq);
+    });
+  }
+
+  finish(reason: string): void {
+    if (this.finished) return;
+    const last = this.events[this.events.length - 1];
+    if (last && !this.frames.some((f) => f.seq === last.seq)) this.capture(last.seq);
+    this.finished = true;
+    Object.assign(this.meta, { status: 'ended' as const, endedAt: new Date().toISOString(), endReason: reason });
+    this.writeMeta();
+    this.eventsOut.end();
+    this.framesOut.end();
+  }
+
+  recording(): SessionRecording { return { meta: { ...this.meta }, events: [...this.events], frames: [...this.frames] }; }
+
+  private capture(seq: number, sections: readonly Section[] = SECTIONS): void {
+    if (this.finished) return;
+    const snapshot = this.snapshot();
+    const patch: SnapshotFrame['patch'] = {};
+    for (const section of sections) {
+      const json = JSON.stringify(snapshot[section]);
+      if (this.last.get(section) === json) continue;
+      this.last.set(section, json);
+      (patch as Record<string, unknown>)[section] = snapshot[section];
+    }
+    if (!Object.keys(patch).length && this.frames.length) return;
+    const frame: SnapshotFrame = { seq, t: snapshot.t, patch };
+    this.frames.push(frame);
+    this.framesOut.write(`${JSON.stringify(frame)}\n`);
+    this.meta.frames = this.frames.length;
+  }
+
+  private writeMeta(): void {
+    try { fs.writeFileSync(path.join(this.dir, 'meta.json'), `${JSON.stringify(this.meta, null, 2)}\n`); } catch { /* the recording itself continues */ }
+  }
+}
+
+/** Past and current sessions, newest first. A session left `live` by a Hub that died is `interrupted`. */
+export function listSessions(root: string, currentId: string | null): SessionMeta[] {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root).filter(isSessionId).sort().reverse().flatMap((id) => {
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(root, id, 'meta.json'), 'utf8')) as SessionMeta;
+      if (meta.status === 'live' && id !== currentId) meta.status = 'interrupted';
+      return [meta];
+    } catch { return []; }
+  });
+}
+
+export function readSession(root: string, id: string): SessionRecording | null {
+  if (!isSessionId(id)) return null;
+  const dir = path.join(root, id);
+  if (!fs.existsSync(path.join(dir, 'meta.json'))) return null;
+  const lines = <T>(file: string): T[] => {
+    try {
+      return fs.readFileSync(path.join(dir, file), 'utf8').split('\n').flatMap((line) => {
+        if (!line.trim()) return [];
+        try { return [JSON.parse(line) as T]; } catch { return []; }
+      });
+    } catch { return []; }
+  };
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) as SessionMeta;
+  if (meta.status === 'live') meta.status = 'interrupted';
+  return { meta, events: lines<EntityEvent>('events.jsonl'), frames: lines<SnapshotFrame>('frames.jsonl') };
+}
+
+function pruneSessions(root: string, keep: number): void {
+  const ids = fs.readdirSync(root).filter(isSessionId).sort();
+  for (const id of ids.slice(0, Math.max(0, ids.length - keep))) {
+    try { fs.rmSync(path.join(root, id), { recursive: true, force: true }); } catch { /* try again next session */ }
+  }
+}
+
+function writeSessionsReadme(root: string): void {
+  try { fs.writeFileSync(path.join(root, 'README.md'), SESSIONS_README); } catch { /* optional */ }
+}
+
+const SESSIONS_README = `# Entity sessions
+
+Recordings of entity bench sessions (Drone Hub → Entity window). One folder per session, from
+Start until Reset or Hub shutdown, named \`YYYYMMDD-HHMMSS-xxxx\` (local time). The newest ${KEEP_SESSIONS} are kept.
+The bench can replay any of them: Replay in the timeline bar under the bench.
+
+Each folder holds:
+
+- \`meta.json\`: id, status (\`live\`, \`ended\`, or \`live\` left behind by a Hub that stopped, which
+  the Hub reports as \`interrupted\`), start and end time, end reason, the bench config (models,
+  evaluator, mode), event and frame counts, and the user's first chat message.
+- \`events.jsonl\`: the entity's event log, one event per line, in order. This is the source of truth:
+  \`{ seq, t, at, type, by, data }\`, where \`t\` is ms since the session started, \`at\` is epoch ms,
+  and \`by\` is \`user\`, \`host\`, \`system\` or a limb id (\`head\`, \`voice\`, \`t3\`, \`w5\` …).
+- \`frames.jsonl\`: runtime snapshots as \`{ seq, t, patch }\`, where \`patch\` holds only the snapshot
+  sections that changed (\`status\`, \`world\`, \`self\`, \`levels\`, \`stops\`, \`health\`, \`limbs\`,
+  \`senses\`, \`jev\`). \`world\`, \`levels\` and \`self\` are exact after every event; the other sections
+  are captured once the runtime finishes handling a batch of events. Frame 0 (seq 0) is the full
+  state at Start. The snapshot after event N is every patch with \`seq <= N\` applied in order
+  (several frames can share a seq).
+
+Useful queries:
+
+\`\`\`sh
+cd "$(ls -d */ | tail -1)"                                  # newest session
+jq -c 'select(.type=="chat_message") | {t, by, text: .data.text}' events.jsonl
+jq -c 'select(.by!="user" and .by!="system") | {t, by, type}' events.jsonl | head -50
+jq -c 'select(.type=="run_finished") | {by, ms: .data.ms, aborted: .data.aborted}' events.jsonl
+jq -c 'select(.type=="limb_failed" or .type=="output_stopped")' events.jsonl
+jq -s 'map(select(.patch.limbs)) | last | .patch.limbs' frames.jsonl   # limbs at the end
+\`\`\`
+
+Event types and the runtime are documented in entity/docs (core-model.md, architecture.md,
+session-logs.md) in the drone repo.
+`;

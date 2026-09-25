@@ -1,5 +1,6 @@
 import { DetachedChatWindows, type DetachedChatWindowsProps } from './DetachedChatWindows';
 import { DesktopToolWindows, type DesktopToolWindowsProps } from './DesktopToolWindows';
+import { EntityWindow } from '../entity/EntityWindow';
 import React from 'react';
 import { ChatContextActionsContext, type ChatContextActions } from './ChatContextActions';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
@@ -102,6 +103,7 @@ export function DroneHubWorkspaceContent({
       <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
         <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
         <DesktopToolWindows {...desktopToolWindowsProps} chatContext={detachedChatWindowsProps} />
+        <EntityWindow />
         <DetachedChatWindows {...detachedChatWindowsProps}
           currentDroneId={selectedDroneWorkspaceProps?.currentDrone.id ?? null}
           visible={appView === 'workspace' && !setupWelcomeProps && !draftChatWorkspaceProps && !groupMultiChatWorkspaceProps && Boolean(selectedDroneWorkspaceProps)} />

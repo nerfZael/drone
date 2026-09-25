@@ -57,6 +57,8 @@ import {
   SkeletonLine,
 } from './icons';
 import { DesktopDevicePicker } from './DesktopDevicePicker';
+import { useEntityWindow } from '../entity/entity-window-store';
+import { IconEntity } from '../entity/IconEntity';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { SidebarContextMenu } from './SidebarContextMenu';
 import { resolveEffectiveSidebarMuteSets } from './sidebar-mute';
@@ -3638,6 +3640,13 @@ export function DroneSidebar({
                   else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
                 }}
                 panelClassName="w-[240px]"
+              />
+            ) : null}
+            {sidebarCapabilities.repoFooter ? (
+              <UiToolbarIconButton
+                onClick={() => useEntityWindow.getState().show()}
+                label="Open the entity test bench"
+                icon={<IconEntity className="opacity-70" />}
               />
             ) : null}
             {sidebarCapabilities.repoFooter ? (

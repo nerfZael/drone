@@ -13,7 +13,7 @@ A channel (or a host) provides:
 | Render | How its state appears in context, and whether it sits in the stable, cacheable part or the volatile tail |
 | Logs | Optional append-only history plus read tools, e.g. `read_chat` |
 
-Risk classes are explained in [architecture.md](architecture.md#jevs-authority).
+Risk classes are explained in [architecture.md](architecture.md#risk-classes).
 
 ## Channels
 
@@ -26,12 +26,12 @@ Risk classes are explained in [architecture.md](architecture.md#jevs-authority).
 
 **Speech in** is a one-way chat. The live transcript works like the typed draft: partial segments are visible and time-stamped, and final segments land in the transcript log. It reuses the transcription path Companion already has.
 
-**Speech out** is a lifecycle, not a fire-and-forget call. The entity sees when its speech was queued, when it actually started and ended, and where it was cut off. Combined with the user's speech events, overlap is a plain state fact: `world.speech.overlap = true`. The entity can then decide to yield, keep talking, or respond to the interruption. It is the same pattern as holds: the channel reports, the entity chooses. Overlap and "entity is speaking" are levels, so a watch can react to "user talking over me for > 1 s".
+**Speech out** is a lifecycle, not a fire-and-forget call. The entity sees when its speech was queued, when it actually started and ended, and where it was cut off. Combined with the user's speech events, overlap is a plain state fact: `world.speech.overlap = true`. The entity can then decide to yield, keep talking, or respond to the interruption. It is the same pattern as output stops: the channel reports, the entity chooses. Overlap and "entity is speaking" are levels, so a watch can react to "user talking over me for > 1 s".
 
-**Nested entities** attach to a parent entity as a channel too; see [topology.md](topology.md#nested-entities).
+**Nested entities** will attach to a parent entity as a channel too; see [future.md](future.md#topology).
 
-**Native realtime voice (M4).** Full-duplex speech models (OpenAI Realtime, Gemini Live, Moshi) handle barge-in and overlap natively, with latency a speech-to-text → LLM → text-to-speech chain can't match. In M4 such a model can be the **voice limb**, wired to the speech channels, while our limbs do the thinking and the core keeps the log, projections and holds. It is a limb type, not the core.
+**Native realtime voice (M4).** Full-duplex speech models (OpenAI Realtime, Gemini Live, Moshi) handle barge-in and overlap natively, with latency a speech-to-text → LLM → text-to-speech chain can't match. In M4 such a model can be the **voice limb**, wired to the speech channels, while our limbs do the thinking and the core keeps the log, projections and output stops. It is a limb type, not the core.
 
-**MCP adapter (later).** MCP already has resources (state), subscriptions (events) and tools (effects). An adapter could turn any MCP server into a channel. It is not realtime-grade and has no risk classes, so it stays an adapter, not the core.
+**Later:** an MCP adapter and a game host; see [future.md](future.md#channels-and-hosts).
 
 **Second host.** Once the keypad works, a second small host (tic-tac-toe or a timer) checks that the API is general and not shaped around the keypad.

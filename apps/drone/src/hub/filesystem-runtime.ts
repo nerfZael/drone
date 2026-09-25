@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertInsideFolderWorkspace } from './folder-workspaces';
 import type http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -320,7 +321,10 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     if (runtime === 'host') {
       const text = typeof raw === 'string' ? String(raw).trim() : '';
       if (!text && opts?.fallbackToHome === false) return '';
-      return normalizeDroneCwdForRuntime(drone, text || null);
+      const normalized = normalizeDroneCwdForRuntime(drone, text || null);
+      // Folder workspaces (Companion home, the entity workspace) are not drones: never serve paths outside them.
+      if (typeof drone?.confineRoot === 'string' && drone.confineRoot) assertInsideFolderWorkspace(drone.confineRoot, normalized);
+      return normalized;
     }
     const text = typeof raw === 'string' ? String(raw) : '';
     return normalizeContainerPath(text || '/');

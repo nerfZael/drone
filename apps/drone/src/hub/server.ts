@@ -319,6 +319,8 @@ import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerRecordingRoutes } from './recordings/registerRecordingRoutes';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { registerReflexRoutes } from './reflex/reflex-routes';
+import { registerEntityRoutes } from './entity/entity-routes';
+import { registerFolderWorkspace, resolveFolderWorkspace } from './folder-workspaces';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { createFileRevisionWatcher } from './file-revision-watch';
 import { createWorkspaceEventsWebSocketServer } from './workspace-events-websocket-server';
@@ -5637,6 +5639,8 @@ async function startDroneHubApiServerWithLifecycle(
   registerRecordingRoutes(apiRouter);
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
+  registerFolderWorkspace({ id: COMPANION_HOME_TARGET_ID, name: 'Companion home', root: ensureCompanionHome });
+  registerEntityRoutes(apiRouter);
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();
@@ -5995,14 +5999,9 @@ async function startDroneHubApiServerWithLifecycle(
     parseContainerFsListOutput,
     parseFsSearchOutput,
     readHostFileBytes,
-    // Companion home is not a drone, but the explorer and editor can browse it like a host drone's folder.
+    // Folder workspaces (Companion home, the entity workspace) are not drones, but the explorer and editor can browse them like a host drone's folder.
     resolveDroneOrRespond: async (res: http.ServerResponse, droneRef: string) =>
-      String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
-        ? {
-            id: COMPANION_HOME_TARGET_ID,
-            drone: { id: COMPANION_HOME_TARGET_ID, name: 'Companion home', runtime: 'host', cwd: await ensureCompanionHome(), repoPath: '', gitIgnoreMetadata: false },
-          }
-        : resolveDroneOrRespond(res, droneRef),
+      (await resolveFolderWorkspace(droneRef)) ?? resolveDroneOrRespond(res, droneRef),
     runHostCommand,
     withLockedDroneContainer,
     withReadonlyDroneContainer,
@@ -6425,11 +6424,9 @@ async function startDroneHubApiServerWithLifecycle(
     companionWebSocketServer: companionWss,
     workspaceEvents: {
       webSocketServer: workspaceEventsWss,
-      // Companion home is browsed like a host drone's folder, as in the filesystem routes.
+      // Folder workspaces are browsed like a host drone's folder, as in the filesystem routes.
       resolveWorkspace: async (socket, droneRef) =>
-        String(droneRef ?? '').trim() === COMPANION_HOME_TARGET_ID
-          ? { id: COMPANION_HOME_TARGET_ID, drone: { id: COMPANION_HOME_TARGET_ID, runtime: 'host', cwd: await ensureCompanionHome() } }
-          : resolveDroneOrRejectUpgrade(socket, droneRef),
+        (await resolveFolderWorkspace(droneRef)) ?? resolveDroneOrRejectUpgrade(socket, droneRef),
     },
     handleDeviceMeshUpgrade: deviceMesh.handleLiveAudioUpgrade,
     isSafeSessionName: isSafeTmuxSessionName,

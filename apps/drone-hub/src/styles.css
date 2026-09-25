@@ -824,6 +824,32 @@ code, pre {
   50% { opacity: .45; }
 }
 
+/* Entity brain: a signal firing along an edge. The comet and spark run the path (pathLength=100),
+   then the arrowhead and ping mark where it landed. */
+@keyframes brain-comet {
+  from { stroke-dashoffset: 22; }
+  to { stroke-dashoffset: -100; }
+}
+.brain-comet { stroke-dasharray: 22 200; animation: brain-comet .42s cubic-bezier(.3,0,.2,1) both; }
+@keyframes brain-spark {
+  from { offset-distance: 0%; opacity: 1; }
+  85% { opacity: 1; }
+  to { offset-distance: 100%; opacity: 0; }
+}
+.brain-spark { offset-rotate: 0deg; animation: brain-spark .42s cubic-bezier(.3,0,.2,1) both; }
+@keyframes brain-land {
+  0%, 30% { opacity: 0; }
+  40% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.brain-arrow { animation: brain-land 1.2s ease-out both; }
+@keyframes brain-ping {
+  0%, 30% { transform: scale(.4); opacity: 0; }
+  38% { opacity: .9; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+.brain-ping { transform-box: fill-box; transform-origin: center; animation: brain-ping 1s ease-out both; }
+
 /* Overlay motion: quick, damped, and directional. Menus drop in from their
    anchor; dialogs rise from below; toasts slide up from the screen edge. */
 @keyframes menu-in {

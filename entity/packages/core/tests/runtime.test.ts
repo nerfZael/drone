@@ -1,0 +1,419 @@
+import { afterEach, expect, test } from 'bun:test';
+import { chatChannel, type Channel, type Evaluator } from '../src/index.js';
+import { lastUserMessage, makeEntity, sleep, until } from './helpers.js';
+
+const cleanups: (() => void)[] = [];
+afterEach(() => { for (const c of cleanups.splice(0)) c(); });
+function setup(...args: Parameters<typeof makeEntity>) {
+  const h = makeEntity(...args);
+  cleanups.push(() => h.entity.close());
+  return h;
+}
+
+test('the newest voice run owns the voice: an older run gets "superseded"', async () => {
+  const results: Record<string, string> = {};
+  let release!: () => void;
+  const slow = new Promise<void>(r => { release = r; });
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (message === 'first') { await slow; results.first = await call('say', { text: 'answer to first' }); }
+    if (message === 'second') results.second = await call('say', { text: 'answer to second' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'first' });
+  await until(() => h.mind.runs.some(r => lastUserMessage(r) === 'first'));
+  h.entity.input('chat_message', { text: 'second' });
+  await until(() => results.second !== undefined);
+  release();
+  await until(() => results.first !== undefined);
+  expect(results.second).toBe('sent');
+  expect(results.first).toStartWith('superseded');
+  expect(h.said()).toEqual(['answer to second']);
+});
+
+test('invalid watches and effects are rejected with an error the model can act on', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    results.push(await call('set_watch', { watch: { name: 'bad', on: { event: 'key_down' }, do: { hold: true } } }));
+    results.push(await call('set_watch', { watch: { name: 'bad effect', on: { event: 'key_down' }, do: { effect: 'teleport' } } }));
+    results.push(await call('press', { key: '5' }));
+    results.push(await call('run_program', { name: 'broken', code: 'this is not javascript(' }));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 4);
+  expect(results[0]).toStartWith('error: invalid watch');
+  expect(results[1]).toContain('unknown effect "teleport"');
+  expect(results[2]).toContain('press.keys is required');
+  expect(results[3]).toContain('SyntaxError');
+  expect(h.of('watch_installed')).toHaveLength(0);
+});
+
+test('effects are rejected only when something they depend on changed', async () => {
+  const board: Channel<{ moves: string[] }> = {
+    name: 'board', describe: 'test board', inputs: ['board_changed'],
+    init: () => ({ moves: [] }),
+    reduce() {},
+    render: () => ({}),
+    effects: [{
+      name: 'move', description: 'move', risk: 'limb',
+      parameters: { type: 'object', properties: { to: { type: 'string' } }, required: ['to'] },
+      dependsOn: () => [{ type: 'board_changed' }],
+      apply(args: { to: string }, ctx) { ctx.world.moves.push(args.to); return 'moved'; },
+    }],
+  };
+  const results: string[] = [];
+  let step = 0;
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'play') return;
+    if (step++ === 0) {
+      h.entity.input('key_down', { key: '1' }); // unrelated: not a conflict
+      results.push(await call('move', { to: 'a1' }));
+      h.entity.input('board_changed', {}); // related: stale
+      results.push(await call('move', { to: 'b2' }));
+    }
+  }, { channels: [chatChannel(), board, (await import('../src/index.js')).keypadChannel()] });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'play' });
+  await until(() => results.length === 2);
+  expect(results[0]).toBe('moved');
+  expect(results[1]).toStartWith('stale');
+});
+
+test('output stops are scoped: "work" leaves the voice free, "subtree" blocks it, resume lifts it', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('run_program', { name: 'loop', code: 'for (;;) { await wait(5); }' });
+    await call('stop_output', { reason: 'test' });
+    results.push(await call('say', { text: 'still talking' }));
+    await call('stop_output', { reason: 'quiet', scope: 'subtree' });
+    results.push(await call('say', { text: 'blocked' }));
+    await call('resume_output');
+    results.push(await call('say', { text: 'back' }));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 3);
+  expect(results).toEqual(['sent', 'output stopped: quiet. Nothing was done.', 'sent']);
+  expect(h.of('program_cancelled')).toHaveLength(1);
+});
+
+test('task limbs: spawned by the head, cannot speak, wake the head when done, and keep their session key', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'think hard') await call('spawn', { task: 'plan something', name: 'planner' });
+    if (input.role === 'task') {
+      expect(input.sessionKey).toBe(input.limbId);
+      expect(input.tools.some(t => t.name === 'say')).toBe(false);
+      expect(await call('say', { text: 'hi' })).toContain('only the voice speaks');
+      await call('report', { text: 'halfway' });
+      await call('finish_task', { result: 'the plan' });
+    }
+    if (input.role === 'head' && input.prompt.includes('"woken_because":"task task-')) await call('say', { text: 'done: the plan' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'think hard' });
+  await until(() => h.said().includes('done: the plan'));
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'done', result: 'the plan' });
+  expect(h.mind.forgotten).toEqual(['task-3']);
+});
+
+test('cancel asks a task to wrap up, then kills it after the grace period', async () => {
+  let taskResult = '';
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('spawn', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'task-3' });
+    if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'start' });
+  await until(() => h.of('limb_spawned').length === 1);
+  h.entity.input('chat_message', { text: 'stop' });
+  await until(() => h.of('task_done').length === 1);
+  expect(taskResult).toContain('cancel requested');
+  expect(h.of('task_done')[0].data.status).toBe('killed');
+});
+
+test('a crashing task limb is restarted up to the cap, then fails upward', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('spawn', { task: 'crash' });
+    if (input.role === 'task') throw new Error('model outage');
+  }, { config: { restartMax: 2 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('task_done').length === 1);
+  expect(h.of('limb_failed')).toHaveLength(3);
+  expect(h.of('task_done')[0].data.status).toBe('failed');
+});
+
+test('pause freezes programs and blocks effects; resume continues and tells the head how long it was paused', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'count') await call('run_program', { name: 'count', code: 'for (let i = 1; i <= 5; i++) { await say(String(i)); await wait(20); }' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'count' });
+  await until(() => h.said().length >= 2);
+  h.entity.pause();
+  const atPause = h.said().length;
+  await sleep(80);
+  expect(h.said().length).toBe(atPause);
+  h.entity.resume();
+  await until(() => h.said().length === 5);
+  expect(h.of('session_resumed')[0].data.paused_for_ms).toBeGreaterThanOrEqual(70);
+  expect(h.mind.runs.at(-1)!.prompt).toContain('resumed after');
+});
+
+test('watches that fire too often are rate limited; programs are throttled instead', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('set_watch', { watch: { name: 'echo', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+  }, { config: { reflexPerSecond: 3 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('watch_installed').length === 1);
+  for (let i = 0; i < 6; i++) h.entity.input('key_down', { key: '1' });
+  await sleep(10);
+  expect(h.entityKeys('key_down')).toHaveLength(3);
+  expect(h.entity.snapshot().health.some(x => x.message.includes('rate limited'))).toBe(true);
+});
+
+test('level watches fire after a duration: typing for a while wakes the head', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'watch me') await call('set_watch', { watch: { name: 'long typing', on: { level: 'user.typing', for_ms: 40 }, do: { wake: { reason: 'typing a long time' } } } });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'watch me' });
+  await until(() => h.of('watch_installed').length === 1);
+  h.entity.input('draft_changed', { text: 'h' });
+  await sleep(20);
+  expect(h.of('watch_woke')).toHaveLength(0);
+  await until(() => h.of('watch_woke').length === 1);
+  expect(h.mind.runs.at(-1)!.prompt).toContain('typing a long time');
+});
+
+test('judge and sense: batched into one evaluator call, sensed levels feed watches, answers are logged', async () => {
+  const calls: string[][] = [];
+  const evaluator: Evaluator = {
+    async evaluate(questions, state) {
+      calls.push(questions.map(q => q.question));
+      const changed = state.includes('pizza');
+      return Object.fromEntries(questions.map(q => [q.id, q.question.includes('subject') ? (changed ? 0.9 : 0.1) : 0.7]));
+    },
+  };
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'stop if I change the subject') {
+      results.push(await call('set_watch', { watch: { name: 'subject', on: { sense: 'did the user change the subject?', above: 0.75 }, do: { stop_output: { reason: 'subject changed', scope: 'subtree' } } } }));
+      results.push(await call('run_program', { name: 'judges', code: 'const [a, b] = await Promise.all([judge("is it sunny?"), judge("is it late?")]); console.log(a, b);' }));
+    }
+  }, { evaluator, jev: { senseIntervalMs: 5 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'stop if I change the subject' });
+  await until(() => h.of('judged').length === 2);
+  expect(calls.some(c => c.length === 2 && c.includes('is it sunny?') && c.includes('is it late?'))).toBe(true);
+  h.entity.input('chat_message', { text: 'anyway, I love pizza' });
+  await until(() => h.of('output_stopped').length === 1);
+  expect(results[0]).toContain('sense level sense.did_the_user_change_the_subject');
+  expect(h.of('sensed').length).toBeGreaterThan(0);
+});
+
+test('reset archives the old log and starts clean', async () => {
+  const h = setup(async () => {});
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  const archived = h.entity.reset();
+  expect(archived.some(e => e.type === 'chat_message')).toBe(true);
+  expect(h.entity.log.length).toBe(0);
+  expect(h.entity.status).toBe('idle');
+});
+
+test('programs read events in order and never miss one between nextEvent calls', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('run_program', { name: 'reader', code: `
+      const down = await nextEvent({ type: 'key_down', by: 'user' }, 1000);
+      await wait(40); // the key_up happens while we are not waiting
+      const up = await nextEvent({ type: 'key_up', by: 'user' }, 1000);
+      console.log(down.data.key, up.data.key, up.t - down.t >= 0);` });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  h.entity.input('key_down', { key: '1' });
+  await sleep(10);
+  h.entity.input('key_up', { key: '1' });
+  await until(() => h.of('program_log').length === 1);
+  expect(h.of('program_log')[0].data.message).toBe('1 1 true');
+});
+
+test('keypad events carry held_ms and gap_ms, so programs need no timing arithmetic', async () => {
+  const h = setup(async () => {});
+  h.entity.start();
+  h.entity.input('key_down', { key: '1' });
+  await sleep(30);
+  h.entity.input('key_up', { key: '1' });
+  await sleep(20);
+  h.entity.input('key_down', { key: '1' });
+  const [up] = h.of('key_up');
+  const downs = h.of('key_down');
+  expect(Number(up.data.held_ms)).toBeGreaterThanOrEqual(25);
+  expect(downs[0].data.gap_ms).toBeUndefined();
+  expect(Number(downs[1].data.gap_ms)).toBeGreaterThanOrEqual(15);
+});
+
+test('an older head run can no longer act once a newer run exists, except to leave a note', async () => {
+  const results: string[] = [];
+  let release!: () => void;
+  const slow = new Promise<void>(r => { release = r; });
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'first') {
+      await slow;
+      results.push(await call('press', { keys: '1' }), await call('note', { text: 'was about to press 1' }));
+    }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'first' });
+  await until(() => h.mind.runs.some(r => lastUserMessage(r) === 'first'));
+  h.entity.input('chat_message', { text: 'second' });
+  await until(() => h.mind.runs.some(r => lastUserMessage(r) === 'second'));
+  release();
+  await until(() => results.length === 2);
+  expect(results[0]).toStartWith('superseded');
+  expect(results[1]).toBe('noted');
+});
+
+test('freeze pauses a task limb and a program at their next action, and resume continues them with nothing lost', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') {
+      // Spawn first: the freeze wakes the head, and a newer run supersedes this one.
+      await call('spawn', { task: 'press 4 then 5' });
+      await call('set_watch', { watch: { name: 'freeze on 9', on: { level: 'key.9.held' }, do: { stop_output: { reason: 'user holds 9', mode: 'freeze' } } } });
+      await call('set_watch', { watch: { name: 'resume on release', on: { event: 'key_up', key: '9' }, do: { resume_output: {} } } });
+      await call('run_program', { name: 'steps', code: 'for (const k of ["1","2","3"]) { await press(k); await wait(30); }' });
+    }
+    if (input.role === 'task') {
+      await call('press', { keys: '4' });
+      await sleep(60);
+      await call('press', { keys: '5' });
+      await call('press', { keys: '9' }); // the task pressing 9 must not freeze anything: levels default to the user's
+      await call('finish_task', { result: 'done' });
+    }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.entityKeys('key_down').length >= 1);
+  h.entity.input('key_down', { key: '9' });
+  await sleep(15);
+  const frozenAt = h.entity.log.length;
+  await sleep(120);
+  expect(h.entityKeys('key_down', frozenAt)).toHaveLength(0);
+  h.entity.input('key_up', { key: '9' });
+  await until(() => h.of('task_done').length === 1 && h.of('program_finished').length === 1);
+  expect(h.entityKeys('key_down').map(e => e.data.key).sort().join('')).toBe('123459');
+  expect(h.of('output_stopped')).toHaveLength(1);
+});
+
+test('watch conditions combine: fire on a key only while the user has stopped typing and is not holding 0', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('set_watch', { watch: {
+      name: 'press when idle', on: { event: 'key_down', key: '1' }, do: { effect: 'press', args: { keys: '2' } },
+      when: { all: [{ quiet: 'draft_changed', for_ms: 50 }, { not: { level: 'key.0.held' } }] },
+    } });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('watch_installed').length === 1);
+  h.entity.input('draft_changed', { text: 'typ' });
+  h.entity.input('key_down', { key: '1' }); // still typing: no fire
+  await sleep(70);
+  h.entity.input('key_down', { key: '0' });
+  h.entity.input('key_down', { key: '1' }); // holding 0: no fire
+  h.entity.input('key_up', { key: '0' });
+  h.entity.input('key_down', { key: '1' }); // idle and 0 released: fires
+  expect(h.entityKeys('key_down').map(e => e.data.key)).toEqual(['2']);
+});
+
+test('the built-in draft sense waits for a typing pause before waking the head', async () => {
+  const evaluator = { async evaluate(questions: { id: string }[]) { return Object.fromEntries(questions.map(q => [q.id, 0.9])); } };
+  const h = setup(async () => {}, { evaluator, jev: { senseIntervalMs: 5 } });
+  h.entity.start();
+  for (const text of ['h', 'ho', 'how', 'how are', 'how are you']) { h.entity.input('draft_changed', { text }); await sleep(100); }
+  expect(h.of('watch_woke')).toHaveLength(0);
+  await until(() => h.of('watch_woke').length === 1);
+});
+
+test('with a voice limb: the voice answers first, simple messages never reach the head, and handoff wakes the head', async () => {
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.role === 'voice') {
+      expect(input.tools.some(t => t.name === 'set_watch')).toBe(false);
+      if (message === 'hi') await call('say', { text: 'hey!' });
+      if (message === 'repeat after me') { await call('say', { text: 'on it' }); await call('handoff', { note: 'set up key mirroring' }); }
+    }
+    if (input.role === 'head' && input.prompt.includes('voice handed off: set up key mirroring')) {
+      await call('set_watch', { watch: { name: 'mirror', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+      expect(await call('say', { text: 'mirroring your keys now' })).toBe('sent');
+    }
+  }, { models: { head: 'test/head', task: 'test/task', voice: 'test/voice' } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.said().includes('hey!'));
+  expect(h.mind.runs.filter(r => r.role === 'head')).toHaveLength(0);
+  h.entity.input('chat_message', { text: 'repeat after me' });
+  await until(() => h.said().includes('mirroring your keys now'));
+  expect(h.said()).toEqual(['hey!', 'on it', 'mirroring your keys now']);
+  h.entity.input('key_down', { key: '4' });
+  expect(h.entityKeys('key_down').map(e => e.data.key)).toEqual(['4']);
+});
+
+test('the front limb does not act while the user is still typing; a message sent meanwhile supersedes it', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (message === 'actually') { await sleep(40); results.push(await call('say', { text: 'what would you like to change?' })); }
+    if (message === "let's convert to python") results.push(await call('say', { text: 'switching to python' }));
+  }, { config: { messageSettleMs: 60, messageSettleMaxMs: 2000 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'actually' });
+  for (const text of ["let's", "let's convert", "let's convert to python"]) { await sleep(20); h.entity.input('draft_changed', { text }); }
+  await sleep(30);
+  h.entity.input('chat_message', { text: "let's convert to python" });
+  await until(() => results.length === 2);
+  expect(results.filter(r => r === 'sent')).toHaveLength(1);
+  expect(results.filter(r => r.startsWith('superseded'))).toHaveLength(1);
+  expect(h.said()).toEqual(['switching to python']);
+});
+
+test('a message sent while the user is still typing waits for them to finish, so a burst gets one wake', async () => {
+  const h = setup(async () => {}, { config: { messageSettleMs: 60, messageSettleMaxMs: 2000 } });
+  h.entity.start();
+  await until(() => h.mind.runs.length === 1); // session started
+  h.entity.input('chat_message', { text: 'first part' });
+  h.entity.input('draft_changed', { text: 'second' }); // still typing right after sending
+  for (const text of ['second part', 'second part here']) { await sleep(20); h.entity.input('draft_changed', { text }); }
+  expect(h.mind.runs.length).toBe(1);
+  h.entity.input('chat_message', { text: 'second part here' });
+  await until(() => h.mind.runs.length === 2);
+  await sleep(150);
+  expect(h.mind.runs.length).toBe(2);
+  expect(h.mind.runs[1].prompt).toContain('first part');
+  expect(h.mind.runs[1].prompt).toContain('second part here');
+});
+
+test('the front limb never acts while a user message it has not read is waiting', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'one') {
+      h.entity.input('chat_message', { text: 'two' }); // arrives during this run, before it acts
+      results.push(await call('say', { text: 'reply to one' }));
+    }
+    if (lastUserMessage(input) === 'two') results.push(await call('say', { text: 'reply to both' }));
+  }, { config: { messageDebounceMs: 50 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'one' });
+  await until(() => results.length === 2);
+  expect(results[0]).toStartWith('superseded');
+  expect(h.said()).toEqual(['reply to both']);
+});

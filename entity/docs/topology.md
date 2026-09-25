@@ -1,65 +1,60 @@
-# Limbs and topology
+# Limbs
 
-An entity's mind is a set of **limbs**: concurrent LLM or Jev workers that share one event log and one orchestrator, each reading its own projection of it. It is not bound by biology. It can have 2 limbs or 200. Its shape, whether a single head, a hierarchy or a society of peers, is **configuration, not architecture**.
+An entity's mind is a set of **limbs**: concurrent workers that share one event log and one orchestrator, each reading its own projection of it. v1 has one shape: a head that also speaks, strong task limbs it spawns, and the code limbs they write. Richer shapes (hierarchies, peers, nested entities) are in [future.md](future.md).
 
-A limb is configuration, not code:
+A limb is defined by its **contract**, not by what's inside it. It reads a projection of the log, commits effects allowed by its capabilities and their risk class, spends a budget, and has a supervising parent.
+
+| Kind | What its "thinking" is | Examples | Budget |
+|---|---|---|---|
+| **LLM limb** | Generating: talking, planning, writing code limbs | head and voice (gpt-6-luna), task limbs (gpt-6-sol) | tokens per minute |
+| **Code limb** | Executing: millisecond reactions, calling Jev when a condition needs meaning | every watch and program an LLM limb installs | effect rate limit plus its Jev calls |
+
+Code limbs are children of the LLM limb that wrote them. That limb supervises them, can cancel or replace them, and pays for them, including their Jev calls, from its budget. So one supervision tree, one authority model and one inspector view cover everything that runs. Jev itself is not a limb: it is a [runtime primitive](architecture.md#jev-as-a-runtime-primitive) (`judge`, `sense`) that code calls, and it only returns numbers.
+
+A limb's configuration:
 
 | Field | Example |
 |---|---|
-| `model` | a fast model, a strong model, or Jev |
-| `role` | a short system prompt: "head", "voice", "planner", "keypad hand" |
+| `kind` and `model` | `llm` with gpt-6-luna or gpt-6-sol, or `code` with the watch or program it runs |
+| `role` | a short system prompt: "head", "task" |
 | `parent` | the limb that spawned it and holds authority over it; none for the root |
-| `capabilities` | what it may do: `speak`, `spawn`, `set_watch`, `direct` (assign tasks to its children), `cancel`, `kill` |
-| `view` | its projection of the event log: which sections and how much history it sees (smaller view, cheaper and faster run) |
-| `restart` | its supervision policy: what happens when it crashes (see below) |
-| `wakes` | code or Jev watches that start it |
+| `capabilities` | what it may do: `speak`, `spawn`, `set_watch`, `run_program`, `cancel`, `kill` |
+| `view` | its projection of the event log: which sections and how much history it sees |
+| `restart` | `permanent` or `transient` (see below) |
 | `budget` | tokens per minute and concurrency, handed down from its parent |
 
 ## Work goes through state; lifecycle goes through signals
 
-- **Work.** Tasks, results and requests are events in the log, projected into each limb's state. A parent assigns work by writing to a child's `tasks`, and the child commits results. This keeps everything visible, replayable and conflict-checked. For request-and-response, `ask(child, question)` writes the task and waits for the result with a timeout, so it feels like a call while state stays the truth.
-- **Lifecycle.** Pause, cancel and kill are direct signals from the orchestrator. They take effect immediately, like OS signals, and are logged as events. State-based directives are soft: a child could delay them. Signals are not.
+- **Work.** Tasks and results are events in the log, projected into each limb's state. The head assigns work by spawning a task limb with a task, and the task limb commits results. `ask(child, question)` writes a task and waits for the result with a timeout, so it feels like a call while the log stays the truth.
+- **Lifecycle.** Pause, cancel and kill are direct signals from the orchestrator. They take effect immediately, like OS signals, and are logged as events. A child could delay a directive written to state; it can't delay a signal.
 
 ## Supervision
 
-Lifecycle follows Erlang/OTP supervision trees rather than a scheme of our own. Every parent is its children's **supervisor**.
+Lifecycle borrows from Erlang/OTP supervision trees. Every parent is its children's supervisor.
 
-- **Cancel and kill.** Parents can stop their own children. **Cancel** (OTP `shutdown` with a timeout, our default) lets the child checkpoint and stop. **Kill** (OTP `brutal_kill`) fires the child's abort controller at once and drops its partial output. A cancel that is not honoured within the grace period becomes a kill, and running out of budget also kills. Everything up to the kill stays in the log. Jev can do neither.
-- **Restart policy per child.** `permanent` children (the head-and-voice limb) are always restarted from their checkpoint. `transient` children (task limbs) are restarted only if they crashed, not if they finished. `temporary` children (one-off helpers) are never restarted.
-- **Restart intensity.** A supervisor allows at most N restarts in T seconds. Past that, it gives up and fails upward to its own parent, and at the root the entity reports `limb_failed` and falls back to [the floor](architecture.md#the-floor-never-worse-than-a-normal-agent). This stops a crashing limb from burning budget in a loop.
-- **Strategies.** `one_for_one` (restart only the crashed child) is the default. `one_for_all` (restart a group together) is available for limbs that only make sense as a set.
+- **Cancel and kill.** Parents can stop their own children. **Cancel** (the default) lets the child checkpoint and stop within a grace period. **Kill** fires the child's abort controller at once and drops its partial output. A cancel that isn't honoured in time becomes a kill, and running out of budget also kills. Everything up to the kill stays in the log. Jev can do neither: it only returns numbers.
+- **Restart policy.** `permanent` limbs (the head) are always restarted from their checkpoint. `transient` limbs (task limbs, code limbs) are restarted only if they crashed, not if they finished.
+- **Restart cap.** A supervisor allows at most N restarts in T seconds. Past that, it gives up and reports `limb_failed` to its parent. At the root, the entity falls back to [the floor](architecture.md#the-floor-never-worse-than-a-normal-agent). This stops a crashing limb from burning budget in a loop.
 
-## Topology presets
+## Rules
 
-| Preset | Shape | Status |
-|---|---|---|
-| Head + limbs | One root head directs; limbs work tasks and report back | v1 default, depth ≤ 2 |
-| Hierarchy | Heads of sub-teams, each directing its own limbs | Later |
-| Peers | Equal authority: limbs bid and an arbiter decides (see below), coordinating only through the log and version checks | Later, when models cooperate better |
-| Nested entities | A child is a whole entity, attached to its parent as a channel | Later |
-
-Rules that hold in every topology:
-
-1. **Head and voice are roles, not the same thing.** The head decides and the voice talks. In v1 one fast limb plays both, because the head must react quickly. Later a strong head can sit behind a fast voice.
-2. **One voice, through an arbiter.** User-facing effects (`say`, `speak`) go through an **arbiter** that decides which limb holds the floor. In v1 the arbiter is trivial: the limb with `speak` always wins, and others publish to state for it to relay. The interface exists from day one so later topologies can swap in a real one (see [Arbitration](#arbitration)).
-3. **Conflicts.** Every effect commits against the log position its projection was built from. A later conflicting commit is rejected, and that limb re-wakes with the new state.
-4. **Budgets and caps flow down the tree.** A parent gives its children part of its own budget. Depth and spawn caps apply, so a society can't grow without limit.
-5. **Many Jevs.** Each limb's watches run as their own evaluator loop, in parallel. Recall, wake-gating and interrupt contracts are separate Jev streams.
-
-## Arbitration
-
-A head is one way to decide. The other, for the peers topology, comes from global workspace theory in cognitive science. Many specialists work in parallel and compete for a small shared "spotlight". The winner's content is broadcast to all of them.
-
-- Any limb can **bid** for a scarce resource such as the voice, a motor channel, or the head's attention, with an urgency and a short reason: "I want to speak, urgency 0.8: the task finished".
-- The **arbiter** picks the winner by urgency, recency and budget, and the decision is logged as an event.
-- The winning content is **broadcast** into every limb's projection, so the whole entity knows what it just said or did.
-
-In v1 the arbiter is the trivial one described above. The bid interface is kept so that moving from a head to peers is a configuration change, not a rewrite.
-
-## Nested entities
-
-An entity can contain entities. A child entity plugs into its parent through the [host API](host-api.md) as a channel. Its events are its messages, status and results. Its effects are sending it a message, pausing it and giving it budget. An entity never needs to know whether it is talking to a limb, a sub-entity or a human.
+1. **Head and voice are roles, and the split is configurable.** By default one limb (the head) plays both. With `voiceModel` set, a separate **voice limb** on a fast model answers first: it handles simple things itself (small talk, short answers, simple key presses) and otherwise acknowledges briefly and calls `handoff(note)`, which wakes the head. The head can still speak directly, so its answers are not relayed. Simple messages never reach the head. Output stops of scope `work` do not silence the voice.
+2. **The newest run of each speaking limb owns its voice.** A busy voice never makes a new wake queue: the wake starts a parallel run (see [the floor](architecture.md#the-floor-never-worse-than-a-normal-agent)). To stop two runs acting on the same thing, only the newest voice run may act. Every action an older run tries returns `superseded`, except `note`, so it can leave what it knows for the newer run. Its thinking is not killed; it just can't act any more. Guarding only `say` was not enough: in M2 two head runs each started a Morse decoder. Task limbs never `say`; they commit results, and the voice relays them.
+3. **Conflicts are about dependencies, not time.** Each effect declares what it depends on (see [core-model.md](core-model.md#effects)). It is rejected only if one of those things changed since the limb read it. The log advancing with unrelated keystrokes or ticks is not a conflict.
+4. **Budgets flow down the tree.** A parent gives its children part of its own budget. Depth and spawn caps apply.
+5. **Jev calls are shared.** All `judge` and `sense` questions from every code limb are batched by the runtime, so ten code limbs sensing ten things cost about one Jev call per tick, not ten.
 
 ## Default v1 config
 
-One fast head-and-voice limb that spawns strong task limbs on demand, plus one Jev attention stream.
+Limbs run in parallel. A wake that arrives while a limb is busy starts a new run instead of queuing.
+
+| Limb | Model | Role |
+|---|---|---|
+| Head (and voice, unless split) | `openai-codex/gpt-6-luna`, medium reasoning | Replies, installs watches and programs, spawns task limbs |
+| Voice (optional, `voiceModel`) | `cerebras/qwen-3.8-27b` | Answers first in about 0.5-1.3 s; hands anything harder to the head |
+| Task limbs | `openai-codex/gpt-6-sol`, medium reasoning | Harder work, spawned on demand |
+| Fast reflex limb (optional) | `cerebras/qwen-3.8-27b` | Sub-second watch setup where speed is being tested. Not a planner, not cached, and billed per API call rather than on the subscription, so it's off by default |
+| Code limbs | none: plain code | Every watch and program, supervised by the LLM limb that wrote it |
+| Jev (M3) | Runtime primitive, not a limb | `judge` and `sense`, called from code limbs |
+
+The Codex models run on the subscription. In the spike, gpt-6-luna reached its first action in about 1.5–2 s and Cerebras qwen in about 0.5 s; see [plan.md](plan.md#m05-spike-results).

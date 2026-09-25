@@ -5,7 +5,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "blip/packages/*"
+    "blip/packages/*",
+    "entity/packages/*"
   ],
   "scripts": {
     "build": "turbo run build --force",
