@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Mind, MindRunInput, MindRunResult } from '@entity/core';
 import type { AssistantMessage, Context, Message, Model } from '@mariozechner/pi-ai';
 import { resolveBlipProviderApiKey } from '../hub-settings';
@@ -10,23 +12,60 @@ const loadPiAi = () => (piAi ??= importEsm('@mariozechner/pi-ai') as Promise<PiA
 
 export type ReasoningLevel = 'minimal' | 'low' | 'medium' | 'high';
 
+/** Where worker conversations are kept beyond memory, so a restored session can continue them. Append-only per key. */
+export interface ConversationStore {
+  load(key: string): Message[] | undefined;
+  append(key: string, messages: Message[]): void;
+  remove(key: string): void;
+}
+
+/** One JSON Lines file per worker conversation (`<key>.jsonl`), next to a session's recording. */
+export function fileConversationStore(dir: string): ConversationStore {
+  const file = (key: string) => path.join(dir, `${key.replace(/[^\w.-]/g, '_')}.jsonl`);
+  return {
+    load(key) {
+      try { return fs.readFileSync(file(key), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as Message); }
+      catch { return undefined; }
+    },
+    append(key, messages) {
+      if (!messages.length) return;
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(file(key), messages.map(m => `${JSON.stringify(m)}\n`).join(''));
+    },
+    remove(key) { fs.rmSync(file(key), { force: true }); },
+  };
+}
+
 /**
- * Runs entity LLM limbs with pi-ai directly: one fresh context per reactive wake, and an
- * in-memory conversation per task limb until the runtime calls forget(). Tool calls commit
- * as soon as they stream in, not at the end of the turn.
+ * Runs entity LLM limbs with pi-ai directly: one fresh context per reactive wake, and a
+ * conversation per task limb until the runtime calls forget(). Conversations live in memory
+ * and, with a store, on disk too. Tool calls commit as soon as they stream in, not at the end of the turn.
  */
 export class PiAiMind implements Mind {
   private readonly sessions = new Map<string, Message[]>();
 
-  constructor(private readonly reasoning: ReasoningLevel = 'medium') {}
+  constructor(private readonly reasoning: ReasoningLevel = 'medium', private readonly store?: ConversationStore) {}
 
-  forget(sessionKey: string): void { this.sessions.delete(sessionKey); }
+  forget(sessionKey: string): void {
+    this.sessions.delete(sessionKey);
+    this.store?.remove(sessionKey);
+  }
 
   fork(fromKey: string, toKey: string): boolean {
-    const history = this.sessions.get(fromKey);
+    const history = this.history(fromKey);
     if (!history) return false;
     this.sessions.set(toKey, [...history]);
+    this.store?.append(toKey, history);
     return true;
+  }
+
+  /** A kept conversation: from memory, or from the store after a restart. */
+  private history(key: string): Message[] | undefined {
+    const known = this.sessions.get(key);
+    if (known) return known;
+    const loaded = this.store?.load(key);
+    if (loaded) this.sessions.set(key, loaded);
+    return loaded;
   }
 
   async run(input: MindRunInput): Promise<MindRunResult> {
@@ -38,8 +77,9 @@ export class PiAiMind implements Mind {
     const apiKey = await resolveBlipProviderApiKey(providerId);
     if (!apiKey) throw new Error(`No credentials for ${providerId}. Sign in or add a key in Settings.`);
 
-    const history = input.sessionKey ? (this.sessions.get(input.sessionKey) ?? []) : [];
-    const messages: Message[] = [...history, { role: 'user', content: input.prompt, timestamp: Date.now() }];
+    const history = input.sessionKey ? (this.history(input.sessionKey) ?? []) : [];
+    const prompt: Message = { role: 'user', content: input.prompt, timestamp: Date.now() };
+    const messages: Message[] = [...history, prompt];
     const context: Context = {
       systemPrompt: input.system,
       messages,
@@ -48,7 +88,8 @@ export class PiAiMind implements Mind {
     // Kept from the start and appended step by step, so a run that is aborted (Pause) or crashes keeps the
     // steps it completed: their effects already happened. A step is appended whole (the model's tool calls
     // with their results), so the history never holds a call without its result.
-    if (input.sessionKey) this.sessions.set(input.sessionKey, context.messages);
+    const key = input.sessionKey;
+    if (key) { this.sessions.set(key, context.messages); this.store?.append(key, [prompt]); }
     const usage = { input: 0, output: 0, cacheRead: 0, cost: 0 };
     let text = '';
 
@@ -83,6 +124,7 @@ export class PiAiMind implements Mind {
       usage.cacheRead += message.usage?.cacheRead ?? 0;
       usage.cost += message.usage?.cost?.total ?? 0;
       context.messages.push(message, ...results);
+      if (key && this.sessions.get(key) === context.messages) this.store?.append(key, [message, ...results]);
       const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
       if (said) text = said;
       if (!results.length) { ranOut = false; break; }

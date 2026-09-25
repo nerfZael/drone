@@ -6,6 +6,7 @@ import type { Mind } from '@entity/core';
 import { HubRouter } from '../src/hub/hub-router';
 import { registerEntityRoutes } from '../src/hub/entity/entity-routes';
 import { EntitySession } from '../src/hub/entity/entity-session';
+import { fileConversationStore, PiAiMind, type ConversationStore } from '../src/hub/entity/entity-mind';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -91,6 +92,71 @@ test('entity routes: a session is recorded from Start to Reset and can be replay
     expect((await call('GET', '/api/entity/sessions/20990101-000000-zzzz')).status).toBe(404);
   } finally {
     session.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('entity session: after a Hub restart the newest session resumes, paused, with its workers\' conversations', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-sessions-'));
+  const histories: unknown[][] = [];
+  const makeMind = (_config: unknown, conversations: ConversationStore): Mind => ({
+    async run(input) {
+      if (input.role === 'head' && input.prompt.includes(' user chat_message {"text":"work on it"}') && input.prompt.includes('"woken_because":"user message"')) {
+        await input.callTool('dispatch', { task: 'the job', name: 'job' });
+      }
+      if (input.role === 'task') {
+        histories.push(conversations.load(input.limbId) ?? []);
+        conversations.append(input.limbId, [{ role: 'user', content: `wake ${histories.length}`, timestamp: 0 }]);
+        await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve()));
+      }
+      return {};
+    },
+  });
+  let session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+  try {
+    session.control('start');
+    const id = session.state().sessionId!;
+    session.input('chat_message', { text: 'work on it' });
+    for (let i = 0; i < 100 && !histories.length; i++) await sleep(10);
+    expect(histories).toEqual([[]]);
+    session.close();
+    expect(JSON.parse(fs.readFileSync(path.join(dir, id, 'meta.json'), 'utf8')).status).toBe('suspended');
+
+    // A new Hub: the same session, paused, its log and the worker's conversation intact.
+    session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+    expect(session.state().sessionId).toBe(id);
+    expect(session.state().snapshot.status).toBe('paused');
+    expect(session.state().snapshot.limbs.find(l => l.name === 'job')).toMatchObject({ status: 'running', runs: [] });
+    expect(session.sessions()[0]).toMatchObject({ id, status: 'live' });
+    session.control('resume');
+    for (let i = 0; i < 100 && histories.length < 2; i++) await sleep(10);
+    expect(histories[1]).toEqual([{ role: 'user', content: 'wake 1', timestamp: 0 }]);
+
+    // A Reset ends it for good: the next Hub starts fresh.
+    session.control('reset');
+    session.close();
+    session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+    expect(session.state().snapshot.status).toBe('idle');
+  } finally {
+    session.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('entity mind: conversations are kept on disk, forked from disk after a restart, and forgotten', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-conversations-'));
+  try {
+    const store = fileConversationStore(dir);
+    store.append('worker-3', [{ role: 'user', content: 'a', timestamp: 1 }]);
+    store.append('worker-3', [{ role: 'user', content: 'b', timestamp: 2 }]);
+    expect(store.load('worker-3')?.map(m => m.content)).toEqual(['a', 'b']);
+    const mind = new PiAiMind('medium', store); // a fresh mind, as after a restart: nothing in memory
+    expect(mind.fork('worker-3', 'worker-9')).toBe(true);
+    expect(store.load('worker-9')?.map(m => m.content)).toEqual(['a', 'b']);
+    mind.forget('worker-3');
+    expect(store.load('worker-3')).toBeUndefined();
+    expect(mind.fork('worker-3', 'worker-10')).toBe(false);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

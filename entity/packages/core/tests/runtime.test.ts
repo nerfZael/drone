@@ -561,3 +561,40 @@ test('sensed levels come from the log; a sense asked only in a condition is drop
   expect(h.of('senses_dropped')[0].data.levels).toEqual(['sense.is_the_user_confused']);
   expect(h.entity.levels.get('sense.is_the_user_confused')).toBeUndefined();
 });
+
+test('restore: a session rebuilt from its log comes back paused, closes what cannot survive, and carries on after resume', async () => {
+  const script = async (input: Parameters<Parameters<typeof makeEntity>[0]>[0], call: (name: string, args?: Record<string, unknown>) => Promise<string>) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'set up' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('dispatch', { task: 'long work', name: 'long' });
+      await call('dispatch', { task: 'next work', name: 'next' });
+      await call('set_watch', { watch: { name: 'mirror', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+      await call('run_program', { name: 'ticker', code: 'for (;;) await wait(1000);' });
+      await call('set_timer', { after_ms: 150, label: 'check in' });
+      await call('note', { text: 'the user likes short answers' });
+    }
+    if (input.role === 'task') await new Promise<void>(r => input.signal.addEventListener('abort', () => r()));
+  };
+  const a = setup(script, { config: { maxTasks: 1 } });
+  a.entity.start();
+  a.entity.input('chat_message', { text: 'set up' });
+  await until(() => a.of('note').length === 1 && a.of('program_started').length === 1);
+  const events = [...a.events()];
+  a.entity.close();
+
+  const b = setup(script, { config: { maxTasks: 1 } });
+  b.entity.restore(events);
+  expect(b.entity.status).toBe('paused');
+  expect(b.of('session_restored')).toHaveLength(1);
+  expect(b.of('program_failed')[0].data.reason).toContain('Hub restarted');
+  const limbs = b.entity.snapshot().limbs;
+  expect(limbs.find(l => l.name === 'long')).toMatchObject({ status: 'running', runs: [] });
+  expect(limbs.find(l => l.name === 'next')).toMatchObject({ status: 'queued' });
+  expect(b.entity.snapshot().self.notes).toEqual(['the user likes short answers']);
+  const workerRuns = () => b.mind.runs.filter(r => r.role === 'task').length;
+  b.entity.resume();
+  await until(() => workerRuns() === 1); // the running worker picks up again; the queued one still waits
+  b.entity.input('key_down', { key: '5' });
+  await until(() => b.entityKeys('key_down').length === 1); // the watch was armed again
+  await until(() => b.of('timer').length === 1, 3000); // and the timer, with the time it had left
+  expect(b.mind.runs.some(r => r.role === 'head' && r.prompt.includes('"woken_because":"timer \\"check in\\""'))).toBe(true);
+});

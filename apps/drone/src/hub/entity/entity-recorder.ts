@@ -22,7 +22,8 @@ const PER_EVENT: readonly Section[] = ['world', 'levels', 'self'];
 /** The snapshot after event `seq`: only the sections that changed since the previous frame. */
 export interface SnapshotFrame { seq: number; t: number; patch: Partial<Pick<EntitySnapshot, Section>> }
 
-export type SessionStatus = 'live' | 'ended' | 'interrupted';
+/** `suspended`: the Hub closed while it ran; `interrupted`: the Hub stopped without closing it. Both can be resumed. */
+export type SessionStatus = 'live' | 'ended' | 'interrupted' | 'suspended';
 
 export interface SessionMeta {
   id: string;
@@ -50,7 +51,9 @@ function newSessionId(now = new Date()): string {
   return `${stamp}-${Math.random().toString(36).slice(2, 6).padEnd(4, '0')}`;
 }
 
-/** Records one entity session, from Start until Reset or Hub shutdown. */
+export const isResumable = (meta: SessionMeta) => meta.status === 'interrupted' || meta.status === 'suspended';
+
+/** Records one entity session, from Start until Reset, across Hub restarts when the session is resumed. */
 export class EntityRecorder {
   readonly meta: SessionMeta;
   readonly dir: string;
@@ -62,19 +65,31 @@ export class EntityRecorder {
   private capturePending = false;
   private finished = false;
 
-  constructor(root: string, config: Record<string, unknown>, private readonly snapshot: () => EntitySnapshot) {
+  /** A new recording, or (`resume`) one read back from disk that carries on in the same folder. */
+  constructor(root: string, config: Record<string, unknown>, private readonly snapshot: () => EntitySnapshot, resume?: SessionRecording) {
     fs.mkdirSync(root, { recursive: true });
     writeSessionsReadme(root);
-    pruneSessions(root, KEEP_SESSIONS - 1);
-    this.meta = { id: newSessionId(), status: 'live', startedAt: new Date().toISOString(), config, events: 0, frames: 0 };
+    if (!resume) pruneSessions(root, KEEP_SESSIONS - 1);
+    this.meta = resume
+      ? { ...resume.meta, status: 'live', endedAt: undefined, endReason: undefined }
+      : { id: newSessionId(), status: 'live', startedAt: new Date().toISOString(), config, events: 0, frames: 0 };
     this.dir = path.join(root, this.meta.id);
     fs.mkdirSync(this.dir, { recursive: true });
     this.eventsOut = fs.createWriteStream(path.join(this.dir, 'events.jsonl'), { flags: 'a' });
     this.framesOut = fs.createWriteStream(path.join(this.dir, 'frames.jsonl'), { flags: 'a' });
+    if (resume) {
+      this.events.push(...resume.events);
+      this.frames.push(...resume.frames);
+      // Frames only carry what changed, so start from the sections as the recording left them.
+      for (const frame of resume.frames) for (const [section, value] of Object.entries(frame.patch)) this.last.set(section as Section, JSON.stringify(value));
+    }
     this.writeMeta();
     // Frame zero: the full state before the first event.
-    this.capture(0);
+    if (!resume) this.capture(0);
   }
+
+  /** Where worker conversations are kept, so a resumed session can continue them. */
+  get conversationsDir(): string { return path.join(this.dir, 'conversations'); }
 
   get id(): string { return this.meta.id; }
 
@@ -98,12 +113,13 @@ export class EntityRecorder {
     });
   }
 
-  finish(reason: string): void {
+  /** Ends the recording: `ended` for good (Reset), or `suspended` to be resumed when the Hub starts again. */
+  finish(reason: string, status: 'ended' | 'suspended' = 'ended'): void {
     if (this.finished) return;
     const last = this.events[this.events.length - 1];
     if (last && !this.frames.some((f) => f.seq === last.seq)) this.capture(last.seq);
     this.finished = true;
-    Object.assign(this.meta, { status: 'ended' as const, endedAt: new Date().toISOString(), endReason: reason });
+    Object.assign(this.meta, { status, endedAt: new Date().toISOString(), endReason: reason });
     this.writeMeta();
     this.eventsOut.end();
     this.framesOut.end();
@@ -181,12 +197,15 @@ The bench can replay any of them: Replay in the timeline bar under the bench.
 
 Each folder holds:
 
-- \`meta.json\`: id, status (\`live\`, \`ended\`, or \`live\` left behind by a Hub that stopped, which
-  the Hub reports as \`interrupted\`), start and end time, end reason, the bench config (models,
+- \`meta.json\`: id, status (\`live\`; \`ended\` after Reset; \`suspended\` when the Hub closed while it
+  ran; or \`live\` left behind by a Hub that stopped, which the Hub reports as \`interrupted\`; the Hub resumes
+  the newest session when it is suspended or interrupted), start and end time, end reason, the bench config (models,
   evaluator, review, workspace), event and frame counts (as of the last update), and the user's first chat message.
 - \`events.jsonl\`: the entity's event log, one event per line, in order. This is the source of truth:
   \`{ seq, t, at, type, by, data }\`, where \`t\` is ms since the session started, \`at\` is epoch ms,
   and \`by\` is \`user\`, \`host\`, \`system\` or a limb id (\`head\`, \`voice\`, \`reviewer\`, \`worker-3\`, \`watch-5\` …).
+- \`conversations/<worker>.jsonl\`: each worker's conversation with its model, one message per line,
+  so a resumed session can continue it.
 - \`frames.jsonl\`: runtime snapshots as \`{ seq, t, patch }\`, where \`patch\` holds only the snapshot
   sections that changed (\`status\`, \`world\`, \`self\`, \`levels\`, \`stops\`, \`health\`, \`limbs\`,
   \`senses\`, \`jev\`). \`world\`, \`levels\` and \`self\` are exact after every event; the other sections

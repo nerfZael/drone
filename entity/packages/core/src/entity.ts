@@ -150,9 +150,10 @@ export class Entity {
 
   // ---------- lifecycle ----------
 
-  private init(): void {
-    this.startedAt = performance.now();
-    this.log = new EventLog(() => this.now());
+  /** A fresh session, or (restore) one that began at `sessionStart` (epoch ms): its clock carries on from there. */
+  private init(sessionStart = Date.now()): void {
+    this.startedAt = performance.now() - (Date.now() - sessionStart);
+    this.log = new EventLog(() => this.now(), sessionStart);
     this.levels = new Levels(() => this.now());
     this.world = Object.fromEntries(this.channels.map(c => [c.name, c.init()]));
     const { head, task, voice } = this.options.models;
@@ -258,11 +259,7 @@ export class Entity {
   // ---------- events ----------
 
   private onEvent(event: EntityEvent): void {
-    reduceRuntime(this.state, event);
-    // Sensed levels come from the log like every other level, so a replay rebuilds them too.
-    if (event.type === 'sensed') for (const [level, p] of Object.entries(event.data.answers as Record<string, number>)) this.levels.set(level, p, 'jev', event.t);
-    if (event.type === 'senses_dropped') for (const level of event.data.levels as string[]) this.levels.clear(level);
-    for (const channel of this.channels) channel.reduce(this.world[channel.name] as never, event, { levels: this.levels, now: event.t });
+    this.applyState(event);
     for (const listener of this.listeners) listener(event);
     for (const waiter of [...this.eventWaiters]) {
       if (matches(event, waiter.matcher)) { this.eventWaiters.delete(waiter); clearTimeout(waiter.timer); waiter.resolve(event); }
@@ -272,6 +269,49 @@ export class Entity {
     this.runEventWatches(event);
     this.baselineWakes(event);
     this.queueReview(event);
+  }
+
+  /** Everything an event changes that a replay must rebuild: the runtime state, levels and each channel's world. Nothing else. */
+  private applyState(event: EntityEvent): void {
+    reduceRuntime(this.state, event);
+    // Sensed levels come from the log like every other level, so a replay rebuilds them too.
+    if (event.type === 'sensed') for (const [level, p] of Object.entries(event.data.answers as Record<string, number>)) this.levels.set(level, p, 'jev', event.t);
+    if (event.type === 'senses_dropped') for (const level of event.data.levels as string[]) this.levels.clear(level);
+    for (const channel of this.channels) channel.reduce(this.world[channel.name] as never, event, { levels: this.levels, now: event.t });
+  }
+
+  /**
+   * Rebuilds a session from its log, e.g. after a Hub restart, and leaves it paused for the user to resume.
+   * State, levels and channels are replayed. What cannot survive a restart is closed in the log: runs in flight
+   * end as aborted, programs fail (their JavaScript state is gone), a worker being cancelled is cancelled, and a
+   * review in progress is queued again. Watches and timers are armed again. Worker conversations are the mind's.
+   */
+  restore(events: readonly EntityEvent[]): void {
+    if (this.status !== 'idle' || this.log.length) throw new Error('restore needs an entity that has not started');
+    const first = events[0];
+    const last = events[events.length - 1];
+    if (!first || !events.some(e => e.type === 'session_started' && e.data.setup)) throw new Error('this log has no session_started with its setup, so it cannot be restored');
+    this.shutdown();
+    this.init(first.at - first.t);
+    for (const event of events) { this.log.load(event); this.applyState(event); }
+    const wasPaused = this.state.pausedSince !== undefined;
+    this.status = 'paused';
+    this.pausedAt = this.state.pausedSince ?? last.t;
+    this.log.append('session_restored', 'system', { from_seq: last.seq, downtime_ms: Math.round(this.now() - last.t) });
+    for (const limb of this.limbList()) {
+      if (limb.kind === 'llm') for (const run of [...limb.runs]) this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(last.t - run.startedAt), aborted: true, restored: true });
+    }
+    for (const limb of this.limbList()) {
+      if (limb.status !== 'running') continue;
+      if (limb.role === 'program') this.endCodeLimb(limb, 'failed', 'the Hub restarted; programs do not survive a restart');
+      else if (limb.role === 'watch') this.armWatch(limb.id, limb.watch);
+      else if (limb.role === 'task' && limb.cancelRequested) this.finishTask(limb, 'cancelled: the Hub restarted while it was wrapping up', 'cancelled');
+    }
+    if (this.state.reviewing.length) this.log.append('review_requeued', 'system', { seqs: [...this.state.reviewing] });
+    const runningNow = (this.state.pausedSince ?? last.t) - this.state.pausedMs;
+    for (const timer of this.state.timers) this.armTimer(timer.id, timer.label, timer.limb, Math.max(0, timer.due - runningNow));
+    if (!wasPaused) this.log.append('session_paused', 'system', { restored: true });
+    this.tickTimer = setInterval(() => this.tick(), this.config.tickMs);
   }
 
   /** Every answer of the front limb gets a second look, not only the ones it thinks might be wrong. */
@@ -432,12 +472,18 @@ export class Entity {
     if (this.countCode() >= this.config.maxCodeLimbs) return `error: too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.`;
     const id = this.nextId('watch');
     // Ready before the install is logged: the new watch already sees that event.
+    const live = this.armWatch(id, spec);
+    this.log.append('watch_installed', author.id, { id, name: spec.name, watch: spec as unknown as Record<string, unknown>, ...(builtin ? { builtin } : {}), ...(decidedAt !== undefined ? { decided_at: decidedAt } : {}) });
+    return `watch ${id} "${spec.name}" installed${live.sense ? ` (sense level ${live.sense.level})` : ''}`;
+  }
+
+  /** What a watch needs to run beyond its spec: a level tracker, and the senses it asks. */
+  private armWatch(id: string, spec: WatchSpec): LimbLive {
     const live = this.liveOf(id);
     live.tracker = new LevelTracker();
     if ('sense' in spec.on) live.sense = this.jev.sense(spec.on.sense, id);
     for (const question of conditionSenses(spec.when)) this.jev.sense(question, id);
-    this.log.append('watch_installed', author.id, { id, name: spec.name, watch: spec as unknown as Record<string, unknown>, ...(builtin ? { builtin } : {}), ...(decidedAt !== undefined ? { decided_at: decidedAt } : {}) });
-    return `watch ${id} "${spec.name}" installed${live.sense ? ` (sense level ${live.sense.level})` : ''}`;
+    return live;
   }
 
   // ---------- programs ----------
@@ -527,6 +573,16 @@ export class Entity {
       if (live.effectTimes.length < limit) return;
       await this.pausableWait(1000 - (now - live.effectTimes[0]) + 1);
     }
+  }
+
+  /** A set_timer timer: it counts only while the session runs, then logs `timer` and wakes whoever set it. */
+  private armTimer(id: string, label: string, limbId: string, ms: number): void {
+    const log = this.log;
+    void this.pausableWait(ms).then(() => {
+      if (this.status === 'idle' || this.log !== log) return;
+      this.log.append('timer', 'system', { id, label, limb: limbId });
+      this.wake(limbId, `timer "${label}"`);
+    });
   }
 
   private whileRunning(): Promise<void> {
@@ -1066,11 +1122,9 @@ export class Entity {
       case 'set_timer': {
         const ms = Math.max(0, Math.min(Number(args.after_ms) || 0, 3_600_000));
         const label = String(args.label ?? 'timer');
-        void this.pausableWait(ms).then(() => {
-          if (this.status === 'idle') return;
-          this.log.append('timer', 'system', { label, limb: limb.id });
-          this.wake(limb.id, `timer "${label}"`);
-        });
+        const id = this.nextId('timer');
+        this.log.append('timer_set', limb.id, { id, label, limb: limb.id, after_ms: ms });
+        this.armTimer(id, label, limb.id, ms);
         return `timer "${label}" set for ${ms} ms`;
       }
       case 'cancel': {
@@ -1314,7 +1368,7 @@ export class Entity {
 export const DRAFT_PAUSE_MS = 700;
 export const DRAFT_ATTENTION_QUESTION = 'Does the unsent draft already contain a question or request to the entity that is clear enough to answer or act on?';
 
-const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'senses_dropped', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'review_started', 'review_requeued']);
+const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'senses_dropped', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'timer_set', 'review_started', 'review_requeued']);
 
 
 

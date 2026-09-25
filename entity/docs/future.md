@@ -19,7 +19,6 @@ Today's shape is one head, an optional voice and reviewer, workers and code limb
 - **Backup models.** A limb whose model keeps failing falls back to another (see [plan.md](plan.md#open-questions)).
 - **One abort signal per running period**, shared by every run, Jev call, timer and program, so Pause is a single abort nothing outlives.
 - **Per-limb views**, beyond today's per-role worker lists: each limb renders only the sections it needs (a keypad limb sees keys and recent chat).
-- **Resumable sessions** are the next milestone ([plan.md](plan.md#milestones)).
 
 ## Arbitration
 

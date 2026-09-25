@@ -13,7 +13,7 @@ Scenarios are in [demo.md](demo.md). Jev (`judge` and `sense`) came in at M3: sc
 | M3 | `judge` and `sense`; Jev compared against a small fast LLM | Scenarios 5–8, E3 and E4 pass live, the floor passes with Jev and code limbs off, interrupts measured, the backing model chosen | Done |
 | M3.5 | Workers: parallel conversation as the only mode, the workspace channel, the worker queue, batches, steer-after, rerouting, answer review, work summaries, session recording and replay, the routing eval | Several workers run and reply at once; the routing eval passes on luna; fast answers are reviewed | Done (`00ed05184`–`dc786e65a`) |
 | M3.6 | The Work canvas | Work is readable at a glance from one message to a 100-worker batch | Done (`dc786e65a`); gaps in [work-canvas.md](work-canvas.md#not-built-yet) |
-| Next | Resumable sessions: worker conversations saved with the recording; the runtime state is rebuilt by replaying the log (`replayRuntime`, built) | After a Hub restart, a session continues where it stopped | Started: runtime state is a projection of the log |
+| M3.7 | Resumable sessions: the runtime state is a projection of the log, and worker conversations are saved with the recording | After a Hub restart, a session continues where it stopped | Done |
 | M4 | Speech in and speech out, plus a native full-duplex realtime model as an optional voice limb | The user talks, the entity talks back, and it reacts to overlap | Not started |
 | M5 | Memory: long-term store, explicit `remember` / `recall` | The entity recalls a fact or a program from an earlier session | Not started |
 

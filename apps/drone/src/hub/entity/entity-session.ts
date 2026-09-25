@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import { chatChannel, Entity, keypadChannel, workspaceChannel, type EntityEvent, type EntitySnapshot, type Evaluator, type Mind } from '@entity/core';
 import { droneRootPath } from '../../host/paths';
-import { PiAiMind, type ReasoningLevel } from './entity-mind';
+import { fileConversationStore, PiAiMind, type ConversationStore, type ReasoningLevel } from './entity-mind';
 import { createWorkSummarizer } from './entity-summarizer';
 import type { EvaluatorKind } from './entity-evaluator';
-import { EntityRecorder, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
+import { EntityRecorder, isResumable, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
 
 export interface EntitySessionConfig {
   headModel: string;
@@ -67,19 +67,53 @@ export class EntitySession {
   constructor(
     private readonly createEvaluator: (kind: EvaluatorKind) => Evaluator | undefined,
     config: Partial<EntitySessionConfig> = {},
-    private readonly createMind: (config: EntitySessionConfig) => Mind = c => new PiAiMind(c.reasoning),
+    /** `conversations` keeps worker conversations with the session's recording, so a resumed session continues them. */
+    private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(c.reasoning, conversations),
     /** Where to record sessions; null records nothing. */
     options: { sessionsDir?: string | null } = {},
   ) {
     this.sessionsDir = options.sessionsDir === undefined ? defaultEntitySessionsDir() : options.sessionsDir;
     this.config = { ...DEFAULT_ENTITY_CONFIG, ...config };
     this.build();
+    this.resumeLatest();
   }
+
+  /**
+   * After a Hub restart, the newest session carries on where it stopped if the Hub closed or died while it ran.
+   * It comes back paused; the user resumes it or resets. Sessions recorded before logs carried their setup cannot be.
+   */
+  private resumeLatest(): void {
+    if (!this.sessionsDir) return;
+    const latest = listSessions(this.sessionsDir, null)[0];
+    if (!latest || !isResumable(latest)) return;
+    const recording = readSession(this.sessionsDir, latest.id);
+    if (!recording?.events.some(e => e.type === 'session_started' && e.data.setup)) return;
+    this.config = { ...DEFAULT_ENTITY_CONFIG, ...(recording.meta.config as Partial<EntitySessionConfig>) };
+    this.build();
+    const entity = this.entity;
+    try {
+      this.recorder = new EntityRecorder(this.sessionsDir, { ...this.config }, () => entity.snapshot(), recording);
+      entity.restore(recording.events);
+    } catch (error) {
+      console.warn('[entity] could not resume session', latest.id, error instanceof Error ? error.message : error);
+      this.recorder?.finish('could not be resumed');
+      this.recorder = null;
+      this.config = { ...DEFAULT_ENTITY_CONFIG };
+      this.build();
+    }
+  }
+
+  /** Worker conversations live next to the current recording; with no recording, only in memory. */
+  private readonly conversations: ConversationStore = {
+    load: key => (this.recorder ? fileConversationStore(this.recorder.conversationsDir).load(key) : undefined),
+    append: (key, messages) => { if (this.recorder) fileConversationStore(this.recorder.conversationsDir).append(key, messages); },
+    remove: key => { if (this.recorder) fileConversationStore(this.recorder.conversationsDir).remove(key); },
+  };
 
   private build(): void {
     this.unsubscribe?.();
     this.entity = new Entity({
-      mind: this.createMind(this.config),
+      mind: this.createMind(this.config, this.conversations),
       channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: this.config.workspace || defaultEntityWorkspace(), allowCommands: this.config.allowCommands })],
       config: { review: this.config.review },
       models: { head: this.config.headModel, task: this.config.taskModel, voice: this.config.voiceModel || undefined },
@@ -165,7 +199,7 @@ export class EntitySession {
   }
 
   close(): void {
-    this.recorder?.finish('hub closed');
+    this.recorder?.finish('hub closed', 'suspended');
     this.recorder = null;
     this.entity.close();
     this.unsubscribe?.();

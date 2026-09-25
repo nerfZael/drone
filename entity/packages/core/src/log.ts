@@ -17,6 +17,12 @@ export class EventLog {
     return event;
   }
 
+  /** Puts back an event from an earlier run of this session (restore), without notifying anyone. */
+  load(event: EntityEvent): void {
+    if (event.seq !== this.events.length + 1) throw new Error(`restore: expected event #${this.events.length + 1}, got #${event.seq}`);
+    this.events.push(event);
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

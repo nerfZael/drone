@@ -8,7 +8,7 @@ import { requestJson } from '../http';
  */
 
 export type SessionMeta = {
-  id: string; status: 'live' | 'ended' | 'interrupted'; startedAt: string; endedAt?: string; endReason?: string;
+  id: string; status: 'live' | 'ended' | 'interrupted' | 'suspended'; startedAt: string; endedAt?: string; endReason?: string;
   config: Record<string, unknown>; events: number; frames: number; firstMessage?: string;
 };
 type SnapshotFrame = { seq: number; t: number; patch: Partial<EntitySnapshot> };
@@ -232,7 +232,7 @@ export function EntityTimeline({ replay, liveSessionId, liveLastSeq }: { replay:
 function sessionLabel(s: SessionMeta): string {
   const started = new Date(s.startedAt);
   const when = `${started.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${started.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
-  const status = s.status === 'live' ? ' · live' : s.status === 'interrupted' ? ' · interrupted' : '';
+  const status = s.status === 'live' ? ' · live' : s.status === 'interrupted' ? ' · interrupted' : s.status === 'suspended' ? ' · suspended' : '';
   return `${when} · ${s.events} ev${status}${s.firstMessage ? ` · ${s.firstMessage.slice(0, 40)}` : ''}`;
 }
 

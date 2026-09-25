@@ -113,6 +113,11 @@ export interface RuntimeState {
   lastEvents: Record<string, number>;
   /** Highest number used in an id (worker-N, run-N, stop-N ...), so new ids never collide. */
   counter: number;
+  /** Timers set with set_timer and not fired yet. `due` is in running time: session time minus time spent paused. */
+  timers: { id: string; label: string; limb: string; due: number }[];
+  /** Time spent paused so far, and since when the session is paused now. */
+  pausedMs: number;
+  pausedSince?: number;
 }
 
 /** A limb as views see it: one flat shape for every kind. */
@@ -145,7 +150,7 @@ export function initialRuntimeState(setup: RuntimeSetup): RuntimeState {
   const limbs: Record<string, LimbState> = { head: { ...llm({ id: 'head', name: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'head' } };
   if (setup.review === 'separate') limbs.reviewer = { ...llm({ id: 'reviewer', name: 'reviewer', parent: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'reviewer' };
   if (setup.models.voice) limbs.voice = { ...llm({ id: 'voice', name: 'voice', parent: 'head', model: setup.models.voice, status: 'idle', createdAt: 0 }), role: 'voice' };
-  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0 };
+  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0, timers: [], pausedMs: 0 };
 }
 
 /** Rebuilds the runtime state from a log. */
@@ -188,6 +193,19 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       if (setup) Object.assign(state, initialRuntimeState(setup), { lastEvents: state.lastEvents, counter: state.counter });
       return;
     }
+    case 'session_paused':
+      state.pausedSince = t;
+      return;
+    case 'session_resumed':
+      state.pausedMs += Number(data.paused_for_ms ?? 0);
+      state.pausedSince = undefined;
+      return;
+    case 'timer_set':
+      state.timers.push({ id: String(data.id), label: String(data.label), limb: String(data.limb), due: t - state.pausedMs + Number(data.after_ms) });
+      return;
+    case 'timer':
+      state.timers = state.timers.filter(timer => timer.id !== data.id);
+      return;
     case 'run_started': {
       if (!selfLlm) return;
       selfLlm.runs.push({ id: String(data.run), reason: String(data.reason), startedAt: t, readSeq: event.seq - 1 });
