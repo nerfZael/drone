@@ -4,6 +4,16 @@ The Work tab as a map of the work: what is running, what came from what, what is
 
 Mockup (v10): https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv. Older versions, for comparison: [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq), [v5](https://claude.ai/artifact/McMX67JjeuCu4ETKk4ofGy), [v6](https://claude.ai/artifact/CxP9miBuQtTfybRZDnM6dz), [v7](https://claude.ai/artifact/LPmbQp8DjPHRp6WLeL6QGA), [v8](https://claude.ai/artifact/2ebTXVBBMrT2ALWBTwsQs4), [v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
 
+## Status (2026-09-25)
+
+Built: the canvas is the Work tab's default view, with Rows and Cards kept next to it (`EntityWorkCanvas.tsx`, laid out by `work-canvas-model.ts`, which is pure and tested). It has time rows with the message column, lineage columns, the three arrows, folds for talk and for finished work (after a minute, never while selected, expanded or hovered), group cards for batches and for four or more workers from one message, watch and program chips, the top strip, a side panel with the thread and Message and Stop, rename by double-click, and pulses when a fork starts or a wait is released. The runtime has the worker queue (`maxTasks` running, the rest `queued`), `dispatch_many`, and labels on watches and programs.
+
+Also built: a batch shows one progress line in Chat, updated in place, and its workers reply in their own threads (`say` defaults to `thread: true` for them); the front limb is woken with the results when the batch ends. Past three, workers pulled out of a group are one compact list. Chat and the canvas highlight each other (a message and its work, a worker and its replies), and clicking a worker's reply in Chat opens it on the canvas. Folded work fades out and the rows below slide up; the canvas keeps its own clock between events so work folds in quiet sessions too.
+
+A message that was only answered or steered stays visible for a minute with **Own worker** and **Fork of X**, then folds. The view keeps everything in sight until you pan or zoom yourself.
+
+Not built yet: the needs-you state (`ask`) and a zoomed-out design.
+
 ## Terms
 
 - **Limb**: the runtime's unit of supervision. Head, voice, task limbs, watches and programs are all limbs.
@@ -44,10 +54,10 @@ Mockup (v10): https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv. Older versions,
 | Needed | Why | Change |
 |---|---|---|
 | A needs-you state | Workers now ask with `say` and carry on or end | An `ask` tool that holds the worker in `needs_you` until you answer |
-| Queued workers | Every dispatch starts at once; 100 workers hit rate limits and cost | `maxConcurrentWorkers` and a queue |
+| Queued workers | Every dispatch starts at once; 100 workers hit rate limits and cost | `maxConcurrentWorkers` and a queue Done. |
 | Blocked by a file | A write to a claimed path is only refused | `wait_for_claim`, or derive it from a refusal followed by idling |
-| Short labels | Watches and programs only have a name and a condition | A `label` field when they are created, and the summarizer budget |
-| Batch dispatch | 100 dispatches cost 100 router tool calls, and the group has no title | `dispatch_many({ title, items })` |
+| Short labels | Watches and programs only have a name and a condition | A `label` field when they are created, and the summarizer budget Done. |
+| Batch dispatch | 100 dispatches cost 100 router tool calls, and the group has no title | `dispatch_many({ title, items })` Done. |
 | One progress message per batch | 100 replies would bury Chat | Workers in a batch reply in their threads; Chat gets one message that updates as they finish, plus the ones that need you |
 
 ## Not designed yet
@@ -58,7 +68,7 @@ Mockup (v10): https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv. Older versions,
 - **Steers.** A steer now lives in a folded message line. The card should flash, and the side panel should show the latest steer.
 - **Arrows into folded or grouped work.** They should attach to the fold line or the group card instead of disappearing.
 - **Chat and canvas links.** A message line opens that message in Chat, and a reply tagged W3 in Chat jumps to its card.
-- **Results.** A finished coding card shows "3 files changed" and opens the diff. A finished batch gets a results table (fixed, duplicate, skipped, failed).
+- **Results stay general.** Workers may be external agents (Codex, Claude Code) whose file changes we can't see, so a card shows the worker's own result summary, never harness data like files changed. The "blocked by a file" arrow comes from our workspace claims, so it only appears for workers that use our tools.
 - **Fold timing.** A row that folds the moment its work finishes makes the rows below jump. Fold after about a minute, not while hovered, with the collapse animated. Use the entity clock, so replay shows the same thing.
 - **Zoomed out.** Below 45% the cards leave their text out, which reads as blank cards. It needs its own design, such as the name large and the status as a coloured bar.
 - **Many exceptions.** Past about three, workers pulled out of a group should be one-line rows under it, not full cards.
@@ -70,12 +80,12 @@ All workers share one workspace today, and claims keep them apart. That holds fo
 ## Open questions
 
 1. **Group threshold.** Group 4 or more workers from one origin, and pull out needs-you, stopped and failed? *Suggested: yes.*
-   Answer:
+   Answer: yes: 4 or more, with needs-you, stopped and failed pulled out.
 2. **Rows and cards.** Remove both once the canvas works, and add a searchable outline only if long sessions call for it? *Suggested: yes.*
-   Answer:
+   Answer: keep them next to the canvas if that stays easy; remove them if they become a burden.
 3. **Acting from the canvas.** So far: view, rename, expand, and Message, Fork and Stop in the side panel. Anything more, like dragging a message onto a card to steer it, or moving cards by hand?
-   Answer:
+   Answer: the recommendation. No dragging for now.
 4. **Build order.** *Suggested:* (1) runtime states: ask, queue and limit, `dispatch_many`, labels; (2) a pure, tested function from the log to the canvas layout, replacing `deriveWork`; (3) rendering on `@xyflow/react`, which Drone Hub's canvas already uses; (4) motion and fold timing; (5) remove the row and card views.
-   Answer:
+   Answer: the recommendation, except that the needs-you state (`ask`) comes later.
 5. **One conversation mode.** Should parallel conversation become the only mode, with single mode's behaviour as a routing preference? See [parallel-conversation.md](parallel-conversation.md).
    Answer: yes. Done 2026-09-25.

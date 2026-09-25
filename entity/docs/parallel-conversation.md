@@ -28,6 +28,22 @@ When the router is unsure, the cheap mistake is a fresh worker with a note like 
 
 Workers run on the task model (gpt-6-sol by default). The router may choose the head model for small requests to save budget.
 
+## When routing is a guess
+
+Routing is the entity's hardest call: steer the running worker now, queue the message for after it finishes (`steer` with `when: "after"`), start a fresh worker, or fork one. Three rules came from a live session where "all 3 parallel?" got a "yes" and no workers:
+
+- **A question can be a request.** "Can you...?", "should we...?", "all three in parallel?" ask for action; answering "yes" is not doing it.
+- **No promise without the action.** A reply that says work is happening comes with the tool call that makes it true, in the same decision.
+- **The user's words about splitting work win**, and keep applying: "in parallel", "separately" mean separate workers; "in the same worker", "after that" mean steer or queue.
+
+Wrong guesses are cheap to fix: on the Work canvas, a message that was only answered or steered offers **Own worker** and **Fork of X** for a minute before it folds (`reroute`). The steered worker is told to leave that part to the new one.
+
+`entity/evals/routing-cases.ts` holds routing cases, each a short conversation and the decision it should get, and `bun apps/drone/scripts/entity-routing-eval.ts` plays them against the real front model with stand-in workers. Add a case whenever a live session routes badly. First results (2026-09-25, gpt-6-luna): 30 of 32 runs right with the head in front, 13 of 14 with a gpt-6-luna voice.
+
+## Second looks
+
+Fast answers are reviewed by a stronger model, and the runtime decides what gets reviewed, not the fast model: every answer of the front limb, a few seconds after it goes quiet, in one pass (`review: 'separate'`, a reviewer limb on the head's model, so the head stays free; `'head'`, the head reviews the voice; or `'off'`). The reviewer calls `amend` per message: confirm (a ✓ in the chat), correct (the original is struck through, the correction posted below it), or expand. A corrected message is marked as wrong in every limb's state, so no one reads it as fact. The reviewer checks promises against state too, and hands work to the head when a correction needs it. With review on, the front limb no longer dispatches workers just to verify its answers.
+
 ## Real replies
 
 Workers speak in the chat themselves. Each reply is tagged with the worker and the message it answers (`reply_to`), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes also reports its result as a reply.
