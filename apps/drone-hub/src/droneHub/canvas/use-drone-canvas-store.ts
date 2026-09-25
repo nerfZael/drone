@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import { profileStorageKey } from '../../profile-storage';
 
 const MIN_CANVAS_SCALE = 0.35;
@@ -135,10 +135,12 @@ function normalizeSelection(
   nodesByDroneId: Record<string, DroneCanvasNode>,
 ): string[] {
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const raw of ids) {
     const id = String(raw ?? '').trim();
-    if (!id || out.includes(id)) continue;
+    if (!id || seen.has(id)) continue;
     if (!nodesByDroneId[id]) continue;
+    seen.add(id);
     out.push(id);
   }
   return out;
@@ -170,8 +172,9 @@ function normalizeNodesByDroneId(value: unknown): Record<string, DroneCanvasNode
 function normalizeNodeOrder(value: unknown, nodesByDroneId: Record<string, DroneCanvasNode>): string[] {
   const source = Array.isArray(value) ? value : [];
   const out = normalizeSelection(source as string[], nodesByDroneId);
+  const seen = new Set(out);
   for (const droneId of Object.keys(nodesByDroneId)) {
-    if (!out.includes(droneId)) out.push(droneId);
+    if (!seen.has(droneId)) out.push(droneId);
   }
   return out;
 }
@@ -248,13 +251,15 @@ function getBrowserLocalStorage(): Storage | null {
   }
 }
 
-const canvasPersistStorage: StateStorage = (() => {
+const canvasPersistStorage: PersistStorage<DroneCanvasState> = (() => {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  const pending = new Map<string, string>();
-  let lastFlushAt = Date.now();
+  const pending = new Map<string, StorageValue<DroneCanvasState>>();
+  let pendingSince: number | null = null;
 
   const flush = () => {
+    if (flushTimer !== null) clearTimeout(flushTimer);
     flushTimer = null;
+    pendingSince = null;
     if (pending.size === 0) return;
     const storage = getBrowserLocalStorage();
     if (!storage) {
@@ -263,20 +268,22 @@ const canvasPersistStorage: StateStorage = (() => {
     }
     for (const [name, value] of pending.entries()) {
       try {
-        storage.setItem(name, value);
+        // Projection and serialization belong inside the debounce too: a pointer
+        // event must not walk and stringify every saved board.
+        storage.setItem(name, JSON.stringify({ state: toPersistedState(value.state), version: value.version }));
       } catch {
         // Ignore write errors (e.g. quota exceeded/private mode restrictions).
       }
     }
     pending.clear();
-    lastFlushAt = Date.now();
   };
 
   const scheduleFlush = () => {
     if (flushTimer !== null) {
       clearTimeout(flushTimer);
     }
-    flushTimer = setTimeout(flush, CANVAS_PERSIST_DEBOUNCE_MS);
+    const remaining = CANVAS_PERSIST_MAX_STALE_MS - (Date.now() - (pendingSince ?? Date.now()));
+    flushTimer = setTimeout(flush, Math.max(0, Math.min(CANVAS_PERSIST_DEBOUNCE_MS, remaining)));
   };
 
   if (typeof window !== 'undefined') {
@@ -294,24 +301,28 @@ const canvasPersistStorage: StateStorage = (() => {
 
   return {
     getItem: (name) => {
+      if (pending.has(name)) return pending.get(name)!;
       const storage = getBrowserLocalStorage();
       if (!storage) return null;
       try {
-        return storage.getItem(name);
+        const value = storage.getItem(name);
+        return value ? JSON.parse(value) : null;
       } catch {
         return null;
       }
     },
     setItem: (name, value) => {
       pending.set(name, value);
-      if (Date.now() - lastFlushAt >= CANVAS_PERSIST_MAX_STALE_MS) {
-        flush();
-        return;
-      }
+      pendingSince ??= Date.now();
       scheduleFlush();
     },
     removeItem: (name) => {
       pending.delete(name);
+      if (pending.size === 0) {
+        if (flushTimer !== null) clearTimeout(flushTimer);
+        flushTimer = null;
+        pendingSince = null;
+      }
       const storage = getBrowserLocalStorage();
       if (!storage) return;
       try {
@@ -328,6 +339,16 @@ function toPersistedBoard(board: DroneCanvasBoard): DroneCanvasPersistedBoard {
   return persisted;
 }
 
+function toPersistedState(state: DroneCanvasState): DroneCanvasPersistedState {
+  return {
+    ...toPersistedBoard(state),
+    scope: state.scope,
+    droneBoards: Object.fromEntries(
+      Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
+    ),
+  };
+}
+
 type BoardReducers = {
   [K in keyof DroneCanvasBoardActions]: (...args: Parameters<DroneCanvasBoardActions[K]>) => BoardReducer;
 };
@@ -336,35 +357,26 @@ type BoardReducers = {
 const boardReducers: BoardReducers = {
   upsertNodes: (nodes) => (state) => {
     if (!Array.isArray(nodes) || nodes.length === 0) return state;
-    const nextById = { ...state.nodesByDroneId };
-    const nextOrder = state.nodeOrder.slice();
-    let touched = false;
-
+    let nextById: Record<string, DroneCanvasNode> | null = null;
+    let nextOrder: string[] | null = null;
     for (const candidate of nodes) {
       const droneId = String(candidate?.droneId ?? '').trim();
       if (!droneId) continue;
       const label = String(candidate?.label ?? '').trim() || droneId;
       const x = roundCoord(candidate?.x ?? 0);
       const y = roundCoord(candidate?.y ?? 0);
-      const previous = nextById[droneId];
+      const previous = (nextById ?? state.nodesByDroneId)[droneId];
+      if (previous?.label === label && previous.x === x && previous.y === y) continue;
       if (!previous) {
+        nextOrder ??= state.nodeOrder.slice();
         nextOrder.push(droneId);
-        touched = true;
-      } else if (previous.label === label && previous.x === x && previous.y === y) {
-        continue;
-      } else {
-        touched = true;
       }
+      nextById ??= { ...state.nodesByDroneId };
       nextById[droneId] = { droneId, label, x, y };
     }
-
-    if (!touched) return state;
-    return {
-      ...state,
-      nodesByDroneId: nextById,
-      nodeOrder: normalizeNodeOrder(nextOrder, nextById),
-      selectedDroneIds: normalizeSelection(state.selectedDroneIds, nextById),
-    };
+    if (!nextById) return state;
+    // Updating a label or position does not change membership or selection.
+    return { ...state, nodesByDroneId: nextById, nodeOrder: nextOrder ?? state.nodeOrder };
   },
   moveNode: (droneId, x, y) => (state) => {
     const id = String(droneId ?? '').trim();
@@ -653,14 +665,7 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
     {
       name: DRONE_CANVAS_STORAGE_KEY,
       version: 3,
-      storage: createJSONStorage(() => canvasPersistStorage),
-      partialize: (state): DroneCanvasPersistedState => ({
-        ...toPersistedBoard(state),
-        scope: state.scope,
-        droneBoards: Object.fromEntries(
-          Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
-        ),
-      }),
+      storage: canvasPersistStorage,
       merge: (persistedState, currentState) => {
         const persisted = normalizePersistedState(persistedState);
         return {

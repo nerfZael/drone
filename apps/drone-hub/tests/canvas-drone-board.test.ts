@@ -186,3 +186,29 @@ describe('chat fork edges', () => {
     expect(edges.map((edge) => edge.variant)).toEqual(['chat-fork']);
   });
 });
+
+
+test('upserting existing cards preserves membership and selection, including repeated ids in a batch', () => {
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {} });
+  const actions = getCanvasBoardActions('upsert-test');
+  actions.upsertNodes([{ droneId: 'one', label: 'One', x: 1, y: 2 }]);
+  actions.setSelectedDroneIds(['one']);
+  const before = selectCanvasBoard(useDroneCanvasStore.getState(), 'upsert-test');
+  actions.upsertNodes([{ droneId: 'one', label: 'Renamed', x: 1, y: 2 }]);
+  const renamed = selectCanvasBoard(useDroneCanvasStore.getState(), 'upsert-test');
+  expect(renamed.nodeOrder).toBe(before.nodeOrder);
+  expect(renamed.selectedDroneIds).toBe(before.selectedDroneIds);
+  actions.upsertNodes([{ droneId: 'one', label: 'Renamed', x: 1, y: 2 }]);
+  expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'upsert-test')).toBe(renamed);
+  actions.upsertNodes([
+    { droneId: 'two', label: 'Two', x: 3, y: 4 },
+    { droneId: 'two', label: 'Latest', x: 5, y: 6 },
+  ]);
+  const added = selectCanvasBoard(useDroneCanvasStore.getState(), 'upsert-test');
+  expect(added.nodeOrder).toEqual(['one', 'two']);
+  expect(added.nodesByDroneId.two).toMatchObject({ label: 'Latest', x: 5, y: 6 });
+  expect(added.nodesByDroneId.one).toBe(renamed.nodesByDroneId.one);
+  expect(added.selectedDroneIds).toBe(before.selectedDroneIds);
+  actions.removeNodes(['one']);
+  expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'upsert-test').selectedDroneIds).toEqual([]);
+});

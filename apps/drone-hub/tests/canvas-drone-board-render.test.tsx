@@ -47,6 +47,7 @@ function Dock({
   onActivateChat,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
+  chatNodeStateById = {},
 }: {
   drone: DroneSummary;
   onCreateChat?: (droneId: string) => Promise<boolean>;
@@ -56,6 +57,7 @@ function Dock({
   onActivateChat?: DockProps['onActivateChat'];
   onSendCanvasPrompt?: DockProps['onSendCanvasPrompt'];
   onCreateCanvasDroneFromDraft?: DockProps['onCreateCanvasDroneFromDraft'];
+  chatNodeStateById?: DockProps['chatNodeStateById'];
 }) {
   const noop = () => {};
   return (
@@ -67,7 +69,7 @@ function Dock({
         droneRepoById={{}}
         fleetParentIdByDroneId={{}}
         fleetAssignedIdsByDroneId={{}}
-        chatNodeStateById={{}}
+        chatNodeStateById={chatNodeStateById}
         onCreateChat={onCreateChat}
         onCloneChat={onCloneChat}
         onDeleteChats={onDeleteChats}
@@ -685,7 +687,7 @@ test('dragging a card onto the canvas composer references it in the message with
   const composer = () => container.querySelector('[data-selected-chats-composer]')!;
   const board = () => selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha');
   const mouse = async (type: string, x: number, y: number, buttons = type === 'mouseup' ? 0 : 1) => {
-    await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: y, buttons, bubbles: true })); });
+    await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: y, buttons, bubbles: true })); await settle(); });
   };
   try {
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])} onSendCanvasPrompt={async (targets, payload) => {
@@ -734,6 +736,151 @@ test('dragging a card onto the canvas composer references it in the message with
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+
+test('canvas gestures avoid unrelated card renders and layout reads, and use the latest panned coordinates', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => { frames.set(++nextFrame, run); return nextFrame; },
+    cancelAnimationFrame: (id: number) => frames.delete(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => new Response(JSON.stringify({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } })),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  const flushFrames = async () => act(async () => {
+    const pending = [...frames.values()]; frames.clear(); pending.forEach(run => run(0));
+  });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone' });
+  const container = dom.document.createElement('div'); dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const board = () => selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha');
+  const actions = getCanvasBoardActions('alpha');
+  const renders = new Map<string, number>();
+  const chats = ['default', ...Array.from({ length: 99 }, (_, i) => `chat-${i}`)];
+  const states = Object.fromEntries(chats.map(name => [alpha(name), {
+    statusOk: true, statusError: null, busy: false, unreadAgentMessage: false,
+    get lastAgentSnippet() { renders.set(name, (renders.get(name) ?? 0) + 1); return null; },
+  }]));
+  let unsubscribe = () => {};
+  let layoutReads = 0;
+  const originalRect = dom.HTMLElement.prototype.getBoundingClientRect;
+  dom.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.hasAttribute('data-canvas-node')) layoutReads++;
+    // Other suites patch the shared happy-dom prototype; keep this fixture layout deterministic.
+    return new dom.DOMRect();
+  };
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(chats)} chatNodeStateById={states} onRenameChat={async (_id, _name, chatName) => ({ ok: true, chatName })} />));
+    await flushFrames();
+    const viewport = container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
+    const card = (name: string) => container.querySelector(`[data-drone-id="${alpha(name)}"]`) as unknown as Element;
+    expect(container.querySelectorAll('[data-canvas-node]')).toHaveLength(100);
+    renders.clear(); layoutReads = 0;
+    for (let i = 0; i < 10; i++) await act(async () => actions.setPan(100 + i, 200 + i));
+    expect(renders.size).toBe(0);
+    expect(layoutReads).toBe(0);
+    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe('translate(109px, 209px) scale(1)');
+
+    // Wheel samples before the next React render must compound, anchored under the pointer.
+    const anchor = { x: 400, y: 300 };
+    await act(async () => {
+      Simulate.wheel(viewport, { deltaY: -100, clientX: anchor.x, clientY: anchor.y });
+      Simulate.wheel(viewport, { deltaY: -100, clientX: anchor.x, clientY: anchor.y });
+    });
+    expect(board().scale).toBeCloseTo(Math.exp(0.3), 8);
+    expect((anchor.x - board().panX) / board().scale).toBeCloseTo(anchor.x - 109, 0);
+    expect(renders.size).toBe(0); // At these scales cards keep the same local geometry.
+    expect(layoutReads).toBe(0);
+
+    await act(async () => actions.setScale(0.5));
+    expect(renders.size).toBe(0); // Inherited CSS updates readability without rendering or measuring cards.
+    expect(layoutReads).toBe(0);
+    renders.clear();
+    await act(async () => actions.moveNode(alpha('default'), 750, 300));
+    expect([...renders.keys()]).toEqual(['default']);
+    expect(layoutReads).toBe(0);
+
+    await act(async () => Simulate.doubleClick(card('chat-0'), { button: 0 }));
+    await flushFrames();
+    renders.clear();
+    await act(async () => Simulate.change(container.querySelector('[data-canvas-node] input') as unknown as Element, { target: { value: 'a longer chat title' } } as never));
+    expect([...renders.keys()]).toEqual(['chat-0']);
+    expect(layoutReads).toBe(0);
+    await act(async () => Simulate.keyDown(container.querySelector('[data-canvas-node] input') as unknown as Element, { key: 'Escape', nativeEvent: {} } as never));
+
+    renders.clear();
+    await act(async () => useDroneCanvasStore.getState().addOptimisticBoardMember('alpha', {
+      chatName: 'new-chat', sourceChatName: 'default', sideChat: false, addedAt: Date.now(),
+    }));
+    expect(container.querySelectorAll('[data-canvas-node]')).toHaveLength(101);
+    expect(renders.size).toBe(0);
+    await act(async () => {
+      useDroneCanvasStore.getState().dropOptimisticBoardMembers('alpha', ['new-chat']);
+      actions.removeNodes([alpha('new-chat')]);
+    });
+    expect(container.querySelectorAll('[data-canvas-node]')).toHaveLength(100);
+    expect(renders.size).toBe(0);
+
+    // Hundreds of pointer samples before a frame produce one update; release flushes the last sample.
+    await act(async () => Simulate.mouseDown(card('default'), { button: 0, clientX: 10, clientY: 10 }));
+    const start = board().nodesByDroneId[alpha('default')];
+    let updates = 0;
+    unsubscribe = useDroneCanvasStore.subscribe((next, prev) => {
+      if (next.droneBoards.alpha?.nodesByDroneId !== prev.droneBoards.alpha?.nodesByDroneId) updates++;
+    });
+    await act(async () => {
+      for (let i = 1; i <= 100; i++) dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 10 + i, clientY: 10, buttons: 1 }));
+    });
+    expect(updates).toBe(0);
+    await flushFrames();
+    expect(updates).toBe(1);
+    expect(board().nodesByDroneId[alpha('default')].x).toBe(start.x + 200);
+    await act(async () => {
+      dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 120, clientY: 10, buttons: 1 }));
+      dom.dispatchEvent(new dom.MouseEvent('mouseup', { clientX: 120, clientY: 10, buttons: 0 }));
+    });
+    expect(updates).toBe(2);
+    expect(board().nodesByDroneId[alpha('default')].x).toBe(start.x + 220);
+    unsubscribe();
+    await flushFrames();
+
+    // Switching boards cancels a queued gesture instead of moving the new board.
+    const oldPan = board().panX;
+    await act(async () => {
+      Simulate.mouseDown(viewport, { button: 2, clientX: 10, clientY: 10 });
+      dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 100, clientY: 100, buttons: 2 }));
+      useDroneCanvasStore.getState().setScope('global');
+    });
+    await flushFrames();
+    await act(async () => dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 200, clientY: 200, buttons: 2 })));
+    await flushFrames();
+    expect(board().panX).toBe(oldPan);
+    expect(useDroneCanvasStore.getState().panX).toBe(32);
+
+    // Creation after a pan must use the current viewport even though the board did not rerender.
+    await act(async () => useDroneCanvasStore.getState().setPan(150, 250));
+    await act(async () => Simulate.doubleClick(viewport, { button: 0, clientX: 600, clientY: 500 }));
+    const draft = Object.values(useDroneCanvasStore.getState().nodesByDroneId)[0];
+    expect(draft.x).toBe(450 - 96 / 2);
+    expect(draft.y).toBe(250 - 54 / 2);
+  } finally {
+    unsubscribe();
+    await act(async () => root.unmount());
+    dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

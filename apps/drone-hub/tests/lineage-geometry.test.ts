@@ -3,6 +3,7 @@ import {
   buildLineagePath,
   measureRectInWorldSpace,
   resolveLineageEndpoint,
+  scaleCanvasRect,
 } from '../src/droneHub/canvas/lineage-geometry';
 
 describe('lineage geometry helpers', () => {
@@ -40,4 +41,11 @@ describe('lineage geometry helpers', () => {
       'M 226 174 C 226 202, 259 252, 259 280',
     );
   });
+});
+
+
+test('calculated bounds match a card scaled around its left edge and vertical center', () => {
+  const rect = { x: 100, y: 200, width: 150, height: 40 };
+  expect(scaleCanvasRect(rect, 1)).toEqual(rect);
+  expect(scaleCanvasRect(rect, 1.4)).toEqual({ x: 100, y: 192, width: 210, height: 56 });
 });

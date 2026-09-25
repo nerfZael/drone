@@ -5,6 +5,16 @@ export type CanvasRect = {
   height: number;
 };
 
+/** Bounds of a card scaled around its left edge and vertical center. */
+export function scaleCanvasRect(rect: CanvasRect, boost: number): CanvasRect {
+  return {
+    x: rect.x,
+    y: rect.y + rect.height * (1 - boost) / 2,
+    width: rect.width * boost,
+    height: rect.height * boost,
+  };
+}
+
 type RectLike = Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>;
 
 function roundCanvasCoord(value: number): number {
