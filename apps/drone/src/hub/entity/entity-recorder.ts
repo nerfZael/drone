@@ -176,17 +176,17 @@ function writeSessionsReadme(root: string): void {
 const SESSIONS_README = `# Entity sessions
 
 Recordings of entity bench sessions (Drone Hub → Entity window). One folder per session, from
-Start until Reset or Hub shutdown, named \`YYYYMMDD-HHMMSS-xxxx\` (local time). The newest ${KEEP_SESSIONS} are kept.
+Start until Reset, named \`YYYYMMDD-HHMMSS-xxxx\` (local time). The newest ${KEEP_SESSIONS} are kept.
 The bench can replay any of them: Replay in the timeline bar under the bench.
 
 Each folder holds:
 
 - \`meta.json\`: id, status (\`live\`, \`ended\`, or \`live\` left behind by a Hub that stopped, which
   the Hub reports as \`interrupted\`), start and end time, end reason, the bench config (models,
-  evaluator, mode), event and frame counts, and the user's first chat message.
+  evaluator, review, workspace), event and frame counts (as of the last update), and the user's first chat message.
 - \`events.jsonl\`: the entity's event log, one event per line, in order. This is the source of truth:
   \`{ seq, t, at, type, by, data }\`, where \`t\` is ms since the session started, \`at\` is epoch ms,
-  and \`by\` is \`user\`, \`host\`, \`system\` or a limb id (\`head\`, \`voice\`, \`t3\`, \`w5\` …).
+  and \`by\` is \`user\`, \`host\`, \`system\` or a limb id (\`head\`, \`voice\`, \`reviewer\`, \`worker-3\`, \`watch-5\` …).
 - \`frames.jsonl\`: runtime snapshots as \`{ seq, t, patch }\`, where \`patch\` holds only the snapshot
   sections that changed (\`status\`, \`world\`, \`self\`, \`levels\`, \`stops\`, \`health\`, \`limbs\`,
   \`senses\`, \`jev\`). \`world\`, \`levels\` and \`self\` are exact after every event; the other sections

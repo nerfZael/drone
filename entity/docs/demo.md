@@ -1,12 +1,12 @@
 # Demo and success criteria
 
-The demo is a Drone Hub desktop popup with three panes:
+The bench is Drone Hub's Entity window (a desktop tool window):
 
-- **Chat:** a normal agent chat. Either side can send any number of messages at any time. The entity also sees the user's **unsent draft** as it's typed, clearly marked as not sent. It works both ways: the entity can show its own draft, so the user sees what it's typing before it sends.
-- **Keypad:** 0–9. The user and the entity can both press and hold keys. Each key has a down and an up, `world.keys` shows which keys are held and by whom, and every change is marked with who made it.
-- **Inspector:** the live state JSON, the event timeline, active watches and motor programs, what each limb is doing, and latency readouts.
+- **Chat:** a normal agent chat. Either side can send any number of messages at any time. The entity also sees the user's **unsent draft** as it's typed, clearly marked as not sent, and can show its own draft. Workers reply here tagged with the message they answer; a batch shows one progress line; reviewed answers show a ✓ or are struck through with the correction below.
+- **Keypad:** 0–9. The user and the entity can both press and hold keys. Each key has a down and an up, the keypad state shows which keys are held and by whom, and every change is marked with who made it.
+- **A third view**, chosen in the header: **Brain** (the limbs and the signals between them), **Work** (the Work canvas, plus Rows and Cards; see [work-canvas.md](work-canvas.md)), **Inspector** (state, events, watches and programs, latency readouts) or **Files** (the workspace).
 
-The popup also has the user controls: Start, Pause, Resume and Reset (see [architecture.md](architecture.md#user-controls)).
+The header has the user controls (Start, Pause, Resume, Reset; see [architecture.md](architecture.md#user-controls)) and the settings: voice, head and worker models, review, senses (Jev), workspace and commands. A timeline under the bench replays any recorded session ([session-logs.md](session-logs.md)).
 
 ## Scenarios
 
@@ -19,7 +19,7 @@ The popup also has the user controls: Start, Pause, Resume and Reset (see [archi
 | 3 | "Repeat after me", then presses keys | Mirror each press immediately, with no LLM call per key | Code watch installed by the entity |
 | 4 | "Send a message per number, count to 50. Stop when I press 5." Presses 5 at 11 | Stop counting within a beat and acknowledge it | Code watch stops output and tells the limb |
 | 5 | "Stop if I change the subject", then drifts | Notice and stop or redirect | Code limb using `sense`, installed by the entity |
-| 6 | Types while the entity is busy | Take the message in without losing work | The floor: a parallel voice run, and the newest run owns the voice |
+| 6 | Types while the entity is busy | Take the message in without losing work | The floor: a parallel run of the front limb, and the newest run owns the voice |
 | 7 | Types "press 5 if you see this" and doesn't send it | Press 5 from the draft alone | Code limb using `sense` on the draft |
 | 8 | Types "how are you" slowly | Answer before the user sends it, if the models are fast enough | Voice limb woken by the draft |
 | 9 | "Hold 6 while I hold 5", then holds 5 | Hold 6 on `key_down 5` and release it on `key_up 5` | Code watch installed by the entity |
@@ -31,6 +31,8 @@ Scenarios 5–8 prove Jev's value (fuzzy language perception through `judge` and
 The scenarios above each test one capability. These stories are the goals: things neither a fast model nor a slow model can do alone, only the combination.
 
 ### E1: Morse conversation (M2, flagship)
+
+*Status: passed in M2; flaky since (3 of 5 replied in the latest runs). The weak point is the decoder program written in one go ([plan.md](plan.md#results)).*
 
 The user says: "Let's talk in Morse. Short tap is a dot, long tap is a dash." Then they tap `HI HOW ARE YOU` on key 1. The entity taps a reply back in Morse on key 2.
 
@@ -44,11 +46,13 @@ The user says: "Let's talk in Morse. Short tap is a dot, long tap is a dash." Th
 
 ### E2: Deep work you can still talk to (M2)
 
+*Status: passes, with a worker doing the plan.*
+
 The user says: "Work out a 12-step plan for X and press each step's number as you finish it. While you work, answer my questions. If I hold 9, freeze; when I release it, continue." Then they chat casually, hold 9 for a few seconds, and release it.
 
 - **Needs the fast tiers.** Freezing on `key_down 9` and resuming on `key_up 9` must be instant, and casual replies need a responsive voice limb (under about 2 s).
-- **Needs the slow tier.** The plan itself is real thinking: a gpt-6-sol task limb working for a while.
-- **Exercises:** parallel limbs, stopping output without losing the thought, the head delegating to a task limb, and `resume_output`. It targets exactly what the M0.5 spike found broken: acknowledgements waiting 7–10 s behind a busy mind.
+- **Needs the slow tier.** The plan itself is real thinking: a gpt-6-sol worker working for a while.
+- **Exercises:** parallel limbs, stopping output without losing the thought, the front limb dispatching a worker, and `resume_output`. It targets exactly what the M0.5 spike found broken: acknowledgements waiting 7–10 s behind a busy mind.
 - **Passes when:**
     - chat replies arrive in under 2 s while the task runs
     - nothing is emitted while 9 is held
@@ -57,17 +61,21 @@ The user says: "Work out a 12-step plan for X and press each step's number as yo
 
 ### E3: Quick guess, careful correction (M3)
 
+*Status: passes; the wrong-quick-answer path is now answer review's job and hasn't been exercised live with a wrong answer.*
+
 The user types a tricky question slowly and does not send it, e.g. "if I have 3 boxes with 17 apples each and give away a third of them, how many are left?"
 
 - **Needs the fast tiers.** A fast limb, woken by a code limb that uses `sense("is a question forming?")` on the draft, sees the question forming and answers before the user hits enter.
-- **Needs the slow tier.** A strong limb checks the quick answer. If it was wrong, the entity says "actually, correction: …".
-- **Exercises:** the draft channel, speculative answers, and a fast and a slow limb producing one answer, with `judge` deciding whether to correct. It shows speed and accuracy together, which neither model has alone.
+- **Needs the slow tier.** A stronger model reviews the quick answer ([answer review](parallel-conversation.md#second-looks)). If it was wrong, the original is struck through and the correction posted below it.
+- **Exercises:** the draft channel, speculative answers, and a fast and a slow limb producing one answer. It shows speed and accuracy together, which neither model has alone.
 - **Passes when:**
     - the first answer appears before the user sends
     - a wrong quick answer is corrected within about 5 s
     - a correct quick answer is not needlessly "corrected"
 
 ### E4: Live tutor (M3)
+
+*Status: passed in M3.*
 
 The user works through a set of practice problems (for example, fractions) by typing answers into the draft. The entity tutors them.
 
@@ -82,13 +90,13 @@ The user works through a set of practice problems (for example, fractions) by ty
 
 ## Latency targets
 
-Latency targets make "real time" measurable. Each one is measured from the triggering event to the visible effect, and the inspector records them per run. The numbers are starting targets, to be tuned once we have measurements.
+Latency targets make "real time" measurable. Each one is measured from the triggering event to the visible effect, and the inspector records them per run.
 
-| Behaviour | Target | Carried by | M0.5 spike |
+| Behaviour | Target | Carried by | Latest measured |
 |---|---|---|---|
-| Mirror a key (scenarios 3, 9) | < 50 ms | Code watch | < 0.3 ms |
-| Stop counting after the stop key (scenario 4) | < 300 ms | Code watch (`stop_output`) | 0 ms, no extra messages |
-| Sense-triggered keypad effect (scenario 7) | < 1 s | Code limb + `sense` | not tested yet (M3) |
-| First entity reply to a sent message | < 2 s | Fast voice limb | 1.8 s luna, 2.1 s sol, 0.6 s Cerebras qwen |
-| Acknowledgement after an output stop | < 2 s | Voice limb, in a parallel run | 7.6–10.1 s with one serial mind; parallel runs should fix it |
-| Acknowledgement that a hard task started | < 2 s, with the result later | Voice limb, then task limb | not tested yet |
+| Mirror a key (scenarios 3, 9) | < 50 ms | Code watch | 0.5–0.8 ms in the bench (M2) |
+| Stop counting after the stop key (scenario 4) | < 300 ms | Code watch or program | 0 extra numbers (M2, after the merge) |
+| Sense-triggered keypad effect (scenario 7) | < 1 s | Code limb + `sense` | 4.3 s from the draft (M3): over target |
+| First entity reply to a sent message | < 2 s | Fast voice limb | 0.5–1.3 s with a qwen voice; 2.0–7.4 s with luna alone (M3) |
+| Acknowledgement after an output stop | < 2 s | Voice limb, in a parallel run | 7.6–10.1 s in the spike with one serial mind; not remeasured since parallel runs |
+| A hard task started | < 2 s, with the result later | Front limb dispatching a worker | 2.5 s to dispatch (after the merge) |

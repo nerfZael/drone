@@ -71,16 +71,16 @@ Each run gets cheaper and faster. This builds on the memory design in [future.md
 
 ## What has to be built
 
-| Piece | What | Notes |
+| Piece | What | Status |
 |---|---|---|
-| Coding-agent limbs | A limb whose backend is a real coding agent in its own worktree: a drone chat, or a blip session with workspace tools | The one structural change: a pluggable limb backend with its own tools, still under the same budget, supervision and stop rules |
-| Workspace channel | Events: commit, test and typecheck results, diff stats, conflict checks, user file edits. Effects: create attempt, run evidence, freeze, steer, discard, promote to PR | `confirm` risk class for promote, push and destructive commands |
-| Evidence runners | Code limbs that run scoped commands per branch, plus the hidden integration branch | Evidence is structured events, so watches can prune on it |
-| Approval flow | Approve / deny for `confirm` effects in the bench | Today `confirm` effects are rejected |
-| Budget accounting | Tokens and money per limb, candidate and session; caps; staged policy | Extends the Jev caps to every model |
-| Counting conditions | Watch conditions like "5 failures in 60 s" or "no commit for 5 min" | Extends `when` |
-| Persistence | Event log on disk; sessions resume after a Hub restart | A search can run for an hour |
-| Candidate board | Branches, status, evidence, cost, diff preview, merge and discard | A new bench tab |
+| Coding-agent limbs | A limb whose backend is a real coding agent in its own worktree: a drone chat, Codex or Claude Code, or a blip session with workspace tools. The one structural change: a pluggable limb backend with its own tools, under the same supervision and stop rules | Not built. Workers run on the Hub's own pi-ai mind |
+| Workspace channel | Events: commit, test and typecheck results, diff stats, conflict checks, user file edits. Effects: create attempt, run evidence, freeze, steer, discard, promote to PR (`confirm` for promote, push and destructive commands) | Partly built: file tools, `run` (off by default) and claims in one shared folder ([parallel-conversation.md](parallel-conversation.md#workspace)). No worktrees, commits or evidence events |
+| Evidence runners | Code limbs that run scoped commands per branch, plus the hidden integration branch | Not built |
+| Approval flow | Approve / deny for `confirm` effects in the bench | Not built; `confirm` effects are rejected |
+| Budget accounting | Tokens and money per limb, candidate and session; caps; staged policy | Partly built: the Work canvas shows each worker's cost or tokens, and the queue caps concurrency. No caps on spend outside Jev |
+| Counting conditions | Watch conditions like "5 failures in 60 s" or "no commit for 5 min" | Not built; watches have `quiet` and durations |
+| Persistence | Sessions resume after a Hub restart, because a search can run for an hour | Partly built: every session's log is recorded and can be replayed, but not resumed ([session-logs.md](session-logs.md)) |
+| Candidate board | Branches, status, evidence, cost, diff preview, merge and discard | Not built; the Work canvas is its natural home |
 
 ## First demo: race to fix a failing test
 

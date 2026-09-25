@@ -1,91 +1,50 @@
 # Work canvas
 
-The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. It replaces the row and card views. You look at it from the top and click into a worker when you need to; you don't arrange it.
+The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. You look at it from the top and click into a worker when you need to; you don't arrange it. It is the Work tab's default view; the older Rows and Cards views stay next to it while they are easy to keep.
 
-Mockup (v10): https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv. Older versions, for comparison: [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq), [v5](https://claude.ai/artifact/McMX67JjeuCu4ETKk4ofGy), [v6](https://claude.ai/artifact/CxP9miBuQtTfybRZDnM6dz), [v7](https://claude.ai/artifact/LPmbQp8DjPHRp6WLeL6QGA), [v8](https://claude.ai/artifact/2ebTXVBBMrT2ALWBTwsQs4), [v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
+Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` derives everything from the snapshot and the event log, so it also works when replaying a recording, and is pure and tested. Mockups: [v10](https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv), which the colours follow, and earlier [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq)–[v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
 
-## Status (2026-09-25)
+## Layout
 
-Built: the canvas is the Work tab's default view, with Rows and Cards kept next to it (`EntityWorkCanvas.tsx`, laid out by `work-canvas-model.ts`, which is pure and tested). It has time rows with the message column, lineage columns, the three arrows, folds for talk and for finished work (after a minute, never while selected, expanded or hovered), group cards for batches and for four or more workers from one message, watch and program chips, the top strip, a side panel with the thread and Message and Stop, rename by double-click, and pulses when a fork starts or a wait is released. The runtime has the worker queue (`maxTasks` running, the rest `queued`), `dispatch_many`, and labels on watches and programs.
+- **Rows run in time order.** The left column has one line per origin, the message that started the work, with its time of day; the work sits level with it. Hovering a time shows the exact time and how far into the session (and into the worker) it was.
+- **Columns show lineage.** A fork sits right of the worker it came from, and gated work right of what it waits for.
+- **Rows are laid out from measured sizes**, so expanding a card, or a row folding, slides the rows below. The view keeps everything in sight until you pan or zoom yourself; **Fit** brings that back.
 
-Also built: a batch shows one progress line in Chat, updated in place, and its workers reply in their own threads (`say` defaults to `thread: true` for them); the front limb is woken with the results when the batch ends. Past three, workers pulled out of a group are one compact list. Chat and the canvas highlight each other (a message and its work, a worker and its replies), and clicking a worker's reply in Chat opens it on the canvas. Folded work fades out and the rows below slide up; the canvas keeps its own clock between events so work folds in quiet sessions too.
+**Arrows**, only three kinds: forked from (solid), waiting on (dashed amber, green once released), and blocked by a file another worker holds (red dotted). An arrow into folded or grouped work attaches to the fold line or the group card.
 
-A message that was only answered or steered stays visible for a minute with **Own worker** and **Fork of X**, then folds. The view keeps everything in sight until you pan or zoom yourself.
+## Cards
 
-Not built yet: the needs-you state (`ask`) and a zoomed-out design.
+- **Header:** the worker's name and its state: working (one colour for thinking and acting), waiting, queued, blocked, failed, done. The id (`worker-N`) only shows on hover. Double-click the name to rename it; the name is kept in this browser for the session, and the canvas and its side panel use it.
+- **Status line** (up to two lines): what the worker is doing, from its latest summary's current step, or else the task it was given. Never the tool it happens to be calling: that changes every second, and external agents don't report it. Blocked, waiting and queued workers say what they're waiting for, by name. Done workers show their result.
+- **Footer:** summary steps as pips, watch and program chips, time, and cost (or tokens for subscription models). A chip shows the label, an eye (watch) or `</>` (program), and one value: a watch's fire count, a program's running time, ✓ or failed. Hover shows the full condition.
+- **⌄ expands a card in place**: the done / doing / next steps, each watch and program spelled out, claims and the model.
+- **Click opens the side panel**: the message that started the worker, the task it was given (collapsed), then its replies and every steer, in markdown with times of day, plus Message and Stop.
+- **Motion:** a pulse runs along an arrow when a fork starts or a wait is released; a card flashes when it finishes, starts from the queue, or is steered.
 
-## Terms
+Text fits by being written short: summaries are asked for short steps, and watches and programs carry a label beside their full condition. Anything still cut off shows in full on hover.
 
-- **Limb**: the runtime's unit of supervision. Head, voice, task limbs, watches and programs are all limbs.
-- **Worker**: a task limb, the LLM limb that handles one piece of your work. Every worker is a limb; the head, the voice, watches and programs are limbs but not workers. The UI says worker; the runtime and these docs say limb when they mean all of them.
-- **Chat**: where you talk to the entity. A worker's own conversation is its **thread**.
+## Scale
 
-## Design so far
+- **Folds.** Messages that started no work, and finished work that nothing live depends on, fold into one line such as `··· 57 finished · $8.17 · 6 messages · steered Signup flake`. Click it to open it in place. Folding waits: nothing folds within a minute, the 5 most recently finished rows and the 3 most recent plain messages never fold, and nothing folds while selected, expanded or hovered. Folded work fades out and the rows below slide up. The canvas keeps its own clock between events, so work folds in quiet sessions too.
+- **Group cards.** A batch, or 4 or more workers from one message in the first column, becomes one card: counts by state, one cell per worker coloured by state, and totals. Hover a cell to see that worker, click it to open it, ⌄ for a filterable list. Workers that need attention (failed, blocked, stopped) also get their own card under the group, the first three as cards and the rest in one "N more need attention" list.
+- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, and **Fit**. Clicking an item opens that worker.
 
-**Layout.** Rows run in time order; columns show lineage.
-- The left column has one line per origin: the message that started the work. Its work sits level with it.
-- Forks and follow-ups sit to the right of what they came from.
-- Every card has the same width. Placement is automatic and only grows: new work never moves existing cards.
+## Chat and the canvas
 
-**Arrows.** Only three kinds:
-- forked from (solid)
-- waiting on (dashed amber, green once released)
-- blocked by a file another worker holds (red dotted)
+- Hovering a card or a message line highlights the matching messages in Chat (a soft tint), and scrolls Chat to them.
+- Hovering in Chat highlights the related work on the canvas.
+- Clicking a worker's reply in Chat opens that worker in the side panel.
+- Holding Ctrl or ⌘ turns hover into a lens: everything unrelated dims. Without it, nothing dims.
+- A message that was only answered, or steered into a worker, offers **Own worker** and **Fork of X** on hover ([parallel-conversation.md](parallel-conversation.md#when-routing-is-a-guess)).
+- Messages you send a worker from its side panel get their own line, "in X's thread".
 
-**Cards.**
-- A card shows its name (double-click to rename), status, a status line of up to two lines, and a footer with steps, time and cost.
-- Watches and programs a worker installed are icon chips in its footer. The chip's fill is the progress; its text is seconds to fire, or runs done. Hover shows the full condition.
-- ⌄ expands a card in place (full status, each watch and program spelled out, last steps, model). Click opens the thread in a side panel with Message, Fork and Stop.
+## Not built yet
 
-**Text fits by being written short.** The summarizer gets a budget of about 60 characters per status, and watches and programs carry a short label beside their full condition. Anything still cut off shows in full on hover.
+- **A real needs-you state.** Today "needs you" is derived: a failed worker, a blocked one, or one whose last message ends with a question you haven't answered. An `ask` tool would hold the worker until you answer.
+- **The entity's own limbs.** Watches and programs of the head and voice show as chips in the top strip; they could have their own row with their conditions and meters.
+- **Work no message started.** Head-started work lands in the row of your latest message, because dispatch defaults `reply_to` to it. The left column could mean "started by": your message, the head at 12:40, or a watch firing.
+- **More states:** continued after running out of steps (`2/4`), frozen by an output stop, the whole entity paused.
+- **Zoomed out:** below about 45%, cards need their own design, such as the name large and the status as a coloured bar.
+- **Fork from the side panel.** The side panel has Message and Stop; forking a worker is only possible by asking the router.
 
-**Scale.**
-- Only live work gets a row. Messages that started nothing (chat, answered questions, steers, messages in a thread) fold into one line between rows, such as `··· 4 messages · steered W3`.
-- Finished work that nothing live depends on folds the same way, such as `··· 57 finished · $8.17`. Anything running, waiting, needing you, selected or expanded keeps its row.
-- A fan-out of 4 or more workers from one origin becomes a **group card**: counts, one cell per worker coloured by status, and totals. Hover a cell to see that worker, click it for its thread, click the card for a filterable list.
-- Workers that need you, or have stopped, leave their group as normal cards.
-
-**Top strip.** What needs you, then what fires next (watches, waits), then the head's status and heartbeat. Each item jumps to its card.
-
-**Motion.** A pulse travels along an arrow only for cause and effect, such as a finished worker releasing the one waiting on it. Smaller updates flash the card.
-
-## Runtime work the design depends on
-
-| Needed | Why | Change |
-|---|---|---|
-| A needs-you state | Workers now ask with `say` and carry on or end | An `ask` tool that holds the worker in `needs_you` until you answer |
-| Queued workers | Every dispatch starts at once; 100 workers hit rate limits and cost | `maxConcurrentWorkers` and a queue Done. |
-| Blocked by a file | A write to a claimed path is only refused | `wait_for_claim`, or derive it from a refusal followed by idling |
-| Short labels | Watches and programs only have a name and a condition | A `label` field when they are created, and the summarizer budget Done. |
-| Batch dispatch | 100 dispatches cost 100 router tool calls, and the group has no title | `dispatch_many({ title, items })` Done. |
-| One progress message per batch | 100 replies would bury Chat | Workers in a batch reply in their threads; Chat gets one message that updates as they finish, plus the ones that need you |
-
-## Not designed yet
-
-- **The entity's own limbs.** Keypad watches, "stop when I press 5", the built-in draft-attention watch and programs the head installs belong to no worker. They need their own row at the top, with the same conditions and meters as the chips on worker cards.
-- **Work that no message started.** The head can start work on a heartbeat, a watch can wake it, and a worker can spawn subtasks. The left column should mean "started by": your message, the head at 12:40, or a watch firing. Subtasks go in their parent's row, as a group from 4 up.
-- **More states.** Stopped and failed; continued after running out of steps (`2/4`); frozen by an output stop; the whole entity paused.
-- **Steers.** A steer now lives in a folded message line. The card should flash, and the side panel should show the latest steer.
-- **Arrows into folded or grouped work.** They should attach to the fold line or the group card instead of disappearing.
-- **Chat and canvas links.** A message line opens that message in Chat, and a reply tagged W3 in Chat jumps to its card.
-- **Results stay general.** Workers may be external agents (Codex, Claude Code) whose file changes we can't see, so a card shows the worker's own result summary, never harness data like files changed. The "blocked by a file" arrow comes from our workspace claims, so it only appears for workers that use our tools.
-- **Fold timing.** A row that folds the moment its work finishes makes the rows below jump. Fold after about a minute, not while hovered, with the collapse animated. Use the entity clock, so replay shows the same thing.
-- **Zoomed out.** Below 45% the cards leave their text out, which reads as blank cards. It needs its own design, such as the name large and the status as a coloured bar.
-- **Many exceptions.** Past about three, workers pulled out of a group should be one-line rows under it, not full cards.
-
-## Big batches need their own worktrees
-
-All workers share one workspace today, and claims keep them apart. That holds for a handful of workers. With 100 workers on 100 issues, many touch the same files, and most would sit blocked. At that scale each worker needs its own worktree and a merge step, as in [coding.md](coding.md). Until then, batches run at a small concurrency.
-
-## Open questions
-
-1. **Group threshold.** Group 4 or more workers from one origin, and pull out needs-you, stopped and failed? *Suggested: yes.*
-   Answer: yes: 4 or more, with needs-you, stopped and failed pulled out.
-2. **Rows and cards.** Remove both once the canvas works, and add a searchable outline only if long sessions call for it? *Suggested: yes.*
-   Answer: keep them next to the canvas if that stays easy; remove them if they become a burden.
-3. **Acting from the canvas.** So far: view, rename, expand, and Message, Fork and Stop in the side panel. Anything more, like dragging a message onto a card to steer it, or moving cards by hand?
-   Answer: the recommendation. No dragging for now.
-4. **Build order.** *Suggested:* (1) runtime states: ask, queue and limit, `dispatch_many`, labels; (2) a pure, tested function from the log to the canvas layout, replacing `deriveWork`; (3) rendering on `@xyflow/react`, which Drone Hub's canvas already uses; (4) motion and fold timing; (5) remove the row and card views.
-   Answer: the recommendation, except that the needs-you state (`ask`) comes later.
-5. **One conversation mode.** Should parallel conversation become the only mode, with single mode's behaviour as a routing preference? See [parallel-conversation.md](parallel-conversation.md).
-   Answer: yes. Done 2026-09-25.
+Results stay general: workers may be external agents (Codex, Claude Code) whose file changes we can't see, so a card shows the worker's own result, never harness data like files changed. The "blocked by a file" arrow comes from our workspace claims, so it only appears for workers that use our tools.
