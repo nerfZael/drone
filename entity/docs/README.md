@@ -23,7 +23,7 @@ An entity is a realtime AI agent: a continuous control loop over an **event log*
 |---|---|
 | [core-model.md](core-model.md) | Event log, state and what each limb sees, events and levels, effects, time, output stops |
 | [architecture.md](architecture.md) | Limb kinds, Jev as a primitive, watches (data) and programs (sandboxed JS), risk classes, the floor, guardrails, user controls |
-| [topology.md](topology.md) | The limbs and their capabilities, supervision, the voice rule, default models |
+| [topology.md](topology.md) | The limbs and the tools each role gets, supervision, the voice rule, default models |
 | [host-api.md](host-api.md) | The host interface (`Entity`, `Mind`, `Evaluator`) and the channels: chat, keypad, workspace |
 | [context-and-memory.md](context-and-memory.md) | What each limb's context holds, kept worker conversations, memory |
 
@@ -49,7 +49,7 @@ An entity is a realtime AI agent: a continuous control loop over an **event log*
 
 | Where | What |
 |---|---|
-| `entity/packages/core` | `@entity/core`: the runtime (`entity.ts`), channels, watches, the program sandbox, Jev, prompts. Tests in `tests/` |
+| `entity/packages/core` | `@entity/core`: the runtime (`entity.ts`), its state as a projection of the log (`runtime-state.ts`), the tools each role gets (`tools.ts`), channels, watches, the program sandbox, Jev, prompts. Tests in `tests/` |
 | `apps/drone/src/hub/entity` | The Hub's session: the pi-ai mind, Jev evaluator, work summarizer, recorder and the `/api/entity/*` routes |
 | `apps/drone-hub/src/droneHub/entity` | The bench UI: chat, keypad, Brain, Work (canvas, rows, cards), Inspector, Files, replay |
 | `entity/evals` | Routing cases, run with `bun apps/drone/scripts/entity-routing-eval.ts` |

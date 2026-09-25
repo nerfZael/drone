@@ -42,7 +42,6 @@ export interface EventMatcher {
 
 export type LimbKind = 'llm' | 'code';
 
-export type Capability = 'speak' | 'set_watch' | 'run_program' | 'cancel' | 'kill';
 
 /** Who is committing an effect. */
 export interface Caller {

@@ -45,13 +45,13 @@ Besides channel events, the runtime logs its own: tool calls (`tool_called`, `to
 
 ## Effects and tools
 
-Channel effects go through one gate: schema validation, the speak capability, output stops, dependencies, rate limits for code limbs, and path claims. They are the only things programs and watches can do.
+Channel effects go through one gate: schema validation, the limb's role (the reviewer only reads), output stops, dependencies, rate limits for code limbs, and path claims. They are the only things programs and watches can do.
 
 - Chat: `say` (with `reply_to`, and `thread` to post only in a worker's own thread), `set_draft`, `read_chat`.
 - Keypad: `press`, `key_down`, `key_up`.
 - Workspace: `list_files`, `read_file`, `search`, `write_file`, `edit_file`, and `run` when commands are allowed.
 
-The runtime's own tools are handled directly and are only for LLM limbs: `set_watch`, `run_program`, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `kill`; for the front limb and head `dispatch`, `dispatch_many`, `fork`, `steer`; for the voice and reviewer `handoff`; for the reviewer `amend`; for workers `claim`, `release`, `share`, `finish_task`. Output stops and dependency checks don't apply to them.
+The runtime's own tools are handled directly and are only for LLM limbs: `set_watch`, `run_program`, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel` (with `now` to stop at once); for the front limb and head `dispatch`, `dispatch_many`, `fork`, `steer`; for the voice and reviewer `handoff`; for the reviewer `amend`; for workers `claim`, `release`, `share`, `finish_task`. Which limb gets which is one table per role ([topology.md](topology.md#the-limbs)). Output stops and dependency checks don't apply to them.
 
 Effects apply as soon as their tool call streams in, with one exception: the front limb's actions wait until the user has stopped typing (at most 6 s), and are superseded if a new user message arrived after the limb read the state. See [topology.md](topology.md#rules).
 
@@ -84,4 +84,4 @@ A stop halts the work in flight when it was issued. Work an LLM deliberately sta
 
 We deliberately don't call this a "hold". In the M0.5 spike a model read a `hold` action as "hold key 6", because holding keys is also part of the world.
 
-Thoughts are only stopped from outside by lifecycle: a parent (or the front limb, for any worker) can cancel or kill ([topology.md](topology.md)), the user can stop a worker from the Work view or Pause and Reset the session, and a worker's watches and programs end when it finishes. A watch's `stop_output` in `stop` mode cancels programs; it never stops an LLM run.
+Thoughts are only stopped from outside by lifecycle: a parent (or the front limb, for any worker) can cancel, gracefully or at once ([topology.md](topology.md)), the user can stop a worker from the Work view or Pause and Reset the session, and a worker's watches and programs end when it finishes. A watch's `stop_output` in `stop` mode cancels programs; it never stops an LLM run.

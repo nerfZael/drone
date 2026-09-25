@@ -2,7 +2,7 @@
 
 An entity's mind is a set of **limbs** that share one event log and one orchestrator. v1 has one shape: a head, an optional fast voice in front of it, an optional reviewer, workers, and the code limbs they write. Richer shapes (hierarchies, peers, nested entities) are in [future.md](future.md#topology).
 
-A limb is defined by its **contract**, not by what's inside it: it reads its render of the log, acts through the tools and effects its capabilities allow, and has a supervising parent.
+A limb is defined by its **contract**, not by what's inside it: it reads its render of the log, acts through the tools and effects its role allows, and has a supervising parent.
 
 ## The limbs
 
@@ -17,28 +17,28 @@ A limb is defined by its **contract**, not by what's inside it: it reads its ren
 
 Code limbs are children of the LLM limb that wrote them; a worker's end cancels them. Workers are children of the head, whichever limb dispatched them.
 
-Capabilities decide which tools and effects a limb gets:
+One table per role decides which tools a limb gets (`runtimeTools` in `tools.ts`). A limb is offered exactly these, and a call to anything else is refused:
 
-| Limb | Capabilities | Router tools |
+| Limb | Channel effects | Runtime tools |
 |---|---|---|
-| Head | `speak`, `set_watch`, `run_program`, `cancel`, `kill` | `dispatch`, `dispatch_many`, `fork`, `steer` |
-| Voice | `speak`, `cancel` | `dispatch`, `dispatch_many`, `fork`, `steer`, `handoff` |
-| Reviewer | `speak`, read-only channel effects | `amend`, `handoff` |
-| Worker | `speak`, `cancel`, plus `set_watch` and `run_program` when code limbs are on | `claim`, `release`, `share`, `finish_task` |
-| Watch, program | Their author's | — |
+| Head | all | `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, and `amend` with review `head` |
+| Voice | all | `note`, `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `handoff` |
+| Reviewer | read-only | `amend`, `handoff`, `note` |
+| Worker | all | `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `claim`, `release`, `share`, `finish_task` |
+| Watch, program | their author's | — |
 
-The front limb (and the head) may cancel any worker; other limbs only their own children.
+The front limb (and the head) may cancel any worker; other limbs only their own watches and programs.
 
 ## Work goes through state; lifecycle goes through signals
 
 - **Work.** Tasks and results are events in the log, projected into every limb's state. The front limb dispatches a worker with a task; the worker replies to the user itself and commits its result with `finish_task`. Past `maxTasks` (6) running workers, new ones wait as `queued` and start oldest first ([parallel-conversation.md](parallel-conversation.md)).
-- **Lifecycle.** Pause, cancel and kill act directly, not through state. Kill aborts a worker's run at once. Cancel asks it to wrap up: from its next tool call on it may only `say`, `note`, read and `finish_task`, and it ends as `cancelled` with what it had. It becomes a kill after 3 s if it doesn't finish.
+- **Lifecycle.** Pause and `cancel` act directly, not through state. `cancel` with `now: true` aborts a worker's run at once. Without it, cancel asks it to wrap up: from its next tool call on it may only `say`, `note`, read and `finish_task`, and it ends as `cancelled` with what it had. It becomes a kill after 3 s if it doesn't finish.
 
 ## Supervision
 
 Lifecycle borrows from Erlang/OTP supervision trees: parents supervise their children.
 
-- **Cancel and kill.** Cancel (the default) lets the child finish within a grace period; kill drops its partial work. Everything up to the kill stays in the log. Jev can do neither: it only returns numbers.
+- **Cancel.** A cancel lets the child finish within a grace period; `now: true` (a kill, in OTP terms) drops its partial work. Everything up to then stays in the log. Jev can do neither: it only returns numbers.
 - **Restarts.** A worker whose run crashes is woken again, at most 3 times in a minute; past that it is finished as failed. Every crash is logged as `limb_failed`. The head is not restarted; the next event wakes it. Code limbs are not restarted.
 
 ## Rules

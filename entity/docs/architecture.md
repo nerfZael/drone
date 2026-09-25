@@ -39,7 +39,7 @@ The runtime's `JevService` handles what each piece of code would otherwise get w
 - **Logging.** Every question and answer is appended to the log (`judged`, `sensed`).
 - **Cost.** Jev is billed per call through the AI Gateway, not on a subscription, so the runtime enforces entity-wide caps (60 calls a minute, 2000 a session) and the bench shows the count.
 
-Jev only returns numbers. It cannot act, wake or stop anything. Whatever the code does with the answer is governed by that code limb's capabilities, so "Jev signals, never commands" is true by construction.
+Jev only returns numbers. It cannot act, wake or stop anything. Whatever the code does with the answer is governed by what that code limb's author may do, so "Jev signals, never commands" is true by construction.
 
 Not built yet: replaying recorded Jev answers so a replayed session is deterministic, and charging Jev calls to the limb that asked.
 
@@ -69,7 +69,7 @@ Every watch and program an LLM limb installs becomes a **code limb**: named, wit
 
 - **Watches are validated data.** A watch has one trigger (an event edge like `key_down 5`, a level with a duration like `key.5.held` for 2 s, or a `sense` threshold) plus optional `when` conditions: levels, senses, and quiet periods such as `{"quiet": "draft_changed", "for_ms": 700}`, combined with `all` / `any` / `not`. Triggers count only the user's events unless `by` says otherwise. Its action is an effect (args can copy fields of the triggering event with `$key`), `stop_output`, `resume_output`, a wake, or starting a program. A watch can fire `once` or expire after `expires_s`. Watches get this right most often because they are data checked against a schema.
 - **Programs are sandboxed JavaScript.** A program is the body of an async function, run in QuickJS (32 MB, 250 ms between awaits). Its API: the channel effects (`say`, `press`, `key_down`, `effect(name, args)` and so on), `wait`, `nextEvent`, `judge`, `sense`, `state()`, `now()`, `console.log`, and `wake(reason)`, which hands something that needs thinking (like composing a reply) to its author, at most once a second. Stateful behaviour is trivial in JS: the Morse decoder in E1 collects dots and dashes and detects letter and word gaps. A program that finishes or fails wakes its author.
-- **Risk is enforced at the effect boundary, not in the code.** A program can compute anything, but it can only act through effects, and every effect goes through the gate: speak capability, output stops, rate limits (programs are slowed to their limit, watches drop what's over it), and path claims.
+- **Risk is enforced at the effect boundary, not in the code.** A program can compute anything, but it can only act through effects, and every effect goes through the gate: the author's role, output stops, rate limits (programs are slowed to their limit, watches drop what's over it), and path claims.
 
 ## Risk classes
 

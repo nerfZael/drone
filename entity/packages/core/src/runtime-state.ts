@@ -1,5 +1,5 @@
 import { isEntityActor } from './log.js';
-import type { Capability, EntityEvent } from './types.js';
+import type { EntityEvent } from './types.js';
 import type { StopMode, StopScope, WatchSpec } from './watch.js';
 
 /**
@@ -15,30 +15,38 @@ export type LimbStatus = 'idle' | 'queued' | 'waiting' | 'running' | 'done' | 'f
 
 export interface RunState { id: string; reason: string; startedAt: number; readSeq: number; firstToolAt?: number }
 
-export interface LimbState {
+interface LimbBase {
   id: string;
-  kind: 'llm' | 'code';
-  role: LimbRole;
   name: string;
   parent?: string;
-  model?: string;
-  capabilities: Capability[];
   status: LimbStatus;
   createdAt: number;
   /** When an LLM decided to start this (a tool call; for a program a watch launched, when the watch was decided). Output stops issued before then do not cover it. */
   decidedAt?: number;
-  /** When a task or code limb stopped running. */
+  /** When a worker or code limb stopped running. */
   endedAt?: number;
-  /** LLM runs in flight, and the newest one: older runs of a limb are superseded. */
+}
+
+interface LlmBase extends LimbBase {
+  kind: 'llm';
+  model: string;
+  /** Runs in flight, and the newest one: older runs of a limb are superseded. */
   runs: RunState[];
   latestRun?: string;
   /** Log position up to which this limb has already been shown events. */
   seenSeq: number;
   lastRunAt?: number;
   crashes: number[];
-  // workers
-  task?: string;
-  /** The user message this worker answers, the worker it waits for, and its batch (dispatch_many). */
+}
+
+/** The head, the voice and the reviewer: permanent, and fresh on every wake. */
+export interface ReactiveLimb extends LlmBase { role: 'head' | 'voice' | 'reviewer' }
+
+/** One piece of the user's work, with a conversation of its own. */
+export interface WorkerLimb extends LlmBase {
+  role: 'task';
+  task: string;
+  /** The user message it answers, the worker it waits for, and its batch (dispatch_many). */
   replyTo?: number;
   waitFor?: string;
   group?: string;
@@ -49,16 +57,28 @@ export interface LimbState {
   /** Times it was continued after running out of turns. */
   continuations: number;
   cancelRequested?: boolean;
-  // code limbs
-  /** A few words saying what a watch or program does. */
+}
+
+interface CodeBase extends LimbBase {
+  kind: 'code';
+  /** A few words saying what it does. */
   label?: string;
-  watch?: WatchSpec;
-  code?: string;
+}
+
+export interface WatchLimb extends CodeBase {
+  role: 'watch';
+  watch: WatchSpec;
   fires: number;
   expiresAt?: number;
   /** Installed by the runtime itself; limbs cannot cancel it. */
   builtin?: boolean;
 }
+
+export interface ProgramLimb extends CodeBase { role: 'program'; code: string }
+
+export type LlmLimb = ReactiveLimb | WorkerLimb;
+export type CodeLimb = WatchLimb | ProgramLimb;
+export type LimbState = LlmLimb | CodeLimb;
 
 export interface Claim { path: string; limb: string; note: string; since: number }
 
@@ -95,23 +115,36 @@ export interface RuntimeState {
   counter: number;
 }
 
+/** A limb as views see it: one flat shape for every kind. */
+export interface LimbSnapshot {
+  id: string; kind: 'llm' | 'code'; role: LimbRole; name: string; parent?: string; model?: string; status: LimbStatus;
+  runs: { id: string; reason: string; startedAt: number; firstToolAt?: number }[];
+  task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
+  createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
+}
+
+/** The limbs as views show them, from the runtime state alone. */
+export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
+  const claims = Object.values(state.claims);
+  return Object.values(state.limbs).map(l => ({
+    id: l.id, kind: l.kind, role: l.role, name: l.name, parent: l.parent, status: l.status, createdAt: l.createdAt, endedAt: l.endedAt,
+    claims: claims.filter(c => c.limb === l.id).map(c => c.path),
+    runs: l.kind === 'llm' ? l.runs.map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt })) : [],
+    ...(l.kind === 'llm' ? { model: l.model } : { label: l.label }),
+    ...(l.role === 'task' ? { task: l.task, result: l.result, group: l.group, replyTo: l.replyTo, waitFor: l.waitFor } : {}),
+    ...(l.role === 'watch' ? { watch: l.watch, fires: l.fires } : {}),
+    ...(l.role === 'program' ? { code: l.code } : {}),
+  }));
+}
+
 export const WORKER_ACTIVE: readonly LimbStatus[] = ['running', 'queued', 'waiting'];
 
-export function workerCapabilities(codeLimbs: boolean): Capability[] {
-  return ['speak', ...(codeLimbs ? ['set_watch', 'run_program'] as Capability[] : []), 'cancel'];
-}
-
-function newLimb(init: Pick<LimbState, 'id' | 'kind' | 'role' | 'name' | 'capabilities' | 'status' | 'createdAt'> & Partial<LimbState>): LimbState {
-  return { runs: [], seenSeq: 0, crashes: [], notices: [], later: [], continuations: 0, fires: 0, ...init };
-}
+const llm = (init: Pick<LlmBase, 'id' | 'name' | 'model' | 'status' | 'createdAt'> & Partial<LlmBase>) => ({ kind: 'llm' as const, runs: [], seenSeq: 0, crashes: [], ...init });
 
 export function initialRuntimeState(setup: RuntimeSetup): RuntimeState {
-  const code: Capability[] = setup.codeLimbs ? ['set_watch', 'run_program'] : [];
-  const limbs: Record<string, LimbState> = {
-    head: newLimb({ id: 'head', kind: 'llm', role: 'head', name: 'head', model: setup.models.head, capabilities: ['speak', ...code, 'cancel', 'kill'], status: 'idle', createdAt: 0 }),
-  };
-  if (setup.review === 'separate') limbs.reviewer = newLimb({ id: 'reviewer', kind: 'llm', role: 'reviewer', name: 'reviewer', parent: 'head', model: setup.models.head, capabilities: ['speak'], status: 'idle', createdAt: 0 });
-  if (setup.models.voice) limbs.voice = newLimb({ id: 'voice', kind: 'llm', role: 'voice', name: 'voice', parent: 'head', model: setup.models.voice, capabilities: ['speak', 'cancel'], status: 'idle', createdAt: 0 });
+  const limbs: Record<string, LimbState> = { head: { ...llm({ id: 'head', name: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'head' } };
+  if (setup.review === 'separate') limbs.reviewer = { ...llm({ id: 'reviewer', name: 'reviewer', parent: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'reviewer' };
+  if (setup.models.voice) limbs.voice = { ...llm({ id: 'voice', name: 'voice', parent: 'head', model: setup.models.voice, status: 'idle', createdAt: 0 }), role: 'voice' };
   return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0 };
 }
 
@@ -141,7 +174,11 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
     if (n) state.counter = Math.max(state.counter, Number(n));
   }
   const limb = (id: unknown) => (typeof id === 'string' ? state.limbs[id] : undefined);
+  const worker = (id: unknown) => { const l = limb(id); return l?.role === 'task' ? l : undefined; };
+  const code = (id: unknown) => { const l = limb(id); return l?.kind === 'code' ? l : undefined; };
   const self = limb(by);
+  const selfLlm = self?.kind === 'llm' ? self : undefined;
+  const selfWorker = worker(by);
   /** Updates for every other running worker. */
   const notify = (text: string) => { for (const l of Object.values(state.limbs)) if (l.role === 'task' && l.status === 'running' && l.id !== by) l.notices.push(text); };
 
@@ -152,47 +189,47 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     }
     case 'run_started': {
-      if (!self) return;
-      self.runs.push({ id: String(data.run), reason: String(data.reason), startedAt: t, readSeq: event.seq - 1 });
-      self.latestRun = String(data.run);
-      self.seenSeq = event.seq - 1;
-      self.lastRunAt = t;
-      if (typeof data.notices === 'number') self.notices.splice(0, data.notices);
+      if (!selfLlm) return;
+      selfLlm.runs.push({ id: String(data.run), reason: String(data.reason), startedAt: t, readSeq: event.seq - 1 });
+      selfLlm.latestRun = String(data.run);
+      selfLlm.seenSeq = event.seq - 1;
+      selfLlm.lastRunAt = t;
+      if (selfWorker && typeof data.notices === 'number') selfWorker.notices.splice(0, data.notices);
       return;
     }
     case 'run_finished':
-      if (self) self.runs = self.runs.filter(r => r.id !== data.run);
+      if (selfLlm) selfLlm.runs = selfLlm.runs.filter(r => r.id !== data.run);
       return;
     case 'tool_called': {
-      const run = self?.runs.find(r => r.id === data.run);
+      const run = selfLlm?.runs.find(r => r.id === data.run);
       if (run) run.firstToolAt ??= t;
       return;
     }
     case 'tool_done':
-      if (self && typeof data.notices === 'number') self.notices.splice(0, data.notices);
+      if (selfWorker && typeof data.notices === 'number') selfWorker.notices.splice(0, data.notices);
       return;
     case 'limb_failed':
-      if (self) push(self.crashes, t, 10);
+      if (selfLlm) push(selfLlm.crashes, t, 10);
       return;
     case 'limb_spawned': {
       const status = (str(data.status) ?? (data.queued ? 'queued' : 'running')) as LimbStatus;
-      state.limbs[String(data.id)] = newLimb({
-        id: String(data.id), kind: 'llm', role: 'task', name: String(data.name), parent: 'head', model: str(data.model),
-        capabilities: workerCapabilities(state.setup.codeLimbs), status, createdAt: t, decidedAt: t,
-        task: String(data.task), replyTo: typeof data.reply_to === 'number' ? data.reply_to : undefined,
+      state.limbs[String(data.id)] = {
+        ...llm({ id: String(data.id), name: String(data.name), parent: 'head', model: String(data.model), status, createdAt: t, decidedAt: t }),
+        role: 'task', task: String(data.task), replyTo: typeof data.reply_to === 'number' ? data.reply_to : undefined,
         waitFor: status === 'waiting' ? str(data.after) : undefined, group: str(data.group),
+        notices: [], later: [], continuations: 0,
         // What happened before it existed is in its state and task, not news to it.
         seenSeq: event.seq,
-      });
+      };
       return;
     }
     case 'limb_started': {
-      const target = limb(data.id);
+      const target = worker(data.id);
       if (target) { target.status = 'running'; target.waitFor = undefined; }
       return;
     }
     case 'limb_queued': {
-      const target = limb(data.id);
+      const target = worker(data.id);
       if (!target) return;
       target.status = 'queued';
       target.waitFor = undefined;
@@ -200,7 +237,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     }
     case 'limb_revived': {
-      const target = limb(data.id);
+      const target = worker(data.id);
       if (!target) return;
       target.status = 'running';
       target.endedAt = undefined;
@@ -210,27 +247,27 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     }
     case 'task_continued':
-      if (self) self.continuations = Number(data.continuations);
+      if (selfWorker) selfWorker.continuations = Number(data.continuations);
       return;
     case 'cancel_requested': {
-      const target = limb(data.id);
+      const target = worker(data.id);
       if (target) target.cancelRequested = true;
       return;
     }
     case 'task_done': {
-      if (!self) return;
-      self.status = data.status as LimbStatus;
-      self.endedAt = t;
-      self.result = String(data.result ?? '');
-      state.kept = state.kept.filter(id => id !== self.id);
-      if (self.status === 'done') {
-        state.kept.push(self.id);
+      if (!selfWorker) return;
+      selfWorker.status = data.status as LimbStatus;
+      selfWorker.endedAt = t;
+      selfWorker.result = String(data.result ?? '');
+      state.kept = state.kept.filter(id => id !== selfWorker.id);
+      if (selfWorker.status === 'done') {
+        state.kept.push(selfWorker.id);
         if (state.kept.length > state.setup.keptSessions) state.kept.splice(0, state.kept.length - state.setup.keptSessions);
       }
       return;
     }
     case 'steered': {
-      const target = limb(data.id);
+      const target = worker(data.id);
       if (!target) return;
       const note = steerNote(by, String(data.text));
       if (data.when === 'after' && WORKER_ACTIVE.includes(target.status)) target.later.push(note);
@@ -238,7 +275,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     }
     case 'rerouted': {
-      const target = limb(data.from);
+      const target = worker(data.from);
       if (target && WORKER_ACTIVE.includes(target.status)) {
         target.notices.push(`The user moved their message "${String(data.text ?? '').slice(0, 200)}" to a separate worker: leave that part to it and carry on with the rest.`);
       }
@@ -291,29 +328,29 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     case 'watch_installed': {
       const watch = data.watch as unknown as WatchSpec;
-      state.limbs[String(data.id)] = newLimb({
-        id: String(data.id), kind: 'code', role: 'watch', name: String(data.name), parent: by, capabilities: [...(self?.capabilities ?? [])],
-        status: 'running', createdAt: t, decidedAt: typeof data.decided_at === 'number' ? data.decided_at : undefined,
-        watch, label: watch.label, builtin: data.builtin === true || undefined, expiresAt: watch.expires_s ? t + watch.expires_s * 1000 : undefined,
-      });
+      state.limbs[String(data.id)] = {
+        id: String(data.id), kind: 'code', role: 'watch', name: String(data.name), parent: by, status: 'running', createdAt: t,
+        decidedAt: typeof data.decided_at === 'number' ? data.decided_at : undefined, watch, label: watch.label, fires: 0,
+        builtin: data.builtin === true || undefined, expiresAt: watch.expires_s ? t + watch.expires_s * 1000 : undefined,
+      };
       return;
     }
     case 'program_started':
-      state.limbs[String(data.id)] = newLimb({
-        id: String(data.id), kind: 'code', role: 'program', name: String(data.name), parent: by, capabilities: [...(self?.capabilities ?? [])],
-        status: 'running', createdAt: t, decidedAt: typeof data.decided_at === 'number' ? data.decided_at : undefined, code: String(data.code), label: str(data.label),
-      });
+      state.limbs[String(data.id)] = {
+        id: String(data.id), kind: 'code', role: 'program', name: String(data.name), parent: by, status: 'running', createdAt: t,
+        decidedAt: typeof data.decided_at === 'number' ? data.decided_at : undefined, code: String(data.code), label: str(data.label),
+      };
       return;
     case 'watch_fired': {
       const target = limb(data.id);
-      if (target) target.fires++;
+      if (target?.role === 'watch') target.fires++;
       return;
     }
     case 'watch_removed':
     case 'program_finished':
     case 'program_failed':
     case 'program_cancelled': {
-      const target = limb(data.id);
+      const target = code(data.id);
       if (!target) return;
       target.status = (str(data.status) ?? (event.type === 'program_finished' ? 'done' : event.type === 'program_failed' ? 'failed' : 'cancelled')) as LimbStatus;
       target.endedAt = t;

@@ -503,3 +503,43 @@ test('the front limb never acts while a user message it has not read is waiting'
   expect(results[0]).toStartWith('superseded');
   expect(h.said()).toEqual(['reply to both']);
 });
+
+test('permissions come from one table per role: a limb is offered its tools, and anything else is refused', async () => {
+  const results: Record<string, string> = {};
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'hi') {
+      await call('say', { text: 'hello' });
+      results.headFinish = await call('finish_task', { result: 'x' });
+    }
+    if (input.limbId === 'reviewer') {
+      results.reviewerTools = input.tools.map(t => t.name).sort().join(',');
+      results.reviewerSay = await call('say', { text: 'sneaky' });
+      await call('amend', { seq: h.of('chat_message').find(e => e.data.text === 'hello')!.seq, verdict: 'confirm' });
+    }
+  }, { config: { review: 'separate', reviewQuietMs: 20, codeLimbs: false } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(results.headFinish).toContain('you cannot use "finish_task"');
+  expect(results.reviewerTools).toBe('amend,handoff,note,read_chat');
+  expect(results.reviewerSay).toContain('you cannot use "say"');
+  const head = h.mind.runs.find(r => r.role === 'head')!;
+  expect(head.tools.some(t => t.name === 'set_watch' || t.name === 'kill')).toBe(false); // code limbs off; kill is cancel with now
+  expect(head.system).not.toContain('set_watch installs a watch');
+  expect(h.mind.runs.find(r => r.limbId === 'reviewer')!.system).not.toContain('set_watch');
+});
+
+test('cancel with now stops a worker at once, dropping partial work', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop now') await call('cancel', { id: 'worker-3', now: true });
+    if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
+  }, { config: { cancelGraceMs: 5000 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'start' });
+  await until(() => h.of('limb_spawned').length === 1);
+  h.entity.input('chat_message', { text: 'stop now' });
+  await until(() => h.of('task_done').length === 1);
+  expect(h.of('task_done')[0].data.status).toBe('killed');
+  expect(h.of('cancel_requested')).toHaveLength(0);
+});
