@@ -47,9 +47,7 @@ export function AgentRunSummaryLine({
   const showPreRunDuration = normalizedPreRunDurationMs >= 1_000;
   const summaryLabel =
     label ??
-    (showPreRunDuration
-      ? `${active ? 'Working for' : 'Completed in'} ${formatWorkingDuration(normalizedPreRunDurationMs + durationMs)}`
-      : `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`);
+    `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`;
   const content = (
     <>
       {leading ? <span className="flex flex-none items-center">{leading}</span> : null}
@@ -61,6 +59,7 @@ export function AgentRunSummaryLine({
       >
         {summaryLabel}
       </span>
+      {showPreRunDuration ? <span className="text-compact text-[var(--muted-dim)]">Queued {formatWorkingDuration(normalizedPreRunDurationMs)}</span> : null}
       {detail ? <span className="text-compact text-[var(--muted-dim)]">{detail}</span> : null}
       {at ? (
         <RelativeTimeText
@@ -141,4 +140,14 @@ export function CreatingNewChatStatus() {
       />
     </div>
   );
+}
+
+export function QueuedElapsedStatus({ submittedAt }: { submittedAt: string }) {
+  const [now, setNow] = React.useState(Date.now);
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const start = Date.parse(submittedAt);
+  return <span>{Number.isFinite(start) ? `Queued for ${formatWorkingDuration(now - start)}` : 'Queued'}</span>;
 }

@@ -4,6 +4,15 @@ export type PendingPromptState = (typeof PENDING_PROMPT_STATES)[number];
 
 export type PendingPromptPriority = 'queue' | 'asap';
 
+/** Delivery to the runner does not mean that execution has started. */
+export function pendingPromptIsWaiting(prompt: {
+  state?: unknown;
+  executionState?: unknown;
+} | null | undefined): boolean {
+  return prompt?.state === 'queued' ||
+    (prompt?.state === 'sent' && prompt.executionState === 'queued');
+}
+
 export type PendingPromptRecord = Record<string, unknown> & {
   id?: unknown;
   state?: unknown;

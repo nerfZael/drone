@@ -433,3 +433,14 @@ describe('drone pending prompt store', () => {
     expect(keptRecent.map((item) => item.id)).toEqual(['done-1']);
   });
 });
+
+
+test('preserves daemon execution state when presenting pending prompts', () => {
+  for (const executionState of ['queued', 'running'] as const) {
+    const [prompt] = pendingPromptStore.pendingPromptsFromChatEntry({
+      pendingPrompts: [{ id: 'delivered', at: '2026-09-25T00:26:13Z', prompt: 'Fix the crash', state: 'sent', executionState }],
+    });
+    expect(prompt?.state).toBe('sent');
+    expect(prompt?.executionState).toBe(executionState);
+  }
+});

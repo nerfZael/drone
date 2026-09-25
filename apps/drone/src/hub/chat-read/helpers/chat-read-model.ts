@@ -1,4 +1,4 @@
-import { completedTurnIds, normalizePendingPromptState } from '@drone/assistant-chat';
+import { completedTurnIds, normalizePendingPromptState, pendingPromptIsWaiting } from '@drone/assistant-chat';
 import type {
   AssistantChatIdleStatus,
   AssistantChatIdleTarget,
@@ -33,6 +33,7 @@ type ChatReadPrompt = {
   at?: string;
   prompt?: string;
   state?: string;
+  executionState?: 'queued' | 'running';
 };
 
 export type ChatReadSnapshot = {
@@ -83,7 +84,7 @@ export function summarizeChatActivity(
   );
   const activeUserMessages = Math.max(active.length, runtimeBusy ? 1 : 0);
   const queuedUserMessages = pending.filter(
-    (prompt) => normalizePendingPromptState(prompt.state, 'queued') === 'queued',
+    (prompt) => normalizePendingPromptState(prompt.state, 'queued') === 'queued' || pendingPromptIsWaiting(prompt),
   ).length;
   const history =
     snapshot.agent?.kind === 'native'
@@ -101,7 +102,7 @@ export function summarizeChatActivity(
     candidates.push({
       id: `user:${prompt.id}`,
       role: 'user',
-      status: normalizePendingPromptState(prompt.state, 'queued'),
+      status: pendingPromptIsWaiting(prompt) ? 'queued' : normalizePendingPromptState(prompt.state, 'queued'),
       at: String(prompt.at ?? ''),
       text: String(prompt.prompt ?? ''),
       turnId: prompt.id,

@@ -35,11 +35,37 @@ describe('external prompt job scheduling', () => {
   test('ignores jobs that are not queued', () => {
     expect(
       selectNextPromptJobId([
-        job('running-asap', 'asap', 'running'),
+        job('canceled-asap', 'asap', 'canceled'),
         job('done-asap', 'asap', 'done'),
         job('queued', 'queue'),
       ]),
     ).toBe('queued');
     expect(selectNextPromptJobId([job('done', 'queue', 'done')])).toBeNull();
+  });
+});
+
+
+describe('per-chat execution slots', () => {
+  const active = { ...job('active', 'queue', 'running'), chatKey: 'graphics' };
+  test('runs another chat while preserving same-chat ordering, including ASAP', () => {
+    expect(selectNextPromptJobId([
+      active,
+      { ...job('same-chat-asap', 'asap'), chatKey: 'graphics' },
+      { ...job('crash-fix'), chatKey: 'crash' },
+    ])).toBe('crash-fix');
+  });
+  test('restored running records reserve the same chat after restart', () => {
+    const restored = JSON.parse(JSON.stringify(active));
+    expect(selectNextPromptJobId([restored, { ...job('next'), chatKey: 'graphics' }])).toBeNull();
+    restored.state = 'canceled';
+    expect(selectNextPromptJobId([restored, { ...job('next'), chatKey: 'graphics' }])).toBe('next');
+  });
+  test('legacy stream identities isolate chats and unknown jobs retain exclusivity', () => {
+    const stream = { ...job('stream', 'queue', 'running'), claudeStream: { sessionKey: 'one' } };
+    expect(selectNextPromptJobId([stream, { ...job('two'), claudeStream: { sessionKey: 'two' } }])).toBe('two');
+    expect(selectNextPromptJobId([stream, { ...job('same'), chatKey: 'stable-id', claudeStream: { sessionKey: 'one' } }])).toBeNull();
+    expect(selectNextPromptJobId([active, { ...job('same'), chatKey: 'graphics', claudeStream: { sessionKey: 'new-stream' } }])).toBeNull();
+    expect(selectNextPromptJobId([stream, job('unknown')])).toBeNull();
+    expect(selectNextPromptJobId([job('unknown', 'queue', 'running'), { ...job('next'), chatKey: 'known' }])).toBeNull();
   });
 });

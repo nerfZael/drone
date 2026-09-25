@@ -68,6 +68,7 @@ export type DroneSummary = {
   >;
   draftChats?: Record<string, boolean>;
   busyChats?: string[];
+  queuedChats?: string[];
   approvalChats?: string[];
   approvalRequired?: boolean;
   dockerSize?: {
@@ -622,6 +623,7 @@ export type PendingPrompt = {
   action?: ChatQueueAction;
   // `queued` is waiting for earlier work or for a provisioning drone to become ready.
   state: PendingPromptState;
+  executionState?: 'queued' | 'running';
   error?: string;
   observability?: {
     state: 'status-unavailable';

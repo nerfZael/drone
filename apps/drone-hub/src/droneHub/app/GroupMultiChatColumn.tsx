@@ -1,3 +1,5 @@
+import { chatExecutionOrder } from './chat-execution-order';
+import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
 import { useWindowChatModelControls } from './use-window-chat-model-controls';
@@ -970,6 +972,7 @@ export function GroupMultiChatColumn({
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
+  const executionOrder = chatExecutionOrder(timelineGroups);
   const latestCompletedAgentGroupIndex = latestCompletedAgentTurnGroupIndex(timelineGroups);
   let latestFileChangesGroupIndex = -1;
   for (let index = timelineGroups.length - 1; index >= 0; index -= 1) {
@@ -1223,6 +1226,7 @@ export function GroupMultiChatColumn({
                   <TranscriptTurn
                     key={messageId}
                     item={item}
+                    executionOrderNote={executionOrder.notes.get(index)}
                     followUps={followUps}
                     autoExpandAgentMessage={index === latestCompletedAgentGroupIndex}
                     initiallyExpandFileChanges={
@@ -1242,6 +1246,7 @@ export function GroupMultiChatColumn({
                 <PendingTranscriptTurn
                   key={`${drone.id}:pending:${item.id}`}
                   item={groupedPendingPresentationItem(group) ?? item}
+                  executionOrderNote={executionOrder.notes.get(index)}
                   followUps={followUps}
                   autoExpandPrompt={latest}
                   initiallyExpandFileChanges={index === latestFileChangesGroupIndex && latest}
@@ -1263,6 +1268,7 @@ export function GroupMultiChatColumn({
                 />
               );
             })}
+            {executionOrder.activeEarlier ? <EarlierRequestWorkingNotice {...executionOrder.activeEarlier} /> : null}
           </div>
         ) : (
           <EmptyState

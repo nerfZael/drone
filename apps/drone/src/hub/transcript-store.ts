@@ -81,6 +81,7 @@ export type StoredPendingPrompt = {
   cwd?: string | null;
   attachments?: unknown;
   state: string;
+  executionState?: 'queued' | 'running';
   error?: string;
   observability?: unknown;
   blipClones?: unknown;

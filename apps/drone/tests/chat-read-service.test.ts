@@ -16,6 +16,13 @@ const snapshot: ChatReadSnapshot = {
   pending: [],
 };
 
+test('idle status counts daemon-queued messages as waiting after delivery', () => {
+  expect(summarizeChatActivity({
+    ...snapshot,
+    pending: [{ id: 'delivered', state: 'sent', executionState: 'queued', prompt: 'Waiting' }],
+  })).toMatchObject({ idle: false, queuedUserMessages: 1, latest: { status: 'queued' } });
+});
+
 test('read service bounds requests, reports older history and removes completed delivery records', async () => {
   let request: any;
   const service = new ChatReadService(async (input) => {

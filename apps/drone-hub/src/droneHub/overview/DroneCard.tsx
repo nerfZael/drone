@@ -106,6 +106,7 @@ export type SidebarChatStateSummary = {
 
 export type SidebarDroneDisplayState =
   | 'working'
+  | 'queued'
   | 'approval'
   | 'waiting'
   | 'starting'
@@ -148,6 +149,7 @@ export function sidebarDroneDisplayState(
     return 'working';
   }
 
+  if (includeChatActivity && drone.queuedChats?.length) return 'queued';
   return sidebarDroneInactiveDisplayState(drone);
 }
 
@@ -155,9 +157,11 @@ export function sidebarChatDisplayState(
   drone: DroneSummary,
   busy = false,
   approvalRequired = false,
+  queued = false,
 ): SidebarDroneDisplayState {
   if (approvalRequired) return 'approval';
   if (busy) return 'working';
+  if (queued) return 'queued';
   return sidebarDroneInactiveDisplayState(drone);
 }
 
@@ -180,7 +184,7 @@ export function sidebarItemStateToneClass(
   }
   if (state === 'approval') return 'text-[var(--yellow)]';
   if (unread && state === 'idle') return 'text-[var(--green)]';
-  if (state === 'waiting') return 'text-[var(--info)]';
+  if (state === 'waiting' || state === 'queued') return 'text-[var(--info)]';
   if (state === 'blocked' || state === 'offline') return 'text-[var(--red)]';
   return 'text-[var(--muted)]';
 }
@@ -220,6 +224,10 @@ export function SidebarItemStateIndicator({
         <SidebarArchiveStatusIndicator />
       ) : state === 'deleting' ? (
         <SidebarDeletingStatusIndicator />
+      ) : state === 'queued' ? (
+        <svg data-sidebar-queued-indicator="true" className="h-3 w-3 text-[var(--info)]" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+          <circle cx="6" cy="6" r="4.5" /><path d="M6 3v3l2 1" />
+        </svg>
       ) : working ? (
         <SidebarWorkingStatusIndicator />
       ) : approvalRequired ? (
@@ -487,6 +495,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     (a.drone.chats ?? []).join('\u0000') === (b.drone.chats ?? []).join('\u0000') &&
     (a.drone.unreadChats ?? []).join('\u0000') === (b.drone.unreadChats ?? []).join('\u0000') &&
     (a.drone.busyChats ?? []).join('\u0000') === (b.drone.busyChats ?? []).join('\u0000') &&
+    (a.drone.queuedChats ?? []).join('\u0000') === (b.drone.queuedChats ?? []).join('\u0000') &&
     (a.drone.approvalChats ?? []).join('\u0000') === (b.drone.approvalChats ?? []).join('\u0000') &&
     Boolean(a.drone.approvalRequired) === Boolean(b.drone.approvalRequired) &&
     Boolean(a.drone.busy) === Boolean(b.drone.busy) &&

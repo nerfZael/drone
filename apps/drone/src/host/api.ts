@@ -427,6 +427,7 @@ export async function promptEnqueue(
   client: DroneClient,
   payload: {
     id: string;
+    chatKey?: string;
     kind?: string;
     cmd: string;
     args?: string[];

@@ -60,6 +60,7 @@ export type PromptQueueItem = {
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PromptQueueState;
+  executionState?: 'queued' | 'running';
   error?: string;
   observability?: unknown;
   blipClones?: unknown;
@@ -1275,6 +1276,7 @@ export class PromptQueueRepository {
         | 'fileChanges'
         | 'action'
         | 'queueInterruption'
+        | 'executionState'
         | 'startedAt'
         | 'updatedAt'
       >

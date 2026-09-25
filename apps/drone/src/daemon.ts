@@ -95,6 +95,7 @@ type SessionProbe = {
 
 type PromptJob = {
   id: string;
+  chatKey?: string;
   kind: string;
   cmd: string;
   args: string[];
@@ -1717,24 +1718,23 @@ async function main() {
       }
     }
 
-    // Start next queued if none running.
-    const anyRunning = Array.from(jobById.values()).some(
-      (job) => job.state === 'running' && !job.codexAppServer,
-    );
-    if (anyRunning) return;
-
-    const candidates = Array.from(jobById.values()).filter((job) => !job.codexAppServer);
-    const startId = selectNextPromptJobId(candidates);
-    if (!startId) return;
-    const job = await loadPromptJob(promptsDir, startId);
-    if (!job) return;
-    const startedAt = nowIso();
-    const running: PromptJob = {
-      ...job, state: 'running', startedAt, updatedAt: startedAt,
-      ...(job.claudeStream ? { claudeStream: { ...job.claudeStream, runId: job.id } } : {}),
-    };
-    await savePromptJob(promptsDir, running);
-    await startPromptJob(running);
+    // Reserve and start one job per chat. The durable running state also
+    // preserves this boundary after daemon restarts and during cancellation.
+    while (true) {
+      const candidates = Array.from(jobById.values()).filter((job) => !job.codexAppServer);
+      const startId = selectNextPromptJobId(candidates);
+      if (!startId) return;
+      const job = await loadPromptJob(promptsDir, startId);
+      if (!job) return;
+      const startedAt = nowIso();
+      const running: PromptJob = {
+        ...job, state: 'running', startedAt, updatedAt: startedAt,
+        ...(job.claudeStream ? { claudeStream: { ...job.claudeStream, runId: job.id } } : {}),
+      };
+      await savePromptJob(promptsDir, running);
+      jobById.set(running.id, running);
+      await startPromptJob(running);
+    }
   }
 
   function pumpPrompts(): Promise<void> {
@@ -1989,6 +1989,8 @@ async function main() {
           kind,
           cmd,
           args,
+          ...(typeof body.chatKey === 'string' && body.chatKey.trim()
+            ? { chatKey: body.chatKey.trim() } : {}),
           cwd,
           env,
           createdAt,

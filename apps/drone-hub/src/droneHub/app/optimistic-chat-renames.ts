@@ -52,6 +52,7 @@ export function applyOptimisticChatRenames(drone: DroneSummary, renamesRaw: Reco
     draftChats: renameKeys(drone.draftChats, renames),
     unreadChats: renameList(drone.unreadChats, renames),
     busyChats: renameList(drone.busyChats, renames),
+    queuedChats: renameList(drone.queuedChats, renames),
     approvalChats: renameList(drone.approvalChats, renames),
     lastActivityChat: drone.lastActivityChat ? renameEntry(drone.lastActivityChat, renames) : drone.lastActivityChat,
   };

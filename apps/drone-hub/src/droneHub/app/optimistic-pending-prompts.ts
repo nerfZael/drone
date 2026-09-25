@@ -76,10 +76,11 @@ export function optimisticPendingPromptState(
 }
 
 export function pendingPromptShowsWorkingState(
-  item: Pick<PendingPrompt, 'state' | 'action'> | null | undefined,
+  item: Pick<PendingPrompt, 'state' | 'action' | 'executionState'> | null | undefined,
 ): boolean {
   const actionPresentation = resolveChatQueueActionPresentation(item?.action, item?.state ?? '');
   if (actionPresentation && !actionPresentation.countsAsAgentRun) return false;
+  if (item?.state === 'sent' && item.executionState === 'queued') return false;
   return isActivePendingPrompt(item);
 }
 

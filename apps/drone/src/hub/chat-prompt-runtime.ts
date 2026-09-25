@@ -518,6 +518,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             client,
             {
               id: String(opts.id ?? ''),
+              chatKey: `chat:${droneId}:${opts.usage.chatId}`,
               kind: opts.kind,
               cmd: 'bash',
               args: ['-lc', opts.script],
@@ -538,6 +539,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           client,
           {
             id: String(opts.id ?? ''),
+            chatKey: `chat:${droneId}:${opts.usage.chatId}`,
             kind: opts.kind,
             cmd: 'bash',
             args: ['-lc', opts.script],
@@ -2798,6 +2800,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (
         pendingPromptKeepsChatBusy({
           state: st,
+          executionState: p.executionState,
           hasTurn: Boolean(id && doneIds.has(id)),
           native,
           countsAsAgentRun: !isSendInNewChatQueueAction(p?.action),

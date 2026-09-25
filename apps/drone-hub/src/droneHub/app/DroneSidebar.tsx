@@ -535,6 +535,7 @@ function ReadOnlySidebarGroups({
                               chatBusy,
                               droneChatRequiresApproval(drone, chatName) ||
                                 Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                              (drone.queuedChats ?? []).includes(chatName),
                             );
                             const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
                             return (
@@ -787,6 +788,7 @@ function StaticReadOnlySidebarTree({
                 chatBusy,
                 droneChatRequiresApproval(drone, chatName) ||
                   Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                (drone.queuedChats ?? []).includes(chatName),
               );
               const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
               return (
@@ -3152,6 +3154,7 @@ export function DroneSidebar({
                                     chatBusy,
                                     droneChatRequiresApproval(drone, chatName) ||
                                       Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                                    (drone.queuedChats ?? []).includes(chatName),
                                   );
                                   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
                                   return (

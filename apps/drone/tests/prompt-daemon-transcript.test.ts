@@ -335,7 +335,9 @@ lines.on('close', () => { clearInterval(timer); });
     const readJob = async (id: string) => (await (await fetch(`${baseUrl}/v1/prompts/${id}`, { headers })).json() as any).job;
     expect((await readJob(initial)).claudeStream.outputOwner).toBe(false);
     expect((await readJob(queued)).state).toBe('queued');
-    expect((await readJob(other)).state).toBe('queued');
+    // A different chat finishes while the initial chat is still running.
+    await waitForPromptJob(baseUrl, token, other);
+    expect((await readJob(initial)).state).toBe('running');
 
     daemon.kill();
     await daemon.exited;
@@ -358,8 +360,9 @@ lines.on('close', () => { clearInterval(timer); });
     await waitForPromptJob(baseUrl, token, queued);
     await waitForPromptJob(baseUrl, token, other);
     const received = fs.readFileSync(receivedPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
-    expect(received.map((item) => item.prompt)).toEqual(['initial', 'first ASAP', 'second ASAP', 'queued', 'queued']);
-    expect(new Set(received.slice(0, 3).map((item) => item.pid)).size).toBe(1);
+    expect(received.filter((item) => item.prompt !== 'queued').map((item) => item.prompt)).toEqual(['initial', 'first ASAP', 'second ASAP']);
+    expect(received.filter((item) => item.prompt === 'queued')).toHaveLength(2);
+    expect(new Set(received.filter((item) => item.prompt !== 'queued').map((item) => item.pid)).size).toBe(1);
     expect(new Set(received.map((item) => item.pid)).size).toBe(3);
 
     // Stopping any member stops the shared run and settles every member.
@@ -370,10 +373,15 @@ lines.on('close', () => { clearInterval(timer); });
     await waitForRunningPromptJob(baseUrl, token, cancelInitial, (job) => String(job.stdout).includes('initial'));
     await enqueue(cancelFollowUp, 'first ASAP', 'asap');
     await waitForRunningPromptJob(baseUrl, token, cancelFollowUp, (job) => String(job.stdout).includes('first ASAP'));
+    const independent = `claude-independent-${port}`;
+    await enqueue(independent, 'initial', 'queue', 'independent-chat');
+    await waitForRunningPromptJob(baseUrl, token, independent, (job) => String(job.stdout).includes('initial'));
     const cancelResponse = await fetch(`${baseUrl}/v1/prompts/${cancelFollowUp}/cancel`, { method: 'POST', headers });
     expect(cancelResponse.ok).toBe(true);
     expect((await readJob(cancelInitial)).state).toBe('canceled');
     expect((await readJob(cancelFollowUp)).state).toBe('canceled');
+    expect((await readJob(independent)).state).toBe('running');
+    await fetch(`${baseUrl}/v1/prompts/${independent}/cancel`, { method: 'POST', headers });
   }, 30_000);
 
   test('persists the final Codex transcript message when stored stdout is truncated', async () => {

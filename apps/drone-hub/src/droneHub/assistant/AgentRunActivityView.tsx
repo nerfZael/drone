@@ -163,7 +163,7 @@ export function AgentRunActivityView({
                 hasActivityDetails && hasPlan ? 'col-span-2' : ''
               }`}
             >
-              Started in {formatWorkingDuration(normalizedPreRunDurationMs)} · agent{' '}
+              Queued for {formatWorkingDuration(normalizedPreRunDurationMs)} · agent{' '}
               {formatWorkingDuration(durationMs)}
             </div>
           ) : null}

@@ -714,7 +714,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     !active &&
     ((drone.unreadChats ?? []).includes(chatName) ||
       unreadAgentMessageByChatNodeId[chatNodeId] === true);
-  const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
+  const chatState = sidebarChatDisplayState(
+    drone, chatBusy, approvalRequired, (drone.queuedChats ?? []).includes(chatName),
+  );
   const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
   const actionState = droneActionState(droneOperations, drone.id);
   const chatActionsDisabled =
@@ -982,7 +984,9 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
     !active &&
     ((drone.unreadChats ?? []).includes(chatName) ||
       unreadAgentMessageByChatNodeId[chatNodeId] === true);
-  const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
+  const chatState = sidebarChatDisplayState(
+    drone, chatBusy, approvalRequired, (drone.queuedChats ?? []).includes(chatName),
+  );
   const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
   return (
     <div className="flex flex-col gap-0.5" data-sidebar-chat-depth={depth}>

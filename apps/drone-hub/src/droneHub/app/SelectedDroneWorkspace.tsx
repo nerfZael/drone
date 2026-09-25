@@ -1,3 +1,5 @@
+import { chatExecutionOrder } from './chat-execution-order';
+import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
@@ -1471,6 +1473,7 @@ export function SelectedDroneWorkspace({
     />
   ) : null;
 
+  const executionOrder = chatExecutionOrder(externalTimelineGroups);
   const latestCompletedAgentGroupIndex = latestCompletedAgentTurnGroupIndex(externalTimelineGroups);
   let latestFileChangesGroupIndex = -1;
   for (let index = externalTimelineGroups.length - 1; index >= 0; index -= 1) {
@@ -1532,6 +1535,7 @@ export function SelectedDroneWorkspace({
         content: ({ isLatestActivity }) => (
           <PendingTranscriptTurn
             item={presentationPrompt}
+            executionOrderNote={executionOrder.notes.get(groupIndex)}
             showRoleIcons={false}
             onCancelQueued={requestCancelPendingPrompt}
             onOpenFileReference={onOpenMarkdownFileReference}
@@ -1565,6 +1569,7 @@ export function SelectedDroneWorkspace({
         content: ({ isLatestActivity }) => (
           <TranscriptTurn
             item={turn}
+            executionOrderNote={executionOrder.notes.get(groupIndex)}
             autoExpandAgentMessage={groupIndex === latestCompletedAgentGroupIndex}
             followUps={followUps}
             initiallyExpandFileChanges={
@@ -1614,6 +1619,12 @@ export function SelectedDroneWorkspace({
         });
       }
     }
+  }
+  if (executionOrder.activeEarlier) {
+    externalTranscriptItems.push({
+      key: 'earlier-request-working', kind: 'status',
+      content: <EarlierRequestWorkingNotice {...executionOrder.activeEarlier} />,
+    });
   }
   if (pendingEvents.deliveries.length || pendingEvents.error) {
     externalTranscriptItems.push({

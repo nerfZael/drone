@@ -47,6 +47,7 @@ export type PendingPrompt = {
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PendingPromptState;
+  executionState?: 'queued' | 'running';
   error?: string;
   observability?: {
     state: 'status-unavailable';
@@ -199,6 +200,8 @@ export function createDronePendingPromptStore(deps: {
             ? { action: p.action as ChatQueueAction }
             : {}),
           state: normalizeSharedPendingPromptState(p?.state),
+          ...(p?.executionState === 'queued' || p?.executionState === 'running'
+            ? { executionState: p.executionState as 'queued' | 'running' } : {}),
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
           activity: normalizeAgentRunActivity((p as any)?.activity),
@@ -635,6 +638,7 @@ export function createDronePendingPromptStore(deps: {
         | 'action'
         | 'queueInterruption'
         | 'startedAt'
+        | 'executionState'
         | 'updatedAt'
       >
     >;

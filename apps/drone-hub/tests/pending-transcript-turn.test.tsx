@@ -47,7 +47,7 @@ describe('external pending transcript turn', () => {
     expect(html.match(/1m ago/g)).toHaveLength(1);
   });
 
-  test('keeps the queued badge only while the prompt has not been sent', () => {
+  test('shows queue status before delivery', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
         item={pendingPrompt({ state: 'queued' })}
@@ -58,7 +58,7 @@ describe('external pending transcript turn', () => {
 
     expect(html).toContain('Queued');
     expect(html).toContain('Inspect the repository');
-    expect(html).toContain('aria-label="Queued, waiting to send"');
+    expect(html).toContain('aria-label="Queued, waiting to start"');
     expect(html).toContain('aria-label="Cancel queued prompt"');
     expect(html).toContain('>Cancel</button>');
     expect(html).not.toContain('border-t border-[var(--user-border)]');
@@ -160,7 +160,7 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('Waiting to create a fresh chat');
   });
 
-  test('keeps the live total elapsed after a queued start without showing the split', () => {
+  test('separates agent runtime from time spent in the queue', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
         item={pendingPrompt({
@@ -170,7 +170,8 @@ describe('external pending transcript turn', () => {
       />,
     );
 
-    expect(html).toMatch(/Working for 1h 0m \d+s/);
+    expect(html).toMatch(/Working for 1m \d+s/);
+    expect(html).toContain('Queued 58m');
     expect(html).not.toContain('Started in');
   });
 
@@ -231,7 +232,7 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('data-agent-run-plan="true"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-label="Collapse run details"');
-    expect(html).toMatch(/Started in 58m \d+s · agent 1m \d+s/);
+    expect(html).toMatch(/Queued for 58m \d+s · agent 1m \d+s/);
     expect(html).toContain('grid grid-cols-2 items-start gap-2');
     expect(html).toContain('border-l border-[var(--border-subtle)] px-3');
     expect(html).toContain('dh-agent-activity-scrollbar');
@@ -386,4 +387,15 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('>Skip and run queued</button>');
     expect(html).not.toContain('>Cancel queued</button>');
   });
+});
+
+
+test('a delivered but daemon-queued prompt shows elapsed queue time without a working timer', () => {
+  const html = renderToStaticMarkup(<PendingTranscriptTurn item={pendingPrompt({
+    state: 'sent', executionState: 'queued', startedAt: undefined,
+    at: new Date(Date.now() - 125_000).toISOString(),
+  })} />);
+  expect(html).toMatch(/Queued for 2m \d+s/);
+  expect(html).not.toContain('Working for');
+  expect(html).not.toContain('data-chat-working');
 });

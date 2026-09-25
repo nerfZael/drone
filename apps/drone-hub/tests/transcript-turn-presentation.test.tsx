@@ -144,7 +144,7 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('bottom-full left-0');
   });
 
-  test('includes pre-agent time in the total without cluttering the summary', () => {
+  test('shows agent duration and queue time separately', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn
         item={{
@@ -163,7 +163,8 @@ describe('completed external transcript presentation', () => {
       />,
     );
 
-    expect(html).toContain('Completed in 1h 1m 5s');
+    expect(html).toContain('Worked for 1m 5s');
+    expect(html).toContain('Queued 1h 0m 0s');
     expect(html).not.toContain('Started in');
   });
 
@@ -227,7 +228,8 @@ describe('completed external transcript presentation', () => {
     );
 
     expect(html).toContain('data-agent-run-activity="codex"');
-    expect(html).toContain('Completed in 2s');
+    expect(html).toContain('Worked for 1s');
+    expect(html).toContain('Queued 1s');
     expect(html).toContain('1 tool call');
     expect(html).not.toContain('Started in');
     expect(html).toContain('1 tool call');

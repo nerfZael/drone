@@ -21,6 +21,7 @@ export function pendingPromptKeepsChatBusy(opts: {
   hasTurn: boolean;
   native: boolean;
   countsAsAgentRun?: boolean;
+  executionState?: 'queued' | 'running';
 }): boolean {
   if (opts.countsAsAgentRun === false) return false;
   const state = String(opts.state ?? '').trim();
@@ -29,6 +30,7 @@ export function pendingPromptKeepsChatBusy(opts: {
   // yet. Keep it visible in the queue without promoting the chat/drone to the
   // busy state.
   if (state === 'queued') return false;
+  if (state === 'sent' && opts.executionState === 'queued') return false;
   if (state === 'sending') return true;
   if (opts.native && state === 'sent') return false;
   return !opts.hasTurn;

@@ -1,3 +1,4 @@
+import { queuedChatNames } from './queued-chat-names';
 import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion/companion-attachments';
 import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
@@ -5301,6 +5302,7 @@ async function startDroneHubApiServerWithLifecycle(
       chatReadStates,
       draftChats,
       busyChats,
+      queuedChats: queuedChatNames(d.chats).filter((name) => !workflowChatSet.has(name)),
       approvalChats,
       approvalRequired: approvalChats.length > 0,
       hubPhase,

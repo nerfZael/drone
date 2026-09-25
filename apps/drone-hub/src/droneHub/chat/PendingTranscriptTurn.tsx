@@ -1,5 +1,7 @@
 import React from 'react';
+import { ChatExecutionNotice } from './ChatExecutionNotice';
 import {
+  pendingPromptIsWaiting,
   agentRunFailurePresentation,
   parseEventNotificationPrompt,
   isStoppedRunError,
@@ -21,7 +23,7 @@ import {
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { AgentPlanList } from './AgentPlanList';
-import { CreatingNewChatStatus, WorkingElapsedStatus } from './WorkingElapsedStatus';
+import { CreatingNewChatStatus, QueuedElapsedStatus, WorkingElapsedStatus } from './WorkingElapsedStatus';
 import { UserChatMessage, type UserChatMessageFollowUp } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
@@ -32,6 +34,7 @@ import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './Subscript
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
+  executionOrderNote,
   showRoleIcons = false,
   onCancelQueued,
   onResolveInterruption,
@@ -53,6 +56,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   followUps = [],
 }: {
   item: PendingPrompt;
+  executionOrderNote?: string;
   showRoleIcons?: boolean;
   onCancelQueued?: (promptId: string) => Promise<void> | void;
   onResolveInterruption?: (
@@ -80,6 +84,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
   const isFailed = item.state === 'failed';
+  const isWaiting = pendingPromptIsWaiting(item);
   const observability =
     item.observability?.state === 'status-unavailable'
       ? {
@@ -119,14 +124,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     Boolean(onCancelQueued) &&
     (!notification || bundleHasHuman) &&
     (actionPresentation?.canCancel ?? item.state === 'queued');
-  const showAgentPendingBubble = !actionPresentation && !(item.state === 'queued' && !isFailed);
+  const showAgentPendingBubble = !actionPresentation && !isWaiting;
   // Once activity is streaming, the run summary line carries the status. The
   // bubble is only worth its padding when it has something else to say.
   const pendingBubbleHasContent =
     isFailed || !activity || Boolean(observability) || Boolean(cancelError) || isAgentRunFileChanges(item.fileChanges);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const queuedFooter =
-    item.state === 'queued' && !createNewChatBusy ? (
+    isWaiting && !createNewChatBusy ? (
       <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] pt-2">
         <span
           role="status"
@@ -135,14 +140,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               ? 'Queued, waiting to create a fresh chat'
               : item.deliveryMode === 'asap'
                 ? 'ASAP, waiting for the next safe delivery point'
-                : 'Queued, waiting to send'
+                : 'Queued, waiting to start'
           }
           title={
             actionPresentation
               ? 'Creates a fresh chat after earlier messages finish'
               : item.deliveryMode === 'asap'
                 ? 'Will run before queued follow-ups'
-                : 'Waiting to send'
+                : 'Waiting to start'
           }
           className="inline-flex items-center gap-1.5 text-10 font-[var(--weight-semibold)] text-[var(--user-muted)]"
         >
@@ -159,8 +164,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           {actionPresentation
             ? 'Waiting to create a fresh chat'
             : item.deliveryMode === 'asap'
-              ? 'ASAP'
-              : 'Queued'}
+              ? <><span>ASAP · </span><QueuedElapsedStatus submittedAt={item.at} /></>
+              : <QueuedElapsedStatus submittedAt={item.at} />}
         </span>
         <div className="flex items-center gap-1.5">
           {actionPresentation?.canExecuteNow && onCreateNewChatNow ? (
@@ -205,7 +210,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 
   return (
     <div
-      data-chat-working={!isFailed && item.state !== 'queued' ? 'true' : undefined}
+      data-chat-working={!isFailed && !isWaiting ? 'true' : undefined}
+      data-pending-prompt-id={item.id}
       className={`group/turn animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
       {isSubscriptionEvent ? (
@@ -273,7 +279,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         />
       )}
 
-      {activity && !isFailed ? (
+      <ChatExecutionNotice text={executionOrderNote} />
+
+      {activity && !isFailed && !isWaiting ? (
         <AgentRunActivityView
           activity={activity}
           active

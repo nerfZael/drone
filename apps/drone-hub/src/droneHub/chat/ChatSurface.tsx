@@ -57,7 +57,7 @@ export function ChatSurfaceTranscript({
   children,
 }: ChatSurfaceTranscriptProps) {
   return (
-    <div className="relative min-h-0 flex-1">
+    <div data-chat-transcript-surface="true" className="relative min-h-0 flex-1">
       <ChatTranscriptFrame
         ref={scrollRef}
         contentRef={contentRef}

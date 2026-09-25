@@ -198,3 +198,9 @@ describe('pending prompt shutdown', () => {
     await pump.stop();
   });
 });
+
+
+test('daemon-queued delivery is not a running agent', () => {
+  expect(pendingPromptKeepsChatBusy({ state: 'sent', executionState: 'queued', native: false, hasTurn: false })).toBe(false);
+  expect(pendingPromptKeepsChatBusy({ state: 'sent', executionState: 'running', native: false, hasTurn: false })).toBe(true);
+});

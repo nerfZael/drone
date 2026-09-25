@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChatExecutionNotice } from './ChatExecutionNotice';
 import {
   agentRunFailurePresentation,
   agentRunActivityHasResponse,
@@ -78,6 +79,7 @@ function sameFollowUps(a: UserChatMessageFollowUp[], b: UserChatMessageFollowUp[
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
     item,
+    executionOrderNote,
     messageId,
     onRollbackDockerSnapshot,
     onOpenFileReference,
@@ -95,6 +97,7 @@ export const TranscriptTurn = React.memo(
     loadActivity,
   }: {
     item: TranscriptItem;
+    executionOrderNote?: string;
     messageId: string;
     onRollbackDockerSnapshot?: (item: TranscriptItem) => void | Promise<void>;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
@@ -335,6 +338,8 @@ export const TranscriptTurn = React.memo(
           />
         )}
 
+        <ChatExecutionNotice text={executionOrderNote} />
+
         {completedRunDurationMs !== null && !activity && !activitySummary && !isSilentCompletion && !isUserOnly ? (
           <AgentRunSummaryLine
             active={false}
@@ -523,6 +528,9 @@ export const TranscriptTurn = React.memo(
     );
   },
   (a, b) =>
+    a.executionOrderNote === b.executionOrderNote &&
+    a.item.startedAt === b.item.startedAt &&
+    a.item.completedAt === b.item.completedAt &&
     a.item.id === b.item.id &&
     a.item.turn === b.item.turn &&
     a.item.at === b.item.at &&

@@ -404,6 +404,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         }
         if (
           state !== 'sent' ||
+          p.executionState !== jobState ||
           agentPlanChanged ||
           activityChanged ||
           approvalsChanged ||
@@ -413,6 +414,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           pendingList[i] = {
             ...p,
             state: 'sent',
+            executionState: jobState,
             observability: undefined,
             agentPlan: nextAgentPlan,
             activity: nextActivity,
@@ -1068,6 +1070,10 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         const id = String(turn?.id ?? '').trim();
         return id && !initialTurnIds.has(id);
       });
+      for (const turn of newTurns) {
+        const original = pendingBefore.get(String(turn.id));
+        if (original && JSON.parse(original).deliveryMode === 'asap') turn.deliveryMode = 'asap';
+      }
       if (Object.keys(metadataSet).length > 0 || metadataUnset.length > 0 || newTurns.length > 0) {
         await applyChatReconciliationInStore({
           droneId,
@@ -1104,6 +1110,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             fileChanges: pending.fileChanges,
             activity: pending.activity,
             startedAt: pending.startedAt,
+            executionState: pending.executionState,
             updatedAt: pending.updatedAt,
           },
         });
