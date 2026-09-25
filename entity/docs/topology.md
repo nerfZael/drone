@@ -32,7 +32,7 @@ The front limb (and the head) may cancel any worker; other limbs only their own 
 ## Work goes through state; lifecycle goes through signals
 
 - **Work.** Tasks and results are events in the log, projected into every limb's state. The front limb dispatches a worker with a task; the worker replies to the user itself and commits its result with `finish_task`. Past `maxTasks` (6) running workers, new ones wait as `queued` and start oldest first ([parallel-conversation.md](parallel-conversation.md)).
-- **Lifecycle.** Pause, cancel and kill act directly, not through state. Kill aborts a worker's run at once. Cancel asks it to wrap up (the request comes back with its next tool result) and becomes a kill after 3 s if it doesn't finish.
+- **Lifecycle.** Pause, cancel and kill act directly, not through state. Kill aborts a worker's run at once. Cancel asks it to wrap up: from its next tool call on it may only `say`, `note`, read and `finish_task`, and it ends as `cancelled` with what it had. It becomes a kill after 3 s if it doesn't finish.
 
 ## Supervision
 

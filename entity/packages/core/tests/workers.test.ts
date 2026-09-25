@@ -379,3 +379,69 @@ test('reroute: a message steered into a worker can be moved to its own worker or
   await until(() => h.of('task_done').length === 2);
   expect(seen[0]).toContain('moved their message "also nice sprites" to a separate worker');
 });
+
+test('a worker waiting with "after" is not started early by a steer or by pause and resume', async () => {
+  let release!: () => void;
+  const started: string[] = [];
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.role === 'head' && message === 'build it') await call('dispatch', { task: 'build it' });
+    if (input.role === 'head' && message === 'then document it') await call('dispatch', { task: 'document it', name: 'docs', after: 'worker-3' });
+    if (input.role === 'task') {
+      started.push(input.limbId);
+      if (input.limbId === 'worker-3') { await new Promise<void>(r => { release = r; }); if (input.signal.aborted) return; }
+      await call('finish_task', { result: `${input.limbId} done` });
+    }
+  }, {});
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'build it' });
+  await until(() => started.length === 1);
+  h.entity.input('chat_message', { text: 'then document it' });
+  await until(() => h.of('limb_spawned').length === 2);
+  const docs = String(h.of('limb_spawned')[1].data.id);
+  expect(h.entity.snapshot().limbs.find(l => l.id === docs)).toMatchObject({ status: 'waiting', waitFor: 'worker-3' });
+  expect(h.entity.messageWorker(docs, 'use markdown')).toContain('waiting for worker-3');
+  h.entity.pause();
+  h.entity.resume();
+  release(); // the paused run winds down after the resume; worker-3 is woken again
+  await until(() => started.length === 2);
+  await sleep(20);
+  expect(started).toEqual(['worker-3', 'worker-3']);
+  release();
+  await until(() => h.of('task_done').length === 2);
+  expect(started).toEqual(['worker-3', 'worker-3', docs]);
+  expect(h.of('limb_started')[0].data).toMatchObject({ id: docs, after: 'worker-3' });
+  expect(h.mind.runs.find(r => r.limbId === docs)!.prompt).toContain('use markdown');
+});
+
+test('review: a review run that crashes leaves its answers unchecked, never confirmed', async () => {
+  const h = setup(async (input, call) => {
+    if (input.limbId === 'head' && lastUserMessage(input) === 'hi') await call('say', { text: 'hey!' });
+    if (input.limbId === 'reviewer') throw new Error('model outage');
+  }, { config: { review: 'separate', reviewQuietMs: 40 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(h.of('message_reviewed')[0].data).toMatchObject({ verdict: 'unchecked', reason: 'failed' });
+});
+
+test('review: with review "head", a verdict is not superseded by a newer head run', async () => {
+  let release!: () => void;
+  let verdict = '';
+  const h = setup(async (input, call) => {
+    if (input.role === 'voice' && lastUserMessage(input) === 'capital of Australia?') await call('say', { text: 'Sydney' });
+    if (input.role === 'head' && input.prompt.includes('"woken_because":"review')) {
+      await new Promise<void>(r => { release = r; });
+      verdict = await call('amend', { seq: h.of('chat_message').find(e => e.data.text === 'Sydney')!.seq, verdict: 'correct', text: 'Canberra.' });
+    }
+  }, { models: { head: 'test/head', task: 'test/task', voice: 'test/voice' }, config: { review: 'head', reviewQuietMs: 40 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'capital of Australia?' });
+  await until(() => !!release);
+  h.entity.wake('head', 'heartbeat');
+  release();
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(verdict).toContain('corrected');
+  expect(h.said()).toEqual(['Sydney', 'Canberra.']);
+});
+

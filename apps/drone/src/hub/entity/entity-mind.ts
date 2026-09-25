@@ -45,6 +45,10 @@ export class PiAiMind implements Mind {
       messages,
       tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as never })),
     };
+    // Kept from the start and appended step by step, so a run that is aborted (Pause) or crashes keeps the
+    // steps it completed: their effects already happened. A step is appended whole (the model's tool calls
+    // with their results), so the history never holds a call without its result.
+    if (input.sessionKey) this.sessions.set(input.sessionKey, context.messages);
     const usage = { input: 0, output: 0, cacheRead: 0, cost: 0 };
     let text = '';
 
@@ -78,13 +82,11 @@ export class PiAiMind implements Mind {
       usage.output += message.usage?.output ?? 0;
       usage.cacheRead += message.usage?.cacheRead ?? 0;
       usage.cost += message.usage?.cost?.total ?? 0;
-      context.messages.push(message);
+      context.messages.push(message, ...results);
       const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
       if (said) text = said;
       if (!results.length) { ranOut = false; break; }
-      context.messages.push(...results);
     }
-    if (input.sessionKey) this.sessions.set(input.sessionKey, context.messages);
     return { text, usage, stopReason: ranOut ? 'max_steps' : 'done' };
   }
 }

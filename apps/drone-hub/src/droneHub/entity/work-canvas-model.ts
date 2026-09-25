@@ -266,7 +266,7 @@ export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui
 
   const attention: Attention[] = [];
   for (const w of items) if (w.state === 'need') attention.push({ id: w.id, kind: 'need', text: `${w.name}: ${w.label}` });
-  for (const w of items) if (w.waitFor && w.status === 'running') attention.push({ id: w.id, kind: 'wait', text: `${w.name} starts after ${name(w.waitFor)}` });
+  for (const w of items) if (w.waitFor && w.status === 'waiting') attention.push({ id: w.id, kind: 'wait', text: `${w.name} starts after ${name(w.waitFor)}` });
   const queued = items.filter(w => w.status === 'queued');
   if (queued.length) attention.push({ id: queued[0].id, kind: 'queued', text: `${queued.length} queued` });
 

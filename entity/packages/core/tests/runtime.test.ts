@@ -136,6 +136,39 @@ test('cancel asks a task to wrap up, then kills it after the grace period', asyn
   expect(h.of('task_done')[0].data.status).toBe('killed');
 });
 
+test('cancel lets a worker say where it got to and finish; it ends as cancelled', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop') await call('cancel', { id: 'worker-3' });
+    if (input.role === 'task') {
+      let result = '';
+      while (!result.startsWith('cancel requested')) { result = await call('press', { keys: '1' }); await sleep(5); }
+      results.push(result, await call('say', { text: 'stopped after step 3' }), await call('finish_task', { result: 'partial' }));
+    }
+  }, { config: { cancelGraceMs: 2000 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'start' });
+  await until(() => h.of('limb_spawned').length === 1);
+  h.entity.input('chat_message', { text: 'stop' });
+  await until(() => h.of('task_done').length === 1);
+  expect(results.slice(1)).toEqual(['sent', 'task finished']);
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'cancelled', result: 'partial' });
+});
+
+test('the heartbeat wakes the head only while workers are active, not for its own standing watches', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'mirror' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('set_watch', { watch: { name: 'mirror', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+    }
+  }, { config: { headHeartbeatMs: 20 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'mirror' });
+  await until(() => h.of('watch_installed').length === 1);
+  await sleep(100);
+  expect(h.of('run_started').filter(e => e.data.reason === 'heartbeat')).toHaveLength(0);
+});
+
 test('a crashing task limb is restarted up to the cap, then fails upward', async () => {
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'crash' });

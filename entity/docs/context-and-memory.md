@@ -5,7 +5,7 @@
 Context is scoped to a **piece of work**, not to the entity.
 
 - **Reactive limbs** (head, voice, reviewer) start fresh on every wake, from a render of state and new events ([core-model.md](core-model.md#state-and-what-a-limb-sees)). Costs are predictable, restarts are free, and there is nothing to compact.
-- **Workers** keep a conversation for their task: Drone Hub's mind holds each worker's message history in memory. They keep the benefits of a continuous context, and a steer arrives inside it with the worker's next tool result. When a worker finishes, its conversation is kept (the 12 most recent), so it can be forked or picked back up with a follow-up; a failed or stopped worker's conversation is dropped at once. Only results stay in state.
+- **Workers** keep a conversation for their task: Drone Hub's mind holds each worker's message history in memory, appended step by step, so a run that is paused or crashes keeps the steps it completed. They keep the benefits of a continuous context, and a steer arrives inside it with the worker's next tool result. When a worker finishes, its conversation is kept (the 12 most recent), so it can be forked or picked back up with a follow-up; a failed or stopped worker's conversation is dropped at once. Only results stay in state.
 - **Running out of turns** is not the end: a worker whose run hits its step limit while still working is continued in the same conversation, up to 4 times.
 - **Prompt caching** is a design constraint, not an afterthought. Renders keep a fixed order: role and tools, stable state (notes, limbs, workers), then live state, new events and time last, so a fresh run pays full price only for the changed tail. Workers append to their conversation, which caches naturally.
 

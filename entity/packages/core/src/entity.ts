@@ -11,7 +11,8 @@ import { conditionHolds, conditionSenses, eventMatchesTrigger, LevelTracker, lev
 
 export type SessionStatus = 'idle' | 'running' | 'paused';
 export type LimbRole = 'head' | 'voice' | 'reviewer' | 'task' | 'watch' | 'program';
-export type LimbStatus = 'idle' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
+/** A worker is `waiting` while it waits for another worker to finish (dispatch with `after`), and `queued` while it waits for a free slot. */
+export type LimbStatus = 'idle' | 'queued' | 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
 
 export interface RunInfo { id: string; reason: string; startedAt: number; firstToolAt?: number; readSeq: number; abort: AbortController; voice: boolean }
 
@@ -378,6 +379,16 @@ export class Entity {
     this.reviewing.clear();
   }
 
+  /** Answers of a review run that did not complete: requeued after a pause, otherwise marked unchecked. */
+  private abandonReview(limb: Limb, why: 'aborted' | 'failed'): void {
+    if (limb.id !== this.reviewerId() || !this.reviewing.size || limb.runs.size) return;
+    const seqs = [...this.reviewing];
+    this.reviewing.clear();
+    if (why === 'aborted' && this.status === 'paused') { this.unreviewed.unshift(...seqs); return; }
+    if (this.status === 'idle') return;
+    for (const seq of seqs) this.log.append('message_reviewed', limb.id, { seq, verdict: 'unchecked', reason: why });
+  }
+
   private amend(limb: Limb, args: { seq: number; verdict: string; text?: string }): string {
     const original = this.log.all().find(e => e.seq === args.seq && e.type === 'chat_message');
     if (!original || !isEntityActor(original.by)) return `error: #${args.seq} is not one of the entity's messages`;
@@ -422,7 +433,8 @@ export class Entity {
       this.checkLevelWatch(limb, now);
     }
     if (this.config.review !== 'off') this.maybeReview(now);
-    const active = [...this.limbs.values()].some(l => l.status === 'running' && l.id !== 'head' && l.id !== 'reviewer');
+    // Standing watches and programs of the head (a mirror, the draft sense) need no heartbeat; only work in progress does.
+    const active = [...this.limbs.values()].some(l => l.role === 'task' && (l.status === 'running' || l.status === 'queued' || l.status === 'waiting'));
     const head = this.limbs.get('head')!;
     if (active && !head.runs.size && now - this.lastHeadRunAt > this.config.headHeartbeatMs) this.wake('head', 'heartbeat');
   }
@@ -737,17 +749,21 @@ export class Entity {
       callTool: async (name, args) => {
         run.firstToolAt ??= this.now();
         if (run.abort.signal.aborted) return 'error: this run was stopped';
-        if (limb.cancelRequested) return 'cancel requested: wrap up now and call finish_task with what you have.';
+        // A cancelled worker may still tell the user where it got to and finish; everything else is refused.
+        if (limb.cancelRequested && name !== 'say' && name !== 'finish_task' && name !== 'note' && !this.effects.get(name)?.spec.readonly) {
+          return 'cancel requested: wrap up now: say briefly where you got to if useful, then call finish_task with what you have.';
+        }
         // The front limb does not act on its reading of the conversation while the user is still typing:
         // the action waits for them to settle, and if they sent something new meanwhile, a newer run takes over.
-        if (this.isFront(limb) && name !== 'note' && !this.effects.get(name)?.spec.readonly) {
+        if (this.isFront(limb) && name !== 'note' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
           await this.userSettled();
           // A user message this run has not read will wake a newer run; acting now would answer a stale picture.
           if (this.log.since(run.readSeq).some(e => e.type === 'chat_message' && e.by === 'user')) {
             return 'superseded: the user sent another message after you read the state; a newer run will handle both. Nothing was done. Leave a note if you know something it should, then stop.';
           }
         }
-        if (run.voice && run.id !== this.latestRun.get(limb.id) && name !== 'note' && name !== 'handoff' && !this.effects.get(name)?.spec.readonly) {
+        // A verdict on a given message stays valid whatever newer run started, so amend is never superseded.
+        if (run.voice && run.id !== this.latestRun.get(limb.id) && name !== 'note' && name !== 'handoff' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
           return 'superseded: a newer run of you has woken with newer events and is handling things now. Nothing was done. Leave a note if you know something it should, then stop.';
         }
         const summary = describeToolArgs(name, args ?? {});
@@ -773,14 +789,17 @@ export class Entity {
             this.log.append('task_continued', limb.id, { continuations: limb.continuations });
             this.wake(limb.id, 'you ran out of turns in your last run; continue where you left off, and call finish_task when done');
           } else this.finishTask(limb, `stopped after ${limb.continuations} continuations without finishing (step limit)`, 'failed');
-        } else this.finishTask(limb, result.text?.trim() || this.lastSaidBy(limb.id) || 'ended without a summary', 'done');
+        } else this.finishTask(limb, result.text?.trim() || this.lastSaidBy(limb.id) || 'ended without a summary', limb.cancelRequested ? 'cancelled' : 'done');
       }
     }, error => {
       limb.runs.delete(run.id);
       this.wakeIfPending(limb);
-      this.finishReview(limb);
+      // A review that crashed or was aborted checked nothing: never show its answers as confirmed.
+      this.abandonReview(limb, run.abort.signal.aborted ? 'aborted' : 'failed');
       if (run.abort.signal.aborted || this.status !== 'running') {
         this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), aborted: true });
+        // Paused mid-run: if the session was resumed before this run wound down, resume() found it still busy and skipped it.
+        if (this.status === 'running' && limb.role === 'task' && limb.status === 'running' && !limb.runs.size) this.wake(limb.id, 'resumed');
         return;
       }
       this.crashed(limb, error instanceof Error ? error.message : String(error));
@@ -808,7 +827,7 @@ export class Entity {
   }
 
   private finishTask(limb: Limb, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
-    if (limb.status !== 'running' && limb.status !== 'queued') return;
+    if (limb.status !== 'running' && limb.status !== 'queued' && limb.status !== 'waiting') return;
     limb.status = status;
     limb.endedAt = this.now();
     limb.result = result;
@@ -819,10 +838,13 @@ export class Entity {
     this.log.append('task_done', limb.id, { status, result: result.slice(0, 4000), task: limb.task ?? '' });
     // Workers answer the user themselves; the head is only woken to orchestrate.
     for (const waiting of this.limbs.values()) {
-      if (waiting.waitFor === limb.id && waiting.status === 'running') {
+      if (waiting.waitFor === limb.id && waiting.status === 'waiting') {
         waiting.waitFor = undefined;
-        if (this.workerSlots() < 0) { waiting.status = 'queued'; waiting.notices.push(`${limb.id} finished (${status}): ${result.slice(0, 500)}`); }
-        else this.wake(waiting.id, `${limb.id} finished (${status}): ${result.slice(0, 500)}`);
+        const released = `${limb.id} finished (${status}): ${result.slice(0, 500)}`;
+        if (this.workerSlots() <= 0) { waiting.status = 'queued'; waiting.notices.push(released); continue; }
+        waiting.status = 'running';
+        this.log.append('limb_started', 'system', { id: waiting.id, after: limb.id });
+        this.wake(waiting.id, waiting.notices.length ? `${released}; updates: ${waiting.notices.splice(0).join(' | ').slice(0, 1500)}` : released);
       }
     }
     this.startQueued();
@@ -858,10 +880,12 @@ export class Entity {
     limb.replyTo = args.reply_to ?? this.lastUserMessageSeq();
     if (source && !this.mind.fork?.(source.id, limb.id)) { this.limbs.delete(limb.id); this.limbs.get('head')?.children.delete(limb.id); return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`; }
     const target = args.after ? this.limbs.get(args.after) : undefined;
+    const gated = !!target && (target.status === 'running' || target.status === 'queued' || target.status === 'waiting');
     // Workers past the concurrency limit wait in a queue and start, oldest first, as others finish.
-    limb.status = target && (target.status === 'running' || target.status === 'queued') ? 'running' : this.workerSlots() > 0 ? 'running' : 'queued';
+    limb.status = gated ? 'waiting' : this.workerSlots() > 0 ? 'running' : 'queued';
+    if (gated) limb.waitFor = target.id;
     this.log.append('limb_spawned', by.id, { id: limb.id, name: limb.name, task: args.task, model, reply_to: limb.replyTo ?? null, fork_of: source?.id ?? null, after: args.after ?? null, group: args.group ?? null, queued: limb.status === 'queued' });
-    if (target && (target.status === 'running' || target.status === 'queued')) { limb.waitFor = target.id; return `worker ${limb.id} "${limb.name}" will start when ${target.id} finishes`; }
+    if (gated) return `worker ${limb.id} "${limb.name}" will start when ${target.id} finishes`;
     if (limb.status === 'queued') return `worker ${limb.id} "${limb.name}" queued: ${this.config.maxTasks} workers are running; it starts when one finishes`;
     this.wake(limb.id, source ? `forked from ${source.id} for a new request` : 'task assigned');
     return `worker ${limb.id} "${limb.name}" started${source ? ` from ${source.id}'s conversation` : ''}`;
@@ -904,15 +928,15 @@ export class Entity {
     const text = this.batchProgress(group);
     if (text !== batch.text) { batch.text = text; this.log.append('chat_message_updated', 'system', { seq: batch.message, text, group }); }
     const members = [...this.limbs.values()].filter(l => l.group === group);
-    if (members.some(l => l.status === 'running' || l.status === 'queued')) return;
+    if (members.some(l => l.status === 'running' || l.status === 'queued' || l.status === 'waiting')) return;
     batch.ended = true;
     const results = members.map(l => `${l.name}: ${l.status}${l.result ? `: ${l.result.slice(0, 160)}` : ''}`).slice(0, 60).join('\n');
     this.wake(this.frontLimb(), `batch "${batch.title}" finished. ${text}\nResults:\n${results}`);
   }
 
-  /** Running workers that are doing work (not waiting for another) take a slot. */
+  /** Running workers take a slot; queued and waiting ones don't. */
   private workerSlots(): number {
-    const busy = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running' && !l.waitFor).length;
+    const busy = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running').length;
     return this.config.maxTasks - busy;
   }
 
@@ -934,8 +958,8 @@ export class Entity {
     this.log.append('steered', by, { id, text: text.slice(0, 2000), ...(when === 'after' ? { when } : {}) });
     const note = by === 'user' ? `Message from the user: ${text}` : `Message from the user (via ${by}): ${text}`;
     // More work for later: the worker finishes what it is doing first, then continues in the same conversation.
-    if (when === 'after' && (limb.status === 'running' || limb.status === 'queued')) { limb.later.push(note); return `${id} will continue with this once it finishes its current work`; }
-    if (limb.status === 'queued') { limb.notices.push(note); return `${id} is queued; it gets this when it starts`; }
+    if (when === 'after' && (limb.status === 'running' || limb.status === 'queued' || limb.status === 'waiting')) { limb.later.push(note); return `${id} will continue with this once it finishes its current work`; }
+    if (limb.status === 'queued' || limb.status === 'waiting') { limb.notices.push(note); return `${id} is ${limb.status === 'queued' ? 'queued' : `waiting for ${limb.waitFor}`}; it gets this when it starts`; }
     if (limb.status === 'running' && limb.runs.size) { limb.notices.push(note); return `${id} will get it with its next tool result`; }
     if (limb.status === 'running') { this.wake(limb.id, note.slice(0, 2000)); return `${id} woken with it`; }
     if (limb.status !== 'done' || !this.keptSessions.includes(limb.id)) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
@@ -977,7 +1001,7 @@ export class Entity {
     });
     if (result.startsWith('error')) return result;
     this.log.append('rerouted', 'user', { seq, how, from: steered?.id ?? null });
-    if (steered && (steered.status === 'running' || steered.status === 'queued')) {
+    if (steered && (steered.status === 'running' || steered.status === 'queued' || steered.status === 'waiting')) {
       steered.notices.push(`The user moved their message "${text.slice(0, 200)}" to a separate worker: leave that part to it and carry on with the rest.`);
     }
     return result;
@@ -1079,7 +1103,7 @@ export class Entity {
   stopLimb(id: string, mode: 'cancel' | 'kill', by: string): string {
     const limb = this.limbs.get(id);
     if (!limb || limb.id === 'head') return `error: no limb "${id}" to stop`;
-    if (limb.status === 'queued') { this.finishTask(limb, `${mode === 'kill' ? 'killed' : 'cancelled'} by ${by} before it started`, mode === 'kill' ? 'killed' : 'cancelled'); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'} before it started`; }
+    if (limb.status === 'queued' || limb.status === 'waiting') { this.finishTask(limb, `${mode === 'kill' ? 'killed' : 'cancelled'} by ${by} before it started`, mode === 'kill' ? 'killed' : 'cancelled'); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'} before it started`; }
     if (limb.status !== 'running') return `${id} is already ${limb.status}`;
     if (limb.kind === 'code') { this.endCodeLimb(limb, mode === 'kill' ? 'killed' : 'cancelled', `${mode} by ${by}`); return `${id} ${mode === 'kill' ? 'killed' : 'cancelled'}`; }
     if (mode === 'kill' || !limb.runs.size) {
@@ -1193,7 +1217,7 @@ export class Entity {
       case 'finish_task':
         if (limb.role !== 'task') return 'error: only task limbs finish tasks';
         run.abort.abort();
-        this.finishTask(limb, String(args.result ?? ''), 'done');
+        this.finishTask(limb, String(args.result ?? ''), limb.cancelRequested ? 'cancelled' : 'done');
         return 'task finished';
       default:
         if (limb.role === 'task' && name === 'say' && args.reply_to === undefined && limb.replyTo !== undefined) args = { ...args, reply_to: limb.replyTo };
@@ -1261,7 +1285,7 @@ export class Entity {
     stable.limbs = [...this.limbs.values()].filter(l => l.status === 'running' || now - l.createdAt < 60_000).map(l => this.describeLimb(l));
     const tasks = [...this.limbs.values()].filter(l => l.role === 'task');
     if (tasks.length) stable.workers = tasks.map(l => ({
-      id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` (waiting for ${l.waitFor})` : '') + (l.runs.size ? ' (working)' : ''),
+      id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` for ${l.waitFor}` : '') + (l.runs.size ? ' (working)' : ''),
       reply_to: l.replyTo, result: l.result, claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
     }));
     if (this.discoveries.length) stable.discoveries = this.discoveries.map(d => `${d.by}: ${d.text}`);

@@ -88,7 +88,9 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
     if (!link) return null;
     if (link.worker) return [link.worker];
     const ids = [...model.workers.values()].filter(w => w.replyTo === link.message).map(w => w.id);
-    const steered = events.find(e => e.type === 'steered' && e.by !== 'user' && e.t >= (events.find(m => m.seq === link.message)?.t ?? Infinity));
+    // Only a steer made for this message: before the user's next message.
+    const next = events.find(e => e.type === 'chat_message' && e.by === 'user' && e.seq > link.message!);
+    const steered = events.find(e => e.type === 'steered' && e.by !== 'user' && e.seq > link.message! && (!next || e.seq < next.seq));
     return ids.length ? ids : steered ? [String(steered.data.id)] : null;
   }, [link, model, events]);
   // Dimming what is unrelated is a lens you ask for: it applies only while Ctrl or ⌘ is held.
@@ -550,7 +552,7 @@ function Drawer({ w, events, t, live, onWorker, onClose }: { w: WorkItem; events
  * happens to be calling (that changes every second, and external agents don't report it).
  */
 function statusText(w: WorkItem, nameOf: (id: string) => string): string {
-  if (w.waitFor && w.status === 'running') return `Starts when ${nameOf(w.waitFor)} finishes`;
+  if (w.waitFor && w.status === 'waiting') return `Starts when ${nameOf(w.waitFor)} finishes`;
   if (w.state === 'done' || w.state === 'stop') return w.result ?? w.label;
   if (w.steps?.doing[0]) return w.steps.doing[0];
   if (w.label === 'blocked' && w.now?.object) return `Blocked: ${w.now.object}`;
@@ -633,7 +635,8 @@ function useGhosts(nodes: WorkNode[], model: CanvasModel): WorkNode[] {
 
 /** Names you gave workers, kept in this browser per session (keyed by when the session started). */
 function useNames(events: EntityEvent[]) {
-  const session = events[0]?.at ?? 0;
+  // Every event's wall clock is the session start plus its t, so this stays the same when the live buffer drops old events.
+  const session = events[0] ? Math.round(events[0].at - events[0].t) : 0;
   const key = `entity.workNames.${session}`;
   const [map, setMap] = React.useState<Record<string, string>>({});
   React.useEffect(() => {

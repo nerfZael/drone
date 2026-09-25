@@ -108,7 +108,8 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
   }
   const replyTo = l.replyTo !== undefined ? messages.get(l.replyTo) : undefined;
   const userSpokeAfter = (t: number) => [...messages.values()].some(m => m.t > t);
-  const inFlight = lastCall && (!lastDone || lastDone.t < lastCall.t || lastDone.data.run !== lastCall.data.run) ? lastCall : undefined;
+  // A call is in flight only while its run is: an aborted run (Pause, kill) leaves a call without tool_done.
+  const inFlight = lastCall && l.runs.some(r => r.id === lastCall!.data.run) && (!lastDone || lastDone.t < lastCall.t || lastDone.data.run !== lastCall.data.run) ? lastCall : undefined;
   const failedLast = lastDone && lastDone.data.ok === false && (!lastCall || lastCall.t <= lastDone.t) ? lastDone : undefined;
   const nowOf = (e: EntityEvent) => ({ verb: VERBS[String(e.data.name)] ?? String(e.data.name), object: String(e.data.summary ?? '') || undefined, at: e.t });
 
@@ -120,8 +121,8 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
   let blockedBy: string | undefined;
   if (l.status === 'done') { state = 'done'; label = 'done'; }
   else if (l.status === 'queued') { state = 'wait'; label = 'queued'; }
+  else if (l.status === 'waiting') { state = 'wait'; label = l.waitFor ? `after ${nameOf(snapshot, l.waitFor)}` : 'waiting'; }
   else if (l.status !== 'running') { state = l.status === 'failed' ? 'need' : 'stop'; label = l.status === 'failed' ? 'failed' : 'stopped'; }
-  else if (l.waitFor) { state = 'wait'; label = `after ${nameOf(snapshot, l.waitFor)}`; }
   else if (inFlight) { const n = nowOf(inFlight); state = 'act'; label = n.verb; since = inFlight.t; now = n; }
   else if (failedLast && /^(refused|output stopped)/.test(String(failedLast.data.note))) {
     state = 'need'; label = 'blocked'; since = failedLast.t;

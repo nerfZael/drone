@@ -31,7 +31,7 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
       limb('task-2', { runs: [{ id: 'r2', reason: 'forked', startedAt: 3100, voice: true }], replyTo: m2.seq }),
       limb('task-3', { replyTo: m1.seq }),
       limb('task-4', { status: 'done', result: 'tests pass', endedAt: 3700 }),
-      limb('task-5', { waitFor: 'task-1' }),
+      limb('task-5', { status: 'waiting', waitFor: 'task-1' }),
       limb('task-6', { runs: [{ id: 'r6', reason: 'task assigned', startedAt: 4500, voice: true }] }),
     ],
   } as unknown as EntitySnapshot;

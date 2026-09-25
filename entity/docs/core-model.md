@@ -59,7 +59,7 @@ Effects apply as soon as their tool call streams in, with one exception: the fro
 
 Every render ends with a time block in the volatile tail, so it doesn't break caching: `now_s`, how long since the entity last spoke, and why the run was woken. Each recent event and chat message carries its age ("4.0s ago"), and each level how long it has held.
 
-Limbs schedule their own future with `set_timer(after_ms, label)`, at most an hour ahead, which comes back as a `timer` event. The head's heartbeat (every 3 minutes while other limbs run) means time keeps passing for the entity even when nothing happens.
+Limbs schedule their own future with `set_timer(after_ms, label)`, at most an hour ahead, which comes back as a `timer` event. The head's heartbeat (every 3 minutes while workers are running, queued or waiting) means time keeps passing for the entity even when nothing happens.
 
 ## Interrupts stop output, not thoughts
 
