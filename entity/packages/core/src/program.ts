@@ -13,6 +13,8 @@ export interface ProgramApi {
   state(): unknown;
   log(message: string): void;
   now(): number;
+  /** Wakes the program's author with a reason, for anything that needs thinking. Returns what happened. */
+  wake(reason: string): string;
 }
 
 export type ProgramOutcome =
@@ -33,6 +35,15 @@ const PRELUDE = (effects: { name: string; shorthand?: string }[]) => `
   globalThis.effect = (name, args) => effect(name, args ?? {});
   for (const e of ${JSON.stringify(effects)}) globalThis[e.name] = (value) => effect(e.name, toArgs(e.shorthand, value));
   globalThis.console = { log: (...parts) => globalThis.log(parts.map(p => typeof p === 'string' ? p : JSON.stringify(p)).join(' ')) };
+  // Events are strict: reading a field an event does not have throws, naming the fields it has, so a
+  // program built on a wrong guess fails at once instead of silently never matching. event.data stays loose.
+  const loose = new Set(['then', 'toJSON', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']);
+  const strict = (event) => new Proxy(event, { get(target, prop) {
+    if (typeof prop !== 'string' || prop in target || loose.has(prop)) return target[prop];
+    throw new TypeError('event has no field "' + prop + '"; it has ' + Object.keys(target).join(', ') + ' (e.g. event.data.key)');
+  } });
+  const next = globalThis.nextEvent;
+  globalThis.nextEvent = async (matcher, timeoutMs) => { const event = await next(matcher, timeoutMs); return event && strict(event); };
 })();
 `;
 
@@ -108,6 +119,7 @@ export async function runProgram(code: string, api: ProgramApi, signal: AbortSig
   hostSync('state', () => api.state());
   hostSync('now', () => api.now());
   hostSync('log', message => { api.log(String(message)); return undefined; });
+  hostSync('wake', reason => api.wake(String(reason ?? '')));
 
   const dispose = () => {
     if (!alive) return;

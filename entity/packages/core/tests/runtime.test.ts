@@ -303,6 +303,39 @@ test('a stop halts the work in flight; a program the head starts afterwards runs
   expect(h.entityKeys('key_down').some(e => e.data.key === '7')).toBe(false);
 });
 
+test('program events are strict: a wrong field fails the program at once, naming the real fields', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'go') await call('run_program', { name: 'guess', code: 'const e = await nextEvent({ type: "key_down" }, 5000); if (e.event.data.key === "1") await say("one");' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  h.entity.input('key_down', { key: '1' });
+  await until(() => h.of('program_failed').length === 1);
+  expect(String(h.of('program_failed')[0].data.reason)).toContain('event has no field "event"; it has seq, t, at, type, by, data');
+  expect(h.said()).toEqual([]);
+});
+
+test('optional fields in event.data stay loose, and a program can wake its author at most once a second', async () => {
+  const reasons: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'go' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('run_program', { name: 'decoder', code: 'const e = await nextEvent({ type: "key_down" }, 5000); const gap = e.data.gap_ms ?? 0; log(wake("user pressed " + e.data.key + " after " + gap)); log(wake("again"));' });
+    }
+    const time = input.prompt.slice(input.prompt.lastIndexOf('\nTIME\n') + 6);
+    const reason = String(JSON.parse(time).woken_because);
+    if (reason.startsWith('program')) reasons.push(reason);
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  h.entity.input('key_down', { key: '7' });
+  await until(() => h.of('program_finished').length === 1 && reasons.some(r => r.includes('user pressed')));
+  expect(h.of('program_log').map(e => e.data.message)).toEqual(['woken', 'rate limited: at most one wake per second']);
+  expect(h.of('program_woke')).toHaveLength(1);
+  expect(reasons[0]).toContain('user pressed 7 after 0');
+});
+
 test('freeze pauses a task limb and a program at their next action, and resume continues them with nothing lost', async () => {
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'go') {

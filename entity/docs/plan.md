@@ -57,7 +57,7 @@ The M0.5 spike comes first and is thrown away; it exists to measure before we bu
 - Jev is a runtime primitive, not a limb: `judge(question)` for a one-shot probability and `sense(question)` for a continuous level. The runtime batches, coalesces, times out and logs every call, so replay stays deterministic. Jev makes the fuzzy world codeable: it senses, judges (cascades, fit checks, arbiter confidence) and routes.
 - Output stops have a scope (`work` by default: everything under the owner but not the owner) and a mode (`stop` cancels, `freeze` pauses with nothing lost). A stop covers the work in flight when it was issued; work an LLM deliberately starts afterwards is not covered.
 - Once a newer head run exists, an older run can no longer act, except to leave a note.
-- Programs read events in order through their own cursor, and keypad events carry `held_ms` / `gap_ms`.
+- Programs read events in order through their own cursor, and keypad events carry `held_ms` / `gap_ms`. Events are strict: reading a field an event lacks fails the program with the real field names (`event.data` stays loose). A program can `wake(reason)` its author, at most once a second, for anything that needs thinking, like composing a reply.
 - Everything the entity writes is validated, and errors go back to the model as tool results.
 - Live tests use only Codex gpt-6-sol and gpt-6-luna on medium reasoning. Cerebras qwen is for rare speed tests only: it is fast but not smart, prompt caching barely works there, and it bills per API call rather than on the subscription.
 - Limbs see each other's status and committed results, not each other's context. Only the front limb and the head dispatch workers; `spawn` and `report` are gone.

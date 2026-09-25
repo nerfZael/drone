@@ -464,6 +464,7 @@ export class Entity {
     // Programs read the log in order from where they started: events that happen between two
     // nextEvent calls are buffered, never missed.
     let cursor = this.log.length;
+    let lastWake = -Infinity;
     return {
       effect: async (name: string, args: Record<string, unknown>) => {
         await this.whileRunning();
@@ -497,6 +498,16 @@ export class Entity {
       state: () => this.snapshotWorld(),
       log: (message: string) => { this.log.append('program_log', limb.id, { message: message.slice(0, 500) }); },
       now: () => this.now(),
+      // A program cannot think; it can hand what it found to its author. At most once a second, so a loop cannot flood the author with runs.
+      wake: (reason: string) => {
+        const author = limb.parent ? this.limbs.get(limb.parent) : undefined;
+        if (!author || author.kind !== 'llm' || limb.status !== 'running') return 'error: no author to wake';
+        if (this.now() - lastWake < 1000) return 'rate limited: at most one wake per second';
+        lastWake = this.now();
+        this.log.append('program_woke', limb.id, { reason: reason.slice(0, 500), limb: author.id });
+        this.wake(author.id, `program "${limb.name}": ${reason.slice(0, 500)}`);
+        return 'woken';
+      },
     };
   }
 
