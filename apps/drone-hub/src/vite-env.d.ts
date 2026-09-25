@@ -34,6 +34,7 @@ interface Window {
     desktopRecording?(action: 'status' | 'start' | 'stop', options?: { title: string; keepAudio: boolean; liveTranscription: boolean }): Promise<import('@drone/hub-model').DesktopRecordingStatus>;
     captureCompanion?(mode: 'region' | 'screen'): Promise<import('@drone/assistant-chat').CompanionImageAttachment | null>;
     setChatWindowAlwaysOnTop?(name: string, enabled: boolean): Promise<boolean>;
+    notificationDisplay?(): Promise<'cards' | null>;
     clearNotifications?(): Promise<void>;
     notificationsSupported?(): Promise<boolean>;
     showNotification?(input: { title: string; body: string; silent: boolean; name?: string; kind?: string; durationSeconds?: number; target?: { droneId: string; chatName: string } }): Promise<void>;

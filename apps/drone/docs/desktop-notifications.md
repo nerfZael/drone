@@ -8,6 +8,12 @@ Cards use separate, sandboxed, frameless desktop windows positioned at the botto
 
 The app must remain running and connected. Notifications are live, not a durable inbox: startup/reconnect establishes a baseline and does not replay old completions or custom events. These cards do not use OS notifications, appear in the system notification center, or automatically follow OS Do Not Disturb. Use the master switch for quiet mode. Cards close when the main window closes.
 
+## Updating an older desktop process
+
+The UI verifies that the running Electron main process supports cards before sending notifications. An old preload, or a new preload paired with an old main process, pauses notification delivery and shows an update/restart explanation in Settings. It never falls back to OS notifications.
+
+After updating the desktop files, fully quit and reopen Drone Hub. Reloading the UI or restarting only the Hub server does not replace Electron's main process. Already delivered OS notifications can remain in the system notification center until dismissed.
+
 ## Duration, disabling, and dismissal
 
 The default is eight seconds of visible time. Settings offers 5, 8, 15, or 30 seconds, or “Until dismissed”. Timers pause while hovering over or focusing a card. Changes apply to new notifications.
