@@ -8,7 +8,7 @@ const limb = (id: string, over: Partial<EntitySnapshot['limbs'][number]> = {}): 
   id, kind: 'llm', role: 'task', name: id, status: 'running', runs: [], createdAt: 0, claims: [], ...over,
 });
 
-test('deriveWork: states, the now line, routing time, forks, summaries and spend come from the snapshot and log', () => {
+test('deriveWork: states, the now line, forks, summaries and spend come from the snapshot and log', () => {
   const m1 = ev(1000, 'chat_message', 'user', { text: 'fix the test' });
   const m2 = ev(2000, 'chat_message', 'user', { text: 'do the same for signup' });
   const events: EntityEvent[] = [
@@ -41,7 +41,7 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
   expect(head?.reason).toBe('claim conflict');
   expect(w['task-1']).toMatchObject({ state: 'act', label: 'editing', claims: ['src/a.ts'] });
   expect(w['task-1'].now).toMatchObject({ verb: 'editing', object: 'src/a.ts' });
-  expect(w['task-1'].ask).toMatchObject({ text: 'fix the test', routedMs: 1500 });
+  expect(w['task-1'].replyTo).toBe(m1.seq);
   expect(w['task-1'].steps?.done).toEqual(['found the bug']);
   expect(w['task-2']).toMatchObject({ state: 'need', label: 'blocked', parent: 'task-1' });
   expect(w['task-3']).toMatchObject({ state: 'need', label: 'asking you' });
@@ -50,6 +50,6 @@ test('deriveWork: states, the now line, routing time, forks, summaries and spend
   expect(w['task-5']).toMatchObject({ state: 'wait', label: 'after Login fix' });
   expect(w['task-2']).toMatchObject({ blockedBy: 'task-1' });
   expect(w['task-2'].now?.object).toBe('"src/b.ts" is claimed by Login fix (writing)');
-  expect(w['task-6']).toMatchObject({ state: 'think', pulse: true, since: 4500 });
+  expect(w['task-6']).toMatchObject({ state: 'think', label: 'thinking' });
   expect(costTotal).toBeCloseTo(0.12);
 });

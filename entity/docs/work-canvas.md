@@ -1,6 +1,6 @@
 # Work canvas
 
-The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. You look at it from the top and click into a worker when you need to; you don't arrange it. It is the Work tab's default view; the older Rows and Cards views stay next to it while they are easy to keep.
+The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. You look at it from the top and click into a worker when you need to; you don't arrange it. It is the whole Work tab; the earlier Rows and Cards views are gone.
 
 Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` derives everything from the snapshot and the event log, so it also works when replaying a recording, and is pure and tested. Mockups: [v10](https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv), which the colours follow, and earlier [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq)–[v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
 
@@ -27,7 +27,7 @@ Text fits by being written short: summaries are asked for short steps, and watch
 
 - **Folds.** Messages that started no work, and finished work that nothing live depends on, fold into one line such as `··· 57 finished · $8.17 · 6 messages · steered Signup flake`. Click it to open it in place. Folding waits: nothing folds within a minute, the 5 most recently finished rows and the 3 most recent plain messages never fold, and nothing folds while selected, expanded or hovered. Folded work fades out and the rows below slide up. The canvas keeps its own clock between events, so work folds in quiet sessions too.
 - **Group cards.** A batch, or 4 or more workers from one message in the first column, becomes one card: counts by state, one cell per worker coloured by state, and totals. Hover a cell to see that worker, click it to open it, ⌄ for a filterable list. Workers that need attention (failed, blocked, stopped) also get their own card under the group, the first three as cards and the rest in one "N more need attention" list.
-- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, and **Fit**. Clicking an item opens that worker.
+- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, what the head is thinking about, the session time and cost, and **Fit**. Clicking an item opens that worker.
 
 ## Chat and the canvas
 

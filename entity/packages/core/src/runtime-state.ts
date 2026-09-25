@@ -1,4 +1,6 @@
 import { isEntityActor } from './log.js';
+
+export { isEntityActor };
 import type { EntityEvent } from './types.js';
 import type { StopMode, StopScope, WatchSpec } from './watch.js';
 

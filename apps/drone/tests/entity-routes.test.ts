@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Mind } from '@entity/core';
+import { replayRuntime, snapshotLimbs, type Mind } from '@entity/core';
 import { HubRouter } from '../src/hub/hub-router';
 import { registerEntityRoutes } from '../src/hub/entity/entity-routes';
 import { EntitySession } from '../src/hub/entity/entity-session';
@@ -69,13 +69,15 @@ test('entity routes: a session is recorded from Start to Reset and can be replay
     expect(live.events.map((e: any) => e.seq)).toEqual(session.state().events.map(e => e.seq));
     expect((await call('GET', '/api/entity/sessions')).body.sessions[0]).toMatchObject({ id, status: 'live' });
 
-    // Frames rebuild the snapshot: frame 0 is the full idle state; applying every patch gives the final state.
+    // Frames rebuild the channels' state: frame 0 is the full idle state; applying every patch gives the final state.
+    // The runtime's own state (limbs, stops, notes) is rebuilt from the log alone.
     expect(live.frames[0]).toMatchObject({ seq: 0 });
     expect(live.frames[0].patch.status).toBe('idle');
     const rebuilt = live.frames.reduce((state: any, frame: any) => ({ ...state, ...frame.patch }), {});
     const now = session.state().snapshot;
     expect(rebuilt.world).toEqual(now.world);
-    expect(rebuilt.limbs.map((l: any) => l.id)).toEqual(now.limbs.map(l => l.id));
+    expect(rebuilt.limbs).toBeUndefined();
+    expect(snapshotLimbs(replayRuntime(live.events))).toEqual(now.limbs);
     // Channel state is exact at every event, even inside one runtime turn: at the entity's key_down, before its key_up, the key is held.
     const press = live.events.find((e: any) => e.type === 'key_down' && e.by !== 'user');
     const atPress = live.frames.filter((f: any) => f.seq <= press.seq).reduce((state: any, frame: any) => ({ ...state, ...frame.patch }), {});

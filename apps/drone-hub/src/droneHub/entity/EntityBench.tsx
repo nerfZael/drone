@@ -1,5 +1,7 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { isEntityActor as isEntity } from '@entity/core/state';
+import { KEYS, seconds } from './bench-format';
 import { UiButton } from '../../ui/components/Button';
 import { EntityBrain } from './EntityBrain';
 import { EntityWork } from './EntityWork';
@@ -16,9 +18,6 @@ const ENTITY_WORKSPACE_ID = 'entity-workspace';
 type BenchView = 'brain' | 'work' | 'inspector' | 'files';
 
 const MODELS = ['openai-codex/gpt-6-luna', 'openai-codex/gpt-6-sol', 'cerebras/qwen-3.8-27b'];
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
-const isEntity = (by: string) => by !== 'user' && by !== 'host' && by !== 'system';
-const seconds = (t: number) => `${(t / 1000).toFixed(2)}s`;
 
 /** The entity test bench: chat, keypad and inspector over the Hub's live entity session. */
 export function EntityBench() {
@@ -63,7 +62,7 @@ export function EntityBench() {
             link={view === 'work' ? link : null} onLink={setLink} onOpenWorker={showWorker} />
           <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} />
           {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} />
-            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} link={link} onLink={l => setLink(l && { ...l, from: 'canvas' })} openWorker={openWorker} onReroute={session.reroute} />
+            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} link={link} onLink={l => setLink(l && { ...l, from: 'canvas' })} open={openWorker} onReroute={session.reroute} />
             : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>
       )}

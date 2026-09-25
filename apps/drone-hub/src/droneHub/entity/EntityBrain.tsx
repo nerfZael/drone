@@ -1,5 +1,7 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { isEntityActor as isEntity } from '@entity/core/state';
+import { KEYS } from './bench-format';
 
 /**
  * The entity brain: a live, fit-to-pane map of the entity. Top to bottom it runs from the user,
@@ -20,7 +22,6 @@ const COMPACT_H = 26;
 const HOP_MS = 400;
 const MAX_FIRING_BATCH = 24;
 const CHANNELS = ['chat', 'keypad', 'workspace'] as const;
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const CHANNEL_OF: Record<string, (typeof CHANNELS)[number]> = {
   chat_message: 'chat', draft_changed: 'chat', entity_draft: 'chat',
   key_down: 'keypad', key_up: 'keypad',
@@ -33,7 +34,6 @@ const TONE_COLOR: Record<Tone, string> = {
   sense: 'var(--cyan, #39c5cf)',
 };
 const ENDED = new Set(['done', 'failed', 'cancelled', 'killed']);
-const isEntity = (by: string) => by !== 'user' && by !== 'host' && by !== 'system';
 const lastOf = <T,>(list: readonly T[], test: (item: T) => boolean = () => true): T | undefined => { for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) return list[i]; return undefined; };
 const clip = (text: unknown, n: number) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const channelId = (name: string) => `ch:${name}`;

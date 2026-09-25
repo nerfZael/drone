@@ -104,6 +104,10 @@ export interface CanvasModel {
   entityChips: Chip[];
   attention: Attention[];
   workers: Map<string, WorkItem>;
+  /** What the head is thinking about right now, and what the session has cost so far. */
+  head?: { reason: string; since: number };
+  costTotal: number;
+  tokensTotal: number;
 }
 
 export interface CanvasUi {
@@ -123,7 +127,7 @@ export const moreId = (id: string) => `more:${id}`;
 export const stackId = (s: Stack) => (s.kind === 'card' ? cardId(s.id) : s.kind === 'group' ? groupId(s.id) : moreId(s.id));
 
 export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui: CanvasUi): CanvasModel {
-  const { workers: items } = deriveWork(snapshot, events);
+  const { workers: items, head, costTotal, tokensTotal } = deriveWork(snapshot, events);
   const workers = new Map(items.map(w => [w.id, w]));
   const limbs = new Map(snapshot.limbs.map(l => [l.id, l]));
   const spawned = new Map<string, EntityEvent>();
@@ -271,7 +275,7 @@ export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui
   if (queued.length) attention.push({ id: queued[0].id, kind: 'queued', text: `${queued.length} queued` });
 
   const entityChips = snapshot.limbs.filter(l => (l.parent === 'head' || l.parent === 'voice') && (l.role === 'watch' || l.role === 'program') && l.status === 'running').map(l => chip(l, snapshot.t));
-  return { rows, shownAs, edges, entityChips, attention, workers };
+  return { rows, shownAs, edges, entityChips, attention, workers, head, costTotal, tokensTotal };
 }
 
 function stacksFor(list: WorkItem[], col: Map<string, number>, groupTitles: Map<string, string>, chipsFor: (owner: string) => Chip[], message: EntityEvent | undefined): Stack[] {

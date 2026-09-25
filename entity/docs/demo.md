@@ -4,7 +4,7 @@ The bench is Drone Hub's Entity window (a desktop tool window):
 
 - **Chat:** a normal agent chat. Either side can send any number of messages at any time. The entity also sees the user's **unsent draft** as it's typed, clearly marked as not sent, and can show its own draft. Workers reply here tagged with the message they answer; a batch shows one progress line; reviewed answers show a ✓ or are struck through with the correction below.
 - **Keypad:** 0–9. The user and the entity can both press and hold keys. Each key has a down and an up, the keypad state shows which keys are held and by whom, and every change is marked with who made it.
-- **A third view**, chosen in the header: **Brain** (the limbs and the signals between them), **Work** (the Work canvas, plus Rows and Cards; see [work-canvas.md](work-canvas.md)), **Inspector** (state, events, watches and programs, latency readouts) or **Files** (the workspace).
+- **A third view**, chosen in the header: **Brain** (the limbs and the signals between them), **Work** (the Work canvas; see [work-canvas.md](work-canvas.md)), **Inspector** (state, events, watches and programs, latency readouts) or **Files** (the workspace).
 
 The header has the user controls (Start, Pause, Resume, Reset; see [architecture.md](architecture.md#user-controls)) and the settings: voice, head and worker models, review, senses (Jev), workspace and commands. A timeline under the bench replays any recorded session ([session-logs.md](session-logs.md)).
 

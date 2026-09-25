@@ -12,6 +12,12 @@
       "import": "./dist/index.js",
       "require": "./dist/cjs/index.js",
       "default": "./dist/index.js"
+    },
+    "./state": {
+      "types": "./dist/runtime-state.d.ts",
+      "import": "./dist/runtime-state.js",
+      "require": "./dist/cjs/runtime-state.js",
+      "default": "./dist/runtime-state.js"
     }
   },
   "scripts": {

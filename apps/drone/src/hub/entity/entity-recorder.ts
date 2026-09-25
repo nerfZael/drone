@@ -9,15 +9,18 @@ import type { EntityEvent, EntitySnapshot } from '@entity/core';
  * entity/docs/session-logs.md.
  */
 
-/** Snapshot sections a frame can carry. `t` travels on the frame itself. */
-const SECTIONS = ['status', 'world', 'self', 'levels', 'stops', 'health', 'limbs', 'senses', 'jev'] as const;
-type Section = (typeof SECTIONS)[number];
+/**
+ * Snapshot sections a frame carries. `t` travels on the frame itself. Limbs, stops, notes and health are not
+ * recorded: the log rebuilds them (`replayRuntime` from `@entity/core/state`). Recordings made before that carry them too.
+ */
+const SECTIONS = ['status', 'world', 'levels', 'senses', 'jev'] as const;
+type Section = (typeof SECTIONS)[number] | 'self' | 'stops' | 'health' | 'limbs';
 /**
  * The runtime reduces these into state before it notifies listeners, so they are exact at every
- * event. The rest (limbs, senses, stops …) settle while the runtime handles the event, so they are
- * captured once it has finished the turn.
+ * event. Senses and Jev stats settle while the runtime handles the event, so they are captured
+ * once it has finished the turn.
  */
-const PER_EVENT: readonly Section[] = ['world', 'levels', 'self'];
+const PER_EVENT: readonly Section[] = ['world', 'levels'];
 
 /** The snapshot after event `seq`: only the sections that changed since the previous frame. */
 export interface SnapshotFrame { seq: number; t: number; patch: Partial<Pick<EntitySnapshot, Section>> }
@@ -60,8 +63,9 @@ export class EntityRecorder {
   readonly events: EntityEvent[] = [];
   readonly frames: SnapshotFrame[] = [];
   private readonly last = new Map<Section, string>();
-  private readonly eventsOut: fs.WriteStream;
-  private readonly framesOut: fs.WriteStream;
+  /** Appended synchronously, so what the entity did is on disk before anything else happens: a resumed session needs all of it. */
+  private readonly eventsOut: number;
+  private readonly framesOut: number;
   private capturePending = false;
   private finished = false;
 
@@ -75,8 +79,8 @@ export class EntityRecorder {
       : { id: newSessionId(), status: 'live', startedAt: new Date().toISOString(), config, events: 0, frames: 0 };
     this.dir = path.join(root, this.meta.id);
     fs.mkdirSync(this.dir, { recursive: true });
-    this.eventsOut = fs.createWriteStream(path.join(this.dir, 'events.jsonl'), { flags: 'a' });
-    this.framesOut = fs.createWriteStream(path.join(this.dir, 'frames.jsonl'), { flags: 'a' });
+    this.eventsOut = fs.openSync(path.join(this.dir, 'events.jsonl'), 'a');
+    this.framesOut = fs.openSync(path.join(this.dir, 'frames.jsonl'), 'a');
     if (resume) {
       this.events.push(...resume.events);
       this.frames.push(...resume.frames);
@@ -96,7 +100,7 @@ export class EntityRecorder {
   record(event: EntityEvent): void {
     if (this.finished) return;
     this.events.push(event);
-    this.eventsOut.write(`${JSON.stringify(event)}\n`);
+    fs.writeSync(this.eventsOut, `${JSON.stringify(event)}\n`);
     this.meta.events = this.events.length;
     this.capture(event.seq, PER_EVENT);
     if (!this.meta.firstMessage && event.type === 'chat_message' && event.by === 'user') {
@@ -121,8 +125,8 @@ export class EntityRecorder {
     this.finished = true;
     Object.assign(this.meta, { status, endedAt: new Date().toISOString(), endReason: reason });
     this.writeMeta();
-    this.eventsOut.end();
-    this.framesOut.end();
+    fs.closeSync(this.eventsOut);
+    fs.closeSync(this.framesOut);
   }
 
   recording(): SessionRecording { return { meta: { ...this.meta }, events: [...this.events], frames: [...this.frames] }; }
@@ -140,7 +144,7 @@ export class EntityRecorder {
     if (!Object.keys(patch).length && this.frames.length) return;
     const frame: SnapshotFrame = { seq, t: snapshot.t, patch };
     this.frames.push(frame);
-    this.framesOut.write(`${JSON.stringify(frame)}\n`);
+    fs.writeSync(this.framesOut, `${JSON.stringify(frame)}\n`);
     this.meta.frames = this.frames.length;
   }
 
@@ -206,10 +210,11 @@ Each folder holds:
   and \`by\` is \`user\`, \`host\`, \`system\` or a limb id (\`head\`, \`voice\`, \`reviewer\`, \`worker-3\`, \`watch-5\` …).
 - \`conversations/<worker>.jsonl\`: each worker's conversation with its model, one message per line,
   so a resumed session can continue it.
-- \`frames.jsonl\`: runtime snapshots as \`{ seq, t, patch }\`, where \`patch\` holds only the snapshot
-  sections that changed (\`status\`, \`world\`, \`self\`, \`levels\`, \`stops\`, \`health\`, \`limbs\`,
-  \`senses\`, \`jev\`). \`world\`, \`levels\` and \`self\` are exact after every event; the other sections
-  are captured once the runtime finishes handling a batch of events. Frame 0 (seq 0) is the full
+- \`frames.jsonl\`: snapshots of what the log alone does not give, as \`{ seq, t, patch }\`, where \`patch\`
+  holds only the sections that changed (\`status\`, \`world\`, \`levels\`, \`senses\`, \`jev\`). \`world\` and
+  \`levels\` are exact after every event; the others are captured once the runtime finishes handling a batch of
+  events. Limbs, stops, notes and health are rebuilt from \`events.jsonl\` with \`replayRuntime\` from
+  \`@entity/core/state\` (older recordings also carry them as \`limbs\`, \`stops\`, \`self\` and \`health\`). Frame 0 (seq 0) is the full
   state at Start. The snapshot after event N is every patch with \`seq <= N\` applied in order
   (several frames can share a seq).
 
@@ -221,7 +226,6 @@ jq -c 'select(.type=="chat_message") | {t, by, text: .data.text}' events.jsonl
 jq -c 'select(.by!="user" and .by!="system") | {t, by, type}' events.jsonl | head -50
 jq -c 'select(.type=="run_finished") | {by, ms: .data.ms, aborted: .data.aborted}' events.jsonl
 jq -c 'select(.type=="limb_failed" or .type=="output_stopped")' events.jsonl
-jq -s 'map(select(.patch.limbs)) | last | .patch.limbs' frames.jsonl   # limbs at the end
 \`\`\`
 
 Event types and the runtime are documented in entity/docs (core-model.md, architecture.md,

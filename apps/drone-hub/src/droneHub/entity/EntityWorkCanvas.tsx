@@ -168,7 +168,7 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   return (
     <CanvasCtx.Provider value={ctx}>
       <div className="flex min-h-0 flex-1 flex-col" data-settled={settled || undefined}>
-        <TopStrip model={model} onPick={setSelected} onFit={() => { userMoved.current = false; flow.current?.fitView({ ...FIT, duration: 200 }); }} />
+        <TopStrip model={model} t={t} onPick={setSelected} onFit={() => { userMoved.current = false; flow.current?.fitView({ ...FIT, duration: 200 }); }} />
         <div className="relative min-h-0 flex-1">
           {model.rows.length === 0 ? (
             <div className="p-4 text-[var(--muted)]">No work yet. Ask for something that takes real work and it shows up here.</div>
@@ -485,7 +485,7 @@ function ChipView({ chip }: { chip: Chip }) {
   );
 }
 
-function TopStrip({ model, onPick, onFit }: { model: CanvasModel; onPick(id: string): void; onFit(): void }) {
+function TopStrip({ model, t, onPick, onFit }: { model: CanvasModel; t: number; onPick(id: string): void; onFit(): void }) {
   const color = { need: STATE_COLOR.need, wait: STATE_COLOR.wait, queued: 'var(--muted)' } as const;
   return (
     <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border)] px-3 py-1 text-[12px]" aria-label="Needs you and coming up">
@@ -501,7 +501,18 @@ function TopStrip({ model, onPick, onFit }: { model: CanvasModel; onPick(id: str
         </span>
       ) : null}
       {!model.attention.length && !model.entityChips.length ? <span className="text-[var(--muted)]">Nothing needs you.</span> : null}
-      <button type="button" onClick={onFit} className="ml-auto shrink-0 rounded border border-[var(--border)] px-2 text-[var(--muted)] hover:bg-[var(--hover)]">Fit</button>
+      <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[12px] text-[var(--muted)]">
+        {model.head ? (
+          <span className="inline-flex min-w-0 items-center gap-1.5 font-sans" style={{ color: STATE_COLOR.think }} title={`Head is thinking: ${model.head.reason}`}>
+            <Dot pulse /><span className="text-[var(--fg-secondary,var(--fg))]">head</span>
+            <span className="max-w-[26ch] truncate text-[var(--muted)]">{model.head.reason}</span>
+            <span className="font-mono text-[11px] text-[var(--muted)]">{clock(t - model.head.since)}</span>
+          </span>
+        ) : null}
+        <span title="Session time">{clock(t)}</span>
+        <span title={model.costTotal > 0 ? 'Model cost this session' : 'Tokens this session (subscription models report no price)'}>{spend(model.costTotal, model.tokensTotal)}</span>
+      </span>
+      <button type="button" onClick={onFit} className="shrink-0 rounded border border-[var(--border)] px-2 text-[var(--muted)] hover:bg-[var(--hover)]">Fit</button>
     </div>
   );
 }
@@ -520,7 +531,7 @@ function Drawer({ w, events, t, live, onWorker, onClose }: { w: WorkItem; events
         <button type="button" aria-label="Close" onClick={onClose} className="ml-auto rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]">✕</button>
       </div>
       <div className="grid content-start gap-2 overflow-y-auto">
-        <WorkerDetail w={w} t={t} live={live} onWorker={onWorker} hideAsk />
+        <WorkerDetail w={w} live={live} onWorker={onWorker} />
         <div className="grid gap-2 px-3 pb-3">
           {origin ? (
             <div className="max-w-[88%] justify-self-end rounded-[9px] bg-[color-mix(in_srgb,var(--accent)_14%,var(--panel))] px-2.5 py-1.5">
