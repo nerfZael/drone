@@ -39,6 +39,15 @@ export const HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "navigate-to 'none'",
 ].join('; ');
 
+// Opt-in resource access retains the opaque origin and all non-network restrictions.
+export const HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY = HTML_PREVIEW_CONTENT_SECURITY_POLICY
+  .replace("script-src 'unsafe-inline'", "script-src 'unsafe-inline' 'unsafe-eval' http: https:")
+  .replace("style-src 'unsafe-inline'", "style-src 'unsafe-inline' http: https:")
+  .replace('img-src data: blob:', 'img-src data: blob: http: https:')
+  .replace('font-src data:', 'font-src data: http: https:')
+  .replace('media-src data: blob:', 'media-src data: blob: http: https:')
+  .replace("connect-src 'none'", 'connect-src http: https: ws: wss:');
+
 const HTML_PREVIEW_LINK_GUARD = `<script>
 (() => {
   document.addEventListener('click', (event) => {
@@ -90,10 +99,13 @@ const HTML_PREVIEW_LINK_GUARD = `<script>
  * development URLs while preventing the iframe from leaving the srcdoc page.
  * A later meta policy in the file can only further restrict the initial policy.
  */
-export function buildIsolatedHtmlPreviewDocument(source: string): string {
+export function buildIsolatedHtmlPreviewDocument(source: string, allowExternalResources = false): string {
+  const policy = allowExternalResources
+    ? HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY
+    : HTML_PREVIEW_CONTENT_SECURITY_POLICY;
   return [
     '<!doctype html>',
-    `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CONTENT_SECURITY_POLICY}">`,
+    `<meta http-equiv="Content-Security-Policy" content="${policy}">`,
     '<meta name="referrer" content="no-referrer">',
     '<meta http-equiv="x-dns-prefetch-control" content="off">',
     HTML_PREVIEW_LINK_GUARD,
