@@ -45,7 +45,7 @@ Every event is timestamped, typed, and attributed with `by`. Bursts of `draft_ch
 
 Effects are tool calls from the core and from channels.
 
-- Core effects: `set_watch`, `run_program`, `stop_output`, `resume_output`, `note`, `spawn`, `ask`, `cancel`, `kill`, `set_timer`, `remember`, `recall`.
+- Core effects: `set_watch`, `run_program`, `stop_output`, `resume_output`, `note`, `dispatch`, `ask`, `cancel`, `kill`, `set_timer`, `remember`, `recall`.
 - Demo channel effects: `say`, `set_draft` (the entity's own visible "typing" text), `press`, `key_down` / `key_up`.
 
 Effects apply as soon as their tool call streams in, and every committed effect is appended to the log like any event.

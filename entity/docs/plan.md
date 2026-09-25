@@ -52,15 +52,15 @@ The M0.5 spike comes first and is thrown away; it exists to measure before we bu
 - Multiple models run as limbs, in parallel. The default is a gpt-6-luna head-and-voice limb plus gpt-6-sol task limbs (both Codex, medium reasoning), with Cerebras qwen as an optional fast reflex limb. See [topology.md](topology.md#default-v1-config).
 - A busy limb never makes a new wake queue: the wake starts a parallel run.
 - Head and voice can be split by configuration: a fast voice limb answers first and hands off to the head.
-- Parallel conversation (`parallel: true`): every message gets a capable worker at once. Workers reply in threads, can be forked, steered or gated, claim files, and share discoveries. A workspace channel gives them file tools confined to one folder, with commands off by default. See [parallel-conversation.md](parallel-conversation.md).
+- One conversation mode (2026-09-25; single mode and the `parallel` flag are gone): the front limb answers quick things, does what takes seconds itself (keypad, watches, programs), and dispatches real work to workers at once. Workers reply in threads, can be forked, steered or gated, claim files, and share discoveries. A workspace channel gives them file tools confined to one folder, with commands off by default. See [parallel-conversation.md](parallel-conversation.md).
 - Limbs come in two kinds under one contract: LLM limbs and the code limbs they write. Code limbs are children of their author.
 - Jev is a runtime primitive, not a limb: `judge(question)` for a one-shot probability and `sense(question)` for a continuous level. The runtime batches, coalesces, times out and logs every call, so replay stays deterministic. Jev makes the fuzzy world codeable: it senses, judges (cascades, fit checks, arbiter confidence) and routes.
-- Output stops have a scope (`work` by default: everything under the owner but not the owner) and a mode (`stop` cancels, `freeze` pauses with nothing lost).
+- Output stops have a scope (`work` by default: everything under the owner but not the owner) and a mode (`stop` cancels, `freeze` pauses with nothing lost). A stop covers the work in flight when it was issued; work an LLM deliberately starts afterwards is not covered.
 - Once a newer head run exists, an older run can no longer act, except to leave a note.
 - Programs read events in order through their own cursor, and keypad events carry `held_ms` / `gap_ms`.
 - Everything the entity writes is validated, and errors go back to the model as tool results.
 - Live tests use only Codex gpt-6-sol and gpt-6-luna on medium reasoning. Cerebras qwen is for rare speed tests only: it is fast but not smart, prompt caching barely works there, and it bills per API call rather than on the subscription.
-- Limbs see each other's status and committed results, not each other's context. In v1 only the voice limb spawns task limbs.
+- Limbs see each other's status and committed results, not each other's context. Only the front limb and the head dispatch workers; `spawn` and `report` are gone.
 - Work flows through state, lifecycle through signals, and parents can cancel or kill their children.
 - Context is kept per task, and checkpoints replace compaction.
 - The user has Start, Pause, Resume and Reset.

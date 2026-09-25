@@ -20,6 +20,7 @@ An entity is a realtime AI agent: a continuous control loop over an **event log*
 | [context-and-memory.md](context-and-memory.md) | Fresh vs. kept context, caching, memory layers |
 | [parallel-conversation.md](parallel-conversation.md) | Every message gets a capable worker at once: dispatch, fork, steer, threaded replies, claims, workspace tools |
 | [coding.md](coding.md) | Coding as a search: parallel candidates in worktrees, evidence-based pruning, live steering, spend policy |
+| [work-canvas.md](work-canvas.md) | The Work tab as a map: time rows, lineage columns, three arrow kinds, folding, group cards, and the runtime changes it needs |
 | [plan.md](plan.md) | Codebase plan, milestones, decisions, open questions, later |
 | [future.md](future.md) | Designed but not in v1: richer topologies, arbitration, cascades, automatic memory, more hosts |
 | [alternatives.md](alternatives.md) | Architectures we compared the design against, and what we took or rejected |

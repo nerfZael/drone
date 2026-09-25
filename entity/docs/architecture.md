@@ -76,7 +76,7 @@ Every watch and program an LLM limb installs becomes a **code limb**: named, sup
 Every effect declares a **risk class**:
 
 - **`reflex`** effects can be fired freely by code limbs at full speed. The keypad is the demo's example.
-- **`limb`** effects (such as `say`, `spawn`, memory writes) can be fired by LLM limbs, and by code limbs within a tighter rate limit, with each firing shown to the authoring limb.
+- **`limb`** effects (such as `say`, `dispatch`, memory writes) can be fired by LLM limbs, and by code limbs within a tighter rate limit, with each firing shown to the authoring limb.
 - **`confirm`** effects need the user's approval. There are none in the demo.
 
 The host marks its own effects the same way, so a game decides which of its moves a reflex may make.
