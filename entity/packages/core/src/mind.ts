@@ -28,9 +28,12 @@ export interface MindRunInput {
 }
 
 export interface MindRunResult {
+  /** Why the run ended: the model stopped by itself, or it used all maxSteps turns while still working. */
+  stopReason?: 'done' | 'max_steps';
   /** Final assistant text, if any. The user never sees it unless the limb calls `say`. */
   text?: string;
-  usage?: { input: number; output: number; cacheRead?: number };
+  /** cost: model price in USD for this run, when the provider reports it. */
+  usage?: { input: number; output: number; cacheRead?: number; cost?: number };
 }
 
 /** Runs one LLM limb wake. The Hub implements it with a real model; tests use a scripted one. */

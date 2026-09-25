@@ -100,29 +100,30 @@ test('output stops are scoped: "work" leaves the voice free, "subtree" blocks it
   expect(h.of('program_cancelled')).toHaveLength(1);
 });
 
-test('task limbs: spawned by the head, cannot speak, wake the head when done, and keep their session key', async () => {
+test('workers: dispatched by the head, reply to the user themselves, do not wake the head when done, and keep their session', async () => {
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'think hard') await call('spawn', { task: 'plan something', name: 'planner' });
+    if (input.role === 'head' && lastUserMessage(input) === 'think hard') await call('dispatch', { task: 'plan something', name: 'planner' });
     if (input.role === 'task') {
       expect(input.sessionKey).toBe(input.limbId);
-      expect(input.tools.some(t => t.name === 'say')).toBe(false);
-      expect(await call('say', { text: 'hi' })).toContain('only the voice speaks');
-      await call('report', { text: 'halfway' });
-      await call('finish_task', { result: 'the plan' });
+      expect(input.tools.some(t => t.name === 'spawn' || t.name === 'report')).toBe(false);
+      expect(await call('say', { text: 'the plan' })).toBe('sent');
+      await call('finish_task', { result: 'planned' });
     }
-    if (input.role === 'head' && input.prompt.includes('"woken_because":"task task-')) await call('say', { text: 'done: the plan' });
   });
   h.entity.start();
   h.entity.input('chat_message', { text: 'think hard' });
-  await until(() => h.said().includes('done: the plan'));
-  expect(h.of('task_done')[0].data).toMatchObject({ status: 'done', result: 'the plan' });
-  expect(h.mind.forgotten).toEqual(['task-3']);
+  await until(() => h.of('task_done').length === 1);
+  expect(h.said()).toEqual(['the plan']);
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'done', result: 'planned' });
+  await sleep(30);
+  expect(h.mind.runs.filter(r => r.role === 'head')).toHaveLength(2); // session start and the message, not the finish
+  expect(h.mind.forgotten).toEqual([]);
 });
 
 test('cancel asks a task to wrap up, then kills it after the grace period', async () => {
   let taskResult = '';
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('spawn', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
     if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'task-3' });
     if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
   });
@@ -137,7 +138,7 @@ test('cancel asks a task to wrap up, then kills it after the grace period', asyn
 
 test('a crashing task limb is restarted up to the cap, then fails upward', async () => {
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('spawn', { task: 'crash' });
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'crash' });
     if (input.role === 'task') throw new Error('model outage');
   }, { config: { restartMax: 2 } });
   h.entity.start();
@@ -283,11 +284,30 @@ test('an older head run can no longer act once a newer run exists, except to lea
   expect(results[1]).toBe('noted');
 });
 
+test('a stop halts the work in flight; a program the head starts afterwards runs, one a watch starts afterwards does not', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('run_program', { name: 'old', code: 'while (true) { await press("1"); await wait(10); }' });
+    await call('set_watch', { watch: { name: 'relauncher', on: { event: 'key_down', key: '7' }, do: { run_program: { name: 'from watch', code: 'await press("7")' } } } });
+    results.push(await call('stop_output', { reason: 'replacing the program' }));
+    results.push(await call('run_program', { name: 'new', code: 'await press("2")' }));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 2);
+  await until(() => h.entityKeys('key_down').some(e => e.data.key === '2'));
+  h.entity.input('key_down', { key: '7' });
+  await sleep(50);
+  expect(h.of('program_cancelled').map(e => e.data.name)).toEqual(['old']);
+  expect(h.entityKeys('key_down').some(e => e.data.key === '7')).toBe(false);
+});
+
 test('freeze pauses a task limb and a program at their next action, and resume continues them with nothing lost', async () => {
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'go') {
-      // Spawn first: the freeze wakes the head, and a newer run supersedes this one.
-      await call('spawn', { task: 'press 4 then 5' });
+      // Dispatch first: the freeze wakes the head, and a newer run supersedes this one.
+      await call('dispatch', { task: 'press 4 then 5' });
       await call('set_watch', { watch: { name: 'freeze on 9', on: { level: 'key.9.held' }, do: { stop_output: { reason: 'user holds 9', mode: 'freeze' } } } });
       await call('set_watch', { watch: { name: 'resume on release', on: { event: 'key_up', key: '9' }, do: { resume_output: {} } } });
       await call('run_program', { name: 'steps', code: 'for (const k of ["1","2","3"]) { await press(k); await wait(30); }' });

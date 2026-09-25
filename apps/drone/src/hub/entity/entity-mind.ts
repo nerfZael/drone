@@ -45,9 +45,11 @@ export class PiAiMind implements Mind {
       messages,
       tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as never })),
     };
-    const usage = { input: 0, output: 0, cacheRead: 0 };
+    const usage = { input: 0, output: 0, cacheRead: 0, cost: 0 };
     let text = '';
 
+    // Stays true if the loop ends by using every turn while the model is still calling tools.
+    let ranOut = true;
     for (let step = 0; step < input.maxSteps; step++) {
       if (input.signal.aborted) throw new Error('aborted');
       const results: Message[] = [];
@@ -75,13 +77,14 @@ export class PiAiMind implements Mind {
       usage.input += message.usage?.input ?? 0;
       usage.output += message.usage?.output ?? 0;
       usage.cacheRead += message.usage?.cacheRead ?? 0;
+      usage.cost += message.usage?.cost?.total ?? 0;
       context.messages.push(message);
       const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
       if (said) text = said;
-      if (!results.length) break;
+      if (!results.length) { ranOut = false; break; }
       context.messages.push(...results);
     }
     if (input.sessionKey) this.sessions.set(input.sessionKey, context.messages);
-    return { text, usage };
+    return { text, usage, stopReason: ranOut ? 'max_steps' : 'done' };
   }
 }

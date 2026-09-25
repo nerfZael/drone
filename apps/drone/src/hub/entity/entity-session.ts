@@ -2,23 +2,24 @@ import fs from 'node:fs';
 import { chatChannel, Entity, keypadChannel, workspaceChannel, type EntityEvent, type EntitySnapshot, type Evaluator, type Mind } from '@entity/core';
 import { droneRootPath } from '../../host/paths';
 import { PiAiMind, type ReasoningLevel } from './entity-mind';
+import { createWorkSummarizer } from './entity-summarizer';
 import type { EvaluatorKind } from './entity-evaluator';
 import { EntityRecorder, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
 
 export interface EntitySessionConfig {
   headModel: string;
   taskModel: string;
-  /** A fast model that answers first and hands off to the head; empty means the head is the voice. */
+  /** A fast model that answers first, routes to workers and hands ongoing behaviour to the head; empty means the head is the front. */
   voiceModel: string;
   reasoning: ReasoningLevel;
   /** What backs `judge` / `sense`: Jev (billed per call through the AI Gateway), a small fast LLM, or nothing. Off by default. */
   evaluator: EvaluatorKind;
-  /** Parallel conversation: every message gets a capable worker at once. */
-  parallel: boolean;
   /** Folder the workspace tools are confined to. Empty: a scratch folder in the Hub's data directory. */
   workspace: string;
   /** Let workers run shell commands in the workspace. Off by default: it runs LLM-written commands on this machine. */
   allowCommands: boolean;
+  /** Work view summaries of busy workers, written by a cheap model. */
+  summaries: boolean;
 }
 
 /** Where session recordings go: next to hub.log, so other agents on this machine can read them. */
@@ -38,9 +39,9 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
   voiceModel: '',
   reasoning: 'medium',
   evaluator: 'off',
-  parallel: false,
   workspace: '',
   allowCommands: false,
+  summaries: true,
 };
 
 export type EntityStreamMessage =
@@ -77,9 +78,9 @@ export class EntitySession {
     this.entity = new Entity({
       mind: this.createMind(this.config),
       channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: this.config.workspace || defaultEntityWorkspace(), allowCommands: this.config.allowCommands })],
-      config: { parallel: this.config.parallel },
       models: { head: this.config.headModel, task: this.config.taskModel, voice: this.config.voiceModel || undefined },
       evaluator: this.config.evaluator === 'off' ? undefined : this.createEvaluator(this.config.evaluator),
+      summarizer: this.config.summaries ? createWorkSummarizer() : undefined,
     });
     this.unsubscribe = this.entity.subscribe(event => {
       if (event.type === 'session_reset') return;
@@ -131,6 +132,11 @@ export class EntitySession {
 
   input(type: string, data: Record<string, unknown>): EntityEvent {
     return this.entity.input(type, data);
+  }
+
+  /** Work view actions on one worker. */
+  worker(id: string, action: 'message' | 'stop', text = ''): string {
+    return action === 'message' ? this.entity.messageWorker(id, text) : this.entity.stopWorker(id);
   }
 
   /** Config changes rebuild the entity, so they are only allowed before Start or after Reset. */

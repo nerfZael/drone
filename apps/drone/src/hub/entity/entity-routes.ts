@@ -78,6 +78,15 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
     json(200, { ok: true, seq: event.seq });
   });
 
+  router.post('/api/entity/worker', async ({ readJson, json, fail }) => {
+    const body = await readJson<{ id?: string; action?: string; text?: string }>();
+    if (!body?.id || (body.action !== 'message' && body.action !== 'stop')) return fail(400, 'id and action (message or stop) are required');
+    if (body.action === 'message' && (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000)) return fail(400, 'text must be 1-4000 characters');
+    const result = current().worker(String(body.id), body.action, body.text ?? '');
+    if (result.startsWith('error')) return fail(400, result.replace(/^error: /, ''));
+    json(200, { ok: true, result });
+  });
+
   router.post('/api/entity/config', async ({ readJson, json, fail }) => {
     const body = await readJson<Partial<EntitySessionConfig>>();
     const update: Partial<EntitySessionConfig> = {};
@@ -87,8 +96,8 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
       if (body.voiceModel !== '' && !MODELS.has(body.voiceModel)) return fail(400, 'unsupported voice model');
       update.voiceModel = body.voiceModel;
     }
-    if (body?.parallel !== undefined) update.parallel = body.parallel === true;
     if (body?.allowCommands !== undefined) update.allowCommands = body.allowCommands === true;
+    if (body?.summaries !== undefined) update.summaries = body.summaries === true;
     if (body?.workspace !== undefined) {
       const dir = String(body.workspace).trim();
       if (dir && (!path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory())) return fail(400, 'workspace must be an absolute path to an existing folder (or empty for the scratch folder)');

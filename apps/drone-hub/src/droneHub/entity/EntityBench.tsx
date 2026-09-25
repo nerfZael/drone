@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { UiButton } from '../../ui/components/Button';
 import { EntityBrain } from './EntityBrain';
+import { EntityWork } from './EntityWork';
 import { EntityTimeline, useEntityReplay, useReplayKeys } from './EntityTimeline';
 import { useEntitySession, type EntityConfig } from './use-entity-session';
 import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
@@ -10,7 +11,7 @@ import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
 const FolderWorkspaceFiles = React.lazy(() => import('../files/FolderWorkspaceFiles').then(m => ({ default: m.FolderWorkspaceFiles })));
 /** The Hub serves the entity workspace through the drone file routes under this id (see folder-workspaces.ts). */
 const ENTITY_WORKSPACE_ID = 'entity-workspace';
-type BenchView = 'brain' | 'inspector' | 'files';
+type BenchView = 'brain' | 'work' | 'inspector' | 'files';
 
 const MODELS = ['openai-codex/gpt-6-luna', 'openai-codex/gpt-6-sol', 'cerebras/qwen-3.8-27b'];
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
@@ -51,10 +52,12 @@ export function EntityBench() {
           </div>
         </div>
       ) : (
-        <div className={`grid min-h-0 flex-1 gap-px bg-[var(--border)] ${brain ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]'}`}>
+        <div className={`grid min-h-0 flex-1 gap-px bg-[var(--border)] ${brain || view === 'work' ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]'}`}>
           <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input} />
           <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} />
-          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} /> : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
+          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} />
+            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} />
+            : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>
       )}
       <EntityTimeline replay={replay} liveSessionId={state.sessionId} liveLastSeq={state.events[state.events.length - 1]?.seq ?? 0} />
@@ -83,7 +86,7 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
         {!idle ? <UiButton size="small" variant="danger" onClick={() => onControl('reset')}>Reset</UiButton> : null}
       </div>
       <div className="flex rounded border border-[var(--border)] p-px" role="tablist" aria-label="Right pane">
-        {(['brain', 'inspector', 'files'] as const).map((id) => (
+        {(['brain', 'work', 'inspector', 'files'] as const).map((id) => (
           <button key={id} type="button" role="tab" aria-selected={view === id}
             className={`rounded-sm px-2 py-0.5 capitalize ${view === id ? 'bg-[var(--hover)] text-[var(--fg)]' : 'text-[var(--muted)]'}`}
             onClick={() => onView(id)}>{id}</button>
@@ -116,14 +119,6 @@ function SettingsRow({ config, idle, onConfigure }: { config: EntityConfig; idle
   React.useEffect(() => setWorkspace(config.workspace), [config.workspace]);
   return (
     <div className="flex w-full flex-wrap items-center gap-3 text-[var(--muted)]" title={idle ? undefined : 'Reset the session to change settings'}>
-      <label className="flex items-center gap-1" title="Parallel: every message gets its own capable worker at once; workers reply in threads.">
-        Mode
-        <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.parallel ? 'parallel' : 'single'} disabled={!idle}
-          onChange={(e) => onConfigure({ parallel: e.target.value === 'parallel' })}>
-          <option value="single">single</option>
-          <option value="parallel">parallel conversation</option>
-        </select>
-      </label>
       <label className="flex min-w-0 flex-1 items-center gap-1" title="Folder the workspace tools are confined to. Empty: a scratch folder in the Hub's data directory.">
         Workspace
         <input className="min-w-[200px] flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--fg)]"

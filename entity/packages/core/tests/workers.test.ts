@@ -19,7 +19,7 @@ function workspace() {
   return dir;
 }
 
-test('parallel: each message gets a worker at once; workers reply in their own threads; questions are answered from state', async () => {
+test('workers: each message gets a worker at once; workers reply in their own threads; questions are answered from state', async () => {
   let releaseFirst!: () => void;
   const firstBusy = new Promise<void>(r => { releaseFirst = r; });
   const h = setup(async (input, call) => {
@@ -38,7 +38,7 @@ test('parallel: each message gets a worker at once; workers reply in their own t
       await call('say', { text: 'changelog entry added' });
       await call('finish_task', { result: 'changelog' });
     }
-  }, { config: { parallel: true } });
+  }, {});
   h.entity.start();
   const m1 = h.entity.input('chat_message', { text: 'fix the flaky test' });
   await until(() => h.of('limb_spawned').length === 1);
@@ -55,7 +55,7 @@ test('parallel: each message gets a worker at once; workers reply in their own t
   expect(h.mind.forgotten).toEqual([]); // finished workers keep their conversation for follow-ups
 });
 
-test('parallel: steer reaches a busy worker with its next tool result; fork continues from a worker; after waits', async () => {
+test('workers: steer reaches a busy worker with its next tool result; fork continues from a worker; after waits', async () => {
   const seen: string[] = [];
   let go!: () => void;
   const gate = new Promise<void>(r => { go = r; });
@@ -73,7 +73,7 @@ test('parallel: steer reaches a busy worker with its next tool result; fork cont
       await call('finish_task', { result: 'auth refactored' });
     }
     if (input.role === 'task' && input.limbId !== 'task-3') await call('finish_task', { result: `${input.limbId} done` });
-  }, { config: { parallel: true } });
+  }, {});
   h.entity.start();
   h.entity.input('chat_message', { text: 'refactor auth' });
   await until(() => h.mind.runs.some(r => r.limbId === 'task-3'));
@@ -113,7 +113,7 @@ test('workspace: tools stay inside the root, and a file claimed by one worker is
       results.b = await call('write_file', { path: 'app.ts', content: 'overwrite' });
       await call('finish_task', { result: 'gave up' });
     }
-  }, { config: { parallel: true }, channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: dir })] });
+  }, { channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: dir })] });
   h.entity.start();
   h.entity.input('chat_message', { text: 'a' });
   await until(() => results.git !== undefined);
@@ -142,4 +142,62 @@ test('workspace: run is only offered when commands are allowed', async () => {
   expect(out).toContain('answer = 41');
   expect(events).toEqual(['command_ran']);
   await sleep(1);
+});
+
+test('work view data: tool calls are logged with outcomes, busy workers get summaries, and the user can message or stop a worker', async () => {
+  const summaries: string[] = [];
+  const summarizer = { async summarize(input: { task: string; activity: string }) { summaries.push(input.activity); return { done: ['read the file'], doing: ['editing'], next: ['run tests'] }; } };
+  let release!: () => void;
+  const hold = new Promise<void>(r => { release = r; });
+  const heard: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'work') await call('dispatch', { task: 'do some work', name: 'worker' });
+    if (input.role === 'task') {
+      for (let i = 0; i < 4; i++) await call('note', { text: `step ${i}` });
+      await call('press', { key: 'x' }); // invalid: logged as not ok
+      await hold;
+      heard.push(await call('note', { text: 'after' }));
+      await call('finish_task', { result: 'done' });
+    }
+  }, { config: { summaryEveryCalls: 4, summaryIntervalMs: 0 }, summarizer });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'work' });
+  await until(() => h.of('work_summary').length === 1);
+  const summary = h.of('work_summary')[0];
+  expect(summary.data).toMatchObject({ limb: 'task-3', done: ['read the file'], doing: ['editing'], next: ['run tests'] });
+  expect(summaries[0]).toContain('called note: step 0');
+  await until(() => h.of('tool_done').some(e => e.data.ok === false));
+  expect(h.of('tool_called', b => b === 'task-3').map(e => e.data.name)).toContain('press');
+  expect(h.entity.messageWorker('task-3', 'use tabs, not spaces')).toContain('next tool result');
+  release();
+  await until(() => heard.length === 1);
+  expect(heard[0]).toContain('Message from the user: use tabs, not spaces');
+  await until(() => h.of('task_done').length === 1);
+  const worker = h.entity.snapshot().limbs.find(l => l.id === 'task-3')!;
+  expect(worker.endedAt).toBeGreaterThan(worker.createdAt);
+  expect(worker.replyTo).toBeGreaterThan(0);
+  expect(h.entity.stopWorker('task-3')).toContain('already done');
+});
+
+test('a worker that runs out of turns is continued with its conversation, then marked failed at the cap; one that ends quietly keeps its last reply as result', async () => {
+  let turns = 0;
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.role === 'head' && message === 'long') await call('dispatch', { task: 'long work', name: 'long' });
+    if (input.role === 'head' && message === 'short') await call('dispatch', { task: 'short work', name: 'short' });
+    if (input.role === 'task' && ownTask(input) === 'long work') { turns++; return; }
+    if (input.role === 'task' && ownTask(input) === 'short work') await call('say', { text: 'here is the answer' });
+  }, { config: { taskContinuations: 2 } });
+  // The scripted mind reports running out of turns for the long worker.
+  const run = h.mind.run.bind(h.mind);
+  h.mind.run = async input => ({ ...(await run(input)), ...(input.role === 'task' && ownTask(input) === 'long work' ? { stopReason: 'max_steps' as const } : {}) });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'long' });
+  await until(() => h.of('task_done').length === 1);
+  expect(turns).toBe(3);
+  expect(h.of('task_continued')).toHaveLength(2);
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'failed' });
+  h.entity.input('chat_message', { text: 'short' });
+  await until(() => h.of('task_done').length === 2);
+  expect(h.of('task_done')[1].data).toMatchObject({ status: 'done', result: 'here is the answer' });
 });

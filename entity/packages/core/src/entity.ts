@@ -2,6 +2,7 @@ import { Levels, type Channel, type EffectSpec } from './channel.js';
 import { JevService, type Evaluator, type JevOptions, type SenseInfo } from './jev.js';
 import { EventLog, isEntityActor, matches } from './log.js';
 import type { Mind, ToolSpec } from './mind.js';
+import { describeToolArgs, toolResultOk, type Summarizer, type WorkSummary } from './summary.js';
 import { runProgram, type ProgramOutcome } from './program.js';
 import { headSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
 import { toJsonSchema, validate } from './schema.js';
@@ -25,6 +26,8 @@ export interface Limb {
   restart: 'permanent' | 'transient';
   status: LimbStatus;
   createdAt: number;
+  /** When an LLM decided to start this (a tool call; for a program a watch launched, when the watch was decided). Output stops issued before then do not cover it. */
+  decidedAt?: number;
   children: Set<string>;
   runs: Map<string, RunInfo>;
   /** Log position up to which this limb has already been shown events. */
@@ -49,6 +52,14 @@ export interface Limb {
   replyTo?: number;
   waitFor?: string;
   notices: string[];
+  /** When a task or code limb stopped running. */
+  endedAt?: number;
+  /** Times this task was continued after running out of turns. */
+  continuations: number;
+  /** Work view summaries: tool calls since the last one, and whether one is being written. */
+  callsSinceSummary: number;
+  lastSummaryAt: number;
+  summarizing?: boolean;
 }
 
 export interface Claim { path: string; limb: string; note: string; since: number }
@@ -84,10 +95,14 @@ export interface EntityConfig {
   draftAttention: boolean;
   /** Allow watches and programs. Off only to test the floor: the entity as a plain chat agent. */
   codeLimbs: boolean;
-  /** Parallel conversation: every message gets a capable worker at once (see docs/parallel-conversation.md). */
-  parallel: boolean;
   /** Most finished worker conversations kept for forks and follow-ups. */
   keptSessions: number;
+  /** A task run that uses all its turns is continued this many times before the task is marked failed. */
+  taskContinuations: number;
+  /** Summarize a busy worker after this many tool calls, at most every summaryIntervalMs, at most summaryMax per session. */
+  summaryEveryCalls: number;
+  summaryIntervalMs: number;
+  summaryMax: number;
   recentEvents: number;
 }
 
@@ -98,6 +113,8 @@ export interface EntityOptions {
   models: { head: string; task: string; voice?: string };
   evaluator?: Evaluator;
   jev?: JevOptions;
+  /** Writes Work view summaries of busy workers. Optional; everything else in the Work view comes from the log. */
+  summarizer?: Summarizer;
   config?: Partial<EntityConfig>;
 }
 
@@ -113,6 +130,7 @@ export interface EntitySnapshot {
     id: string; kind: string; role: LimbRole; name: string; parent?: string; model?: string; status: LimbStatus;
     runs: { id: string; reason: string; startedAt: number; firstToolAt?: number; voice: boolean }[];
     task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number;
+    createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
   }[];
   senses: SenseInfo[];
   jev: { available: boolean; calls: number; perMinute: number };
@@ -121,7 +139,7 @@ export interface EntitySnapshot {
 const DEFAULT_CONFIG: EntityConfig = {
   messageDebounceMs: 150, messageSettleMs: 1000, messageSettleMaxMs: 6000, tickMs: 50, headHeartbeatMs: 180_000, headMaxSteps: 8, taskMaxSteps: 24,
   maxTasks: 6, maxCodeLimbs: 32, reflexPerSecond: 30, limbPerSecond: 5, cancelGraceMs: 3000,
-  restartMax: 3, restartWindowMs: 60_000, freezeMaxMs: 600_000, draftAttention: true, codeLimbs: true, parallel: false, keptSessions: 12, recentEvents: 40,
+  restartMax: 3, restartWindowMs: 60_000, freezeMaxMs: 600_000, draftAttention: true, codeLimbs: true, keptSessions: 12, taskContinuations: 4, summaryEveryCalls: 4, summaryIntervalMs: 20_000, summaryMax: 200, recentEvents: 40,
 };
 
 class Stopped extends Error {}
@@ -158,6 +176,7 @@ export class Entity {
   private claims = new Map<string, Claim>();
   private discoveries: { by: string; text: string; t: number }[] = [];
   private keptSessions: string[] = [];
+  private summaries = 0;
   private eventWaiters = new Set<{ matcher: EventMatcher; resolve(e: EntityEvent | null): void; timer: ReturnType<typeof setTimeout> }>();
   private pausable = new Set<{ remaining: number; startedAt: number; timer: ReturnType<typeof setTimeout> | null; fire(): void }>();
 
@@ -185,12 +204,13 @@ export class Entity {
     this.claims = new Map();
     this.discoveries = [];
     this.keptSessions = [];
+    this.summaries = 0;
     this.jev = new JevService(this.options.evaluator, this.log, this.levels, () => this.renderForJev(), m => this.addHealth(m), this.options.jev);
     this.log.subscribe(event => this.onEvent(event));
     const code: Capability[] = this.config.codeLimbs ? ['set_watch', 'run_program'] : [];
-    this.createLimb({ id: 'head', kind: 'llm', role: 'head', name: 'head', model: this.options.models.head, capabilities: ['speak', 'spawn', ...code, 'cancel', 'kill'], restart: 'permanent' });
+    this.createLimb({ id: 'head', kind: 'llm', role: 'head', name: 'head', model: this.options.models.head, capabilities: ['speak', ...code, 'cancel', 'kill'], restart: 'permanent' });
     if (this.options.models.voice) {
-      this.createLimb({ id: 'voice', kind: 'llm', role: 'voice', name: 'voice', parent: 'head', model: this.options.models.voice, capabilities: this.config.parallel ? ['speak', 'spawn', 'cancel'] : ['speak'], restart: 'permanent' });
+      this.createLimb({ id: 'voice', kind: 'llm', role: 'voice', name: 'voice', parent: 'head', model: this.options.models.voice, capabilities: ['speak', 'cancel'], restart: 'permanent' });
     }
   }
 
@@ -385,12 +405,12 @@ export class Entity {
       this.log.append('watch_woke', limb.id, { reason: action.wake.reason, limb: limb.parent });
       if (limb.parent) this.wake(limb.parent, `watch "${limb.name}": ${action.wake.reason}`);
     } else if ('run_program' in action) {
-      this.startProgram(this.limbs.get(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code);
+      this.startProgram(this.limbs.get(limb.parent ?? 'head')!, action.run_program.name, action.run_program.code, limb.decidedAt);
     }
     if (watch.once) this.endCodeLimb(limb, 'done', 'fired once');
   }
 
-  private installWatch(author: Limb, spec: WatchSpec, builtin = false): string {
+  private installWatch(author: Limb, spec: WatchSpec, builtin = false, decidedAt?: number): string {
     const error = validate(watchSchema, spec, 'watch');
     if (error) return `error: invalid watch: ${error}. Nothing installed.`;
     const action = spec.do;
@@ -405,6 +425,7 @@ export class Entity {
     const limb = this.createLimb({ kind: 'code', role: 'watch', name: spec.name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
     limb.watch = spec;
     limb.builtin = builtin;
+    limb.decidedAt = decidedAt;
     limb.tracker = new LevelTracker();
     limb.status = 'running';
     if (spec.expires_s) limb.expiresAt = this.now() + spec.expires_s * 1000;
@@ -416,10 +437,11 @@ export class Entity {
 
   // ---------- programs ----------
 
-  private startProgram(author: Limb, name: string, code: string): { limb?: Limb; error?: string; done?: Promise<ProgramOutcome> } {
+  private startProgram(author: Limb, name: string, code: string, decidedAt?: number): { limb?: Limb; error?: string; done?: Promise<ProgramOutcome> } {
     if (this.countCode() >= this.config.maxCodeLimbs) return { error: `too many watches and programs (max ${this.config.maxCodeLimbs}); cancel some first.` };
     const limb = this.createLimb({ kind: 'code', role: 'program', name, parent: author.id, capabilities: [...author.capabilities], restart: 'transient' });
     limb.code = code;
+    limb.decidedAt = decidedAt;
     limb.abort = new AbortController();
     limb.status = 'running';
     this.log.append('program_started', author.id, { id: limb.id, name, code });
@@ -536,7 +558,10 @@ export class Entity {
   }
 
   private stoppedBy(caller: Caller): OutputStop | undefined {
+    const limb = this.limbs.get(caller.limbId);
     return this.stops.find(stop => {
+      // A stop halts the work in flight when it was issued. Work a limb deliberately starts afterwards is a new decision.
+      if (limb?.decidedAt !== undefined && limb.decidedAt > stop.since) return false;
       if (stop.scope === 'entity') return true;
       if (!this.isWithin(caller.limbId, stop.owner)) return false;
       // The voice is not the head's "work": only a subtree or entity stop silences it.
@@ -557,7 +582,7 @@ export class Entity {
     if (!limb || (limb.kind === 'code' && limb.status !== 'running')) return 'error: this limb is no longer running';
     if (this.status === 'paused' && !spec.readonly) return 'error: the session is paused';
     if (spec.risk === 'confirm') return `error: "${name}" needs the user's approval, which this session does not support yet`;
-    if (spec.voice && !limb.capabilities.has('speak')) return `error: you cannot use "${name}": only the voice speaks. Use report() to pass it on.`;
+    if (spec.voice && !limb.capabilities.has('speak')) return `error: you cannot use "${name}": only limbs that talk to the user can.`;
     if (!spec.readonly && spec.output !== false) {
       // A freeze pauses programs and task limbs at this effect until it lifts; watches and the voice are rejected instead.
       for (let stop = this.stoppedBy(caller); stop; stop = this.stoppedBy(caller)) {
@@ -580,7 +605,7 @@ export class Entity {
     if (spec.paths) {
       const refused = this.claimPaths(limb.kind === 'code' && limb.parent ? this.limbs.get(limb.parent)! : limb, spec.paths(args), 'writing');
       if (refused) {
-        if (this.config.parallel) this.wake('head', `claim conflict: ${caller.limbId} tried to write ${refused}`);
+        this.wake('head', `claim conflict: ${caller.limbId} tried to write ${refused}`);
         return `refused: ${refused}. Nothing was written. Coordinate (share a note, wait, or work elsewhere) instead of overwriting.`;
       }
     }
@@ -617,8 +642,7 @@ export class Entity {
     if (limb.id === 'head') this.lastHeadRunAt = run.startedAt;
     const prompt = this.render(limb, reason);
     this.log.append('run_started', limb.id, { run: run.id, reason });
-    const parallel = this.config.parallel;
-    const system = limb.role === 'head' ? headSystemPrompt(this.channels, this.limbs.has('voice'), parallel && !this.limbs.has('voice')) : limb.role === 'voice' ? voiceSystemPrompt(this.channels, parallel) : taskSystemPrompt(this.channels, parallel);
+    const system = limb.role === 'head' ? headSystemPrompt(this.channels, this.limbs.has('voice')) : limb.role === 'voice' ? voiceSystemPrompt(this.channels) : taskSystemPrompt(this.channels);
     this.mind.run({
       limbId: limb.id, runId: run.id, role: limb.role === 'head' || limb.role === 'voice' ? limb.role : 'task', model: limb.model!, system, prompt,
       tools: this.toolsFor(limb), signal: run.abort.signal,
@@ -640,7 +664,12 @@ export class Entity {
         if (run.voice && run.id !== this.latestRun.get(limb.id) && name !== 'note' && name !== 'handoff' && !this.effects.get(name)?.spec.readonly) {
           return 'superseded: a newer run of you has woken with newer events and is handling things now. Nothing was done. Leave a note if you know something it should, then stop.';
         }
+        const summary = describeToolArgs(name, args ?? {});
+        this.log.append('tool_called', limb.id, { run: run.id, name, summary });
         const result = await this.callTool(limb, run, name, args ?? {});
+        const ok = toolResultOk(result);
+        this.log.append('tool_done', limb.id, { run: run.id, name, ok, ...(ok ? {} : { note: result.slice(0, 200) }) });
+        if (limb.role === 'task') this.maybeSummarize(limb);
         // Busy workers hear about steers, discoveries and claims with their next tool result, without being stopped.
         if (limb.role === 'task' && limb.notices.length) return `${result}\n\n[updates while you worked]\n${limb.notices.splice(0).join('\n')}`;
         return result;
@@ -650,7 +679,13 @@ export class Entity {
       this.log.append('run_finished', limb.id, { run: run.id, ms: Math.round(this.now() - run.startedAt), usage: result.usage ?? null });
       if (limb.role === 'task' && limb.status === 'running' && !run.abort.signal.aborted) {
         if (limb.notices.length) this.wake(limb.id, `updates arrived: ${limb.notices.splice(0).join(' | ').slice(0, 1500)}`);
-        else this.finishTask(limb, result.text?.trim() || 'finished without a result', 'done');
+        else if (result.stopReason === 'max_steps') {
+          // Out of turns while still working: continue with the same conversation, up to a cap.
+          if (limb.continuations++ < this.config.taskContinuations) {
+            this.log.append('task_continued', limb.id, { continuations: limb.continuations });
+            this.wake(limb.id, 'you ran out of turns in your last run; continue where you left off, and call finish_task when done');
+          } else this.finishTask(limb, `stopped after ${limb.continuations} continuations without finishing (step limit)`, 'failed');
+        } else this.finishTask(limb, result.text?.trim() || this.lastSaidBy(limb.id) || 'ended without a summary', 'done');
       }
     }, error => {
       limb.runs.delete(run.id);
@@ -678,14 +713,14 @@ export class Entity {
   private finishTask(limb: Limb, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
     if (limb.status !== 'running') return;
     limb.status = status;
+    limb.endedAt = this.now();
     limb.result = result;
     for (const child of limb.children) this.stopLimb(child, 'cancel', limb.id);
     this.releaseClaims(limb.id);
-    if (this.config.parallel && status === 'done') this.keepSession(limb.id);
+    if (status === 'done') this.keepSession(limb.id);
     else this.mind.forget?.(limb.id);
     this.log.append('task_done', limb.id, { status, result: result.slice(0, 4000), task: limb.task ?? '' });
-    // In parallel conversation workers answer the user themselves; the head is only woken to orchestrate.
-    if (limb.parent && !this.config.parallel) this.wake(limb.parent, `task ${limb.id} ${status}`);
+    // Workers answer the user themselves; the head is only woken to orchestrate.
     for (const waiting of this.limbs.values()) {
       if (waiting.waitFor === limb.id && waiting.status === 'running') { waiting.waitFor = undefined; this.wake(waiting.id, `${limb.id} finished (${status}): ${result.slice(0, 500)}`); }
     }
@@ -696,7 +731,7 @@ export class Entity {
     while (this.keptSessions.length > this.config.keptSessions) this.mind.forget?.(this.keptSessions.shift()!);
   }
 
-  /** Parallel conversation: a worker for one user message, started at once (or when the worker it waits for finishes). */
+  /** A worker for one user message, started at once (or when the worker it waits for finishes). */
   private dispatch(by: Limb, args: { task: string; name?: string; model?: string; after?: string; reply_to?: number; fork_of?: string }): string {
     const running = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running').length;
     if (running >= this.config.maxTasks) return `error: ${running} workers already running (max ${this.config.maxTasks}); cancel one or steer an existing worker`;
@@ -707,6 +742,7 @@ export class Entity {
     const caps: Capability[] = ['speak', ...(this.config.codeLimbs ? ['set_watch', 'run_program'] as Capability[] : []), 'cancel'];
     const limb = this.createLimb({ kind: 'llm', role: 'task', name: args.name ?? (source ? `${source.name} (fork)` : 'worker'), parent: 'head', model, capabilities: caps, restart: 'transient' });
     limb.task = args.task;
+    limb.decidedAt = this.now();
     limb.status = 'running';
     limb.replyTo = args.reply_to ?? this.lastUserMessageSeq();
     if (source && !this.mind.fork?.(source.id, limb.id)) return `error: ${source.id}'s conversation is no longer kept; dispatch a fresh worker instead`;
@@ -717,18 +753,19 @@ export class Entity {
     return `worker ${limb.id} "${limb.name}" started${source ? ` from ${source.id}'s conversation` : ''}`;
   }
 
-  /** Parallel conversation: a message for one worker, delivered with its next tool result (or reviving it if idle). */
-  private steer(by: Limb, id: string, text: string): string {
+  /** A message for one worker, delivered with its next tool result (or reviving it if idle). */
+  private steer(by: string, id: string, text: string): string {
     const limb = this.limbs.get(id);
     if (!limb || limb.role !== 'task') return `error: no worker "${id}"`;
-    this.log.append('steered', by.id, { id, text: text.slice(0, 2000) });
-    const note = `Message from the user (via ${by.id}): ${text}`;
+    this.log.append('steered', by, { id, text: text.slice(0, 2000) });
+    const note = by === 'user' ? `Message from the user: ${text}` : `Message from the user (via ${by}): ${text}`;
     if (limb.status === 'running' && limb.runs.size) { limb.notices.push(note); return `${id} will get it with its next tool result`; }
     if (limb.status === 'running') { this.wake(limb.id, note.slice(0, 2000)); return `${id} woken with it`; }
     if (limb.status !== 'done' || !this.keptSessions.includes(limb.id)) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
     limb.status = 'running';
+    limb.endedAt = undefined;
     limb.replyTo = this.lastUserMessageSeq();
-    this.log.append('limb_revived', by.id, { id });
+    this.log.append('limb_revived', by, { id });
     this.wake(limb.id, note.slice(0, 2000));
     return `${id} picked the conversation back up`;
   }
@@ -742,6 +779,51 @@ export class Entity {
       if (!typing || quietFor >= this.config.messageSettleMs || this.now() - started >= this.config.messageSettleMaxMs || this.status !== 'running') return;
       await new Promise(resolve => setTimeout(resolve, Math.min(100, this.config.messageSettleMs - quietFor + 5)));
     }
+  }
+
+  /** A message from the user straight to one worker (the Work view's "Message"). */
+  messageWorker(id: string, text: string): string { return this.steer('user', id, text); }
+
+  /** Stops a worker on the user's request (the Work view's "Stop"). */
+  stopWorker(id: string): string {
+    if (this.limbs.get(id)?.role !== 'task') return `error: no worker "${id}"`;
+    return this.stopLimb(id, 'cancel', 'user');
+  }
+
+  private maybeSummarize(limb: Limb): void {
+    const summarizer = this.options.summarizer;
+    limb.callsSinceSummary++;
+    if (!summarizer || limb.summarizing || limb.status !== 'running' || this.summaries >= this.config.summaryMax) return;
+    if (limb.callsSinceSummary < this.config.summaryEveryCalls || this.now() - limb.lastSummaryAt < this.config.summaryIntervalMs) return;
+    limb.summarizing = true;
+    limb.callsSinceSummary = 0;
+    limb.lastSummaryAt = this.now();
+    this.summaries++;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    summarizer.summarize({ task: limb.task ?? '', activity: this.activityOf(limb) }, controller.signal)
+      .then(summary => { if (this.status !== 'idle') this.log.append('work_summary', 'system', { limb: limb.id, ...clean(summary) }); })
+      .catch(error => { if (this.status !== 'idle') this.addHealth(`summary for ${limb.id} failed: ${error instanceof Error ? error.message : String(error)}`); })
+      .finally(() => { clearTimeout(timer); limb.summarizing = false; });
+  }
+
+  /** What a worker has done so far, in order, for the summarizer. */
+  private activityOf(limb: Limb): string {
+    const lines: string[] = [];
+    for (const e of this.log.all()) {
+      if (e.by === limb.id && e.type === 'tool_called') lines.push(`called ${e.data.name}${e.data.summary ? `: ${e.data.summary}` : ''}`);
+      else if (e.by === limb.id && e.type === 'tool_done' && !e.data.ok) lines.push(`  -> not done: ${e.data.note}`);
+      else if (e.by === limb.id && e.type === 'chat_message') lines.push(`said to the user: ${String(e.data.text).slice(0, 300)}`);
+      else if (e.type === 'steered' && e.data.id === limb.id) lines.push(`the user said: ${String(e.data.text).slice(0, 300)}`);
+    }
+    return lines.slice(-60).join('\n');
+  }
+
+  /** The last thing a limb said to the user, as a fallback result. */
+  private lastSaidBy(id: string): string | undefined {
+    const all = this.log.all();
+    for (let i = all.length - 1; i >= 0; i--) if (all[i].type === 'chat_message' && all[i].by === id) return String(all[i].data.text).slice(0, 500);
+    return undefined;
   }
 
   private lastUserMessageSeq(): number | undefined {
@@ -791,17 +873,6 @@ export class Entity {
     return released;
   }
 
-  private spawnTask(author: Limb, task: string, name: string): string {
-    const running = [...this.limbs.values()].filter(l => l.role === 'task' && l.status === 'running').length;
-    if (running >= this.config.maxTasks) return `error: ${running} tasks already running (max ${this.config.maxTasks})`;
-    const limb = this.createLimb({ kind: 'llm', role: 'task', name, parent: author.id, model: this.options.models.task, capabilities: [...(this.config.codeLimbs ? ['set_watch', 'run_program'] as Capability[] : []), 'cancel'], restart: 'transient' });
-    limb.task = task;
-    limb.status = 'running';
-    this.log.append('limb_spawned', author.id, { id: limb.id, name, task });
-    this.wake(limb.id, 'task assigned');
-    return `task limb ${limb.id} "${name}" started; you will be woken when it reports or finishes`;
-  }
-
   /** Cancel (graceful, then kill after a grace period) or kill (immediate). */
   stopLimb(id: string, mode: 'cancel' | 'kill', by: string): string {
     const limb = this.limbs.get(id);
@@ -822,6 +893,7 @@ export class Entity {
   private endCodeLimb(limb: Limb, status: LimbStatus, reason: string, result?: unknown): void {
     if (limb.status !== 'running') return;
     limb.status = status;
+    limb.endedAt = this.now();
     limb.abort?.abort();
     if (limb.sense || limb.role === 'program') this.jev.release(limb.id);
     const type = limb.role === 'program'
@@ -836,12 +908,12 @@ export class Entity {
     switch (name) {
       case 'set_watch':
         if (!has('set_watch')) return 'error: you cannot install watches';
-        return this.installWatch(limb, (args.watch ?? args) as WatchSpec);
+        return this.installWatch(limb, (args.watch ?? args) as WatchSpec, false, this.now());
       case 'run_program': {
         if (!has('run_program')) return 'error: you cannot run programs';
         const error = validate(TOOL_SCHEMAS.run_program, args, 'args');
         if (error) return `error: ${error}`;
-        const started = this.startProgram(limb, String(args.name), String(args.code));
+        const started = this.startProgram(limb, String(args.name), String(args.code), this.now());
         if (started.error || !started.limb || !started.done) return `error: ${started.error}`;
         const program = started.limb;
         // Surface compile errors and instant crashes directly in the tool result.
@@ -864,14 +936,11 @@ export class Entity {
         });
         return `timer "${label}" set for ${ms} ms`;
       }
-      case 'spawn':
-        if (!has('spawn')) return 'error: you cannot spawn limbs';
-        return this.spawnTask(limb, String(args.task ?? ''), String(args.name ?? 'task'));
       case 'cancel':
       case 'kill': {
         if (!has(name)) return `error: you cannot ${name} limbs`;
         const target = String(args.id ?? '');
-        const frontOnWorker = this.config.parallel && this.isFront(limb) && this.limbs.get(target)?.role === 'task';
+        const frontOnWorker = (this.isFront(limb) || limb.id === 'head') && this.limbs.get(target)?.role === 'task';
         if (!frontOnWorker && (!this.isWithin(target, limb.id) || target === limb.id)) return `error: ${target} is not one of your children`;
         if (this.limbs.get(target)?.builtin) return `error: ${target} is built into the runtime and cannot be cancelled`;
         return this.stopLimb(target, name, limb.id);
@@ -885,7 +954,7 @@ export class Entity {
       }
       case 'steer': {
         if (!this.isFront(limb) && limb.id !== 'head') return 'error: only the front limb steers workers';
-        return this.steer(limb, String(args.worker ?? ''), String(args.text ?? ''));
+        return this.steer(limb.id, String(args.worker ?? ''), String(args.text ?? ''));
       }
       case 'claim': {
         const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
@@ -906,11 +975,6 @@ export class Entity {
         this.log.append('handoff', limb.id, { note: String(args.note ?? '').slice(0, 2000) });
         this.wake('head', `voice handed off: ${String(args.note ?? '').slice(0, 300)}`);
         return 'handed off to the head';
-      case 'report':
-        if (limb.role !== 'task') return 'error: only task limbs report';
-        this.log.append('task_progress', limb.id, { text: String(args.text ?? '').slice(0, 2000) });
-        if (limb.parent) this.wake(limb.parent, `progress from ${limb.id}`);
-        return 'reported';
       case 'finish_task':
         if (limb.role !== 'task') return 'error: only task limbs finish tasks';
         run.abort.abort();
@@ -937,26 +1001,26 @@ export class Entity {
     };
     if (limb.role === 'voice') {
       add('note', 'Keep a short note in your state; you remember nothing else between wakes.');
-      if (this.config.parallel) router();
-      else add('handoff', 'Wake the head (slower, smarter) for anything you should not handle yourself. The note says what is needed.');
+      router();
+      add('handoff', 'Wake the head (slower, smarter) for anything you should not handle yourself. The note says what is needed.');
       return tools;
     }
-    if (this.config.parallel && limb.role === 'head' && !this.limbs.has('voice')) { router(); tools.splice(tools.findIndex(t => t.name === 'cancel'), 1); }
+    // The head dispatches and steers workers too: as the front limb, or to act on the voice's handoffs.
+    if (limb.role === 'head') { router(); tools.splice(tools.findIndex(t => t.name === 'cancel'), 1); }
     if (limb.capabilities.has('set_watch')) add('set_watch', 'Install a watch: a code reflex that reacts in ~0 ms without you.');
     if (limb.capabilities.has('run_program')) add('run_program', 'Run a JavaScript program (the body of an async function) as a code limb.');
     add('stop_output', 'Stop output. scope "work" (default): your programs, watches and task limbs, not you; "subtree": you too. mode "stop" (default) cancels programs; "freeze" pauses everything at its next action until resume_output.');
     add('resume_output', 'Resume output after a stop.');
     add('note', 'Keep a short note in your state; you remember nothing else between wakes.');
     add('set_timer', 'Be woken after a delay.');
-    if (limb.capabilities.has('spawn')) add('spawn', 'Start a task limb (a stronger, slower model) for work that needs real thinking.');
     if (limb.capabilities.has('cancel')) add('cancel', 'Cancel one of your watches, programs or task limbs by id.');
     if (limb.capabilities.has('kill')) add('kill', 'Stop one of your children immediately, dropping partial work.');
-    if (limb.role === 'task' && this.config.parallel) {
+    if (limb.role === 'task') {
       add('claim', 'Claim files or folders you are working on, so other workers leave them alone. Writing a file claims it automatically.');
       add('release', 'Release your claims (all, or the given paths).');
       add('share', 'Share a discovery that other workers should know (e.g. a root cause).');
       add('finish_task', 'Finish: first say your answer to the user, then call this with a one-line summary.');
-    } else if (limb.role === 'task') { add('report', 'Report progress to the head.'); add('finish_task', 'Finish your task with a result.'); }
+    }
     return tools;
   }
 
@@ -971,7 +1035,7 @@ export class Entity {
     if (limb.role === 'task') stable.task = limb.task;
     stable.limbs = [...this.limbs.values()].filter(l => l.status === 'running' || now - l.createdAt < 60_000).map(l => this.describeLimb(l));
     const tasks = [...this.limbs.values()].filter(l => l.role === 'task');
-    if (tasks.length) stable[this.config.parallel ? 'workers' : 'tasks'] = tasks.map(l => ({
+    if (tasks.length) stable.workers = tasks.map(l => ({
       id: l.id, name: l.name, task: l.task, status: l.status + (l.waitFor ? ` (waiting for ${l.waitFor})` : '') + (l.runs.size ? ' (working)' : ''),
       reply_to: l.replyTo, result: l.result, claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
     }));
@@ -1029,7 +1093,7 @@ export class Entity {
     const limb: Limb = {
       id, kind: init.kind, role: init.role, name: init.name, parent: init.parent, model: init.model,
       capabilities: new Set(init.capabilities), restart: init.restart, status: 'idle', createdAt: this.now(),
-      children: new Set(), runs: new Map(), seenSeq: 0, crashes: [], effectTimes: [], notices: [],
+      children: new Set(), runs: new Map(), seenSeq: 0, crashes: [], effectTimes: [], notices: [], callsSinceSummary: 0, lastSummaryAt: -Infinity, continuations: 0,
     };
     this.limbs.set(id, limb);
     if (init.parent) this.limbs.get(init.parent)?.children.add(id);
@@ -1071,6 +1135,8 @@ export class Entity {
         id: l.id, kind: l.kind, role: l.role, name: l.name, parent: l.parent, model: l.model, status: l.status,
         runs: [...l.runs.values()].map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt, voice: r.voice })),
         task: l.task, result: l.result, watch: l.watch, code: l.code, fires: l.fires,
+        createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, waitFor: l.waitFor,
+        claims: [...this.claims.values()].filter(c => c.limb === l.id).map(c => c.path),
       })),
       senses: this.jev.list(),
       jev: { available: this.jev.available, calls: jev.calls, perMinute: jev.perMinute },
@@ -1082,7 +1148,7 @@ export class Entity {
 export const DRAFT_PAUSE_MS = 700;
 export const DRAFT_ATTENTION_QUESTION = 'Does the unsent draft already contain a question or request to the entity that is clear enough to answer or act on?';
 
-const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'judged', 'program_log']);
+const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary']);
 
 const TOOL_SCHEMAS = {
   set_watch: { type: 'object', additionalProperties: false, required: ['watch'], properties: { watch: watchSchema } },
@@ -1100,13 +1166,8 @@ const TOOL_SCHEMAS = {
     type: 'object', additionalProperties: false, required: ['after_ms'],
     properties: { after_ms: { type: 'integer', minimum: 0, maximum: 3_600_000 }, label: { type: 'string', maxLength: 80 } },
   },
-  spawn: {
-    type: 'object', additionalProperties: false, required: ['task'],
-    properties: { task: { type: 'string', maxLength: 8000 }, name: { type: 'string', maxLength: 80 } },
-  },
   cancel: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string' } } },
   kill: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string' } } },
-  report: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 2000 } } },
   handoff: { type: 'object', additionalProperties: false, required: ['note'], properties: { note: { type: 'string', maxLength: 2000 } } },
   dispatch: {
     type: 'object', additionalProperties: false, required: ['task'],
@@ -1131,3 +1192,8 @@ const TOOL_SCHEMAS = {
   share: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 1000 } } },
   finish_task: { type: 'object', additionalProperties: false, required: ['result'], properties: { result: { type: 'string', maxLength: 8000 } } },
 } satisfies Record<string, Schema>;
+
+function clean(summary: WorkSummary): Record<string, unknown> {
+  const list = (items: unknown) => (Array.isArray(items) ? items : []).map(String).map(s => s.trim()).filter(Boolean).slice(0, 5).map(s => s.slice(0, 160));
+  return { done: list(summary.done), doing: list(summary.doing), next: list(summary.next), ...(summary.blocker ? { blocker: String(summary.blocker).slice(0, 200) } : {}) };
+}

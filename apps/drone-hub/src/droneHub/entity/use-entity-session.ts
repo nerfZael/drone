@@ -2,7 +2,7 @@ import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { requestJson } from '../http';
 
-export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; parallel: boolean; workspace: string; allowCommands: boolean };
+export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; allowCommands: boolean; summaries?: boolean };
 type EntityState = { config: EntityConfig; snapshot: EntitySnapshot; events: EntityEvent[]; sessionId: string | null };
 
 const MAX_EVENTS = 3000;
@@ -52,5 +52,6 @@ export function useEntitySession(enabled: boolean) {
     control: (action: 'start' | 'pause' | 'resume' | 'reset') => post('/api/entity/control', { action }),
     input: (type: string, data: Record<string, unknown>) => post('/api/entity/input', { type, data }),
     configure: (update: Partial<EntityConfig>) => post('/api/entity/config', update),
+    worker: (id: string, action: 'message' | 'stop', text?: string) => post('/api/entity/worker', { id, action, text }),
   };
 }
