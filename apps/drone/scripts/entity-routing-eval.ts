@@ -4,7 +4,7 @@
  *
  *   bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--head openai-codex/gpt-6-luna] [--voice <model>] [--only <text>] [--concurrency 8]
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Entity, chatChannel, keypadChannel, workspaceChannel, type Channel, type Mind } from '@entity/core';
@@ -17,6 +17,9 @@ const repeat = Number(arg('repeat') ?? 1);
 const head = arg('head') ?? 'openai-codex/gpt-6-luna';
 const voice = arg('voice');
 const only = arg('only');
+// Replacement texts for prompt sections, from a JSON file ({ "router": "..." }): to test a different prompt without editing the real one.
+const promptsFile = arg('prompts');
+const prompts = promptsFile ? JSON.parse(readFileSync(promptsFile, 'utf8')) as Record<string, string> : undefined;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** The real model for the head and voice; workers just stay busy until stopped, so routing is all that is judged. */
@@ -47,14 +50,17 @@ function grantedWorkspaces(lines: string[]): Channel {
 }
 
 type Spend = { cost: number; tokens: number; unpriced: number };
+/** For each user message: ms until the front limb's first action, and until the first reply anyone posted. */
+type Latency = { firstAction: number[]; firstReply: number[] };
 
-async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number; spend: Spend }> {
+async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number; spend: Spend; latency: Latency }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'entity-routing-'));
   const entity = new Entity({
     mind: routingMind(c),
     channels: [chatChannel(), keypadChannel(), c.workspaces ? grantedWorkspaces(c.workspaces) : workspaceChannel({ root: dir })],
     models: { head, task: head, voice },
     config: { review: 'off', draftAttention: false },
+    ...(prompts ? { prompts } : {}),
   });
   const started = Date.now();
   try {
@@ -62,7 +68,8 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
     await sleep(2000);
     for (const m of c.messages) {
       await sleep(m.after ?? 3000);
-      const question = m.click ? [...entity.log.all()].reverse().find(e => e.type === 'chat_message' && Array.isArray(e.data.options)) : undefined;
+      // A click answers the latest question with answers to click, in either form (options, or several questions).
+      const question = m.click ? [...entity.log.all()].reverse().find(e => e.type === 'chat_message' && (Array.isArray(e.data.options) || Array.isArray(e.data.questions))) : undefined;
       if (m.click && !question) continue;
       entity.input('chat_message', { text: m.text, ...(question ? { reply_to: question.seq } : {}) });
     }
@@ -79,9 +86,20 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
     // On a failure, show what the front limb did, so the cause is visible without replaying.
     const acts = events.filter(e => e.type === 'tool_called' && (e.by === 'head' || e.by === 'voice') && e.data.name !== 'note').map(e => `${e.data.name}(${String(e.data.summary ?? '').slice(0, 60)})`);
     const why = failure && `${failure} · front did: ${acts.join(', ') || 'nothing'}`;
+    // Latency per user message, until the next one: what a person waits for.
+    const latency: Latency = { firstAction: [], firstReply: [] };
+    const userMessages = events.filter(e => e.type === 'chat_message' && e.by === 'user');
+    userMessages.forEach((m, i) => {
+      const until = userMessages[i + 1]?.seq ?? Infinity;
+      const after = events.filter(e => e.seq > m.seq && e.seq < until);
+      const action = after.find(e => e.type === 'tool_called' && e.by === front && e.data.name !== 'note');
+      const reply = after.find(e => e.type === 'chat_message' && e.by !== 'user');
+      if (action) latency.firstAction.push(action.t - m.t);
+      if (reply) latency.firstReply.push(reply.t - m.t);
+    });
     const u = entity.snapshot().usage;
     const spend = { cost: u.cost, tokens: u.input + u.output + u.cacheRead + u.cacheWrite, unpriced: u.unpriced };
-    return { ok: why === null, why, ms: Date.now() - started, spend };
+    return { ok: why === null, why, ms: Date.now() - started, spend, latency };
   } finally {
     entity.close();
     rmSync(dir, { recursive: true, force: true });
@@ -112,4 +130,9 @@ for (const c of cases) {
 // What the run cost: every model call the entities made, at list price, even on a subscription.
 const spent = sum(results.map(x => x.r.spend));
 console.log(`\n${passed}/${total} passed · ${money(spent.cost)} at list price · ${Math.round(spent.tokens / 1000)}k tokens${spent.unpriced ? ` · ${spent.unpriced} call(s) with no known price` : ''}`);
+const median = (list: number[]) => { const s = [...list].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+const actions = results.flatMap(x => x.r.latency.firstAction);
+const replies = results.flatMap(x => x.r.latency.firstReply);
+console.log(`latency (median over messages): first action ${seconds(median(actions))}, first reply ${seconds(median(replies))}${prompts ? ` · prompts from ${promptsFile}` : ''}`);
 process.exit(0);

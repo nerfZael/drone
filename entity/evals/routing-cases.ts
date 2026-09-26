@@ -121,7 +121,9 @@ export const ROUTING_CASES: RoutingCase[] = [
     messages: [{ text: 'Can you implement a login page for the app?' }, { text: 'Also, write a haiku about autumn into haiku.txt.', after: 8000 }],
     check: events => {
       const asked = optionsAfter(events, 'Also, write a haiku about autumn into haiku.txt.');
-      return !asked.length && workers(events).length === 2 ? null : `${asked.length} question(s), ${workers(events).length} worker(s)`;
+      // Also good: the front limb writes something this small itself instead of starting a worker.
+      const wroteIt = events.some(e => e.type === 'tool_called' && (e.by === 'head' || e.by === 'voice') && e.data.name === 'write_file');
+      return !asked.length && (workers(events).length === 2 || wroteIt) ? null : `${asked.length} question(s), ${workers(events).length} worker(s)`;
     },
   },
   {
@@ -129,6 +131,11 @@ export const ROUTING_CASES: RoutingCase[] = [
     messages: [{ text: 'Write a short poem about my favourite animal into poem.md.' }, { text: 'a fox', after: 9000 }],
     workerAsks: 'Which animal is your favourite?',
     check: events => {
+      // Also good: the front limb asks for what it needs before starting the worker, and passes the answer on.
+      const answer = userMessage(events, 'a fox');
+      const frontAsked = answer && events.some(e => e.type === 'chat_message' && (e.by === 'head' || e.by === 'voice') && e.seq < answer.seq && /\?/.test(String(e.data.text)));
+      const spawnedAfter = answer ? workers(events).filter(e => e.seq > answer.seq && /fox/i.test(String(e.data.task))) : [];
+      if (frontAsked && spawnedAfter.length === 1 && workers(events).length === 1) return null;
       const asked = events.find(e => e.type === 'chat_message' && e.data.question);
       if (!asked) return 'the worker never asked';
       const answered = afterMessage(events, 'a fox').some(e => e.type === 'steered' && e.by !== 'user' && e.data.id === asked.by);

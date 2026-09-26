@@ -108,6 +108,26 @@ Seven cases, gpt-6-luna. With the head in front: 30 of 32 runs right (5 of 7 on 
 
 A request that needs an answer first ("a poem about my favourite animal"), gpt-6-sol workers. With a `question` flag on `say`, the worker marked its question in 1 of 3 runs; in the others it asked and then called `finish_task`, so it showed as done. With the `ask` tool, which ends the worker's turn itself, 2 of 2 asked and waited, and the answer, routed to the worker as a steer, let it finish.
 
+### Is the prompt doing the work? (2026-09-27)
+
+The routing eval, 18 cases × 3 runs, no reviewer. The minimal router (`entity/evals/prompts/router-minimal.json`, 868 characters) only names the tools and says to be brief.
+
+| Front | Full router | Minimal router |
+|---|---|---|
+| gpt-6-luna head | 52/54 | 37/54 |
+| gpt-6-sol head | 50/54, about 12× the cost and slower | 34/54 |
+
+The minimal router mostly failed on product conventions a model cannot guess: questions come with options to click, answers are scannable lists, a follow-up is the same task or a new one. A bigger model does not recover them. So the router is a product spec, not a pile of patches, and stays.
+
+A from-scratch rewrite as one spec (`entity/evals/prompts/router-rewrite.json`, 3,744 characters against 7,662), after loosening cases that demanded one right way when several are right, and fixing the eval so a click also answers the several-questions form, three runs each:
+
+| Router | Pass | Cost | First action | First reply |
+|---|---|---|---|---|
+| Current | 54/54 | $0.06 | 3.0 s | 4.4 s |
+| Rewrite | 51/54 | $0.05 | 3.0 s | 3.2 s |
+
+The rewrite missed each of three cases once in three: a list written as prose, a question before parallel work, and a steer instead of a queue for "when that's done". It had to match the current router to replace it, so the current router stays the default; the rewrite is kept to try with `--prompts`. Reviewer and voice are now off by default and marked experimental: one head deciding alone was as right and more coherent.
+
 ## Later
 
 Everything designed but not built is in [future.md](future.md).

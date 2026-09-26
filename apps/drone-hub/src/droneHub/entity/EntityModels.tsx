@@ -9,7 +9,7 @@ type Part = 'head' | 'task' | 'voice';
 const PARTS: { key: Part; label: string; note: string }[] = [
   { key: 'head', label: 'Head', note: 'Plans, routes and supervises; the reviewer uses it too.' },
   { key: 'task', label: 'Workers', note: 'Does the work: one conversation per worker.' },
-  { key: 'voice', label: 'Voice', note: 'A fast model that answers first and hands off to the head. Off: the head answers.' },
+  { key: 'voice', label: 'Voice', note: 'Experimental: a fast model that answers first and hands off to the head. Off (the default): the head answers, which is more coherent.' },
 ];
 
 const sameChoice = (a: ModelChoice | null, b: ModelChoice | null) => a?.model === b?.model && a?.reasoning === b?.reasoning;

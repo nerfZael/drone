@@ -154,13 +154,13 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
       <div className="ml-auto flex flex-wrap items-center gap-2 text-[var(--muted)]">
         <EntityModelsControl models={config.models} idle={idle} onChange={(models) => onConfigure({ models })} />
         <UiButton size="small" variant="secondary" onClick={onPrompts} title="Read and edit every prompt the entity sends">Prompts</UiButton>
-        <label className="flex items-center gap-1" title="Second looks at the fast answers: a separate reviewer on the head's model (the head stays free), the head itself, or none. Wrong answers are struck through and corrected below.">
+        <label className="flex items-center gap-1" title="Experimental: second looks at the head's answers, by a separate reviewer or by the head itself. Wrong answers are struck through and corrected below. Off by default: one head deciding alone is more coherent.">
           Review
-          <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.review ?? 'separate'} disabled={!idle}
+          <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.review ?? 'off'} disabled={!idle}
             onChange={(e) => onConfigure({ review: e.target.value as EntityConfig['review'] })}>
-            <option value="separate">reviewer</option>
-            <option value="head">head</option>
             <option value="off">off</option>
+            <option value="separate">reviewer (experimental)</option>
+            <option value="head">head (experimental)</option>
           </select>
         </label>
         <label className="flex items-center gap-1" title="What backs judge() and sense(). Jev is billed per call through the AI Gateway; qwen is a small fast LLM on Cerebras.">

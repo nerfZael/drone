@@ -55,7 +55,8 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
   workspace: '',
   workspaceAccess: EMPTY_WORKSPACE_ACCESS,
   summaries: true,
-  review: 'separate',
+  // One head decides; a reviewer is an experimental extra (it and the head acting on one message caused duplicates).
+  review: 'off',
 };
 
 /** A config as saved in a recording, from before `models` too: the flat model fields with one reasoning level. */

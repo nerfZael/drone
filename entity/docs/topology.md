@@ -10,7 +10,7 @@ A limb is defined by its **contract**, not by what's inside it: it reads its ren
 |---|---|---|---|
 | **Head** | LLM, permanent | Fresh each wake | The front limb unless there is a voice: routes messages, answers quick ones, sets up watches and programs. Always the orchestrator: woken on claim conflicts, handoffs and the heartbeat |
 | **Voice** (optional, `models.voice`) | LLM, permanent | Fresh each wake | The front limb when configured: answers and routes first and fast, hands watches, programs and ongoing behaviour to the head (`handoff`) |
-| **Reviewer** (optional, `review: 'separate'`) | LLM, permanent, on the head's model | Fresh each wake | Takes a second look at the front limb's answers and confirms, corrects or expands them (`amend`); hands needed work to the head |
+| **Reviewer** (optional and experimental, `review: 'separate'`) | LLM, permanent, on the head's model | Fresh each wake | Takes a second look at the front limb's answers and confirms, corrects or expands them (`amend`); hands needed work to the head |
 | **Worker** (id `worker-N`) | LLM, transient | A conversation per worker, kept after it finishes | One piece of the user's work; replies in the chat itself ([parallel-conversation.md](parallel-conversation.md)) |
 | **Watch** | Code | — | A validated condition → action ([architecture.md](architecture.md#code-limbs-watches-and-programs)) |
 | **Program** | Code | — | Sandboxed JavaScript |
@@ -57,7 +57,7 @@ Limbs run in parallel. A wake that arrives while a reactive limb is busy starts 
 |---|---|---|
 | Head | `openai-codex/gpt-6-luna`, medium reasoning | At most 8 steps per run |
 | Voice | off | Cerebras qwen (`cerebras/qwen-3.8-27b`) answered first in 0.5–1.3 s in M3; gpt-6-luna as a voice adds handoffs without adding speed |
-| Reviewer | the head's model | On by default in the Hub (`review: 'separate'`), off by default in the library |
+| Reviewer | the head's model | Off by default (experimental), like the voice: one head deciding alone is more coherent |
 | Workers | `openai-codex/gpt-6-sol`, medium reasoning | At most 24 steps per run, continued up to 4 times; the router may pick the head model for small requests |
 | Code limbs | none: plain code | At most 32 |
 | Jev | runtime primitive, not a limb | Off by default in the Hub; turn it on for senses |
