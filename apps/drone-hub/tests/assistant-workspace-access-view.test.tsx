@@ -2,11 +2,13 @@ import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ChatWorkspaceOption } from '@drone/assistant-chat';
-import { AssistantWorkspacePicker } from '../src/droneHub/assistant/AssistantWorkspacePicker';
+import { WorkspaceAccessPicker } from '../src/droneHub/assistant/WorkspaceAccessPicker';
 import { AssistantWorkspacesPanel } from '../src/droneHub/assistant/AssistantSettingsPanels';
 import {
   WORKSPACE_CATEGORIES,
-  toggleWorkspace,
+  addWorkspace,
+  removeWorkspace,
+  setPermission,
   workspaceCategory,
 } from '../src/droneHub/assistant/workspace-access-model';
 
@@ -41,21 +43,47 @@ describe('desktop workspace picker', () => {
     expect(workspaceCategory({ ...base, kind: 'remote' })).toBe('Folders');
   });
 
-  test('first selection becomes the default and starts read-only', () => {
-    const access = toggleWorkspace({ targets: [], defaultTargetId: null }, base);
+  const all = { read: true, write: true, execute: true };
+  const empty = { targets: [], defaultTargetId: null };
+
+  test('adding gives Read and the first addition becomes the default', () => {
+    const access = addWorkspace(empty, base);
     expect(access.defaultTargetId).toBe('drone:a');
     expect(access.targets[0]).toMatchObject({ read: true, write: false, execute: false });
-    expect(toggleWorkspace(access, base)).toEqual({ targets: [], defaultTargetId: null });
+    const two = addWorkspace(access, { ...base, id: 'drone:b', name: 'B' });
+    expect(two.defaultTargetId).toBe('drone:a');
+    expect(removeWorkspace(two, 'drone:a').defaultTargetId).toBe('drone:b');
+    expect(removeWorkspace(access, 'drone:a')).toEqual(empty);
   });
 
-  test('renders search and refresh without an apply step', () => {
+  test('Write and Run include Read; Read off or the last permission off removes the workspace', () => {
+    const run = setPermission(empty, base, 'execute', true, all);
+    expect(run.targets[0]).toMatchObject({ read: true, write: false, execute: true });
+    expect(setPermission(run, base, 'read', false, all)).toEqual(empty);
+    const writeOnly = { read: false, write: true, execute: false };
+    const dropBox = { ...base, ...writeOnly };
+    const written = setPermission(empty, dropBox, 'write', true, writeOnly);
+    expect(written.targets[0]).toMatchObject({ read: false, write: true, execute: false });
+    expect(setPermission(written, dropBox, 'write', false, writeOnly)).toEqual(empty);
+  });
+
+  test('a permission the workspace does not offer is never granted, but can be taken away', () => {
+    const readOnly = { read: true, write: false, execute: false };
+    const access = setPermission(empty, base, 'read', true, readOnly);
+    expect(setPermission(access, base, 'write', true, readOnly)).toBe(access);
+    const granted = { targets: [{ ...base, write: true }], defaultTargetId: 'drone:a' };
+    expect(setPermission(granted, base, 'write', false, readOnly).targets[0]).toMatchObject({ read: true, write: false });
+  });
+
+  test('renders the In use grid with a home row and an add field', () => {
     const html = renderToStaticMarkup(
-      <AssistantWorkspacePicker requestJson={requestJson} threadId="thread-1" />,
+      <WorkspaceAccessPicker requestJson={requestJson} endpoint="/api/entity/workspaces" home={{ name: 'Entity home', note: 'Always available' }} />,
     );
-    expect(html).toContain('aria-label="Search workspaces"');
-    expect(html).toContain('aria-label="Refresh workspaces"');
+    expect(html).toContain('In use');
+    expect(html).toContain('All workspaces');
+    expect(html).toContain('Entity home');
+    expect(html).toContain('aria-label="Add a workspace"');
     expect(html).not.toContain('Apply');
-    expect(html).not.toContain('Show selected only');
   });
 
   test('popover hosts the picker and keeps the private artifacts switch', () => {
@@ -80,7 +108,7 @@ describe('desktop workspace picker', () => {
       />,
     );
     expect(html).toContain('Workspaces');
-    expect(html).toContain('aria-label="Search workspaces"');
+    expect(html).toContain('aria-label="Add a workspace"');
     expect(html).toContain('Artifacts');
     expect(html).toContain('Private');
     expect(html).not.toContain('All workspaces and shared folders');
