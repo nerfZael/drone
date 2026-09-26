@@ -1,7 +1,7 @@
 import type { Channel } from '../channel.js';
 import { isEntityActor } from '../log.js';
 
-export interface ChatMessage { seq: number; by: string; text: string; t: number; replyTo?: number; corrects?: number; expands?: number; correctedBy?: number }
+export interface ChatMessage { seq: number; by: string; text: string; t: number; replyTo?: number; corrects?: number; expands?: number; correctedBy?: number; withdrawn?: boolean }
 
 export interface ChatWorld {
   messages: ChatMessage[];
@@ -29,6 +29,15 @@ export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld
       if (event.type === 'message_reviewed' && event.data.verdict === 'corrected') {
         const message = world.messages.find(m => m.seq === event.data.seq);
         if (message) message.correctedBy = Number(event.data.by);
+      }
+      // A correction the reviewer withdrew no longer counts, and the message it corrected stands again.
+      if (event.type === 'message_reviewed' && event.data.verdict === 'withdrawn') {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.withdrawn = true;
+      }
+      if (event.type === 'message_reviewed' && event.data.restored) {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.correctedBy = undefined;
       }
       if (event.type === 'chat_message_updated') {
         const message = world.messages.find(m => m.seq === event.data.seq);
@@ -93,7 +102,7 @@ export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld
     render(world, { ago }) {
       return {
         volatile: {
-          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}${m.corrects ? ` (correction of #${m.corrects})` : ''}${m.expands ? ` (adds to #${m.expands})` : ''}: ${m.correctedBy ? `[WRONG, corrected by #${m.correctedBy}] ` : ''}${m.text} (${ago(m.t)})`),
+          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}${m.corrects ? ` (correction of #${m.corrects})` : ''}${m.expands ? ` (adds to #${m.expands})` : ''}: ${m.correctedBy ? `[WRONG, corrected by #${m.correctedBy}] ` : ''}${m.withdrawn ? '[WITHDRAWN: this correction was itself wrong] ' : ''}${m.text} (${ago(m.t)})`),
           user_draft_unsent: world.draft ? { text: world.draft.text, typing_for: ago(world.draft.startedAt).replace(' ago', ''), last_key: ago(world.draft.lastKeyAt) } : null,
           your_draft: world.entityDraft?.text ?? null,
         },

@@ -338,7 +338,9 @@ export class Entity {
     if (now - (this.state.lastEvents['entity:chat_message'] ?? -Infinity) < this.config.reviewQuietMs) return;
     const seqs = [...unreviewed];
     this.log.append('review_started', 'system', { seqs });
-    this.wake(reviewer.id, `review ${seqs.map(seq => `#${seq}`).join(', ')}`);
+    // Each with how long ago it was said: a claim about work is judged as of then, not against what has happened since.
+    const said = (seq: number) => { const e = this.log.all()[seq - 1]; return e ? ` (said ${this.ago(e.t)})` : ''; };
+    this.wake(reviewer.id, `review ${seqs.map(seq => `#${seq}${said(seq)}`).join(', ')}`);
   }
 
   /** Answers the reviewer did not amend count as confirmed, so nothing stays "checking" forever. */
@@ -359,6 +361,14 @@ export class Entity {
     const original = this.log.all().find(e => e.seq === args.seq && e.type === 'chat_message');
     if (!original || !isEntityActor(original.by)) return `error: #${args.seq} is not one of the entity's messages`;
     const text = String(args.text ?? '').trim();
+    if (args.verdict === 'withdraw') {
+      // Only a correction or addition of the reviewer's own; the message it amended is restored.
+      const amended = typeof original.data.corrects === 'number' ? original.data.corrects : typeof original.data.expands === 'number' ? original.data.expands : undefined;
+      if (original.by !== limb.id || amended === undefined) return `error: #${args.seq} is not one of your corrections`;
+      this.log.append('message_reviewed', limb.id, { seq: args.seq, verdict: 'withdrawn', ...(text ? { reason: text } : {}) });
+      this.log.append('message_reviewed', limb.id, { seq: amended, verdict: 'confirmed', restored: true });
+      return `#${args.seq} withdrawn; #${amended} restored`;
+    }
     if (args.verdict === 'confirm') { this.log.append('message_reviewed', limb.id, { seq: args.seq, verdict: 'confirmed' }); return `#${args.seq} confirmed`; }
     if (!text) return `error: ${args.verdict} needs text`;
     const replyTo = typeof original.data.reply_to === 'number' ? { reply_to: original.data.reply_to } : {};
@@ -899,17 +909,28 @@ export class Entity {
   }
 
   /** Many workers at once, one per item, as one batch that views can show together. */
-  private dispatchMany(by: LlmLimb, args: { title: string; items: { task: string; name?: string }[]; model?: string }): string {
+  private dispatchMany(by: LlmLimb, args: { title?: string; batch?: string; reply_to?: number; items: { task: string; name?: string }[]; model?: string }): string {
     if (!args.items.length) return 'error: items is empty';
-    const group = this.nextId('group');
-    const replyTo = this.lastUserMessageSeq();
-    this.log.append('group_started', by.id, { id: group, title: args.title, count: args.items.length, reply_to: replyTo ?? null });
-    const results = args.items.map(item => this.dispatch(by, { task: item.task, name: item.name, model: args.model, group }));
+    const extending = args.batch !== undefined;
+    if (extending && !this.state.batches[args.batch!]) return `error: no batch "${args.batch}"; batches: ${Object.keys(this.state.batches).join(', ') || 'none'}`;
+    if (!extending && !args.title?.trim()) return 'error: a new batch needs a title';
+    const group = args.batch ?? this.nextId('group');
+    const replyTo = args.reply_to ?? this.lastUserMessageSeq();
+    // More items for a batch keep its one progress line; a batch that had ended is running again.
+    if (extending) this.log.append('group_extended', by.id, { id: group, count: args.items.length, reply_to: replyTo ?? null });
+    else this.log.append('group_started', by.id, { id: group, title: args.title, count: args.items.length, reply_to: replyTo ?? null });
+    const results = args.items.map(item => this.dispatch(by, { task: item.task, name: item.name, model: args.model, group, reply_to: replyTo }));
     // One line in the chat for the whole batch, updated as its workers start and finish.
-    this.log.append('chat_message', by.id, { text: this.batchProgress(group), group, ...(replyTo !== undefined ? { reply_to: replyTo } : {}) });
+    if (extending) this.updateBatch(group);
+    else {
+      this.log.append('chat_message', by.id, { text: this.batchProgress(group), group, ...(replyTo !== undefined ? { reply_to: replyTo } : {}) });
+      // Workers that finished before the line existed were not counted as the batch's end; count them now.
+      this.updateBatch(group);
+    }
     const errors = results.filter(r => r.startsWith('error'));
     const queued = results.filter(r => r.includes(' queued')).length;
-    return `${group} "${args.title}": ${results.length - errors.length} workers (${results.length - errors.length - queued} started, ${queued} queued)${errors.length ? `; ${errors.length} failed: ${errors[0]}` : ''}`;
+    const title = this.state.batches[group]?.title ?? args.title;
+    return `${group} "${title}": ${extending ? 'added ' : ''}${results.length - errors.length} workers (${results.length - errors.length - queued} started, ${queued} queued)${errors.length ? `; ${errors.length} failed: ${errors[0]}` : ''}`;
   }
 
   private batchProgress(group: string): string {
@@ -1185,7 +1206,7 @@ export class Entity {
       case 'fork':
         return this.dispatch(limb, { ...(args as { task: string }), fork_of: name === 'fork' ? String(args.worker) : undefined });
       case 'dispatch_many':
-        return this.dispatchMany(limb, args as { title: string; items: { task: string; name?: string }[]; model?: string });
+        return this.dispatchMany(limb, args as { title?: string; batch?: string; reply_to?: number; items: { task: string; name?: string }[]; model?: string });
       case 'steer':
         return this.steer(limb.id, String(args.worker ?? ''), String(args.text ?? ''), args.when === 'after' ? 'after' : 'now');
       case 'claim': {
@@ -1322,7 +1343,7 @@ export class Entity {
       return [
         `${l.id} "${l.name}" ${l.status}${l.waitFor ? ` for ${l.waitFor}` : ''}`,
         !worker && l.replyTo !== undefined ? `re #${l.replyTo}` : '',
-        batch ? `batch "${batch}"` : '',
+        batch ? `batch ${l.group} "${batch}"` : '',
         !worker && !batch && l.task && WORKER_ACTIVE.includes(l.status) ? `task: ${clip(l.task, 240)}` : '',
         l.result ? `result: ${clip(l.result, 240)}` : '',
         claims.length ? `claims: ${claims.join(', ')}` : '',

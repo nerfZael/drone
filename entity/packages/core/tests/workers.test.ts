@@ -585,3 +585,60 @@ test('usage: tokens by kind and cost per limb, unpriced calls counted, summaries
   const worker = h.entity.snapshot().limbs.find(l => l.role === 'task')!;
   expect(worker.usage).toMatchObject({ cacheRead: 400, cacheWrite: 20, cost: 0.01 });
 });
+
+test('batches: more items join an existing batch, with one progress line, even after it ended', async () => {
+  let release!: () => void;
+  const hold = new Promise<void>(r => { release = r; });
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.role === 'head' && message === 'five reviews') await call('dispatch_many', { title: 'Reviews', items: Array.from({ length: 5 }, (_, i) => ({ task: `review ${i}` })) });
+    if (input.role === 'head' && message === 'make it 6' && input.prompt.includes('"woken_because":"user message"')) {
+      const lines = (stableState(input).workers as string[]);
+      const batch = /batch (group-\d+)/.exec(lines[0])![1];
+      await call('dispatch_many', { batch, items: [{ task: 'review 5' }], reply_to: h.of('chat_message').find(e => e.data.text === 'make it 6')!.seq });
+    }
+    if (input.role === 'task') { if (ownTask(input) === 'review 5') await hold; await call('finish_task', { result: 'ok' }); }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'five reviews' });
+  await until(() => h.of('group_finished').length === 1);
+  h.entity.input('chat_message', { text: 'make it 6' });
+  await until(() => h.of('group_extended').length === 1);
+  const lines = () => h.of('chat_message').filter(e => e.data.group);
+  expect(lines()).toHaveLength(1); // still one progress line
+  const progress = lines()[0].seq;
+  expect(h.of('chat_message_updated').filter(e => e.data.seq === progress).at(-1)!.data.text).toBe('Reviews: 5 of 6 done, 1 running.');
+  release();
+  await until(() => h.of('group_finished').length === 2); // it ended again, and the front limb heard about it again
+  expect(h.of('chat_message_updated').at(-1)!.data.text).toBe('Reviews: 6 of 6 done.');
+  expect(h.of('group_started')).toHaveLength(1);
+});
+
+test('review: the reviewer is told when each answer was said, and can withdraw its own wrong correction', async () => {
+  const reasons: string[] = [];
+  const h = setup(async (input, call) => {
+    const message = lastUserMessage(input);
+    if (input.limbId === 'head' && input.prompt.includes('"woken_because":"user message"')) {
+      if (message === 'status?') await call('say', { text: 'Five reviews are done; the sixth is running.' });
+      if (message === 'what?') await call('say', { text: 'I meant the count.' });
+    }
+    if (input.limbId === 'reviewer') {
+      reasons.push(JSON.parse(input.prompt.slice(input.prompt.lastIndexOf('\nTIME\n') + 6)).woken_because);
+      const status = h.of('chat_message').find(e => e.data.text === 'Five reviews are done; the sixth is running.')!;
+      const mine = h.of('chat_message').find(e => e.by === 'reviewer' && e.data.corrects === status.seq);
+      if (!mine) await call('amend', { seq: status.seq, verdict: 'correct', text: 'Four reviews are done.' });
+      else expect(await call('amend', { seq: mine.seq, verdict: 'withdraw', text: 'five were done then' })).toContain('restored');
+    }
+  }, { config: { review: 'separate', reviewQuietMs: 20 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'status?' });
+  await until(() => h.of('message_reviewed').some(e => e.data.verdict === 'corrected'));
+  expect(reasons[0]).toMatch(/^review #\d+ \(said \d+\.\ds ago\)$/);
+  h.entity.input('chat_message', { text: 'what?' });
+  await until(() => h.of('message_reviewed').some(e => e.data.verdict === 'withdrawn'));
+  const status = h.of('chat_message').find(e => e.data.text === 'Five reviews are done; the sixth is running.')!;
+  expect(h.of('message_reviewed').filter(e => e.data.seq === status.seq).at(-1)!.data).toMatchObject({ verdict: 'confirmed', restored: true });
+  const chat = h.entity.snapshot().world.chat as { messages: { seq: number; correctedBy?: number; withdrawn?: boolean; by: string }[] };
+  expect(chat.messages.find(m => m.seq === status.seq)!.correctedBy).toBeUndefined();
+  expect(chat.messages.find(m => m.by === 'reviewer')!.withdrawn).toBe(true);
+});

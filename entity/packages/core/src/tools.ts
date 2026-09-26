@@ -27,8 +27,8 @@ export const TOOL_SCHEMAS = {
   amend: {
     type: 'object', additionalProperties: false, required: ['seq', 'verdict'],
     properties: {
-      seq: { type: 'integer', description: 'The message under review' },
-      verdict: { type: 'string', enum: ['confirm', 'correct', 'expand'] },
+      seq: { type: 'integer', description: 'The message under review; for withdraw, your own earlier correction' },
+      verdict: { type: 'string', enum: ['confirm', 'correct', 'expand', 'withdraw'] },
       text: { type: 'string', maxLength: 4000, description: 'For correct: the corrected answer. For expand: what the answer was missing.' },
     },
   },
@@ -44,9 +44,11 @@ export const TOOL_SCHEMAS = {
     },
   },
   dispatch_many: {
-    type: 'object', additionalProperties: false, required: ['title', 'items'],
+    type: 'object', additionalProperties: false, required: ['items'],
     properties: {
-      title: { type: 'string', maxLength: 80, description: 'What the batch is, e.g. "Open bug issues"' },
+      title: { type: 'string', maxLength: 80, description: 'What the batch is, e.g. "Open bug issues". Required for a new batch' },
+      batch: { type: 'string', description: 'The id of an existing batch (e.g. "group-27") to add these items to, instead of starting a new one' },
+      reply_to: { type: 'integer', description: 'The user message seq this answers (default: the latest)' },
       items: {
         type: 'array', maxItems: 200,
         items: { type: 'object', additionalProperties: false, required: ['task'], properties: { task: { type: 'string', maxLength: 4000 }, name: { type: 'string', maxLength: 60 } } },
@@ -108,7 +110,7 @@ const NOTE = 'Keep a short note in your state; you remember nothing else between
 
 export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => string)> = {
   dispatch: 'Start a worker (a capable model) on a user request right away. It replies to the user itself. Use "after" to start it only when another worker finishes.',
-  dispatch_many: 'Start one worker per item as one batch with a title, for many independent items of the same kind (one per issue, per file). Past the running limit, workers queue.',
+  dispatch_many: 'Start one worker per item as one batch with a title, for many independent items of the same kind (one per issue, per file). To add items to a batch that exists ("make it 6"), pass its id as batch: it keeps one progress line. Past the running limit, workers queue.',
   fork: 'Start a worker from another worker\'s conversation, for a request that builds on its context.',
   steer: 'Send a message to one worker: it gets it with its next tool result (or wakes up with it).',
   cancel: role => role === 'voice' ? 'Cancel a worker by id. now: true stops it at once.'
@@ -116,7 +118,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => s
     : 'Cancel one of your watches or programs by id.',
   amend: role => role === 'head'
     ? 'Your verdict on one of the voice\'s answers under review: confirm, correct (shown struck through, your text below), or expand.'
-    : 'Your verdict on one of the answers under review: confirm it, correct it (the original is shown struck through, your text below it), or expand it.',
+    : 'Your verdict on one of the answers under review: confirm it, correct it (the original is shown struck through, your text below it), or expand it. Withdraw one of your own earlier corrections that was wrong: the original is restored.',
   handoff: role => role === 'reviewer'
     ? 'Wake the head for work a correction needs (starting a worker, fixing something promised but not done). The note says what. Never use it to say that nothing is needed.'
     : 'Wake the head (slower, smarter) for anything you should not handle yourself. The note says what is needed.',

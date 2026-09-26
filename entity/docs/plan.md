@@ -63,7 +63,7 @@ It confirmed that code watches react in under 0.3 ms, that every model installed
 
 ### M1
 
-Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice supersession, validation, dependencies, scoped stops and freezes, supervision, pause and resume, rate limits, level durations, `judge` / `sense`, ordered program reads and reset. The core now has 58 tests, each also checking that replaying its log rebuilds the runtime state, and the bench's canvas model and Work view have their own.
+Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice supersession, validation, dependencies, scoped stops and freezes, supervision, pause and resume, rate limits, level durations, `judge` / `sense`, ordered program reads and reset. The core now has 60 tests, each also checking that replaying its log rebuilds the runtime state, and the bench's canvas model and Work view have their own.
 
 ### M2
 
@@ -101,7 +101,7 @@ Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice 
 
 ### Routing eval (2026-09-25)
 
-Seven cases, gpt-6-luna. With the head in front: 30 of 32 runs right (5 of 7 on the first pass, both misses passed on rerun, then 21 of 21). With a gpt-6-luna voice: 13 of 14; the miss read the chat and took no action for a second message. After the compact per-role renders: 14 of 14 with the head in front. After the per-role tool table, `ask` and crash retries (2026-09-26): 14 of 14 again.
+Seven cases, gpt-6-luna. With the head in front: 30 of 32 runs right (5 of 7 on the first pass, both misses passed on rerun, then 21 of 21). With a gpt-6-luna voice: 13 of 14; the miss read the chat and took no action for a second message. After the compact per-role renders: 14 of 14 with the head in front. After the per-role tool table, `ask` and crash retries (2026-09-26): 14 of 14 again. With a case from a live session, "make it 6" (one batch of six, not a second batch of one): 3 of 3 with the head in front, 2 of 2 with a gpt-6-luna voice, and the full eval 8 of 8.
 
 ### Asking the user (2026-09-26)
 

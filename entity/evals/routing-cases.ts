@@ -23,6 +23,17 @@ const afterMessage = (events: RoutingEvent[], text: string) => { const m = userM
 
 export const ROUTING_CASES: RoutingCase[] = [
   {
+    name: '"make it 6" adds to the batch instead of starting another',
+    source: 'entity-sessions/20260926-015305-cfvy',
+    messages: [{ text: 'can you start 5 workers to look for bugs?' }, { text: 'actually make it 6', after: 6000 }],
+    check: events => {
+      // One batch of six, whether it was extended or started at six because both messages were read together.
+      const started = events.filter(e => e.type === 'group_started').length;
+      const total = workers(events).length;
+      return started === 1 && total === 6 ? null : `${started} batch(es), ${total} workers`;
+    },
+  },
+  {
     name: 'a question that asks for parallel work starts it',
     source: 'entity-sessions/20260925-171726-7cfv',
     messages: [

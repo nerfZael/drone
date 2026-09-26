@@ -235,6 +235,7 @@ function ChatPane({ events, snapshot, disabled, replaying, onInput, link, onLink
                       </button>
                     ) : <span>{label}{replyTo ? `${label ? ' · ' : ''}↳ “${String(replyTo.data.text).slice(0, 48)}${String(replyTo.data.text).length > 48 ? '…' : ''}”` : ''}</span>}
                     {reviewed?.state === 'checking' ? <span className="italic opacity-80" title="A stronger model is taking a second look">checking…</span> : null}
+                    {reviewed?.state === 'withdrawn' ? <span className="italic opacity-80" title="The reviewer found this correction was itself wrong; the message it corrected stands">withdrawn</span> : null}
                     {reviewed?.state === 'unchecked' ? <span className="italic opacity-80" title="The review did not complete, so this answer was not checked">not checked</span> : null}
                     {reviewed?.state === 'confirmed' ? <span title="Checked by the reviewer" style={{ color: 'var(--green, #3fb950)' }}>✓</span> : null}
                     {reviewed?.state === 'corrected' && reviewed.by !== undefined ? (
@@ -245,7 +246,7 @@ function ChatPane({ events, snapshot, disabled, replaying, onInput, link, onLink
                     ) : null}
                   </div>
                 ) : null}
-                <div className={reviewed?.state === 'corrected' ? 'text-[var(--muted)] line-through' : undefined}>
+                <div className={reviewed?.state === 'corrected' || reviewed?.state === 'withdrawn' ? 'text-[var(--muted)] line-through' : undefined}>
                   {mine ? (updated.get(m.seq) ?? String(m.data.text)) : <MarkdownMessage text={updated.get(m.seq) ?? String(m.data.text)} className="dh-markdown--agent entity-md" />}
                 </div>
               </div>

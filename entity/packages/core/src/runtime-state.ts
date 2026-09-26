@@ -375,6 +375,11 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
     case 'group_started':
       state.batches[String(data.id)] = { title: String(data.title), ended: false };
       return;
+    case 'group_extended': {
+      const batch = state.batches[String(data.id)];
+      if (batch) batch.ended = false;
+      return;
+    }
     case 'group_finished': {
       const batch = state.batches[String(data.id)];
       if (batch) batch.ended = true;
