@@ -19,12 +19,16 @@ const only = arg('only');
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** The real model for the head and voice; workers just stay busy until stopped, so routing is all that is judged. */
-function routingMind(): Mind {
+function routingMind(c: RoutingCase): Mind {
   const real = new PiAiMind('medium');
+  const asked = new Set<string>();
   return {
-    run: input => (input.role === 'task'
-      ? new Promise(resolve => { input.signal.addEventListener('abort', () => resolve({ stopReason: 'done' })); setTimeout(() => resolve({ stopReason: 'done' }), 120_000); })
-      : real.run(input)),
+    run: async input => {
+      if (input.role !== 'task') return real.run(input);
+      // A case's worker may ask the user first: ask ends its turn, and it waits for the answer.
+      if (c.workerAsks && !asked.has(input.limbId)) { asked.add(input.limbId); await input.callTool('ask', { question: c.workerAsks }); return { stopReason: 'done' }; }
+      return new Promise(resolve => { input.signal.addEventListener('abort', () => resolve({ stopReason: 'done' })); setTimeout(() => resolve({ stopReason: 'done' }), 120_000); });
+    },
     fork: () => true,
     forget: () => {},
   };
@@ -33,7 +37,7 @@ function routingMind(): Mind {
 async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'entity-routing-'));
   const entity = new Entity({
-    mind: routingMind(),
+    mind: routingMind(c),
     channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: dir })],
     models: { head, task: head, voice },
     config: { review: 'off', draftAttention: false },
@@ -42,7 +46,12 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
   try {
     entity.start();
     await sleep(2000);
-    for (const m of c.messages) { await sleep(m.after ?? 3000); entity.input('chat_message', { text: m.text }); }
+    for (const m of c.messages) {
+      await sleep(m.after ?? 3000);
+      const question = m.click ? [...entity.log.all()].reverse().find(e => e.type === 'chat_message' && Array.isArray(e.data.options)) : undefined;
+      if (m.click && !question) continue;
+      entity.input('chat_message', { text: m.text, ...(question ? { reply_to: question.seq } : {}) });
+    }
     // Settled: the front limb has been idle for 5 s (at most 90 s).
     const front = voice ? 'voice' : 'head';
     let quietSince = Date.now();

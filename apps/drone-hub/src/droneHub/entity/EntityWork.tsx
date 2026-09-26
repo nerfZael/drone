@@ -38,10 +38,14 @@ export interface WorkItem {
   after?: string;
   /** The worker holding a file this one needs, when blocked. */
   blockedBy?: string;
+  /** Finished, with its conversation kept: a message picks it back up. */
+  kept?: boolean;
 }
 
 const VERBS: Record<string, string> = {
-  read_file: 'reading', list_files: 'listing', search: 'searching', write_file: 'writing', edit_file: 'editing', run: 'running',
+  read_file: 'reading', list_files: 'listing', search: 'searching', search_files: 'searching', write_file: 'writing', edit_file: 'editing', run: 'running',
+  apply_patch: 'editing', bash: 'running', move_path: 'moving', delete_file: 'deleting', create_directory: 'creating', delete_directory: 'deleting',
+  get_working_tree_status: 'checking',
   say: 'replying', claim: 'claiming', release: 'releasing', share: 'sharing', note: 'noting', finish_task: 'finishing',
   set_watch: 'setting a watch', run_program: 'running a program', press: 'pressing', key_down: 'holding', key_up: 'releasing',
 };
@@ -115,7 +119,7 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
     durationMs: (l.endedAt ?? snapshot.t) - l.createdAt,
     cost: l.usage?.cost ?? 0, tokens: l.usage ? tokens(l.usage) : 0,
     result: l.result,
-    status: l.status, blockedBy: l.blockedBy?.limb, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor, after: l.after,
+    status: l.status, blockedBy: l.blockedBy?.limb, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor, after: l.after, kept: l.kept,
   };
 }
 
@@ -146,7 +150,7 @@ export const clock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-export const spend = (cost: number, tokens: number) => (cost > 0 ? `$${cost < 10 ? cost.toFixed(2) : cost.toFixed(0)}` : tokens > 0 ? `${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tok` : '—');
+export const spend = (cost: number, tokens: number) => (cost > 0 ? (cost < 0.005 ? '<$0.01' : `$${cost < 10 ? cost.toFixed(2) : cost.toFixed(0)}`) : tokens > 0 ? `${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tok` : '—');
 
 /** The Work tab: the canvas, loaded on demand (it brings in the graph library). */
 export function EntityWork(props: React.ComponentProps<typeof EntityWorkCanvas>) {
@@ -192,21 +196,13 @@ export function Steps({ w }: { w: WorkItem }) {
   );
 }
 
-export function WorkerDetail({ w, live, onWorker }: { w: WorkItem; live: boolean; onWorker(id: string, action: 'message' | 'stop', text?: string): void }) {
-  const [text, setText] = React.useState('');
+/** What a worker is doing: its steps and the files it holds. The thread's composer talks to it. */
+export function WorkerDetail({ w }: { w: WorkItem }) {
   const running = w.state !== 'done' && w.state !== 'stop';
   return (
     <div className="grid gap-1.5 bg-[var(--hover)] py-2 pl-[15px] pr-3" style={{ borderLeft: `3px solid ${STATE_COLOR[w.state]}` }}>
       <Steps w={w} />
       {w.claims.length ? <div className="flex flex-wrap gap-1">{w.claims.map(c => <span key={c} className="rounded bg-[var(--panel-alt)] px-1 font-mono text-[11px]">{c}</span>)}</div> : null}
-      {live && running ? (
-        <form className="flex gap-1.5" onSubmit={e => { e.preventDefault(); if (text.trim()) { onWorker(w.id, 'message', text.trim()); setText(''); } }}>
-          <input value={text} onChange={e => setText(e.target.value)} placeholder={`Message ${w.name} directly`}
-            className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 text-[12px] text-[var(--fg)] outline-none" />
-          <button type="submit" className="rounded border border-[var(--border)] bg-[var(--panel)] px-2 text-[12px]">Send</button>
-          <button type="button" onClick={() => onWorker(w.id, 'stop')} className="rounded border border-[var(--border)] bg-[var(--panel)] px-2 text-[12px]" style={{ color: STATE_COLOR.stop }}>Stop</button>
-        </form>
-      ) : null}
       {!running && w.result ? <div className="text-[var(--muted)]">{w.result}</div> : null}
     </div>
   );

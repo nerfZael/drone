@@ -36,6 +36,11 @@ export interface MindRunInput {
   sessionKey?: string;
   /** Most model turns (tool round trips) in this run. */
   maxSteps: number;
+  /**
+   * Reports one model call's usage as soon as it is known, so views show a long run's cost while it works. A mind
+   * that calls it reports every call; the run's result usage is then not counted again.
+   */
+  spent?(usage: ModelUsage): void;
 }
 
 export interface MindRunResult {

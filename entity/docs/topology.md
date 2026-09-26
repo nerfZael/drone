@@ -62,6 +62,8 @@ Limbs run in parallel. A wake that arrives while a reactive limb is busy starts 
 | Code limbs | none: plain code | At most 32 |
 | Jev | runtime primitive, not a limb | Off by default in the Hub; turn it on for senses |
 
+These are the Hub's defaults. The bench's **Models** menu sets each part's model and reasoning level with the chat composer's model picker (any model the Hub offers that pi-ai can run), or one model for everything (head, workers and review, no separate voice). A worker sent to the head's model thinks at the head's level. **Profiles** save a setup under a name to switch back to; they live in `entity-profiles.json` in the Hub's data directory. Models change only before Start or after Reset.
+
 Live tests use only Codex gpt-6-sol and gpt-6-luna on medium reasoning, which run on the subscription. Cerebras qwen is for rare speed tests only: it is fast but not smart, prompt caching barely works there, and it bills per call. Spike and milestone numbers are in [plan.md](plan.md#results).
 
 Not built yet: token budgets per limb that flow down the tree, and depth caps; see [future.md](future.md).

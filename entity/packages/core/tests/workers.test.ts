@@ -511,7 +511,11 @@ test('workers: ask holds the worker until the answer, which wakes it with its co
   const prompts: string[] = [];
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'deploy it') await call('dispatch', { task: 'deploy', name: 'deploy' });
-    if (input.role === 'head' && lastUserMessage(input) === 'staging') await call('steer', { worker: 'worker-3', text: 'staging' });
+    if (input.role === 'head' && lastUserMessage(input) === 'staging') {
+      // The head knows who is waiting on the user from its state alone.
+      const waiting = (stableState(input).workers as string[]).find(line => line.includes('waiting for the answer: Staging or production?'));
+      if (waiting) await call('steer', { worker: waiting.split(' ')[0], text: 'staging' });
+    }
     if (input.role === 'task') {
       prompts.push(input.prompt);
       if (prompts.length === 1) { await call('ask', { question: 'Staging or production?' }); return; }
@@ -529,6 +533,29 @@ test('workers: ask holds the worker until the answer, which wakes it with its co
   await until(() => h.of('task_done').length === 1);
   expect(prompts[1]).toContain('Message from the user (via head): staging');
   expect(h.entity.snapshot().limbs.find(l => l.id === 'worker-3')).toMatchObject({ status: 'done', asking: undefined });
+});
+
+test('workers: a question can offer options; a click answers the worker directly and is logged as the answer', async () => {
+  const prompts: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head') prompts.push(input.prompt);
+    if (input.role === 'head' && lastUserMessage(input) === 'deploy it') await call('dispatch', { task: 'deploy', name: 'deploy' });
+    if (input.role === 'task') {
+      if (!h.of('steered').length) { await call('ask', { question: 'Where to?', options: [{ label: 'Staging', recommended: true }, { label: 'Production' }, { label: '  ' }] }); return; }
+      await call('finish_task', { result: 'deployed' });
+    }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'deploy it' });
+  await until(() => h.said().includes('Where to?'));
+  const question = h.of('chat_message').find(e => e.data.text === 'Where to?')!;
+  expect(question.data.options).toEqual([{ label: 'Staging', recommended: true }, { label: 'Production' }]); // the empty one is dropped
+  h.entity.messageWorker(question.by, 'Staging', question.seq);
+  await until(() => h.of('task_done').length === 1);
+  expect(h.of('steered')[0].data).toMatchObject({ id: question.by, text: 'Staging', answers: question.seq });
+  // Whoever reads the chat sees the options that were offered.
+  h.entity.input('chat_message', { text: 'thanks' });
+  await until(() => prompts.some(p => p.includes('[options: Staging (recommended) | Production]')));
 });
 
 test('workers: renames, fork and wait links, and usage are runtime facts every view shares', async () => {
@@ -586,6 +613,33 @@ test('usage: tokens by kind and cost per limb, unpriced calls counted, summaries
   expect(worker.usage).toMatchObject({ cacheRead: 400, cacheWrite: 20, cost: 0.01 });
 });
 
+test('usage: a mind that reports each call shows a worker\'s cost while it works, and the run total is not counted again', async () => {
+  let release!: () => void;
+  const hold = new Promise<void>(r => { release = r; });
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'work' });
+    if (input.role === 'task') {
+      input.spent?.({ input: 100, output: 10, cost: 0.02 });
+      await hold;
+      input.spent?.({ input: 50, output: 5, cost: 0.01 });
+      await call('finish_task', { result: 'ok' });
+    }
+  });
+  const run = h.mind.run.bind(h.mind);
+  h.mind.run = async input => ({ ...(await run(input)), usage: input.role === 'task' ? { input: 150, output: 15, cost: 0.03 } : undefined });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  const worker = () => h.entity.snapshot().limbs.find(l => l.role === 'task');
+  await until(() => (worker()?.usage?.cost ?? 0) > 0);
+  expect(worker()!.status).toBe('running');
+  expect(worker()!.usage).toMatchObject({ input: 100, cost: 0.02 });
+  release();
+  await until(() => h.of('task_done').length === 1);
+  await sleep(10);
+  expect(worker()!.usage!.input).toBe(150);
+  expect(worker()!.usage!.cost).toBeCloseTo(0.03);
+});
+
 test('batches: more items join an existing batch, with one progress line, even after it ended', async () => {
   let release!: () => void;
   const hold = new Promise<void>(r => { release = r; });
@@ -641,4 +695,62 @@ test('review: the reviewer is told when each answer was said, and can withdraw i
   const chat = h.entity.snapshot().world.chat as { messages: { seq: number; correctedBy?: number; withdrawn?: boolean; by: string }[] };
   expect(chat.messages.find(m => m.seq === status.seq)!.correctedBy).toBeUndefined();
   expect(chat.messages.find(m => m.by === 'reviewer')!.withdrawn).toBe(true);
+});
+
+test('chat limits: a long message is refused with what to do; after two refusals the runtime shortens it, a worker\'s into a file', async () => {
+  const long = 'First sentence of the plan. ' + 'x'.repeat(900);
+  const results: string[] = [];
+  const saved: { limb: string; text: string }[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') {
+      for (let i = 0; i < 3; i++) results.push(await call('say', { text: 'y'.repeat(500) }));
+      await call('dispatch', { task: 'write it up' });
+    }
+    if (input.role === 'task') {
+      for (let i = 0; i < 3; i++) results.push(await call('say', { text: long }));
+      await call('finish_task', { result: 'done' });
+    }
+  }, { overflow: (limb, text) => { saved.push({ limb, text }); return 'artifacts/plan.md'; } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('task_done').length === 1);
+  expect(results[0]).toContain('too long for chat (500/300');
+  expect(results[3]).toContain('Write the details to a file under artifacts/');
+  const said = h.of('chat_message', b => b !== 'user');
+  const head = said.find(e => e.by === 'head' && String(e.data.text).endsWith('… (shortened)'))!;
+  expect(String(head.data.text).length).toBeLessThanOrEqual(300);
+  const worker = said.find(e => e.by.startsWith('worker'))!;
+  expect(worker.data).toMatchObject({ text: 'First sentence of the plan. (full text in artifacts/plan.md)', files: ['artifacts/plan.md'] });
+  expect(saved[0].text).toBe(long);
+});
+
+test('chat limits: a wake sends at most a couple of messages, and linked files must exist', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') {
+      for (let i = 0; i < 3; i++) results.push(await call('say', { text: `line ${i}` }));
+      results.push(await call('say', { text: 'see it', files: ['artifacts/missing.md'] }));
+    }
+  }, { channels: [chatChannel({ checkFiles: paths => paths.includes('artifacts/missing.md') ? 'artifacts/missing.md does not exist' : null }), keypadChannel()] });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 4);
+  expect(results.slice(0, 2).every(r => r === 'sent')).toBe(true);
+  expect(results[2]).toContain('you already sent 2 messages this wake');
+  expect(results[3]).toContain('you already sent 2');
+});
+
+test('chat: linked files are checked by the host and shown with the message', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') {
+      results.push(await call('say', { text: 'see it', files: ['artifacts/missing.md'] }));
+      results.push(await call('say', { text: 'here', files: ['./artifacts/plan.md', 'artifacts/plan.md'] }));
+    }
+  }, { channels: [chatChannel({ checkFiles: paths => paths.includes('artifacts/missing.md') ? 'artifacts/missing.md does not exist' : null }), keypadChannel()] });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 2);
+  expect(results[0]).toContain('artifacts/missing.md does not exist');
+  expect(h.of('chat_message').find(e => e.data.text === 'here')!.data.files).toEqual(['artifacts/plan.md']);
 });

@@ -612,3 +612,22 @@ test('a crashed head run is retried for what woke it, so a user message is not l
   expect(h.of('limb_failed')[0].data).toMatchObject({ error: 'WebSocket closed 1011', retry: true });
   expect(h.of('run_started').at(-1)!.data.reason).toContain('retry after a crash (WebSocket closed 1011): user message');
 });
+
+test('prompts: a section can be replaced, placeholders are filled, and edits apply from the next wake', async () => {
+  const { PROMPT_SECTIONS } = await import('../src/prompts.js');
+  expect(new Set(PROMPT_SECTIONS.map(s => s.id)).size).toBe(PROMPT_SECTIONS.length);
+  const systems: string[] = [];
+  let overrides: Record<string, string> = { head_front: 'You are the head. Custom.' };
+  const h = setup(async input => { if (input.role === 'head') systems.push(input.system); }, { prompts: () => overrides });
+  h.entity.start();
+  await until(() => systems.length === 1);
+  expect(systems[0]).toContain('You are the head. Custom.');
+  expect(systems[0]).not.toContain('You are the head and the front of the entity.');
+  // The routing section fills its placeholders from the current setup.
+  expect(systems[0]).not.toContain('{{');
+  overrides = { router_checking_reviewed: 'CHECKED BY REVIEWER', router_checking_unreviewed: 'CHECK IT YOURSELF' };
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => systems.length === 2);
+  expect(systems[1]).toMatch(/CHECKED BY REVIEWER|CHECK IT YOURSELF/);
+  expect(systems[1]).toContain('You are the head and the front of the entity.'); // back to the default once the override is gone
+});

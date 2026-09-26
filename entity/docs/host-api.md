@@ -14,11 +14,14 @@ const entity = new Entity({
   evaluator?,           // backs judge / sense (Jev or a small LLM)
   summarizer?,          // writes work summaries of busy workers
   config?,              // e.g. { review: 'separate', maxTasks: 6 }
+  prompts?,             // replacement texts by section id, or a function giving them (read on every wake)
 });
 entity.start();
 entity.input('chat_message', { text: 'hi' });   // only a channel's declared inputs, by 'user'
 entity.subscribe(event => …);                     // every logged event
 ```
+
+The system prompts are built from named sections (`PROMPT_SECTIONS`: id, title, where it is used, its `{{placeholders}}` and default text). Which sections a role gets, and in what order, is fixed in code; `prompts` replaces a section's text, and an empty or missing one uses the default. The Hub keeps the user's edits in `entity-prompts.json` in its data directory and adds its own sections (work summaries); the bench's **Prompts** panel edits and resets them, and a limb uses an edit from its next wake.
 
 | Method | Does |
 |---|---|

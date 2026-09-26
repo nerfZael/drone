@@ -11,7 +11,7 @@ type PiAi = typeof import('@mariozechner/pi-ai');
 let piAi: Promise<PiAi> | null = null;
 const loadPiAi = () => (piAi ??= importEsm('@mariozechner/pi-ai') as Promise<PiAi>);
 
-export type ReasoningLevel = 'minimal' | 'low' | 'medium' | 'high';
+export type ReasoningLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 /** Where worker conversations are kept beyond memory, so a restored session can continue them. Append-only per key. */
 export interface ConversationStore {
@@ -42,6 +42,13 @@ export function fileConversationStore(dir: string): ConversationStore {
  * conversation per task limb until the runtime calls forget(). Conversations live in memory
  * and, with a store, on disk too. Tool calls commit as soon as they stream in, not at the end of the turn.
  */
+/** Whether pi-ai can run a "provider/model" id: the entity's minds only run models it knows. */
+export async function isRunnableModel(id: string): Promise<boolean> {
+  const [provider, ...rest] = id.split('/');
+  if (!provider || !rest.length) return false;
+  try { return !!(await loadPiAi()).getModel(provider as never, rest.join('/') as never); } catch { return false; }
+}
+
 export class PiAiMind implements Mind {
   private readonly sessions = new Map<string, Message[]>();
 
@@ -50,7 +57,8 @@ export class PiAiMind implements Mind {
    * pi-ai's own flat rates are used.
    */
   constructor(
-    private readonly reasoning: ReasoningLevel = 'medium',
+    /** How hard the model thinks: one level for every call, or chosen per call (the Hub picks it per part of the entity). */
+    private readonly reasoning: ReasoningLevel | ((input: MindRunInput) => ReasoningLevel) = 'medium',
     private readonly store?: ConversationStore,
     private readonly price?: (provider: string, model: string, counts: TokenCounts) => number | null,
   ) {}
@@ -86,6 +94,7 @@ export class PiAiMind implements Mind {
     const apiKey = await resolveBlipProviderApiKey(providerId);
     if (!apiKey) throw new Error(`No credentials for ${providerId}. Sign in or add a key in Settings.`);
 
+    const reasoning = typeof this.reasoning === 'function' ? this.reasoning(input) : this.reasoning;
     const history = input.sessionKey ? (this.history(input.sessionKey) ?? []) : [];
     const prompt: Message = { role: 'user', content: input.prompt, timestamp: Date.now() };
     const messages: Message[] = [...history, prompt];
@@ -113,7 +122,7 @@ export class PiAiMind implements Mind {
           const stream = streamSimple(model, context, {
             apiKey, signal: input.signal, maxTokens: 8192,
             sessionId: input.sessionKey ?? `entity:${input.limbId}`,
-            ...(model.reasoning ? { reasoning: this.reasoning } : {}),
+            ...(model.reasoning && reasoning !== 'off' ? { reasoning } : {}),
           });
           for await (const event of stream) {
             if (event.type === 'toolcall_end') {
@@ -129,7 +138,8 @@ export class PiAiMind implements Mind {
           await Promise.all(pendingCalls);
           return stream.result();
         }, true);
-        this.count(usage, providerId, modelId, message);
+        const call = this.count(usage, providerId, modelId, message);
+        if (call) input.spent?.(call);
         context.messages.push(message, ...results);
         if (key && this.sessions.get(key) === context.messages) this.store?.append(key, [message, ...results]);
         const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
@@ -145,9 +155,10 @@ export class PiAiMind implements Mind {
   }
 
   /** Adds one model call to a run's usage; each call is priced on its own, since long-context rates depend on its size. */
-  private count(usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number | null }, provider: string, model: string, message: AssistantMessage): void {
+  /** Adds one call to the run's total and returns that call's own usage. */
+  private count(usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number | null }, provider: string, model: string, message: AssistantMessage): ModelUsage | null {
     const used = message.usage;
-    if (!used) return;
+    if (!used) return null;
     const counts: TokenCounts = { input: used.input ?? 0, output: used.output ?? 0, cacheRead: used.cacheRead ?? 0, cacheWrite: used.cacheWrite ?? 0, reasoning: null };
     usage.input += counts.input!;
     usage.output += counts.output!;
@@ -155,5 +166,6 @@ export class PiAiMind implements Mind {
     usage.cacheWrite += counts.cacheWrite!;
     const cost = this.price ? this.price(provider, model, counts) : used.cost?.total ?? null;
     usage.cost = usage.cost === null || cost === null ? null : usage.cost + cost;
+    return { input: counts.input!, output: counts.output!, cacheRead: counts.cacheRead!, cacheWrite: counts.cacheWrite!, cost };
   }
 }

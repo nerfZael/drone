@@ -15,7 +15,7 @@ export type LimbRole = 'head' | 'voice' | 'reviewer' | 'task' | 'watch' | 'progr
 /** A worker is `waiting` while it waits for another worker to finish (dispatch with `after`), and `queued` while it waits for a free slot. */
 export type LimbStatus = 'idle' | 'queued' | 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
 
-export interface RunState { id: string; reason: string; startedAt: number; readSeq: number; firstToolAt?: number }
+export interface RunState { id: string; reason: string; startedAt: number; readSeq: number; firstToolAt?: number; /** Its model calls were counted as they happened (`usage` events), not at the end. */ reported?: boolean }
 
 interface LimbBase {
   id: string;
@@ -153,6 +153,8 @@ export interface LimbSnapshot {
   task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
   createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
   forkOf?: string; after?: string; blockedBy?: { limb: string; path: string }; asking?: number; usage?: Usage;
+  /** A finished worker whose conversation is kept: the user can message it and it picks the conversation back up. */
+  kept?: boolean;
 }
 
 /** The limbs as views show them, from the runtime state alone. */
@@ -166,6 +168,7 @@ export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
     ...(l.role === 'task' ? {
       task: l.task, result: l.result, group: l.group, replyTo: l.replyTo, waitFor: l.waitFor,
       forkOf: l.forkOf, after: l.after, blockedBy: l.blockedBy, asking: l.asking,
+      ...(state.kept.includes(l.id) ? { kept: true } : {}),
     } : {}),
     ...(l.role === 'watch' ? { watch: l.watch, fires: l.fires } : {}),
     ...(l.role === 'program' ? { code: l.code } : {}),
@@ -248,12 +251,22 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
     }
     case 'run_finished': {
       if (!selfLlm) return;
+      const finished = selfLlm.runs.find(r => r.id === data.run);
       selfLlm.runs = selfLlm.runs.filter(r => r.id !== data.run);
       const used = data.usage as Parameters<typeof addUsage>[1] | null | undefined;
-      if (used) { addUsage(selfLlm.usage, used); addUsage(state.usage, used); }
+      if (used && !finished?.reported) { addUsage(selfLlm.usage, used); addUsage(state.usage, used); }
       return;
     }
     case 'usage': {
+      // One model call of a limb's run, counted as it happens.
+      if (data.kind === 'run') {
+        if (!selfLlm) return;
+        const run = selfLlm.runs.find(r => r.id === data.run);
+        if (run) run.reported = true;
+        addUsage(selfLlm.usage, data);
+        addUsage(state.usage, data);
+        return;
+      }
       // Model calls outside the limbs: work summaries and senses.
       const bucket = data.kind === 'summaries' || data.kind === 'senses' ? state.usageBy[data.kind] : undefined;
       if (bucket) addUsage(bucket, data);

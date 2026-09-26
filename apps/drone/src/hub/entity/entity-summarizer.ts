@@ -6,7 +6,8 @@ import { modelCallUsage } from './entity-evaluator';
 
 const importEsm = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>;
 
-const PROMPT = `You summarize one worker's progress for a live dashboard. The worker is an AI agent handling one user request.
+/** The default instructions for work summaries; the user may replace them (see entity-prompts.ts). */
+export const SUMMARY_PROMPT = `You summarize one worker's progress for a live dashboard. The worker is an AI agent handling one user request.
 Reply with only a JSON object: {"done": [...], "doing": [...], "next": [...], "blocker": "..."}.
 - done: finished steps, most important first. doing: the one or two things in progress. next: what remains, if clear.
 - Each item is a short phrase (under 10 words) naming concrete things (files, features, decisions), not tool names.
@@ -14,7 +15,7 @@ Reply with only a JSON object: {"done": [...], "doing": [...], "next": [...], "b
 - At most 4 items per list. Use the worker's own facts only.`;
 
 /** Work view summaries with a cheap model: gpt-6-luna on low reasoning by default (on the Codex subscription). */
-export function createWorkSummarizer(modelRef = 'openai-codex/gpt-6-luna'): Summarizer {
+export function createWorkSummarizer(modelRef = 'openai-codex/gpt-6-luna', prompt: () => string = () => SUMMARY_PROMPT): Summarizer {
   const [providerId, ...rest] = modelRef.split('/');
   const modelId = rest.join('/');
   return {
@@ -25,7 +26,7 @@ export function createWorkSummarizer(modelRef = 'openai-codex/gpt-6-luna'): Summ
       const apiKey = await resolveBlipProviderApiKey(providerId);
       if (!apiKey) throw new Error(`No credentials for ${providerId}`);
       const message = await trackHubGeneration(providerId, modelId, () => completeSimple(model, {
-        systemPrompt: PROMPT,
+        systemPrompt: prompt(),
         messages: [{ role: 'user', content: `TASK\n${input.task}\n\nACTIVITY (oldest first)\n${input.activity}`, timestamp: Date.now() }],
       }, { apiKey, signal, maxTokens: 800, ...(model.reasoning ? { reasoning: 'low' as const } : {}) }), true);
       const text = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('');

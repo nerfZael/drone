@@ -3,6 +3,8 @@ import { Background, BaseEdge, Handle, Position, ReactFlow, ViewportPortal, type
 import '@xyflow/react/dist/style.css';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { Dot, Pips, Steps, STATE_COLOR, WorkerDetail, clock, spend, type WorkItem } from './EntityWork';
+import { EntityComposer, EntityMessage, questionAnswer, type ChatOption } from './EntityChat';
+import { WorkingElapsedStatus } from '../chat/WorkingElapsedStatus';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import {
   CARD_W, LINE_W, cardId, deriveCanvas, foldId, groupId, layoutCanvas, lineId, moreId,
@@ -15,7 +17,7 @@ import {
  * entity/docs/work-canvas.md. Layout is ours (work-canvas-model.ts); xyflow only pans, zooms and draws.
  */
 
-type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string) => void;
+type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number) => Promise<boolean> | void;
 
 /** What the chat and the canvas highlight together: a chat message, or a worker. */
 export type WorkLink = { message?: number; worker?: string; from?: 'chat' | 'canvas' } | null;
@@ -30,7 +32,7 @@ interface Ctx {
   nameOf(id: string): string;
   shownAs(id: string): string | undefined;
   select(id: string | null): void;
-  hover(ids: string[] | null, link?: WorkLink): void;
+  hover(ids: string[] | null): void;
   toggleExpanded(id: string): void;
   toggleFold(key: string): void;
   rename(id: string, name: string): void;
@@ -57,7 +59,7 @@ const EDGE_STYLE = {
   blocked: { stroke: STATE_COLOR.stop, dash: '1 5', width: 2 },
 } as const;
 
-export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLink, open, onReroute }: {
+export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLink, open, onReroute, onOpenFile }: {
   snapshot: EntitySnapshot; events: EntityEvent[]; live: boolean; onWorker: OnWorker;
   /** Override how a message was routed: its own worker, or a fork of the worker it went to. */
   onReroute?(seq: number, how: 'separate' | 'fork'): void;
@@ -66,6 +68,8 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   onLink?(link: WorkLink): void;
   /** A request from the chat to open a worker; `n` changes with every request. */
   open?: { id: string; n: number } | null;
+  /** Opens a file a worker linked, in the entity's home folder. */
+  onOpenFile?(path: string): void;
 }) {
   const [openFolds, setOpenFolds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -75,13 +79,14 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   // The snapshot's clock only moves when an event arrives; folding and durations need time to pass in quiet moments too.
   const t = useLiveClock(snapshot, live);
   const timed = React.useMemo(() => (t === snapshot.t ? snapshot : { ...snapshot, t }), [snapshot, t]);
-  const pinned = React.useMemo(() => new Set([...expanded, ...(selected ? [selected] : []), ...(hovered ?? [])]), [expanded, selected, hovered]);
+  // What stays unfolded: expanded and selected cards. Never what is merely hovered, so pointing never moves the layout.
+  const pinned = React.useMemo(() => new Set([...expanded, ...(selected ? [selected] : [])]), [expanded, selected]);
   const model = React.useMemo(() => deriveCanvas(timed, events, { openFolds, pinned }), [timed, events, openFolds, pinned]);
   const layout = React.useMemo(() => layoutCanvas(model, id => sizes.get(id)), [model, sizes]);
   const { pulsing, flashing } = usePulses(events, model, live);
 
   React.useEffect(() => { if (open) setSelected(open.id); }, [open]);
-  // Hovering in the chat highlights here: a message shows the work it started or steered, a reply shows its worker.
+  // A worker chosen elsewhere (a reply clicked in the chat) is highlighted here.
   const linked = React.useMemo(() => {
     if (!link) return null;
     if (link.worker) return [link.worker];
@@ -150,12 +155,15 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
     requestAnimationFrame(() => { flow.current?.fitView(FIT); setTimeout(() => setSettled(true), 400); });
   }, [nodes.length, sizes.size]);
 
+  React.useEffect(() => { onLink?.(selected ? { worker: selected } : null); }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const ctx: Ctx = {
     t, live, focus, selected, expanded, flashing,
     nameOf: id => model.workers.get(id)?.name ?? id,
     shownAs: id => model.shownAs.get(id),
     select: setSelected,
-    hover: (ids, next) => { setHovered(ids); onLink?.(ids ? next ?? (ids.length === 1 ? { worker: ids[0] } : null) : null); },
+    // Hovering stays on the canvas; only choosing a card points the chat at its messages.
+    hover: ids => setHovered(ids),
     toggleExpanded: id => setExpanded(prev => toggled(prev, id)),
     toggleFold: key => setOpenFolds(prev => toggled(prev, key)),
     // A rename is the Hub's: every view, the chat and the entity's own state use it.
@@ -191,7 +199,7 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
               <Rules rules={layout.rules} width={layout.width} />
             </ReactFlow>
           )}
-          {worker ? <Drawer w={worker} events={events} t={t} live={live} onWorker={onWorker} onClose={() => setSelected(null)} /> : null}
+          {worker ? <Drawer w={worker} events={events} snapshot={snapshot} t={t} live={live} onWorker={onWorker} onOpenFile={onOpenFile} onClose={() => setSelected(null)} /> : null}
         </div>
       </div>
     </CanvasCtx.Provider>
@@ -281,14 +289,14 @@ function LineNode({ data }: NodeProps<Node<LineData, 'line'>>) {
   const target = line.target;
   const lit = !!ctx.focus && [...(line.workers ?? []), ...(target ? [target] : [])].some(id => ctx.focus!.has(cardId(id)) || ctx.focus!.has(ctx.shownAs(id) ?? ''));
   return (
-    <div className={`group grid grid-cols-[40px_minmax(0,1fr)] gap-x-2 text-[12px] ${nested ? 'border-l-2 border-[var(--border)] pl-2.5' : ''} ${ctx.focus && !lit ? 'opacity-40' : ''}`}
+    <div className={`group relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-2 text-[12px] ${nested ? 'border-l-2 border-[var(--border)] pl-2.5' : ''} ${ctx.focus && !lit ? 'opacity-40' : ''}`}
       style={{ width: nested ? LINE_W - 12 : LINE_W }}
-      onMouseEnter={() => { const ids = line.workers?.length ? line.workers : target ? [target] : []; ctx.hover(ids, line.seq !== undefined ? { message: line.seq } : null); }} onMouseLeave={() => ctx.hover(null)}>
+      onMouseEnter={() => { const ids = line.workers?.length ? line.workers : target ? [target] : []; ctx.hover(ids); }} onMouseLeave={() => ctx.hover(null)}>
       <span className="pt-px font-mono text-[11px] text-[var(--muted)] opacity-80" title={timeTitle(line.at, line.t)}>{timeOfDay(line.at, line.t)}</span>
       <span className="line-clamp-2 text-[var(--fg-secondary,var(--fg))]" title={line.text}>{line.by === 'user' ? line.text : <i>{line.text}</i>}</span>
       {ctx.reroute && line.by === 'user' && line.seq !== undefined && !line.workers?.length ? (
-        // Routing is a guess; these make a wrong one cheap to fix. Shown on hover.
-        <span className="col-start-2 hidden gap-1.5 text-[11px] group-hover:flex">
+        // Routing is a guess; these make a wrong one cheap to fix. Shown on hover, over the row, so nothing moves.
+        <span className="absolute right-0 top-0 z-10 hidden gap-1.5 rounded bg-[var(--panel)] pl-1.5 text-[11px] shadow-sm group-hover:flex">
           <button type="button" className="rounded border border-[var(--border)] px-1.5 hover:bg-[var(--hover)]" title="Start a fresh worker for this message"
             onClick={() => ctx.reroute!(line.seq!, 'separate')}>Own worker</button>
           {line.target ? (
@@ -357,14 +365,12 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
           {w.model ? <div className="font-mono text-[11px] text-[var(--muted)]">{w.model}</div> : null}
         </div>
       ) : null}
-      {finished && !open ? null : (
-        <div className="flex items-center gap-2.5 text-[var(--muted)]">
-          <Pips w={w} />
-          {card.chips.length ? <span className="flex gap-1">{card.chips.map(c => <ChipView key={c.id} chip={c} />)}</span> : null}
-          <span className="ml-auto font-mono text-[11.5px] tabular-nums">{clock(w.durationMs)}</span>
-          <span className="font-mono text-[11.5px] tabular-nums">{spend(w.cost, w.tokens)}</span>
-        </div>
-      )}
+      <div className="flex items-center gap-2.5 text-[var(--muted)]">
+        {finished && !open ? null : <Pips w={w} />}
+        {card.chips.length ? <span className="flex gap-1">{card.chips.map(c => <ChipView key={c.id} chip={c} />)}</span> : null}
+        <span className="ml-auto font-mono text-[11.5px] tabular-nums">{clock(w.durationMs)}</span>
+        <span className="font-mono text-[11.5px] tabular-nums" title="Model cost at list price">{spend(w.cost, w.tokens)}</span>
+      </div>
       {handles}
     </div>
   );
@@ -516,28 +522,33 @@ function TopStrip({ model, t, onPick, onFit }: { model: CanvasModel; t: number; 
   );
 }
 
-function Drawer({ w, events, t, live, onWorker, onClose }: { w: WorkItem; events: EntityEvent[]; t: number; live: boolean; onWorker: OnWorker; onClose(): void }) {
+function Drawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }: { w: WorkItem; events: EntityEvent[]; snapshot: EntitySnapshot; t: number; live: boolean; onWorker: OnWorker; onOpenFile?(path: string): void; onClose(): void }) {
   const ctx = useCtx();
+  const bottom = React.useRef<HTMLDivElement | null>(null);
   // The worker's thread: the message that started it and the task it was given, then what it said and what it was told.
   const thread = events.filter(e => (e.type === 'chat_message' && e.by === w.id) || (e.type === 'steered' && e.data.id === w.id));
   const origin = w.replyTo !== undefined ? events.find(e => e.seq === w.replyTo) : undefined;
   const started = events.find(e => e.type === 'limb_spawned' && e.data.id === w.id);
+  const running = w.state !== 'done' && w.state !== 'stop';
+  // Working: a run of its own has started and not finished. Timed from the wall clock, like the agent chat.
+  const lastRun = [...events].reverse().find(e => e.type === 'run_started' && e.by === w.id);
+  const working = live && !!lastRun && !events.some(e => e.type === 'run_finished' && e.by === w.id && e.data.run === lastRun.data.run);
+  React.useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [thread.length, working]);
   return (
-    <aside className="absolute inset-y-0 right-0 z-10 grid w-[360px] max-w-full grid-rows-[auto_minmax(0,1fr)] border-l border-[var(--border)] bg-[var(--panel)] shadow-lg" aria-label={`${w.name} details`}>
+    <aside className="absolute inset-y-0 right-0 z-10 grid w-[420px] max-w-full grid-rows-[auto_minmax(0,1fr)_auto] border-l border-[var(--border)] bg-[var(--panel)] shadow-lg" aria-label={`${w.name} details`}>
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
         <span className="min-w-0 truncate font-semibold" title={w.id}>{w.name}</span>
         <CardStatus w={w} t={t} />
-        <button type="button" aria-label="Close" onClick={onClose} className="ml-auto rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]">✕</button>
+        {live && running ? (
+          <button type="button" onClick={() => void onWorker(w.id, 'stop')} title={`Stop ${w.name}`}
+            className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 text-[12px] hover:bg-[var(--hover)]" style={{ color: STATE_COLOR.stop }}>Stop</button>
+        ) : null}
+        <button type="button" aria-label="Close" onClick={onClose} className={`${live && running ? '' : 'ml-auto '}rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]`}>✕</button>
       </div>
       <div className="grid content-start gap-2 overflow-y-auto">
-        <WorkerDetail w={w} live={live} onWorker={onWorker} />
-        <div className="grid gap-2 px-3 pb-3">
-          {origin ? (
-            <div className="max-w-[88%] justify-self-end rounded-[9px] bg-[color-mix(in_srgb,var(--accent)_14%,var(--panel))] px-2.5 py-1.5">
-              <div className="text-[11px] text-[var(--muted)]" title={timeTitle(origin.at, origin.t, w.createdAt)}>you · {timeOfDay(origin.at, origin.t)}</div>
-              <MarkdownMessage text={String(origin.data.text ?? '')} className="dh-markdown--agent entity-md" />
-            </div>
-          ) : null}
+        <WorkerDetail w={w} />
+        <div className="dh-chat-transcript flex flex-col gap-4 px-4 pb-3 pt-1">
+          {origin ? <EntityMessage mine at={origin.at} label={`you · ${timeOfDay(origin.at, origin.t)}`} text={String(origin.data.text ?? '')} title={timeTitle(origin.at, origin.t, w.createdAt)} /> : null}
           {w.task ? (
             <details className="text-[12px] text-[var(--muted)]">
               <summary className="cursor-pointer" title={started ? timeTitle(started.at, started.t, w.createdAt) : undefined}>Task given{started ? ` by ${started.by}` : ''} · {started ? timeOfDay(started.at, started.t) : ''}</summary>
@@ -545,14 +556,25 @@ function Drawer({ w, events, t, live, onWorker, onClose }: { w: WorkItem; events
             </details>
           ) : null}
           {thread.map(e => (
-            <div key={e.seq} className={`max-w-[88%] rounded-[9px] px-2.5 py-1.5 ${e.type === 'steered' ? 'justify-self-end bg-[color-mix(in_srgb,var(--accent)_14%,var(--panel))]' : 'bg-[var(--panel-alt)]'}`}>
-              <div className="text-[11px] text-[var(--muted)]" title={timeTitle(e.at, e.t, w.createdAt)}>{e.type === 'steered' ? (e.by === 'user' ? 'you' : `you, via ${e.by}`) : ctx.nameOf(w.id)} · {timeOfDay(e.at, e.t)}</div>
-              <MarkdownMessage text={String(e.data.text ?? '')} className="dh-markdown--agent entity-md" />
-            </div>
+            <EntityMessage key={e.seq} mine={e.type === 'steered'} at={e.at} title={timeTitle(e.at, e.t, w.createdAt)}
+              label={`${e.type === 'steered' ? (e.by === 'user' ? 'you' : `you, via ${e.by}`) : ctx.nameOf(w.id)} · ${timeOfDay(e.at, e.t)}`}
+              text={String(e.data.text ?? '')}
+              files={Array.isArray(e.data.files) ? e.data.files as string[] : undefined} onOpenFile={onOpenFile}
+              options={Array.isArray(e.data.options) ? e.data.options as ChatOption[] : undefined}
+              answer={Array.isArray(e.data.options) ? questionAnswer(e, events, snapshot) : null} answerDisabled={!live}
+              onChoose={choice => { void onWorker(w.id, 'message', choice, e.seq); }} />
           ))}
-          {!thread.length && !origin ? <div className="text-[12px] text-[var(--muted)]">Nothing said yet.</div> : null}
+          {!thread.length && !origin && !working ? <div className="text-[12px] text-[var(--muted)]">Nothing said yet.</div> : null}
+          {working ? <WorkingElapsedStatus startedAt={lastRun!.at} /> : null}
+          <div ref={bottom} />
         </div>
       </div>
+      {live && (running || w.kept) ? (
+        <div>
+          <EntityComposer id={`worker:${w.id}`} label={w.name} placeholder="Message this worker"
+            onSend={text => onWorker(w.id, 'message', text)} />
+        </div>
+      ) : <span />}
     </aside>
   );
 }

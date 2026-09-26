@@ -1,20 +1,24 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { chatChannel, Entity, keypadChannel, workspaceChannel, type EntityEvent, type EntitySnapshot, type Evaluator, type Mind } from '@entity/core';
 import { droneRootPath } from '../../host/paths';
 import { priceModelCall } from '../usage/priceModelCall';
-import { fileConversationStore, PiAiMind, type ConversationStore, type ReasoningLevel } from './entity-mind';
-import { createWorkSummarizer } from './entity-summarizer';
+import { fileConversationStore, PiAiMind, type ConversationStore } from './entity-mind';
+import { isReasoning, type EntityModels } from './entity-profiles';
+import { createWorkSummarizer, SUMMARY_PROMPT } from './entity-summarizer';
+import type { EntityPrompts } from './entity-prompts';
 import type { EvaluatorKind } from './entity-evaluator';
 import { EntityRecorder, isResumable, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
 import type { ChatWorkspaceAccess, ChatWorkspaceCatalog } from '@drone/assistant-chat';
 import { EMPTY_WORKSPACE_ACCESS, EntityWorkspaces, workspacesChannel, workspaceView, type CreateWorkspaceService } from './entity-workspaces';
 
 export interface EntitySessionConfig {
-  headModel: string;
-  taskModel: string;
-  /** A fast model that answers first, routes to workers and hands ongoing behaviour to the head; empty means the head is the front. */
-  voiceModel: string;
-  reasoning: ReasoningLevel;
+  /**
+   * The model and reasoning level for each part: the head (and the reviewer, which uses the head's), workers, and the
+   * voice, a fast model that answers first, routes to workers and hands ongoing behaviour to the head (null: the head is
+   * the front).
+   */
+  models: EntityModels;
   /** What backs `judge` / `sense`: Jev (billed per call through the AI Gateway), a small fast LLM, or nothing. Off by default. */
   evaluator: EvaluatorKind;
   /** The entity's home folder, always available to it. Empty: a scratch folder in the Hub's data directory. */
@@ -42,16 +46,41 @@ export function defaultEntityWorkspace(): string {
 }
 
 export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
-  headModel: 'openai-codex/gpt-6-luna',
-  taskModel: 'openai-codex/gpt-6-sol',
-  voiceModel: '',
-  reasoning: 'medium',
+  models: {
+    head: { model: 'openai-codex/gpt-6-luna', reasoning: 'medium' },
+    task: { model: 'openai-codex/gpt-6-sol', reasoning: 'medium' },
+    voice: null,
+  },
   evaluator: 'off',
   workspace: '',
   workspaceAccess: EMPTY_WORKSPACE_ACCESS,
   summaries: true,
   review: 'separate',
 };
+
+/** A config as saved in a recording, from before `models` too: the flat model fields with one reasoning level. */
+export function entityConfigFrom(saved: Record<string, unknown> | undefined): EntitySessionConfig {
+  const { headModel, taskModel, voiceModel, reasoning, ...rest } = (saved ?? {}) as Record<string, any>;
+  const config = { ...DEFAULT_ENTITY_CONFIG, ...rest } as EntitySessionConfig;
+  if (!saved?.models && typeof headModel === 'string') {
+    const level = isReasoning(reasoning) ? reasoning : 'medium';
+    config.models = {
+      head: { model: headModel, reasoning: level },
+      task: { model: typeof taskModel === 'string' ? taskModel : headModel, reasoning: level },
+      voice: typeof voiceModel === 'string' && voiceModel ? { model: voiceModel, reasoning: level } : null,
+    };
+  }
+  return config;
+}
+
+/** The reasoning level for one mind run: the voice's, the head's (reviewer too), or a worker's by the model it runs on. */
+export function reasoningFor(models: EntityModels, input: { role: 'head' | 'voice' | 'task'; model: string }) {
+  if (input.role === 'voice' && models.voice) return models.voice.reasoning;
+  if (input.role === 'head') return models.head.reasoning;
+  // A worker dispatched on the head's model thinks like the head.
+  if (input.role === 'task' && input.model !== models.task.model && input.model === models.head.model) return models.head.reasoning;
+  return models.task.reasoning;
+}
 
 export type EntityStreamMessage =
   | { kind: 'event'; event: EntityEvent }
@@ -78,12 +107,13 @@ export class EntitySession {
   private workspaces: EntityWorkspaces | null = null;
   private readonly createWorkspaceService?: CreateWorkspaceService;
   private readonly workspaceDefinitions?: { name: string; description: string; parameters: Record<string, unknown> }[];
+  private readonly prompts?: EntityPrompts;
 
   constructor(
     private readonly createEvaluator: (kind: EvaluatorKind) => Evaluator | undefined,
     config: Partial<EntitySessionConfig> = {},
     /** `conversations` keeps worker conversations with the session's recording, so a resumed session continues them. */
-    private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(c.reasoning, conversations, priceModelCall),
+    private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(input => reasoningFor(c.models, input), conversations, priceModelCall),
     /**
      * Where to record sessions (null records nothing), and the workspace service with blip's tool definitions: with
      * them the entity works across the workspaces its session selects, without them only in its home folder.
@@ -92,8 +122,11 @@ export class EntitySession {
       sessionsDir?: string | null;
       createWorkspaceService?: CreateWorkspaceService;
       workspaceDefinitions?: { name: string; description: string; parameters: Record<string, unknown> }[];
+      /** The user's prompt edits, read on every wake. */
+      prompts?: EntityPrompts;
     } = {},
   ) {
+    this.prompts = options.prompts;
     this.sessionsDir = options.sessionsDir === undefined ? defaultEntitySessionsDir() : options.sessionsDir;
     this.createWorkspaceService = options.createWorkspaceService;
     this.workspaceDefinitions = options.workspaceDefinitions;
@@ -112,7 +145,7 @@ export class EntitySession {
     if (!latest || !isResumable(latest)) return;
     const recording = readSession(this.sessionsDir, latest.id);
     if (!recording?.events.some(e => e.type === 'session_started' && e.data.setup)) return;
-    this.config = { ...DEFAULT_ENTITY_CONFIG, ...(recording.meta.config as Partial<EntitySessionConfig>) };
+    this.config = entityConfigFrom(recording.meta.config as Record<string, unknown>);
     this.build();
     const entity = this.entity;
     try {
@@ -143,13 +176,16 @@ export class EntitySession {
     this.entity = new Entity({
       mind: this.createMind(this.config, this.conversations),
       channels: [
-        chatChannel(), keypadChannel(),
+        chatChannel({ checkFiles: paths => this.checkFiles(home(), paths) }), keypadChannel(),
         this.workspaces ? workspacesChannel(this.workspaces, this.workspaceDefinitions!) : workspaceChannel({ root: home() }),
       ],
       config: { review: this.config.review },
-      models: { head: this.config.headModel, task: this.config.taskModel, voice: this.config.voiceModel || undefined },
+      models: { head: this.config.models.head.model, task: this.config.models.task.model, voice: this.config.models.voice?.model },
       evaluator: this.config.evaluator === 'off' ? undefined : this.createEvaluator(this.config.evaluator),
-      summarizer: this.config.summaries ? createWorkSummarizer() : undefined,
+      summarizer: this.config.summaries ? createWorkSummarizer(undefined, () => this.prompts?.text('hub_work_summaries') ?? SUMMARY_PROMPT) : undefined,
+      prompts: () => this.prompts?.current() ?? {},
+      artifactsFolder: () => this.artifactsFolder(),
+      overflow: (limbId, text) => this.saveOverflow(home(), limbId, text),
     });
     this.unsubscribe = this.entity.subscribe(event => {
       if (event.type === 'session_reset') return;
@@ -157,6 +193,37 @@ export class EntitySession {
       this.broadcast({ kind: 'event', event });
       this.scheduleSnapshot();
     });
+  }
+
+  /** Where this session's workers keep their artifacts, relative to the home folder: one folder per recorded session. */
+  private artifactsFolder(): string {
+    return `.entity/artifacts/${this.recorder?.id ?? 'unrecorded'}`;
+  }
+
+  /** Files a chat message links must be in the home folder and exist. */
+  private checkFiles(root: string, paths: string[]): string | null {
+    for (const p of paths) {
+      const full = path.resolve(root, p);
+      const inside = path.relative(root, full);
+      if (inside.startsWith('..') || path.isAbsolute(inside)) return `${p} is outside your home folder; link files in your home folder only`;
+      if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return `${p} does not exist in your home folder`;
+    }
+    return null;
+  }
+
+  /** A worker's message that stayed too long for the chat, saved as a file so nothing is lost. */
+  private saveOverflow(root: string, limbId: string, text: string): string | null {
+    try {
+      const name = (this.entity.snapshot().limbs.find(l => l.id === limbId)?.name ?? limbId).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || limbId;
+      const folder = this.artifactsFolder();
+      fs.mkdirSync(path.join(root, folder), { recursive: true });
+      let file = `${folder}/${name}.md`;
+      for (let n = 2; fs.existsSync(path.join(root, file)); n++) file = `${folder}/${name}-${n}.md`;
+      fs.writeFileSync(path.join(root, file), `${text}\n`);
+      return file;
+    } catch {
+      return null;
+    }
   }
 
   /** A saved selection: kept in the config and the recording, and told to the entity so its limbs (and a replay) see it. */
@@ -225,9 +292,9 @@ export class EntitySession {
   }
 
   /** Work view actions on one worker. */
-  worker(id: string, action: 'message' | 'stop' | 'rename', text = ''): string {
+  worker(id: string, action: 'message' | 'stop' | 'rename', text = '', answers?: number): string {
     if (action === 'rename') return this.entity.renameWorker(id, text);
-    return action === 'message' ? this.entity.messageWorker(id, text) : this.entity.stopWorker(id);
+    return action === 'message' ? this.entity.messageWorker(id, text, answers) : this.entity.stopWorker(id);
   }
 
   /** The user overrides how a message was routed (the Work canvas's corrections). */

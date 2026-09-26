@@ -11,7 +11,7 @@ import { ENTITY_HOME_TARGET_ID, type CreateWorkspaceService } from '../src/hub/e
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const repo = { id: 'host:repo', kind: 'host' as const, name: 'repo', deviceId: 'this', deviceName: 'Desktop', read: true, write: true, execute: true };
+const repo = { id: 'host:repo', kind: 'host' as const, name: 'repo', deviceId: 'this', deviceName: 'Desktop', read: true, write: true, execute: true, path: '/tmp', workspaceId: 'repo' };
 const DEFINITIONS = [
   { name: 'read_file', description: 'Read a file.', parameters: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['path'] } },
   { name: 'write_file', description: 'Write a file.', parameters: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
@@ -102,6 +102,55 @@ test('entity workspaces: a saved selection is logged, shown to the limbs, kept f
     // Writes claim their file per workspace, so the same path in two workspaces never collides.
     expect(session.state().events.find(e => e.type === 'claimed')?.data.path).toBe('host:repo:notes.md');
     expect(session.state().events.find(e => e.type === 'tool_done')?.data).toMatchObject({ name: 'write_file', ok: true });
+  } finally {
+    session.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('entity workspaces: the Files view opens a granted folder, and nothing that is not granted', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-workspaces-'));
+  const { session, call } = harness(dir);
+  try {
+    expect((await call('GET', '/api/entity/files-target?target=host:repo')).status).toBe(404);
+    const catalog = (await call('GET', '/api/entity/workspaces')).body;
+    await call('POST', '/api/entity/workspaces', { access: { targets: [repo], defaultTargetId: 'host:repo' }, revision: catalog.revision });
+    expect((await call('GET', '/api/entity/files-target?target=host:repo')).body).toMatchObject({ workspaceId: 'entity-files-repo', name: 'repo' });
+  } finally {
+    session.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('entity chat: a worker\'s message that stays too long is saved to its artifacts folder and linked; links must exist', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-artifacts-'));
+  const long = 'The plan is ready. ' + 'detail '.repeat(200);
+  const results: string[] = [];
+  const mind: Mind = {
+    async run(input) {
+      if (input.role === 'head' && input.prompt.includes('"text":"plan it"')) await input.callTool('dispatch', { task: 'plan', name: 'Game plan' });
+      if (input.role === 'task') {
+        for (let i = 0; i < 3; i++) results.push(await input.callTool('say', { text: long }));
+        results.push(await input.callTool('say', { text: 'nope', files: ['../outside.md'] }));
+        await input.callTool('finish_task', { result: 'planned' });
+      }
+      return {};
+    },
+  };
+  const session = new EntitySession(() => undefined, { workspace: path.join(dir, 'home') }, () => mind, { sessionsDir: path.join(dir, 'sessions') });
+  try {
+    fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
+    session.control('start');
+    session.input('chat_message', { text: 'plan it' });
+    for (let i = 0; i < 200 && results.length < 4; i++) await sleep(10);
+    const message = session.state().events.find(e => e.type === 'chat_message' && Array.isArray(e.data.files))!;
+    const file = (message.data.files as string[])[0];
+    expect(file).toBe(`.entity/artifacts/${session.state().sessionId}/game-plan.md`);
+    expect(fs.readFileSync(path.join(dir, 'home', file), 'utf8').trim()).toBe(long.trim());
+    expect(message.data.text).toBe(`The plan is ready. (full text in ${file})`);
+    // The file-check refused the second message's link (it is outside the home folder); the overflow's link was sent.
+    expect(results[1]).toContain('too long');
+    expect(results[3]).toContain('outside your home folder');
   } finally {
     session.close();
     fs.rmSync(dir, { recursive: true, force: true });

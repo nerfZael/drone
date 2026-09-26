@@ -2,11 +2,11 @@
 
 The bench is Drone Hub's Entity window (a desktop tool window):
 
-- **Chat:** a normal agent chat. Either side can send any number of messages at any time. The entity also sees the user's **unsent draft** as it's typed, clearly marked as not sent, and can show its own draft. Workers reply here tagged with the message they answer; a batch shows one progress line; reviewed answers show a ✓ or are struck through with the correction below.
+- **Chat:** a normal agent chat, in the agent chat's design and with its composer: the full editor (Ctrl+E), dictation with pause (q, w, e) and `s` to send from anywhere in the window. Either side can send any number of messages at any time. The entity also sees the user's **unsent draft** as it's typed, clearly marked as not sent, and can show its own draft. Workers reply here tagged with the message they answer; a batch shows one progress line; reviewed answers show a ✓ or are struck through with the correction below.
 - **Keypad:** 0–9. The user and the entity can both press and hold keys. Each key has a down and an up, the keypad state shows which keys are held and by whom, and every change is marked with who made it.
 - **A third view**, chosen in the header: **Brain** (the limbs and the signals between them), **Work** (the Work canvas; see [work-canvas.md](work-canvas.md)), **Inspector** (state, events, watches and programs, latency readouts) or **Files** (the workspace).
 
-The header has the user controls (Start, Pause, Resume, Reset; see [architecture.md](architecture.md#user-controls)) and the settings: voice, head and worker models, review, senses (Jev), workspace and commands. A timeline under the bench replays any recorded session ([session-logs.md](session-logs.md)).
+The header has the user controls (Start, Pause, Resume, Reset; see [architecture.md](architecture.md#user-controls)) and the settings: **Models** (each part's model and reasoning level, one model for everything, saved profiles; see [topology.md](topology.md)), review, senses (Jev), the home folder, **Workspaces** and **Prompts** (every prompt the entity sends, by section, to edit or reset). A worker's thread on the Work canvas has the same chat and composer: message a running worker, or follow up with a finished one whose conversation is kept. A timeline under the bench replays any recorded session ([session-logs.md](session-logs.md)).
 
 ## Scenarios
 

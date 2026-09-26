@@ -208,6 +208,8 @@ export type ChatInputProps = {
   autoFocus?: boolean;
   focusTargetId?: string;
   modeHint?: string;
+  /** The empty composer's hint; "Ask the agent" by default. */
+  placeholder?: string;
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
@@ -265,6 +267,7 @@ export function ChatInput({
   autoFocus,
   focusTargetId,
   modeHint = '',
+  placeholder = 'Ask the agent',
   attachmentsEnabled,
   attachmentMode = 'images',
   composerContext,
@@ -1596,7 +1599,7 @@ export function ChatInput({
                 sendNow({ trigger: 'keyboard', deliveryMode: shortcutAction });
               }}
               rows={1}
-              placeholder="Ask the agent"
+              placeholder={placeholder}
               className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}

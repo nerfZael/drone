@@ -4,7 +4,7 @@ import { EventLog, isEntityActor, matches } from './log.js';
 import type { Mind, ModelUsage, ToolSpec } from './mind.js';
 import { describeToolArgs, toolResultOk, type Summarizer, type WorkSummary } from './summary.js';
 import { runProgram, type ProgramOutcome } from './program.js';
-import { headSystemPrompt, reviewerSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
+import { headSystemPrompt, reviewerSystemPrompt, taskSystemPrompt, voiceSystemPrompt, type PromptOverrides } from './prompts.js';
 import { initialRuntimeState, reduceRuntime, snapshotLimbs, WORKER_ACTIVE, type Claim, type LimbSnapshot, type CodeLimb, type LimbState, type LimbStatus, type LlmLimb, type OutputStop, type ReactiveLimb, type RuntimeSetup, type RuntimeState, type Usage, type WatchLimb, type WorkerLimb } from './runtime-state.js';
 import { toJsonSchema, validate } from './schema.js';
 import { mayUseEffect, runtimeTools, TOOL_DESCRIPTIONS, TOOL_SCHEMAS, type ToolName } from './tools.js';
@@ -32,6 +32,12 @@ interface LimbLive {
 }
 
 export interface EntityConfig {
+  /**
+   * The chat is for short messages: the most characters a model-backed limb may say at once (the front limb, a worker
+   * in the main chat, a worker in its own thread), and how many chat messages it may send in one wake. Longer text
+   * belongs in a file, linked from the message.
+   */
+  chatLimits: { front: number; worker: number; thread: number; perWake: number };
   /** Debounce before a user message wakes the head, so bursts arrive together. */
   messageDebounceMs: number;
   /** While the user is still typing after sending, wait until their draft has been quiet this long... */
@@ -85,6 +91,15 @@ export interface EntityOptions {
   /** Writes Work view summaries of busy workers. Optional; everything else in the Work view comes from the log. */
   summarizer?: Summarizer;
   config?: Partial<EntityConfig>;
+  /** Replacement texts for prompt sections (see PROMPT_SECTIONS), or a function giving the current ones. */
+  prompts?: PromptOverrides | (() => PromptOverrides);
+  /** Where workers keep the artifacts of their work (reports, pages, scripts, images), relative to their home folder ("artifacts" by default). */
+  artifactsFolder?: string | (() => string);
+  /**
+   * Saves a worker's message that stayed too long for the chat as a file in the artifacts folder, returning its path
+   * (relative to the home folder), or null when it cannot. Without it, such messages are cut at the limit.
+   */
+  overflow?(limbId: string, text: string): string | null;
 }
 
 export interface EntitySnapshot {
@@ -107,6 +122,7 @@ export interface EntitySnapshot {
 const MAX_QUEUED = 500;
 
 const DEFAULT_CONFIG: EntityConfig = {
+  chatLimits: { front: 300, worker: 600, thread: 1500, perWake: 2 },
   messageDebounceMs: 150, messageSettleMs: 1000, messageSettleMaxMs: 6000, tickMs: 50, headHeartbeatMs: 180_000, headMaxSteps: 8, taskMaxSteps: 24,
   maxTasks: 6, review: 'off', reviewQuietMs: 3000, maxCodeLimbs: 32, reflexPerSecond: 30, limbPerSecond: 5, cancelGraceMs: 3000,
   restartMax: 3, restartWindowMs: 60_000, freezeMaxMs: 600_000, draftAttention: true, codeLimbs: true, keptSessions: 12, taskContinuations: 4, summaryEveryCalls: 4, summaryIntervalMs: 20_000, summaryMax: 200, recentEvents: 40,
@@ -741,11 +757,15 @@ export class Entity {
     const allowed = new Set(tools.map(t => t.name));
     /** Set when the limb ends its turn itself (finish_task, ask); the run then stops after this step. */
     let ended = false;
+    /** Chat messages this wake, and messages refused for length (after two refusals the runtime shortens them itself). */
+    const chat = { said: 0, refused: 0 };
     this.mind.run({
       limbId: limb.id, runId, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model,
       system: this.systemPrompt(limb), prompt, tools, signal: abort.signal, ended: () => ended,
       sessionKey: worker ? limb.id : undefined,
       maxSteps: worker ? this.config.taskMaxSteps : this.config.headMaxSteps,
+      // Spent even if the run is later stopped: it counts either way.
+      spent: used => { this.log.append('usage', limb.id, { kind: 'run', run: runId, ...used }); },
       callTool: async (name, args) => {
         if (abort.signal.aborted) return 'error: this run was stopped';
         if (ended) return 'error: your turn is over; stop here.';
@@ -767,8 +787,14 @@ export class Entity {
         if (runId !== limb.latestRun && name !== 'note' && name !== 'handoff' && name !== 'amend' && !this.effects.get(name)?.spec.readonly) {
           return 'superseded: a newer run of you has woken with newer events and is handling things now. Nothing was done. Leave a note if you know something it should, then stop.';
         }
+        if (name === 'say') {
+          const checked = this.checkChat(limb, worker, args ?? {}, chat);
+          if (typeof checked === 'string') return checked;
+          args = checked;
+        }
         this.log.append('tool_called', limb.id, { run: runId, name, summary: describeToolArgs(name, args ?? {}) });
         const result = await this.callTool(limb, runId, readSeq, () => { ended = true; }, name, args ?? {});
+        if (name === 'say' && toolResultOk(result)) chat.said++;
         const ok = toolResultOk(result);
         // Busy workers hear about steers, discoveries and claims with their next tool result, without being stopped.
         const updates = worker && worker.status === 'running' && !ended ? [...worker.notices] : [];
@@ -818,11 +844,15 @@ export class Entity {
 
   private systemPrompt(limb: LlmLimb): string {
     const code = this.config.codeLimbs;
+    // Read on every run, so edited prompts apply from the next wake.
+    const given = this.options.prompts;
+    const p = (typeof given === 'function' ? given() : given) ?? {};
+    const v = { frontChatLimit: this.config.chatLimits.front, workerChatLimit: this.config.chatLimits.worker, artifacts: this.artifactsFolder() };
     switch (limb.role) {
-      case 'reviewer': return reviewerSystemPrompt(this.channels);
-      case 'voice': return voiceSystemPrompt(this.channels, this.config.review !== 'off');
-      case 'task': return taskSystemPrompt(this.channels, limb.group ? this.state.batches[limb.group]?.title : undefined, code);
-      default: return headSystemPrompt(this.channels, !!this.limb('voice'), this.config.review === 'head', this.config.review === 'separate', code);
+      case 'reviewer': return reviewerSystemPrompt(this.channels, p);
+      case 'voice': return voiceSystemPrompt(this.channels, this.config.review !== 'off', p, v);
+      case 'task': return taskSystemPrompt(this.channels, limb.group ? this.state.batches[limb.group]?.title : undefined, code, p, v);
+      default: return headSystemPrompt(this.channels, !!this.limb('voice'), this.config.review === 'head', this.config.review === 'separate', code, p, v);
     }
   }
 
@@ -975,12 +1005,12 @@ export class Entity {
   }
 
   /** A message for one worker, delivered with its next tool result (or reviving it if idle). */
-  private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now'): string {
+  private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now', answers?: number): string {
     const limb = this.workerOf(id);
     if (!limb) return `error: no worker "${id}"`;
     const active = WORKER_ACTIVE.includes(limb.status);
     if (!active && (limb.status !== 'done' || !this.state.kept.includes(limb.id))) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
-    this.log.append('steered', by, { id, text, ...(when === 'after' ? { when } : {}) });
+    this.log.append('steered', by, { id, text, ...(when === 'after' ? { when } : {}), ...(answers !== undefined ? { answers } : {}) });
     // More work for later: the worker finishes what it is doing first, then continues in the same conversation.
     if (when === 'after' && active) return `${id} will continue with this once it finishes its current work`;
     if (limb.status === 'queued' || limb.status === 'waiting') return `${id} is ${limb.status === 'queued' ? 'queued' : `waiting for ${limb.waitFor}`}; it gets this when it starts`;
@@ -1024,7 +1054,8 @@ export class Entity {
   }
 
   /** A message from the user straight to one worker (the Work view's "Message"). */
-  messageWorker(id: string, text: string): string { return this.steer('user', id, text); }
+  /** The user messages a worker directly; `answers` is the seq of its question when the user clicked an option. */
+  messageWorker(id: string, text: string, answers?: number): string { return this.steer('user', id, text, 'now', answers); }
 
   /** The user renames a worker; every view and every limb's state use the new name. */
   renameWorker(id: string, name: string): string {
@@ -1227,7 +1258,7 @@ export class Entity {
       case 'ask': {
         if (!worker) return 'error: only workers ask';
         // Posted in the main chat even for a batch worker: the user must see it to answer.
-        return this.commit(caller, 'say', { text: String(args.question ?? ''), question: true, thread: false, ...(worker.replyTo !== undefined ? { reply_to: worker.replyTo } : {}) }).then(result => {
+        return this.commit(caller, 'say', { text: String(args.question ?? ''), question: true, thread: false, ...(Array.isArray(args.options) ? { options: args.options } : {}), ...(worker.replyTo !== undefined ? { reply_to: worker.replyTo } : {}) }).then(result => {
           if (!result.startsWith('sent')) return result;
           endTurn();
           return 'asked; you wait for the answer, which wakes you';
@@ -1342,6 +1373,7 @@ export class Entity {
       const batch = l.group ? this.state.batches[l.group]?.title : undefined;
       return [
         `${l.id} "${l.name}" ${l.status}${l.waitFor ? ` for ${l.waitFor}` : ''}`,
+        !worker && l.asking !== undefined ? `asked the user (#${l.asking}), waiting for the answer: ${clip(this.questionText(l.asking), 240)}` : '',
         !worker && l.replyTo !== undefined ? `re #${l.replyTo}` : '',
         batch ? `batch ${l.group} "${batch}"` : '',
         !worker && !batch && l.task && WORKER_ACTIVE.includes(l.status) ? `task: ${clip(l.task, 240)}` : '',
@@ -1353,6 +1385,47 @@ export class Entity {
     const hidden = active.length - shownActive.length + finished.length - shownFinished.length;
     if (hidden) lines.push(`(${hidden} more not shown)`);
     return lines;
+  }
+
+  /**
+   * Keeps the chat short. A message over the limb's limit is refused with what to do instead, so the model shortens it
+   * and puts the rest in a file; after two refusals in a wake the runtime does it: a worker's full text goes to a file
+   * (when the host can write one) and the chat gets its first sentence and the link, anything else is cut at the limit.
+   * A wake may send only a few messages. Returns the arguments to send, or why the message was refused.
+   */
+  private checkChat(limb: LlmLimb, worker: WorkerLimb | undefined, args: Record<string, unknown>, chat: { said: number; refused: number }): Record<string, unknown> | string {
+    const limits = this.config.chatLimits;
+    if (chat.said >= limits.perWake) return `error: you already sent ${chat.said} messages this wake; say everything in one message, or put it in a file and link it.`;
+    const text = String(args.text ?? '');
+    const threaded = !!worker && (args.thread === true || (!!worker.group && args.thread !== false));
+    const limit = worker ? (threaded ? limits.thread : limits.worker) : limits.front;
+    if (text.length <= limit) return args;
+    if (chat.refused < 2) {
+      chat.refused++;
+      return worker
+        ? `error: too long for chat (${text.length}/${limit} characters). Write the details to a file under ${this.artifactsFolder()}/ in your home folder and link it (say with files), then say the outcome in a sentence or two.`
+        : `error: too long for chat (${text.length}/${limit} characters). Say it in a sentence or two; if it needs more, dispatch a worker to write it up.`;
+    }
+    const saved = worker ? this.options.overflow?.(limb.id, text) : null;
+    if (saved) {
+      const first = text.split(/(?<=[.!?])\s|\n/)[0].slice(0, Math.min(limit, 240)).trim();
+      const files = [...(Array.isArray(args.files) ? args.files as string[] : []), saved];
+      return { ...args, text: `${first} (full text in ${saved})`, files };
+    }
+    return { ...args, text: `${text.slice(0, Math.max(0, limit - 14)).trimEnd()}… (shortened)` };
+  }
+
+  /** Where workers keep the artifacts of their work: a folder in their home folder, relative to it. */
+  private artifactsFolder(): string {
+    const given = this.options.artifactsFolder;
+    return (typeof given === 'function' ? given() : given) || 'artifacts';
+  }
+
+  /** The text of a worker's question, from the log. */
+  private questionText(seq: number): string {
+    const all = this.log.all();
+    const event = all[seq - 1]?.seq === seq ? all[seq - 1] : all.find(e => e.seq === seq);
+    return String(event?.data.text ?? '');
   }
 
   private describeLimb(limb: ReactiveLimb | CodeLimb): string {

@@ -1,8 +1,14 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import type { ChatWorkspaceAccess } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 
-export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; workspaceAccess?: { targets: unknown[] }; summaries?: boolean; review?: 'off' | 'separate' | 'head' };
+/** One part of the entity: the model it runs on and how hard that model thinks ('off', 'minimal' … 'xhigh'). */
+export type ModelChoice = { model: string; reasoning: string };
+/** The model for each part: head (the reviewer uses it too), workers, and the voice (null: the head is the front). */
+export type EntityModels = { head: ModelChoice; task: ModelChoice; voice: ModelChoice | null };
+export type EntityProfile = { id: string; name: string; models: EntityModels };
+export type EntityConfig = { models: EntityModels; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; workspaceAccess?: ChatWorkspaceAccess; summaries?: boolean; review?: 'off' | 'separate' | 'head' };
 type EntityState = { config: EntityConfig; snapshot: EntitySnapshot; events: EntityEvent[]; sessionId: string | null };
 
 /** The same as the Hub sends on connect, so a reconnect shows what the live view showed. */
@@ -38,12 +44,15 @@ export function useEntitySession(enabled: boolean) {
     return () => source.close();
   }, [enabled]);
 
-  const post = React.useCallback(async (path: string, body: unknown) => {
+  /** Resolves true once the Hub accepted it; a failure shows as the bench's error. */
+  const post = React.useCallback(async (path: string, body: unknown): Promise<boolean> => {
     try {
       setError('');
       await requestJson(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     }
   }, []);
 
@@ -54,7 +63,8 @@ export function useEntitySession(enabled: boolean) {
     control: (action: 'start' | 'pause' | 'resume' | 'reset') => post('/api/entity/control', { action }),
     input: (type: string, data: Record<string, unknown>) => post('/api/entity/input', { type, data }),
     configure: (update: Partial<EntityConfig>) => post('/api/entity/config', update),
-    worker: (id: string, action: 'message' | 'stop' | 'rename', text?: string) => post('/api/entity/worker', { id, action, text }),
+    /** `answers` is the seq of the worker's question when the text is a clicked option. */
+    worker: (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number) => post('/api/entity/worker', { id, action, text, ...(answers !== undefined ? { answers } : {}) }),
     reroute: (seq: number, how: 'separate' | 'fork') => post('/api/entity/reroute', { seq, how }),
   };
 }

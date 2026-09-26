@@ -3973,6 +3973,46 @@ select:disabled optgroup {
   container: floating-chat / inline-size;
 }
 
+/*
+ * The entity bench's composers (its chat and a worker's thread): the usual
+ * rounded card, inset from the edges, with the slim floating chat's shorter rows.
+ */
+.dh-entity-composer .dh-chat-composer {
+  padding: 0 .5rem .5rem;
+}
+
+.dh-entity-composer .dh-chat-composer-box {
+  min-height: 0;
+  box-shadow: none;
+}
+
+.dh-entity-composer .dh-chat-composer-row {
+  padding-left: .625rem;
+  padding-right: .625rem;
+}
+
+.dh-entity-composer .dh-chat-composer-row--collapsed {
+  min-height: 2.25rem;
+  padding-left: .25rem;
+  padding-right: .25rem;
+}
+
+.dh-entity-composer .dh-chat-composer-row--collapsed textarea {
+  min-height: 2.25rem;
+  padding-top: .4375rem;
+  padding-bottom: .4375rem;
+}
+
+.dh-entity-composer .dh-chat-composer-toolbar {
+  min-height: 2.25rem;
+  padding: 0 .25rem .25rem;
+}
+
+.dh-entity-composer .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
+  width: 1.875rem;
+  height: 1.875rem;
+}
+
 /* Chat scopes take programmatic focus for shortcuts; no focus ring on the panel itself. */
 [data-main-workspace-chat]:focus,
 [data-side-chat-name]:focus,

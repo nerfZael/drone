@@ -74,7 +74,7 @@ export const TOOL_SCHEMAS = {
   release: { type: 'object', additionalProperties: false, properties: { paths: { type: 'array', items: { type: 'string' }, maxItems: 50 } } },
   share: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 1000 } } },
   finish_task: { type: 'object', additionalProperties: false, required: ['result'], properties: { result: { type: 'string', maxLength: 8000 } } },
-  ask: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 4000 } } },
+  ask: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 4000 }, options: { type: 'array', maxItems: 6, description: 'Answers the user can click instead of typing, for a question with a few likely answers. Mark the one you recommend.', items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } } } },
 } satisfies Record<string, Schema>;
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;
@@ -132,5 +132,5 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => s
   release: 'Release your claims (all, or the given paths).',
   share: 'Share a discovery that other workers should know (e.g. a root cause).',
   finish_task: 'Finish: first say your answer to the user, then call this with a one-line summary.',
-  ask: 'Ask the user something you need answered before you can go on. It is posted in the chat and ends your turn: you wait, and their answer wakes you with your conversation intact. Do not also finish.',
+  ask: 'Ask the user something you need answered before you can go on. It is posted in the chat and ends your turn: you wait, and their answer wakes you with your conversation intact. When the likely answers are few, pass them as options for the user to click, the one you recommend marked. Do not also finish.',
 };
