@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { UsageAnalytics, UsageObservation, UsagePrice, UsageTotals } from '@drone/assistant-chat';
+import { estimateUsageCost, type UsageAnalytics, type UsageObservation, type UsagePrice, type UsageTotals } from '@drone/assistant-chat';
 import { droneRootPath } from '../../host/paths';
 import { openUsageDatabase } from './helpers/openUsageDatabase';
 import { USAGE_SCHEMA } from './usage-schema';
@@ -75,6 +75,13 @@ export class UsageStore {
     })();
   }
 
+  /** The price in effect for a model now (or at `at`), if one is known. */
+  currentPrice(provider: string, model: string, at = new Date().toISOString()): UsagePrice | undefined {
+    const row = this.db.prepare('SELECT data_json FROM prices WHERE provider=? AND model=? AND effective_at<=? ORDER BY effective_at DESC,created_at DESC,rowid DESC LIMIT 1')
+      .get(provider, model, at) as any;
+    return row ? JSON.parse(row.data_json) : undefined;
+  }
+
   prices(): UsagePrice[] {
     return (this.db.prepare('SELECT data_json FROM prices ORDER BY provider,model,effective_at DESC,created_at DESC,rowid DESC').all() as any[])
       .map((row) => JSON.parse(row.data_json));
@@ -98,7 +105,10 @@ export class UsageStore {
       typeof input.model !== 'string' || !input.model.trim() || typeof input.source !== 'string' || !input.source.trim() ||
       !Number.isFinite(Date.parse(input.effectiveAt)) ||
       [input.input, input.output].some((v) => !Number.isFinite(v) || v < 0) ||
-      [input.cacheRead, input.cacheWrite].some((v) => v !== null && (typeof v !== 'number' || !Number.isFinite(v) || v < 0))) {
+      [input.cacheRead, input.cacheWrite].some((v) => v !== null && (typeof v !== 'number' || !Number.isFinite(v) || v < 0)) ||
+      (input.longContext && (!(input.longContext.inputTokensAbove > 0) ||
+        [input.longContext.input, input.longContext.output].some((v) => !Number.isFinite(v) || v < 0) ||
+        [input.longContext.cacheRead, input.longContext.cacheWrite].some((v) => v !== null && (typeof v !== 'number' || !Number.isFinite(v) || v < 0))))) {
       throw new Error('Invalid price: specify provider, model, source, effective date and nonnegative rates');
     }
     const price: UsagePrice = { ...input, origin: input.origin ?? 'manual', provider: input.provider.trim(), model: input.model.trim(), source: input.source.trim(), effectiveAt: new Date(input.effectiveAt).toISOString(), id: crypto.randomUUID(), createdAt: new Date().toISOString() };
@@ -157,9 +167,7 @@ export class UsageStore {
       : this.db.prepare('SELECT data_json FROM prices WHERE provider=? AND model=? AND effective_at<=? ORDER BY effective_at DESC,created_at DESC,rowid DESC LIMIT 1')
         .get(observation.provider, observation.model, execution.startedAt) as any;
     const price: UsagePrice | undefined = priceRow ? JSON.parse(priceRow.data_json) : undefined;
-    const fields = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
-    const estimate = price && fields.every((field) => observation[field] !== null && (observation[field] === 0 || price[field] !== null))
-      ? fields.reduce((sum, field) => sum + observation[field]! * (price[field] ?? 0) / 1_000_000, 0) : null;
+    const estimate = estimateUsageCost(price, observation, observation.scope === 'request');
     this.db.prepare(`INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(execution_id,id) DO UPDATE SET model=excluded.model,provider=excluded.provider,
       input=excluded.input,output=excluded.output,cache_read=excluded.cache_read,cache_write=excluded.cache_write,

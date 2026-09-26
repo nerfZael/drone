@@ -1,11 +1,16 @@
 import type { HubRouter } from '../hub-router';
 import { getUsageStore, type UsageFilter } from '../usage/UsageStore';
 import { refreshUsagePrices } from '../usage/refreshUsagePrices';
+import { applyBundledPrices } from '../usage/bundledPrices';
 import { readChatMetadataFromStore } from '../transcript-store';
 
 export function registerUsageRoutes(router: HubRouter): void {
   const store = getUsageStore();
-  if (!store.prices().length) void refreshUsagePrices(store).catch((error) => console.warn('Usage price catalog unavailable:', error.message));
+  // Long-context rates go on top of the catalog's, so a first start fetches the catalog before adding them.
+  if (!store.prices().length) {
+    void refreshUsagePrices(store).catch((error) => console.warn('Usage price catalog unavailable:', error.message))
+      .finally(() => applyBundledPrices(store));
+  } else applyBundledPrices(store);
 
   router.get('/api/usage', ({ url, json, fail }) => {
     const filter: UsageFilter = {};

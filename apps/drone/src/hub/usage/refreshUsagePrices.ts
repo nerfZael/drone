@@ -15,12 +15,15 @@ export async function refreshUsagePrices(store: UsageStore = getUsageStore(), fe
       if (!cost || !valid(cost.input) || !valid(cost.output) || (cost.cache_read != null && !valid(cost.cache_read)) || (cost.cache_write != null && !valid(cost.cache_write))) continue;
       // Use token list prices, not a claim about subscription charges or service fees.
       for (const billingProvider of provider === 'openai' ? ['openai', 'openai-codex'] : [provider]) {
-        const rates = { input: cost.input, output: cost.output, cacheRead: cost.cache_read ?? null, cacheWrite: cost.cache_write ?? null };
         const old = existing.get(`${billingProvider}:${model}`);
+        // A cache rate the catalog leaves out is kept from the current price, not blanked: blank would leave calls unpriced.
+        const rates = { input: cost.input, output: cost.output, cacheRead: cost.cache_read ?? old?.cacheRead ?? null, cacheWrite: cost.cache_write ?? old?.cacheWrite ?? null };
         if (old && (old.origin === 'manual' || (!old.origin && !old.source.startsWith('https://models.dev/')))) continue;
         if (old && Object.entries(rates).every(([key, value]) => old[key as keyof typeof rates] === value)) continue;
+        // The catalog has no long-context rates; keep the ones a price already has.
         pending.push({ ...rates, provider: billingProvider, model, effectiveAt, origin: 'catalog',
-          source: 'https://models.dev/api.json (standard token list rates; excludes tier, region and tool charges)' });
+          source: 'https://models.dev/api.json (standard token list rates; excludes tier, region and tool charges)',
+          ...(old?.longContext ? { longContext: old.longContext } : {}) });
       }
     }
   }

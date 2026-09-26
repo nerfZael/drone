@@ -37,8 +37,10 @@ test('usage endpoints validate filters and prices and resolve chat summaries by 
       body = { ...price, input: 5 };
       expect((await request('POST', '/api/usage/prices')).status).toBe(201);
       const prices = await request('GET', '/api/usage/prices');
-      expect(prices.body.prices).toHaveLength(2);
-      expect(prices.body.prices[0].origin).toBe('manual');
+      // Besides the bundled long-context rates the Hub adds on start, the two prices added here.
+      const added = prices.body.prices.filter((p: { origin?: string }) => p.origin !== 'bundled');
+      expect(added).toHaveLength(2);
+      expect(added[0].origin).toBe('manual');
     } finally { await resetTranscriptStoreForTests(); }
   });
 });
