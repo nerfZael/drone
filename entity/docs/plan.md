@@ -14,6 +14,7 @@ Scenarios are in [demo.md](demo.md). Jev (`judge` and `sense`) came in at M3: sc
 | M3.5 | Workers: parallel conversation as the only mode, the workspace channel, the worker queue, batches, steer-after, rerouting, answer review, work summaries, session recording and replay, the routing eval | Several workers run and reply at once; the routing eval passes on luna; fast answers are reviewed | Done (`00ed05184`–`dc786e65a`) |
 | M3.6 | The Work canvas | Work is readable at a glance from one message to a 100-worker batch | Done (`dc786e65a`); gaps in [work-canvas.md](work-canvas.md#not-built-yet) |
 | M3.7 | Resumable sessions: the runtime state is a projection of the log, and worker conversations are saved with the recording | After a Hub restart, a session continues where it stopped | Done |
+| M3.8 | Workspace access: the user grants a session repositories, folders and drones (Read, Write, Run each) in the picker the Companion shares; blip's workspace tools act in them | A worker reads, edits and runs commands in a granted repository, and loses access the moment it is taken away | Built; live check with a real model pending |
 | M4 | Speech in and speech out, plus a native full-duplex realtime model as an optional voice limb | The user talks, the entity talks back, and it reacts to overlap | Not started |
 | M5 | Memory: long-term store, explicit `remember` / `recall` | The entity recalls a fact or a program from an earlier session | Not started |
 

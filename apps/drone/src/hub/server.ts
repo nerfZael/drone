@@ -5640,7 +5640,8 @@ async function startDroneHubApiServerWithLifecycle(
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
   registerFolderWorkspace({ id: COMPANION_HOME_TARGET_ID, name: 'Companion home', root: ensureCompanionHome });
-  registerEntityRoutes(apiRouter);
+  // The entity's sessions use the Companion's workspace service, each with its own selection.
+  registerEntityRoutes(apiRouter, { createWorkspaceService: store => new CompanionWorkspaceService(assistantService, deviceMesh, store) });
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();

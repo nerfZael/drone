@@ -2,6 +2,7 @@ import { protectCompanionTranscripts } from './protectCompanionTranscripts';
 import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion-attachments';
 import { hostWorkspaceId, hostWorkspaceRoot } from '../assistant/host-workspaces';
 import crypto from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { WorkspaceTarget, WorkspaceCapability } from '@blip/tools';
 import {
@@ -208,7 +209,11 @@ export class CompanionWorkspaceService {
     return operation;
   }
 
-  async tools(runId: string, assertActive: () => void, homeRoot?: string): Promise<AgentTool<any>[]> {
+  /**
+   * Workspace tools over the selected targets. `homeRoot` adds an always-available home target: the Companion's by
+   * default, or another consumer's own (`home`: its id and label), which gets no Companion-specific protection.
+   */
+  async tools(runId: string, assertActive: () => void, homeRoot?: string, home?: { id: string; label: string }): Promise<AgentTool<any>[]> {
     const [blip, catalog] = await Promise.all([loadBlipTools(), this.catalog()]);
     const access = catalog.access;
     const targets: WorkspaceTarget[] = [];
@@ -360,7 +365,13 @@ export class CompanionWorkspaceService {
       });
     }
     // Companion's own workspace needs no grant: it is always readable and writable, never executable.
-    if (homeRoot) targets.push(protectCompanionTranscripts(new blip.LocalWorkspaceTarget({
+    if (homeRoot && home) {
+      await mkdir(homeRoot, { recursive: true });
+      targets.push(new blip.LocalWorkspaceTarget({
+        id: home.id, label: home.label, workspaceRoot: homeRoot,
+        permissionMode: 'workspace-write', profile: 'no-shell-workspace-write',
+      }));
+    } else if (homeRoot) targets.push(protectCompanionTranscripts(new blip.LocalWorkspaceTarget({
       id: COMPANION_HOME_TARGET_ID, label: 'Companion home (your own persistent files; uploads/ holds what the user attached)',
       workspaceRoot: await ensureCompanionHome(homeRoot),
       permissionMode: 'workspace-write', profile: 'no-shell-workspace-write',
@@ -368,7 +379,7 @@ export class CompanionWorkspaceService {
     if (!targets.length) return [];
     const targetCatalog = new blip.WorkspaceTargetCatalog(
       targets,
-      access.defaultTargetId ?? (homeRoot ? COMPANION_HOME_TARGET_ID : undefined),
+      access.defaultTargetId ?? (homeRoot ? home?.id ?? COMPANION_HOME_TARGET_ID : undefined),
     );
     const supported = new Set(targets.flatMap((target) => target.descriptor.capabilities));
     const tools = [

@@ -72,15 +72,19 @@ Fast answers are reviewed by a stronger model, and the runtime decides what gets
 
 ## Workspace
 
-Workers need a workspace to actually write code. The workspace channel gives them tools confined to one folder:
+Workers need a workspace to actually write code. In the Hub, a session's workspaces are the ones the user grants it with the workspace picker (the bench's **Workspaces** button), the same picker and service the Companion uses: repositories, folders and drones on this device, and folders other devices share. Each grants Read, Write and Run (commands) on its own, and one is the default. The entity also always has its home folder (`entity-home`, read and write, never commands), which is the default until the user picks one.
+
+The tools are blip's workspace tools, and every call names a `target` workspace or goes to the default:
 
 | Tool | Risk class | Notes |
 |---|---|---|
-| `list_files`, `read_file`, `search` | read-only | Never blocked |
-| `write_file`, `edit_file` | `limb` | Claims the file for the writer; rejected if another worker holds it |
-| `run` | `limb`, **off unless enabled** | Shell command in the workspace with a timeout. Disabled by default because it runs LLM-written commands on the host |
+| `list_files`, `read_file`, `search_files`, `get_working_tree_status` | read-only | Never blocked |
+| `write_file`, `apply_patch`, `move_path`, `delete_file`, `create_directory`, `delete_directory` | `limb` | Need Write. Claim each file as `<target>:<path>` for the writer; rejected if another worker holds it |
+| `bash` | `limb` | Needs Run. A shell command in the workspace; it can change files and reach whatever the workspace can |
 
-Paths are resolved inside the workspace root, and `.git` is never written. All workers share one workspace, and claims keep them apart. That holds for a handful of workers; big batches need per-worker worktrees and a merge step, designed in [coding.md](coding.md).
+Access is checked on every call against the current selection, so a change takes effect at once. The selection is part of the session: it is saved in the recording's config (a resumed session keeps it) and logged as a `workspaces_changed` host event, so the limbs' state and a replay show what was granted when. Access is per session for now, not per worker.
+
+Paths are resolved inside the workspace, and `.git` is never written. All workers share the granted workspaces, and claims keep them apart. That holds for a handful of workers; big batches need per-worker worktrees and a merge step, designed in [coding.md](coding.md). A host without a workspace service (the core's own tests and demo) uses the core's `workspaceChannel({ root })`: file tools and an opt-in `run` confined to one folder.
 
 ## Cost
 

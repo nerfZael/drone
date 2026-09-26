@@ -6,6 +6,8 @@ import { fileConversationStore, PiAiMind, type ConversationStore, type Reasoning
 import { createWorkSummarizer } from './entity-summarizer';
 import type { EvaluatorKind } from './entity-evaluator';
 import { EntityRecorder, isResumable, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
+import type { ChatWorkspaceAccess, ChatWorkspaceCatalog } from '@drone/assistant-chat';
+import { EMPTY_WORKSPACE_ACCESS, EntityWorkspaces, workspacesChannel, workspaceView, type CreateWorkspaceService } from './entity-workspaces';
 
 export interface EntitySessionConfig {
   headModel: string;
@@ -15,10 +17,13 @@ export interface EntitySessionConfig {
   reasoning: ReasoningLevel;
   /** What backs `judge` / `sense`: Jev (billed per call through the AI Gateway), a small fast LLM, or nothing. Off by default. */
   evaluator: EvaluatorKind;
-  /** Folder the workspace tools are confined to. Empty: a scratch folder in the Hub's data directory. */
+  /** The entity's home folder, always available to it. Empty: a scratch folder in the Hub's data directory. */
   workspace: string;
-  /** Let workers run shell commands in the workspace. Off by default: it runs LLM-written commands on this machine. */
-  allowCommands: boolean;
+  /**
+   * The workspaces the session may use besides its home, and what each allows (read, write, run commands): the same
+   * selection the Companion's workspace picker makes, kept per session. Changes apply from the next tool call.
+   */
+  workspaceAccess: ChatWorkspaceAccess;
   /** Work view summaries of busy workers, written by a cheap model. */
   summaries: boolean;
   /** Second looks at the front limb's answers: a separate reviewer on the head's model, the head itself, or none. */
@@ -43,7 +48,7 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
   reasoning: 'medium',
   evaluator: 'off',
   workspace: '',
-  allowCommands: false,
+  workspaceAccess: EMPTY_WORKSPACE_ACCESS,
   summaries: true,
   review: 'separate',
 };
@@ -69,16 +74,29 @@ export class EntitySession {
   private unsubscribe: (() => void) | null = null;
   private recorder: EntityRecorder | null = null;
   private readonly sessionsDir: string | null;
+  /** The session's workspaces, when the Hub provides the Companion's workspace service; else only a local folder. */
+  private workspaces: EntityWorkspaces | null = null;
+  private readonly createWorkspaceService?: CreateWorkspaceService;
+  private readonly workspaceDefinitions?: { name: string; description: string; parameters: Record<string, unknown> }[];
 
   constructor(
     private readonly createEvaluator: (kind: EvaluatorKind) => Evaluator | undefined,
     config: Partial<EntitySessionConfig> = {},
     /** `conversations` keeps worker conversations with the session's recording, so a resumed session continues them. */
     private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(c.reasoning, conversations, priceModelCall),
-    /** Where to record sessions; null records nothing. */
-    options: { sessionsDir?: string | null } = {},
+    /**
+     * Where to record sessions (null records nothing), and the workspace service with blip's tool definitions: with
+     * them the entity works across the workspaces its session selects, without them only in its home folder.
+     */
+    options: {
+      sessionsDir?: string | null;
+      createWorkspaceService?: CreateWorkspaceService;
+      workspaceDefinitions?: { name: string; description: string; parameters: Record<string, unknown> }[];
+    } = {},
   ) {
     this.sessionsDir = options.sessionsDir === undefined ? defaultEntitySessionsDir() : options.sessionsDir;
+    this.createWorkspaceService = options.createWorkspaceService;
+    this.workspaceDefinitions = options.workspaceDefinitions;
     this.config = { ...DEFAULT_ENTITY_CONFIG, ...config };
     this.build();
     this.resumeLatest();
@@ -118,9 +136,16 @@ export class EntitySession {
 
   private build(): void {
     this.unsubscribe?.();
+    const home = () => this.config.workspace || defaultEntityWorkspace();
+    this.workspaces = this.createWorkspaceService && this.workspaceDefinitions
+      ? new EntityWorkspaces(this.createWorkspaceService, this.config.workspaceAccess, home, () => `entity:${this.recorder?.id ?? 'unrecorded'}`, access => this.workspacesChanged(access))
+      : null;
     this.entity = new Entity({
       mind: this.createMind(this.config, this.conversations),
-      channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: this.config.workspace || defaultEntityWorkspace(), allowCommands: this.config.allowCommands })],
+      channels: [
+        chatChannel(), keypadChannel(),
+        this.workspaces ? workspacesChannel(this.workspaces, this.workspaceDefinitions!) : workspaceChannel({ root: home() }),
+      ],
       config: { review: this.config.review },
       models: { head: this.config.headModel, task: this.config.taskModel, voice: this.config.voiceModel || undefined },
       evaluator: this.config.evaluator === 'off' ? undefined : this.createEvaluator(this.config.evaluator),
@@ -132,6 +157,26 @@ export class EntitySession {
       this.broadcast({ kind: 'event', event });
       this.scheduleSnapshot();
     });
+  }
+
+  /** A saved selection: kept in the config and the recording, and told to the entity so its limbs (and a replay) see it. */
+  private workspacesChanged(access: ChatWorkspaceAccess): void {
+    this.config = { ...this.config, workspaceAccess: access };
+    this.recorder?.updateConfig({ ...this.config });
+    this.entity.hostEvent('workspaces_changed', { access: workspaceView(access) as unknown as Record<string, unknown> });
+    this.broadcast({ kind: 'state' });
+    this.scheduleSnapshot();
+  }
+
+  /** The workspace picker's catalog and saves, for this session. */
+  workspaceCatalog(deviceId?: string): Promise<ChatWorkspaceCatalog> {
+    if (!this.workspaces) return Promise.reject(new Error('Workspaces are not available in this Hub'));
+    return this.workspaces.catalog(deviceId);
+  }
+
+  saveWorkspaces(value: unknown, revision: string): Promise<ChatWorkspaceCatalog> {
+    if (!this.workspaces) return Promise.reject(new Error('Workspaces are not available in this Hub'));
+    return this.workspaces.save(value, revision);
   }
 
   get status() { return this.entity.status; }

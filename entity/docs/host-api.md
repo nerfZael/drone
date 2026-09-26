@@ -58,11 +58,12 @@ Channels keep no logs of their own: read tools such as `read_chat` are read-only
 |---|---|---|---|
 | Chat | `chat_message`, `draft_changed`; also reduces `entity_draft`, `chat_message_updated` (a batch's progress line) and `message_reviewed` (a corrected answer is marked wrong in context) | `say` (`reply_to`; `thread` keeps a batch worker's reply in its own thread), `set_draft`, `read_chat` | Built |
 | Keypad | `key_down` (with `gap_ms`), `key_up` (with `held_ms`); level `key.N.held` | `press`, `key_down`, `key_up` (all `reflex`) | Built |
-| Workspace | `file_written`, `command_ran` | `list_files`, `read_file`, `search` (read-only); `write_file`, `edit_file` (claim the path); `run` (off unless commands are allowed) | Built |
+| Workspace | `file_written`, `command_ran` | `list_files`, `read_file`, `search` (read-only); `write_file`, `edit_file` (claim the path); `run` (off unless commands are allowed) | Built (core; one folder) |
+| Workspaces (Hub) | `workspaces_changed` (host event: the granted workspaces) | blip's workspace tools with a `target`: reads read-only, writes claim `<target>:<path>`, `bash` needs Run | Built |
 | Speech in | `transcript_partial`, `transcript_final`, `user_speech_started` / `_ended`, each segment timestamped | none | M4 |
 | Speech out | `speech_queued`, `speech_started`, `speech_ended`, `speech_cut{at word}` | `speak(text)`, `stop_speaking` | M4 |
 
-The workspace channel is confined to one folder: paths are resolved inside its root (symlinks included), `.git` is never written, and writes and commands are not output, so output stops don't block them. See [parallel-conversation.md](parallel-conversation.md#workspace).
+The workspace channel is confined to one folder: paths are resolved inside its root (symlinks included), `.git` is never written, and writes and commands are not output, so output stops don't block them. The Hub replaces it with its workspaces channel: the workspaces the user grants the session in the picker, the Companion's service behind them. See [parallel-conversation.md](parallel-conversation.md#workspace).
 
 **Speech in** will be a one-way chat. The live transcript works like the typed draft: partial segments are visible and time-stamped, and final segments land in the transcript log. It reuses the transcription path Companion already has.
 

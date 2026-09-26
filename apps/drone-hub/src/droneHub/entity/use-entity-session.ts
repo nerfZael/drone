@@ -2,7 +2,7 @@ import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { requestJson } from '../http';
 
-export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; allowCommands: boolean; summaries?: boolean; review?: 'off' | 'separate' | 'head' };
+export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; workspaceAccess?: { targets: unknown[] }; summaries?: boolean; review?: 'off' | 'separate' | 'head' };
 type EntityState = { config: EntityConfig; snapshot: EntitySnapshot; events: EntityEvent[]; sessionId: string | null };
 
 /** The same as the Hub sends on connect, so a reconnect shows what the live view showed. */

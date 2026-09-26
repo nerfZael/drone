@@ -10,10 +10,12 @@ import type { WorkLink } from './EntityWorkCanvas';
 import { EntityTimeline, useEntityReplay, useReplayKeys } from './EntityTimeline';
 import { useEntitySession, type EntityConfig } from './use-entity-session';
 import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
+import { WorkspaceAccessPicker } from '../assistant/WorkspaceAccessPicker';
+import { requestJson } from '../http';
 
 // The explorer and editor are heavy; load them the first time the Files view opens.
 const FolderWorkspaceFiles = React.lazy(() => import('../files/FolderWorkspaceFiles').then(m => ({ default: m.FolderWorkspaceFiles })));
-/** The Hub serves the entity workspace through the drone file routes under this id (see folder-workspaces.ts). */
+/** The Hub serves the entity's home folder through the drone file routes under this id (see folder-workspaces.ts). */
 const ENTITY_WORKSPACE_ID = 'entity-workspace';
 type BenchView = 'brain' | 'work' | 'inspector' | 'files';
 
@@ -52,7 +54,7 @@ export function EntityBench() {
           <div className="min-h-0 bg-[var(--panel)]">
             <React.Suspense fallback={<div className="p-3 text-[var(--muted)]">Loading files…</div>}>
               {/* Keyed by folder: changing the workspace setting starts a fresh explorer. */}
-              <FolderWorkspaceFiles key={config.workspace} workspaceId={ENTITY_WORKSPACE_ID} name="Entity workspace" target={target} className="h-full" />
+              <FolderWorkspaceFiles key={config.workspace} workspaceId={ENTITY_WORKSPACE_ID} name="Entity home" target={target} className="h-full" />
             </React.Suspense>
           </div>
         </div>
@@ -131,21 +133,34 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
 
 function SettingsRow({ config, idle, onConfigure }: { config: EntityConfig; idle: boolean; onConfigure(update: Partial<EntityConfig>): void }) {
   const [workspace, setWorkspace] = React.useState(config.workspace);
+  const [picking, setPicking] = React.useState(false);
   React.useEffect(() => setWorkspace(config.workspace), [config.workspace]);
+  const granted = config.workspaceAccess?.targets.length ?? 0;
   return (
-    <div className="flex w-full flex-wrap items-center gap-3 text-[var(--muted)]" title={idle ? undefined : 'Reset the session to change settings'}>
-      <label className="flex min-w-0 flex-1 items-center gap-1" title="Folder the workspace tools are confined to. Empty: a scratch folder in the Hub's data directory.">
-        Workspace
+    <div className="relative flex w-full flex-wrap items-center gap-3 text-[var(--muted)]">
+      <label className="flex min-w-0 flex-1 items-center gap-1" title={idle ? "The entity's own folder, always readable and writable. Empty: a scratch folder in the Hub's data directory." : 'Reset the session to change the home folder'}>
+        Home
         <input className="min-w-[200px] flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--fg)]"
-          placeholder="scratch folder (absolute path to use a repo)" value={workspace} disabled={!idle}
+          placeholder="scratch folder (absolute path to use another)" value={workspace} disabled={!idle}
           onChange={(e) => setWorkspace(e.target.value)}
           onBlur={() => { if (workspace !== config.workspace) onConfigure({ workspace }); }}
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
       </label>
-      <label className="flex items-center gap-1" title="Let workers run shell commands (tests, builds) in the workspace. These are LLM-written commands running on this machine.">
-        <input type="checkbox" checked={config.allowCommands} disabled={!idle} onChange={(e) => onConfigure({ allowCommands: e.target.checked })} />
-        Allow commands
-      </label>
+      {/* Access can change mid-session: the change is logged, and the next turn sees it. */}
+      <UiButton size="small" variant="secondary" aria-expanded={picking} onClick={() => setPicking(p => !p)}
+        title="Repositories, folders and drones this session may read, write or run commands in">
+        Workspaces{granted ? ` (${granted})` : ''}
+      </UiButton>
+      {picking ? (
+        <>
+          <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setPicking(false)} />
+          <div role="dialog" aria-label="Entity workspaces" onKeyDown={(e) => { if (e.key === 'Escape') setPicking(false); }}
+            className="absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] pt-2 shadow-[0_18px_55px_var(--shadow-color)]">
+            <WorkspaceAccessPicker requestJson={requestJson} endpoint="/api/entity/workspaces"
+              home={{ name: 'Entity home', note: config.workspace || "Scratch folder in the Hub's data directory" }} />
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

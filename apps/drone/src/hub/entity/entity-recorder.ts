@@ -129,6 +129,13 @@ export class EntityRecorder {
     fs.closeSync(this.framesOut);
   }
 
+  /** The session's config changed while it runs (its workspace selection): kept in meta.json, so a resume has it. */
+  updateConfig(config: Record<string, unknown>): void {
+    if (this.finished) return;
+    this.meta.config = config;
+    this.writeMeta();
+  }
+
   recording(): SessionRecording { return { meta: { ...this.meta }, events: [...this.events], frames: [...this.frames] }; }
 
   private capture(seq: number, sections: readonly Section[] = SECTIONS): void {
