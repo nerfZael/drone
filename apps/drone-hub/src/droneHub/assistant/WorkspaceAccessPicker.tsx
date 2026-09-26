@@ -21,11 +21,19 @@ const PERMISSIONS: { key: Permission; label: string; name: string }[] = [
   { key: 'write', label: 'Write', name: 'Write' },
   { key: 'execute', label: 'Run', name: 'Run commands' },
 ];
+const PERMISSION_HELP: Record<Permission, string> = {
+  read: 'Read files. Off removes the workspace.',
+  write: 'Edit files; includes Read.',
+  execute: 'Run commands; includes Read. Commands can change files and reach anything the workspace can.',
+};
 const GRID = 'grid grid-cols-[minmax(0,1fr)_52px_52px_52px_60px] items-center';
 const DRONE_CAP = 5;
 const MATCH_LIMIT = 6;
 const REFRESH_DEBOUNCE_MS = 400;
 const SAVE_DEBOUNCE_MS = 300;
+
+/** The last catalog each picker saw, so reopening shows it at once while a fresh one loads. */
+const lastCatalogs = new Map<string, ChatWorkspaceCatalog>();
 
 const catalogUrl = (base: string, deviceId?: string) => (deviceId ? `${base}?deviceId=${encodeURIComponent(deviceId)}` : base);
 const offeredBy = (option: ChatWorkspaceOption | undefined, granted?: ChatWorkspaceOption): Record<Permission, boolean> => ({
@@ -48,6 +56,7 @@ export function WorkspaceAccessPicker({
   onSelectionChange,
   onBusyChange,
   home,
+  initialAccess,
 }: {
   requestJson: RequestJson;
   /** The catalog: GET lists workspaces and the selection, POST {access, revision} saves it. */
@@ -57,18 +66,20 @@ export function WorkspaceAccessPicker({
   onBusyChange?: (busy: boolean) => void;
   /** An always-available workspace shown as a locked first row (the Companion's home, the entity's home folder). */
   home?: { name: string; note: string; onOpen?: () => void };
+  /** The selection as the caller already knows it, shown at once instead of waiting for the catalog. */
+  initialAccess?: ChatWorkspaceAccess;
 }) {
-  const [catalog, setCatalog] = React.useState<ChatWorkspaceCatalog | null>(null);
-  const [draft, setDraft] = React.useState<ChatWorkspaceAccess | null>(null);
+  const [catalog, setCatalog] = React.useState<ChatWorkspaceCatalog | null>(() => lastCatalogs.get(endpoint) ?? null);
+  const [draft, setDraft] = React.useState<ChatWorkspaceAccess | null>(() => initialAccess ?? lastCatalogs.get(endpoint)?.access ?? null);
   const [mode, setMode] = React.useState<'inuse' | 'all'>('inuse');
-  const [addQuery, setAddQuery] = React.useState('');
-  const [filter, setFilter] = React.useState('');
+  // One search field beside the tabs: under In use it finds workspaces to add, under All workspaces it filters.
+  const [query, setQuery] = React.useState('');
   const [allDrones, setAllDrones] = React.useState(false);
   const [loaded, setLoaded] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState<Set<string>>(new Set());
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [initialLoading, setInitialLoading] = React.useState(true);
+  const [initialLoading, setInitialLoading] = React.useState(() => !lastCatalogs.has(endpoint));
   // Rows turned off while the picker is open stay where they were, faded, so nothing moves under the pointer.
   const [gone, setGone] = React.useState<ChatWorkspaceOption[]>([]);
   const alive = React.useRef(true);
@@ -79,24 +90,31 @@ export function WorkspaceAccessPicker({
   const savePendingRef = React.useRef(false);
   const saveTimerRef = React.useRef<number | null>(null);
   const painting = React.useRef<{ key: Permission; value: boolean } | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  // Edits made before the first catalog arrived: kept, and saved once it does.
+  const editedEarly = React.useRef(false);
+  const flushSaveRef = React.useRef<() => Promise<void>>(async () => undefined);
   loadedRef.current = loaded;
   draftRef.current = draft;
   catalogRef.current = catalog;
   const dirty = Boolean(catalog && draft && workspaceAccessSignature(catalog.access) !== workspaceAccessSignature(draft));
   const dirtyRef = React.useRef(dirty);
   dirtyRef.current = dirty;
-  const locked = disabled || initialLoading;
+  const locked = disabled;
   const selectedCount = draft?.targets.length ?? 0;
 
   React.useEffect(() => { onBusyChange?.(dirty || saving); }, [dirty, saving, onBusyChange]);
   React.useEffect(() => { onSelectionChange?.(selectedCount); }, [onSelectionChange, selectedCount]);
+  React.useEffect(() => { if (catalog) lastCatalogs.set(endpoint, catalog); }, [catalog, endpoint]);
   React.useEffect(() => {
     alive.current = true;
     const stop = () => { painting.current = null; };
-    window.addEventListener('mouseup', stop);
+    // The picker's own window: a desktop tool window never tells the Hub window about its mouse.
+    const view = rootRef.current?.ownerDocument.defaultView ?? window;
+    view.addEventListener('mouseup', stop);
     return () => {
       alive.current = false;
-      window.removeEventListener('mouseup', stop);
+      view.removeEventListener('mouseup', stop);
       if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
     };
   }, []);
@@ -136,8 +154,13 @@ export function WorkspaceAccessPicker({
         ...result,
         workspaces: [...result.workspaces, ...current.workspaces.filter((option) => !base.has(option.deviceId) && previous.has(option.deviceId))],
       } : result);
-      setDraft((current) => (current && dirtyRef.current ? current : result.access));
+      setDraft((current) => (current && (dirtyRef.current || editedEarly.current) ? current : result.access));
       setLoaded(new Set([...base, ...previous]));
+      if (editedEarly.current) {
+        editedEarly.current = false;
+        if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushSaveRef.current(); }, SAVE_DEBOUNCE_MS);
+      }
       if (!initial) for (const deviceId of previous) if (!base.has(deviceId)) void loadDevice(deviceId);
     } catch (loadError: any) {
       if (alive.current && initial) setError(loadError?.message ?? String(loadError));
@@ -203,7 +226,10 @@ export function WorkspaceAccessPicker({
     }
   }, [reload, requestJson, endpoint]);
 
+  flushSaveRef.current = flushSave;
+
   const update = React.useCallback((change: (current: ChatWorkspaceAccess) => ChatWorkspaceAccess) => {
+    if (!catalogRef.current) editedEarly.current = true;
     setDraft((current) => {
       if (!current) return current;
       const next = change(current);
@@ -232,11 +258,11 @@ export function WorkspaceAccessPicker({
   for (const target of draft?.targets ?? []) { inUse.push({ option: { ...target, ...(byId.get(target.id) ?? {}) } as ChatWorkspaceOption, selected: true }); seen.add(target.id); }
   for (const option of gone) if (!seen.has(option.id)) inUse.push({ option, selected: false });
 
-  const addTerm = addQuery.trim().toLowerCase();
-  const matches = addTerm
+  const term = query.trim().toLowerCase();
+  const matches = mode === 'inuse' && term
     ? [...byId.values()]
         .filter((option) => !draft?.targets.some((target) => target.id === option.id))
-        .filter((option) => `${option.name} ${option.path ?? ''} ${option.runtime ?? ''} ${deviceName(option)}`.toLowerCase().includes(addTerm))
+        .filter((option) => `${option.name} ${option.path ?? ''} ${option.runtime ?? ''} ${deviceName(option)}`.toLowerCase().includes(term))
         .slice(0, MATCH_LIMIT)
     : [];
   const add = (option: ChatWorkspaceOption) => update((current) => addWorkspace(current, option));
@@ -252,25 +278,38 @@ export function WorkspaceAccessPicker({
     update((current) => rows.reduce((access, row) => setPermission(access, row.option, key, !allOn, offeredBy(byId.get(row.option.id), row.option)), current));
   };
 
-  const defaultName = draft?.targets.find((target) => target.id === draft.defaultTargetId)?.name;
-  const summary = initialLoading
-    ? 'Loading…'
-    : saving ? 'Saving…' : selectedCount ? `${selectedCount} in use · default ${defaultName ?? 'none'}` : home ? `Only ${home.name}` : 'Nothing in use';
-
   const tab = (on: boolean) => `h-7 rounded-[7px] px-3 text-[13px] ${on ? 'bg-[var(--surface-strong)] font-medium text-[var(--fg)]' : 'text-[var(--muted)] hover:text-[var(--fg)]'}`;
 
   return (
-    <div className="flex min-h-0 flex-col text-[var(--fg)]">
+    <div ref={rootRef} className="flex min-h-0 flex-col text-[var(--fg)]">
       <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         <div role="group" aria-label="Show" className="flex gap-0.5 rounded-[9px] border border-[var(--border-subtle)] p-[3px]">
           <button type="button" aria-pressed={mode === 'inuse'} className={tab(mode === 'inuse')} onClick={() => setMode('inuse')}>In use</button>
           <button type="button" aria-pressed={mode === 'all'} className={tab(mode === 'all')} onClick={() => { setMode('all'); loadOtherDevices(); }}>All workspaces</button>
         </div>
-        {mode === 'all' ? (
-          <input type="search" aria-label="Filter workspaces" placeholder="Filter" value={filter} onChange={(event) => setFilter(event.target.value)}
-            className="h-8 min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 text-[13px] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]" />
-        ) : <span className="ml-auto truncate text-[12px] text-[var(--muted)]">{summary}</span>}
+        <input type="search" value={query} aria-label={mode === 'inuse' ? 'Add a workspace' : 'Filter workspaces'}
+          placeholder={mode === 'inuse' ? 'Add a workspace…' : 'Filter…'} disabled={mode === 'inuse' && locked}
+          onChange={(event) => { setQuery(event.target.value); loadOtherDevices(); }}
+          onKeyDown={(event) => { if (mode === 'inuse' && event.key === 'Enter' && matches[0]) { event.preventDefault(); add(matches[0]); setQuery(''); } }}
+          className="h-8 min-w-0 flex-1 rounded-md bg-[var(--surface-softest)] px-2.5 text-[13px] outline-none placeholder:text-[var(--muted-dim)]" />
+        {saving ? <IconSpinner className="h-3 w-3 flex-shrink-0 animate-spin text-[var(--muted)]" aria-label="Saving" /> : null}
       </div>
+      {matches.length ? (
+        <div role="listbox" aria-label="Matching workspaces" className="mx-3 mb-2 overflow-hidden rounded-md bg-[var(--surface-softest)]">
+          {matches.map((option, index) => (
+            <button key={option.id} type="button" role="option" aria-selected={index === 0} onClick={() => { add(option); setQuery(''); }}
+              className={`flex min-h-[36px] w-full items-center gap-2 px-2.5 py-1 text-left hover:bg-[var(--hover)] ${index === 0 ? 'bg-[var(--surface-strong)]' : ''}`}>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{option.name}</span>
+              <span className="flex-shrink-0 truncate text-[11px] text-[var(--muted-dim)]">{describe(option)}</span>
+            </button>
+          ))}
+        </div>
+      ) : mode === 'inuse' && term && catalog ? (
+        <div className="px-3 pb-2 text-[12px] text-[var(--muted)]">
+          Nothing matches.{' '}
+          <button type="button" className="text-[var(--accent)] hover:underline" onClick={() => { setMode('all'); loadOtherDevices(); }}>Browse all workspaces</button>
+        </div>
+      ) : null}
       {error ? <div className="border-y border-[var(--border-subtle)] px-3 py-1.5 text-[12px] text-[var(--red)]">{error}</div> : null}
 
       {mode === 'inuse' ? (
@@ -279,7 +318,7 @@ export function WorkspaceAccessPicker({
             <span className="text-[var(--muted)]">Workspace</span>
             {PERMISSIONS.map((permission) => (
               <button key={permission.key} type="button" disabled={locked} onClick={() => column(permission.key)}
-                title={`Set ${permission.name} for every workspace in use`}
+                title={`${PERMISSION_HELP[permission.key]} Click to set it for every workspace in use.`}
                 className={`h-7 font-semibold hover:underline disabled:opacity-50 ${permission.key === 'execute' ? 'text-[var(--yellow)]' : 'text-[var(--fg-secondary)]'}`}>
                 {permission.label}
               </button>
@@ -287,7 +326,7 @@ export function WorkspaceAccessPicker({
             <span className="text-center font-semibold text-[var(--fg-secondary)]">Default</span>
           </div>
           <div className="min-h-0 flex-1 select-none overflow-y-auto py-1" onMouseLeave={() => { painting.current = null; }}>
-            {initialLoading && !catalog ? (
+            {initialLoading && !catalog && !draft ? (
               <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-[var(--muted)]"><IconSpinner className="h-3 w-3 animate-spin" /> Loading workspaces…</div>
             ) : null}
             {home ? (
@@ -315,8 +354,8 @@ export function WorkspaceAccessPicker({
               return (
                 <div key={option.id} className={`${GRID} min-h-[42px] px-3 ${selected ? 'bg-[var(--surface-softest)]' : 'opacity-55'}`}>
                   <span className="min-w-0" title={workspaceOptionMeta(option)}>
-                    <span className="block truncate text-[13px]">{option.name}</span>
-                    <span className="block truncate text-[12px] text-[var(--muted)]">{available ? describe(option) : 'Unavailable'}</span>
+                    <span className="block truncate text-[13px] font-medium">{option.name}</span>
+                    <span className="block truncate text-[11px] text-[var(--muted-dim)]">{available || !catalog ? describe(option) : 'Unavailable'}</span>
                   </span>
                   {PERMISSIONS.map((permission) => {
                     const on = Boolean(target?.[permission.key]);
@@ -343,40 +382,11 @@ export function WorkspaceAccessPicker({
                 </div>
               );
             })}
-            <div className="px-3 pt-2">
-              <label className="flex h-9 items-center gap-2 rounded-md border border-dashed border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 focus-within:border-[var(--accent-muted)]">
-                <span aria-hidden="true" className="text-[16px] leading-none text-[var(--accent)]">+</span>
-                <input type="search" aria-label="Add a workspace" placeholder="Add a workspace: type a name" value={addQuery} disabled={locked}
-                  onChange={(event) => { setAddQuery(event.target.value); loadOtherDevices(); }}
-                  onKeyDown={(event) => { if (event.key === 'Enter' && matches[0]) { event.preventDefault(); add(matches[0]); } }}
-                  className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--muted-dim)]" />
-              </label>
-              {matches.length ? (
-                <div role="listbox" aria-label="Matching workspaces" className="mt-1 overflow-hidden rounded-md border border-[var(--border-subtle)]">
-                  {matches.map((option, index) => (
-                    <button key={option.id} type="button" role="option" aria-selected={index === 0} onClick={() => add(option)}
-                      className={`flex min-h-[40px] w-full items-center gap-2 px-2.5 py-1 text-left hover:bg-[var(--hover)] ${index === 0 ? 'bg-[var(--surface-softest)]' : ''} ${index ? 'border-t border-[var(--border-subtle)]' : ''}`}>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px]">{option.name}</span>
-                        <span className="block truncate text-[12px] text-[var(--muted)]">{describe(option)}</span>
-                      </span>
-                      {index === 0 ? <span className="text-[11px] text-[var(--accent)]">Enter</span> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : addTerm && !initialLoading ? (
-                <div className="px-1 py-1.5 text-[12px] text-[var(--muted)]">
-                  Nothing matches.{' '}
-                  <button type="button" className="text-[var(--accent)] hover:underline" onClick={() => { setFilter(addQuery); setAddQuery(''); setMode('all'); loadOtherDevices(); }}>Browse all workspaces</button>
-                </div>
-              ) : null}
-            </div>
           </div>
         </>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-[var(--border-subtle)] py-1">
           {(catalog?.devices ?? []).map((device, deviceIndex) => {
-            const term = filter.trim().toLowerCase();
             const options = [...byId.values()].filter((option) => option.deviceId === device.id && (!term || `${option.name} ${option.path ?? ''} ${option.runtime ?? ''}`.toLowerCase().includes(term)));
             const deviceLabel = deviceIndex === 0 ? `This device · ${device.name}` : `Shared by ${device.name}`;
             return (
@@ -405,11 +415,11 @@ export function WorkspaceAccessPicker({
                           <button key={option.id} type="button" role="checkbox" aria-checked={Boolean(target)} disabled={locked}
                             aria-label={`${target ? 'Remove' : 'Add'} ${option.name}`}
                             onClick={() => update((current) => (target ? removeWorkspace(current, option.id) : addWorkspace(current, option)))}
-                            className={`flex min-h-[40px] w-full items-center gap-2.5 px-3 py-1 text-left hover:bg-[var(--hover)] ${target ? 'bg-[var(--surface-softest)]' : ''}`}>
+                            className={`flex min-h-[36px] w-full items-center gap-2.5 px-3 py-1 text-left hover:bg-[var(--hover)] ${target ? 'bg-[var(--surface-softest)]' : ''}`}>
                             <span className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded border text-[12px] font-bold ${target ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--on-accent,#11111b)]' : 'border-[var(--muted-dim)]'}`}>{target ? '✓' : ''}</span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px]">{option.name}</span>
-                              <span className="block truncate text-[12px] text-[var(--muted)]">{workspaceOptionMeta(option)}</span>
+                              <span className="block truncate text-[13px] font-medium">{option.name}</span>
+                              <span className="block truncate text-[11px] text-[var(--muted-dim)] opacity-80">{workspaceOptionMeta(option)}</span>
                             </span>
                             <span className="flex-shrink-0 text-[12px] text-[var(--muted)]">{grants}</span>
                           </button>
@@ -430,11 +440,6 @@ export function WorkspaceAccessPicker({
         </div>
       )}
 
-      <div className="border-t border-[var(--border-subtle)] px-3 py-2 text-[12px] leading-snug text-[var(--muted)]">
-        {mode === 'all'
-          ? 'Checked workspaces are in use with Read. Set Write, Run and the default under In use.'
-          : 'Click or drag across the squares. Write and Run include Read; Read off removes the workspace. The default is used when no workspace is named. Run can change files and reach anything the workspace can. Granted access is used without asking.'}
-      </div>
     </div>
   );
 }
