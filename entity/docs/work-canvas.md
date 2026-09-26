@@ -2,7 +2,7 @@
 
 The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. You look at it from the top and click into a worker when you need to; you don't arrange it. It is the whole Work tab; the earlier Rows and Cards views are gone.
 
-Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` derives everything from the snapshot and the event log, so it also works when replaying a recording, and is pure and tested. Mockups: [v10](https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv), which the colours follow, and earlier [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq)–[v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
+Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` derives the layout from the snapshot and the event log. What a worker is (its fork and `after` links, who blocks it, the question it is waiting on, its name and usage) is a runtime fact in the snapshot; the log adds what it is doing right now and its summaries. So it all works when replaying a recording too, and the model is pure and tested. Mockups: [v10](https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv), which the colours follow, and earlier [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq)–[v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
 
 ## Layout
 
@@ -14,9 +14,9 @@ Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` 
 
 ## Cards
 
-- **Header:** the worker's name and its state: working (one colour for thinking and acting), waiting, queued, blocked, failed, done. The id (`worker-N`) only shows on hover. Double-click the name to rename it; the name is kept in this browser for the session, and the canvas and its side panel use it.
-- **Status line** (up to two lines): what the worker is doing, from its latest summary's current step, or else the task it was given. Never the tool it happens to be calling: that changes every second, and external agents don't report it. Blocked, waiting and queued workers say what they're waiting for, by name. Done workers show their result.
-- **Footer:** summary steps as pips, watch and program chips, time, and cost (or tokens for subscription models). A chip shows the label, an eye (watch) or `</>` (program), and one value: a watch's fire count, a program's running time, ✓ or failed. Hover shows the full condition.
+- **Header:** the worker's name and its state: working (one colour for thinking and acting), waiting, queued, blocked, asking you, failed, done. The id (`worker-N`) only shows on hover. Double-click the name to rename it: the rename goes to the Hub (`limb_renamed`), so the canvas, the chat, the top strip and the entity's own state all use it, and replays show it.
+- **Status line** (up to two lines): what the worker is doing, from its latest summary's current step, or else the task it was given. Never the tool it happens to be calling: that changes every second, and external agents don't report it. Blocked, waiting, queued and asking workers say what they're waiting for: the worker holding the file, the worker it starts after, a free slot, or the question they asked. Done workers show their result.
+- **Footer:** summary steps as pips, watch and program chips, time, and cost at list price (see [parallel-conversation.md](parallel-conversation.md#cost)). A chip shows the label, an eye (watch) or `</>` (program), and one value: a watch's fire count, a program's running time, ✓ or failed. Hover shows the full condition.
 - **⌄ expands a card in place**: the done / doing / next steps, each watch and program spelled out, claims and the model.
 - **Click opens the side panel**: the message that started the worker, the task it was given (collapsed), then its replies and every steer, in markdown with times of day, plus Message and Stop.
 - **Motion:** a pulse runs along an arrow when a fork starts or a wait is released; a card flashes when it finishes, starts from the queue, or is steered.
@@ -26,8 +26,8 @@ Text fits by being written short: summaries are asked for short steps, and watch
 ## Scale
 
 - **Folds.** Messages that started no work, and finished work that nothing live depends on, fold into one line such as `··· 57 finished · $8.17 · 6 messages · steered Signup flake`. Click it to open it in place. Folding waits: nothing folds within a minute, the 5 most recently finished rows and the 3 most recent plain messages never fold, and nothing folds while selected, expanded or hovered. Folded work fades out and the rows below slide up. The canvas keeps its own clock between events, so work folds in quiet sessions too.
-- **Group cards.** A batch, or 4 or more workers from one message in the first column, becomes one card: counts by state, one cell per worker coloured by state, and totals. Hover a cell to see that worker, click it to open it, ⌄ for a filterable list. Workers that need attention (failed, blocked, stopped) also get their own card under the group, the first three as cards and the rest in one "N more need attention" list.
-- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, what the head is thinking about, the session time and cost, and **Fit**. Clicking an item opens that worker.
+- **Group cards.** A batch of 4 or more, or 4 or more workers from one message in the first column, becomes one card (smaller batches stay separate cards): counts by state, one cell per worker coloured by state, and totals. Hover a cell to see that worker, click it to open it, ⌄ for a filterable list. Workers that need attention (failed, blocked, stopped) also get their own card under the group, the first three as cards and the rest in one "N more need attention" list.
+- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, what the head is thinking about, the session time and cost (hover for tokens by kind, what summaries and senses took, and calls with no known price), and **Fit**. Clicking an item opens that worker.
 
 ## Chat and the canvas
 
@@ -40,7 +40,6 @@ Text fits by being written short: summaries are asked for short steps, and watch
 
 ## Not built yet
 
-- **A real needs-you state.** Today "needs you" is derived: a failed worker, a blocked one, or one whose last message ends with a question you haven't answered. An `ask` tool would hold the worker until you answer.
 - **The entity's own limbs.** Watches and programs of the head and voice show as chips in the top strip; they could have their own row with their conditions and meters.
 - **Work no message started.** Head-started work lands in the row of your latest message, because dispatch defaults `reply_to` to it. The left column could mean "started by": your message, the head at 12:40, or a watch firing.
 - **More states:** continued after running out of steps (`2/4`), frozen by an output stop, the whole entity paused.

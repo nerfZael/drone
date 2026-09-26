@@ -111,6 +111,7 @@ test('workspace: tools stay inside the root, and a file claimed by one worker is
     }
     if (input.role === 'task' && ownTask(input) === 'edit app B') {
       results.b = await call('write_file', { path: 'app.ts', content: 'overwrite' });
+      await aHolds;
       await call('finish_task', { result: 'gave up' });
     }
   }, { channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: dir })] });
@@ -119,6 +120,9 @@ test('workspace: tools stay inside the root, and a file claimed by one worker is
   await until(() => results.git !== undefined);
   h.entity.input('chat_message', { text: 'b' });
   await until(() => results.b !== undefined);
+  // Who blocks whom is a fact in state, not something to read out of the refusal text.
+  const b = h.entity.snapshot().limbs.find(l => l.name === 'b')!;
+  expect(b.blockedBy).toEqual({ limb: 'worker-3', path: 'app.ts' });
   holdA();
   expect(results.read).toContain('41');
   expect(results.edit).toStartWith('edited app.ts');
@@ -501,4 +505,83 @@ test('context: a worker\'s later wakes show only the state that changed; the sta
   await sleep(20);
   const heads = h.mind.runs.filter(r => r.role === 'head').slice(-2).map(r => JSON.stringify(stableState(r)));
   expect(heads[0]).toBe(heads[1]);
+});
+
+test('workers: ask holds the worker until the answer, which wakes it with its conversation', async () => {
+  const prompts: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'deploy it') await call('dispatch', { task: 'deploy', name: 'deploy' });
+    if (input.role === 'head' && lastUserMessage(input) === 'staging') await call('steer', { worker: 'worker-3', text: 'staging' });
+    if (input.role === 'task') {
+      prompts.push(input.prompt);
+      if (prompts.length === 1) { await call('ask', { question: 'Staging or production?' }); return; }
+      else { await call('say', { text: 'deployed to staging' }); await call('finish_task', { result: 'staging' }); }
+    }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'deploy it' });
+  await until(() => h.said().includes('Staging or production?'));
+  await sleep(30);
+  const asking = h.entity.snapshot().limbs.find(l => l.id === 'worker-3')!;
+  expect(asking).toMatchObject({ status: 'running', runs: [] }); // not finished: it waits for the answer
+  expect(asking.asking).toBe(h.of('chat_message').find(e => e.data.text === 'Staging or production?')!.seq);
+  h.entity.input('chat_message', { text: 'staging' });
+  await until(() => h.of('task_done').length === 1);
+  expect(prompts[1]).toContain('Message from the user (via head): staging');
+  expect(h.entity.snapshot().limbs.find(l => l.id === 'worker-3')).toMatchObject({ status: 'done', asking: undefined });
+});
+
+test('workers: renames, fork and wait links, and usage are runtime facts every view shares', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') {
+      await call('dispatch', { task: 'first', name: 'first' });
+      await call('fork', { worker: 'worker-3', task: 'second' });
+      await call('dispatch', { task: 'third', after: 'worker-3' });
+    }
+    if (input.role === 'task' && input.limbId === 'worker-3') await new Promise<void>(r => input.signal.addEventListener('abort', () => r()));
+  });
+  const run = h.mind.run.bind(h.mind);
+  h.mind.run = async input => ({ ...(await run(input)), usage: { input: 100, output: 10, cost: 0.01 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('limb_spawned').length === 3);
+  const [, fork, gated] = h.of('limb_spawned').map(e => String(e.data.id));
+  expect(h.entity.renameWorker('worker-3', '  Login  fix ')).toContain('"Login fix"');
+  const limbs = h.entity.snapshot().limbs;
+  expect(limbs.find(l => l.id === 'worker-3')!.name).toBe('Login fix');
+  expect(limbs.find(l => l.id === fork)!.forkOf).toBe('worker-3');
+  expect(limbs.find(l => l.id === gated)).toMatchObject({ after: 'worker-3', waitFor: 'worker-3' });
+  await until(() => (h.entity.snapshot().usage.cost ?? 0) > 0);
+  expect(h.entity.snapshot().limbs.find(l => l.id === 'head')!.usage!.input).toBeGreaterThan(0);
+  h.entity.stopWorker('worker-3');
+  await until(() => h.of('limb_started').length === 1);
+  expect(h.entity.snapshot().limbs.find(l => l.id === gated)).toMatchObject({ after: 'worker-3', waitFor: undefined }); // the link outlives the wait
+});
+
+test('usage: tokens by kind and cost per limb, unpriced calls counted, summaries and senses in the totals', async () => {
+  let calls = 0;
+  const summarizer = { async summarize() { return { done: ['a'], doing: [], next: [], usage: { input: 50, output: 5, cost: 0.001 } }; } };
+  const evaluator = { async evaluate(questions: { id: string }[]) { return { answers: Object.fromEntries(questions.map(q => [q.id, 0.2])), usage: { input: 30, output: 1, cost: null } }; } };
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'work' });
+    if (input.role === 'task') { for (let i = 0; i < 4; i++) await call('note', { text: `step ${i}` }); await call('finish_task', { result: 'ok' }); }
+  }, { summarizer, evaluator, jev: { senseIntervalMs: 5 }, config: { summaryEveryCalls: 2, summaryIntervalMs: 0 } });
+  const run = h.mind.run.bind(h.mind);
+  // The first head run has no known price; later runs report cache reads and writes.
+  h.mind.run = async input => ({ ...(await run(input)), usage: calls++ === 0 ? { input: 10, output: 1, cost: null } : { input: 100, output: 10, cacheRead: 400, cacheWrite: 20, cost: 0.01 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  h.entity.input('draft_changed', { text: 'hm' });
+  await until(() => h.of('task_done').length === 1 && h.of('usage').some(e => e.data.kind === 'summaries') && h.of('usage').some(e => e.data.kind === 'senses'));
+  await sleep(20);
+  const { usage, usageBy } = h.entity.snapshot();
+  expect(usage.unpriced).toBeGreaterThanOrEqual(2); // the first head run and the senses call
+  expect(usage.cacheRead).toBeGreaterThan(0);
+  expect(usage.cacheWrite).toBeGreaterThan(0);
+  const summaries = h.of('usage').filter(e => e.data.kind === 'summaries').length;
+  expect(usageBy.summaries).toMatchObject({ input: 50 * summaries, output: 5 * summaries, unpriced: 0 });
+  expect(usageBy.summaries.cost).toBeCloseTo(0.001 * summaries);
+  expect(usageBy.senses.unpriced).toBeGreaterThan(0);
+  const worker = h.entity.snapshot().limbs.find(l => l.role === 'task')!;
+  expect(worker.usage).toMatchObject({ cacheRead: 400, cacheWrite: 20, cost: 0.01 });
 });

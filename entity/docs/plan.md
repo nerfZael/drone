@@ -33,6 +33,7 @@ Why we chose these, and what we rejected, is in [alternatives.md](alternatives.m
 - **Parallel runs.** A busy reactive limb never makes a new wake queue: the wake starts a parallel run, and the newest run owns the limb's actions.
 - **One conversation mode** (2026-09-25): the front limb answers quick things, does what takes seconds itself, and dispatches real work to workers, who reply for themselves. Only the front limb and the head dispatch; `spawn` and `report` are gone. The routing rules are in [parallel-conversation.md](parallel-conversation.md#routing-rules).
 - **Voice split.** Head and voice can be split by configuration: a fast voice answers and routes first, and hands ongoing behaviour to the head.
+- **Asking the user.** A worker that needs an answer calls `ask`, a tool that ends its turn and keeps it waiting, not a flag it can forget (see results).
 - **Review.** Every fast answer gets a second look from a stronger model, decided by the runtime, not the fast model. Corrections are shown struck through with the fix below, never as silent edits.
 - **Supervision** follows OTP: cancel with a grace period, then kill; restart caps.
 - **Validation.** Everything the entity writes is validated, and errors go back to the model as tool results.
@@ -62,7 +63,7 @@ It confirmed that code watches react in under 0.3 ms, that every model installed
 
 ### M1
 
-Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice supersession, validation, dependencies, scoped stops and freezes, supervision, pause and resume, rate limits, level durations, `judge` / `sense`, ordered program reads and reset. The core now has 54 tests, each also checking that replaying its log rebuilds the runtime state, and the bench's canvas model and Work view have their own.
+Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice supersession, validation, dependencies, scoped stops and freezes, supervision, pause and resume, rate limits, level durations, `judge` / `sense`, ordered program reads and reset. The core now has 58 tests, each also checking that replaying its log rebuilds the runtime state, and the bench's canvas model and Work view have their own.
 
 ### M2
 
@@ -100,7 +101,11 @@ Story and runtime tests with a scripted mind cover scenarios 1–4 and 9, voice 
 
 ### Routing eval (2026-09-25)
 
-Seven cases, gpt-6-luna. With the head in front: 30 of 32 runs right (5 of 7 on the first pass, both misses passed on rerun, then 21 of 21). With a gpt-6-luna voice: 13 of 14; the miss read the chat and took no action for a second message. After the compact per-role renders: 14 of 14 with the head in front.
+Seven cases, gpt-6-luna. With the head in front: 30 of 32 runs right (5 of 7 on the first pass, both misses passed on rerun, then 21 of 21). With a gpt-6-luna voice: 13 of 14; the miss read the chat and took no action for a second message. After the compact per-role renders: 14 of 14 with the head in front. After the per-role tool table, `ask` and crash retries (2026-09-26): 14 of 14 again.
+
+### Asking the user (2026-09-26)
+
+A request that needs an answer first ("a poem about my favourite animal"), gpt-6-sol workers. With a `question` flag on `say`, the worker marked its question in 1 of 3 runs; in the others it asked and then called `finish_task`, so it showed as done. With the `ask` tool, which ends the worker's turn itself, 2 of 2 asked and waited, and the answer, routed to the worker as a steer, let it finish.
 
 ## Later
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { chatChannel, Entity, keypadChannel, workspaceChannel, type EntityEvent, type EntitySnapshot, type Evaluator, type Mind } from '@entity/core';
 import { droneRootPath } from '../../host/paths';
+import { priceModelCall } from '../usage/priceModelCall';
 import { fileConversationStore, PiAiMind, type ConversationStore, type ReasoningLevel } from './entity-mind';
 import { createWorkSummarizer } from './entity-summarizer';
 import type { EvaluatorKind } from './entity-evaluator';
@@ -49,8 +50,11 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
 
 export type EntityStreamMessage =
   | { kind: 'event'; event: EntityEvent }
-  | { kind: 'snapshot'; snapshot: EntitySnapshot }
-  | { kind: 'reset' };
+  /** The snapshot sections that changed since the last one (and `t`). */
+  | { kind: 'snapshot'; snapshot: Partial<EntitySnapshot> }
+  | { kind: 'reset' }
+  /** The whole state again, e.g. once Start has created the recording, so views learn its id. */
+  | { kind: 'state' };
 
 const MAX_BUFFERED_EVENTS = 2000;
 
@@ -60,6 +64,8 @@ export class EntitySession {
   private config: EntitySessionConfig;
   private readonly listeners = new Set<(message: EntityStreamMessage) => void>();
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Each snapshot section as last streamed. */
+  private readonly sent = new Map<string, string>();
   private unsubscribe: (() => void) | null = null;
   private recorder: EntityRecorder | null = null;
   private readonly sessionsDir: string | null;
@@ -68,7 +74,7 @@ export class EntitySession {
     private readonly createEvaluator: (kind: EvaluatorKind) => Evaluator | undefined,
     config: Partial<EntitySessionConfig> = {},
     /** `conversations` keeps worker conversations with the session's recording, so a resumed session continues them. */
-    private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(c.reasoning, conversations),
+    private readonly createMind: (config: EntitySessionConfig, conversations: ConversationStore) => Mind = (c, conversations) => new PiAiMind(c.reasoning, conversations, priceModelCall),
     /** Where to record sessions; null records nothing. */
     options: { sessionsDir?: string | null } = {},
   ) {
@@ -157,6 +163,7 @@ export class EntitySession {
         catch (error) { console.warn('[entity] session recording unavailable:', error instanceof Error ? error.message : error); }
       }
       this.entity.start();
+      this.broadcast({ kind: 'state' });
     } else if (action === 'pause') this.entity.pause();
     else if (action === 'resume') this.entity.resume();
     else if (action === 'reset') {
@@ -173,7 +180,8 @@ export class EntitySession {
   }
 
   /** Work view actions on one worker. */
-  worker(id: string, action: 'message' | 'stop', text = ''): string {
+  worker(id: string, action: 'message' | 'stop' | 'rename', text = ''): string {
+    if (action === 'rename') return this.entity.renameWorker(id, text);
     return action === 'message' ? this.entity.messageWorker(id, text) : this.entity.stopWorker(id);
   }
 
@@ -214,7 +222,17 @@ export class EntitySession {
     if (this.snapshotTimer) return;
     this.snapshotTimer = setTimeout(() => {
       this.snapshotTimer = null;
-      this.broadcast({ kind: 'snapshot', snapshot: this.entity.snapshot() });
+      // Only what changed: a client has the full state from when it connected, and every patch since.
+      const snapshot = this.entity.snapshot();
+      const patch: Partial<EntitySnapshot> = { t: snapshot.t };
+      for (const [key, value] of Object.entries(snapshot)) {
+        if (key === 't') continue;
+        const json = JSON.stringify(value);
+        if (this.sent.get(key) === json) continue;
+        this.sent.set(key, json);
+        (patch as Record<string, unknown>)[key] = value;
+      }
+      this.broadcast({ kind: 'snapshot', snapshot: patch });
     }, delay);
   }
 }

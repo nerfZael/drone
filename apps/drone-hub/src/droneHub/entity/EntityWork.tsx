@@ -34,6 +34,8 @@ export interface WorkItem {
   replyTo?: number;
   group?: string;
   waitFor?: string;
+  /** The worker it was dispatched to wait for; unlike waitFor, kept once the wait is over. */
+  after?: string;
   /** The worker holding a file this one needs, when blocked. */
   blockedBy?: string;
 }
@@ -49,76 +51,58 @@ export const STATE_COLOR: Record<WorkerState, string> = {
 };
 
 /** Derives the Work view from a snapshot and the event log. Pure, so it is cheap to rerun on every event. */
-export function deriveWork(snapshot: EntitySnapshot, events: EntityEvent[]): { workers: WorkItem[]; head?: { reason: string; since: number }; costTotal: number; tokensTotal: number } {
+export function deriveWork(snapshot: EntitySnapshot, events: EntityEvent[]): { workers: WorkItem[]; head?: { reason: string; since: number }; costTotal: number; tokensTotal: number; usageDetail: string } {
   const byLimb = new Map<string, EntityEvent[]>();
   const push = (id: string, e: EntityEvent) => { const list = byLimb.get(id); if (list) list.push(e); else byLimb.set(id, [e]); };
   const messages = new Map<number, EntityEvent>();
   const spawned = new Map<string, EntityEvent>();
   const summaries = new Map<string, EntityEvent>();
-  let costTotal = 0;
-  let tokensTotal = 0;
   for (const e of events) {
-    if (e.type === 'chat_message' && e.by === 'user') messages.set(e.seq, e);
+    if (e.type === 'chat_message') messages.set(e.seq, e);
     if (e.type === 'limb_spawned') spawned.set(String(e.data.id), e);
     if (e.type === 'work_summary') summaries.set(String(e.data.limb), e);
-    if (e.type === 'run_finished') {
-      const usage = e.data.usage as { input?: number; output?: number; cost?: number } | null | undefined;
-      costTotal += usage?.cost ?? 0;
-      tokensTotal += (usage?.input ?? 0) + (usage?.output ?? 0);
-    }
     push(e.by, e);
     if (e.type === 'steered' || e.type === 'limb_revived') push(String(e.data.id), e);
   }
 
-  const workers = snapshot.limbs.filter(l => l.role === 'task').map((l): WorkItem => deriveWorker(l, snapshot, byLimb.get(l.id) ?? [], messages, spawned.get(l.id), summaries.get(l.id)));
+  const workers = snapshot.limbs.filter(l => l.role === 'task').map((l): WorkItem => deriveWorker(l, snapshot, byLimb.get(l.id) ?? [], messages, summaries.get(l.id)));
   const head = snapshot.limbs.find(l => l.id === 'head');
   const headRun = head?.runs.slice().sort((a, b) => b.startedAt - a.startedAt)[0];
-  return { workers, head: headRun ? { reason: headRun.reason, since: headRun.startedAt } : undefined, costTotal, tokensTotal };
+  const usage = snapshot.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 };
+  return { workers, head: headRun ? { reason: headRun.reason, since: headRun.startedAt } : undefined, costTotal: usage.cost, tokensTotal: tokens(usage), usageDetail: usageDetail(snapshot) };
 }
 
-function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], messages: Map<number, EntityEvent>, spawn: EntityEvent | undefined, summary: EntityEvent | undefined): WorkItem {
-  let cost = 0;
-  let tokens = 0;
+function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], messages: Map<number, EntityEvent>, summary: EntityEvent | undefined): WorkItem {
   let lastCall: EntityEvent | undefined;
   let lastDone: EntityEvent | undefined;
-  let lastSaid: EntityEvent | undefined;
   for (const e of own) {
-    if (e.type === 'run_finished') {
-      const usage = e.data.usage as { input?: number; output?: number; cost?: number } | null | undefined;
-      cost += usage?.cost ?? 0;
-      tokens += (usage?.input ?? 0) + (usage?.output ?? 0);
-    }
     if (e.type === 'tool_called') lastCall = e;
     if (e.type === 'tool_done') lastDone = e;
-    if (e.type === 'chat_message') lastSaid = e;
   }
-  const replyTo = l.replyTo !== undefined ? messages.get(l.replyTo) : undefined;
-  const userSpokeAfter = (t: number) => [...messages.values()].some(m => m.t > t);
+  const question = l.asking !== undefined ? messages.get(l.asking) : undefined;
   // A call is in flight only while its run is: an aborted run (Pause, kill) leaves a call without tool_done.
   const inFlight = lastCall && l.runs.some(r => r.id === lastCall!.data.run) && (!lastDone || lastDone.t < lastCall.t || lastDone.data.run !== lastCall.data.run) ? lastCall : undefined;
-  const failedLast = lastDone && lastDone.data.ok === false && (!lastCall || lastCall.t <= lastDone.t) ? lastDone : undefined;
   const nowOf = (e: EntityEvent) => ({ verb: VERBS[String(e.data.name)] ?? String(e.data.name), object: String(e.data.summary ?? '') || undefined, at: e.t });
 
   let state: WorkerState;
   let label: string;
   let now: WorkItem['now'];
-  let blockedBy: string | undefined;
   if (l.status === 'done') { state = 'done'; label = 'done'; }
   else if (l.status === 'queued') { state = 'wait'; label = 'queued'; }
   else if (l.status === 'waiting') { state = 'wait'; label = l.waitFor ? `after ${nameOf(snapshot, l.waitFor)}` : 'waiting'; }
   else if (l.status !== 'running') { state = l.status === 'failed' ? 'need' : 'stop'; label = l.status === 'failed' ? 'failed' : 'stopped'; }
   else if (inFlight) { const n = nowOf(inFlight); state = 'act'; label = n.verb; now = n; }
-  else if (failedLast && /^(refused|output stopped)/.test(String(failedLast.data.note))) {
+  else if (l.blockedBy) {
     state = 'need'; label = 'blocked';
-    blockedBy = /claimed by (\S+?)[\s(]/.exec(String(failedLast.data.note))?.[1];
-    now = { verb: 'blocked:', object: withNames(snapshot, String(failedLast.data.note).replace(/^refused: /, '').replace(/ since [\d.]+s ago$/, '')).slice(0, 120), at: failedLast.t };
+    now = { verb: 'blocked:', object: `"${l.blockedBy.path}" is held by ${nameOf(snapshot, l.blockedBy.limb)}`, at: lastDone?.t ?? l.createdAt };
   } else if (l.runs.length) {
     const start = Math.max(...l.runs.map(r => r.startedAt), lastDone?.t ?? -Infinity);
     state = 'think'; label = 'thinking';
     if (lastCall) now = { ...nowOf(lastCall), verb: `last: ${nowOf(lastCall).verb}` };
-  } else if (lastSaid && /\?\s*$/.test(String(lastSaid.data.text)) && !userSpokeAfter(lastSaid.t)) {
+  } else if (l.asking !== undefined) {
+    // It asked something it needs answered and waits for it.
     state = 'need'; label = 'asking you';
-    now = { verb: 'asked', object: String(lastSaid.data.text).slice(0, 90), at: lastSaid.t };
+    now = { verb: 'asked', object: String(question?.data.text ?? '').slice(0, 90), at: question?.t ?? l.createdAt };
   } else { state = 'wait'; label = 'idle'; }
 
   const s = summary?.data as WorkItem['steps'] | undefined;
@@ -126,19 +110,37 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
     id: l.id, name: l.name, state, label, now,
     steps: s ? { done: s.done ?? [], doing: s.doing ?? [], next: s.next ?? [], blocker: s.blocker } : undefined,
     model: l.model?.split('/').pop(),
-    parent: spawn?.data.fork_of ? String(spawn.data.fork_of) : undefined,
+    parent: l.forkOf,
     claims: l.claims ?? [],
     durationMs: (l.endedAt ?? snapshot.t) - l.createdAt,
-    cost, tokens,
+    cost: l.usage?.cost ?? 0, tokens: l.usage ? tokens(l.usage) : 0,
     result: l.result,
-    status: l.status, blockedBy, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor,
+    status: l.status, blockedBy: l.blockedBy?.limb, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor, after: l.after,
   };
+}
+
+type Usage = EntitySnapshot['usage'];
+/** Every token a call carried, cached ones included: the context it really used. */
+const tokens = (u: Pick<Usage, 'input' | 'output'> & Partial<Usage>) => u.input + u.output + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+const count = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+/** Hover text for the session's spend: tokens by kind, what summaries and senses took, and calls with no known price. */
+function usageDetail(snapshot: EntitySnapshot): string {
+  const u = snapshot.usage;
+  if (!u) return 'Model cost this session';
+  const lines = [
+    `Model cost this session, at list prices (subscription models too): $${u.cost.toFixed(4)}`,
+    `Input ${count(u.input)} · cache read ${count(u.cacheRead)} · cache write ${count(u.cacheWrite)} · output ${count(u.output)}`,
+  ];
+  const by = snapshot.usageBy;
+  if (by?.summaries && tokens(by.summaries)) lines.push(`Work summaries: $${by.summaries.cost.toFixed(4)}`);
+  if (by?.senses && tokens(by.senses)) lines.push(`Senses (Jev): $${by.senses.cost.toFixed(4)}`);
+  if (u.unpriced) lines.push(`${u.unpriced} call${u.unpriced === 1 ? '' : 's'} with no known price, not included`);
+  return lines.join('\n');
 }
 
 /** A worker's name for user-facing text; ids are for the runtime. */
 const nameOf = (snapshot: EntitySnapshot, id: string) => snapshot.limbs.find(l => l.id === id)?.name ?? id;
-/** Replaces worker ids in runtime text (like "claimed by worker-3") with their names. */
-const withNames = (snapshot: EntitySnapshot, text: string) => text.replace(/\b(?:worker|task)-\d+\b/g, id => nameOf(snapshot, id));
 
 export const clock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));

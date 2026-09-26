@@ -72,6 +72,7 @@ export const TOOL_SCHEMAS = {
   release: { type: 'object', additionalProperties: false, properties: { paths: { type: 'array', items: { type: 'string' }, maxItems: 50 } } },
   share: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 1000 } } },
   finish_task: { type: 'object', additionalProperties: false, required: ['result'], properties: { result: { type: 'string', maxLength: 8000 } } },
+  ask: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 4000 } } },
 } satisfies Record<string, Schema>;
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;
@@ -95,7 +96,7 @@ export function runtimeTools({ role, codeLimbs, review }: ToolPolicy): ToolName[
     case 'head': return [...ROUTER, ...(review === 'head' ? ['amend' as const] : []), ...code, 'stop_output', 'resume_output', 'note', 'set_timer'];
     case 'voice': return ['note', ...ROUTER, 'handoff'];
     case 'reviewer': return ['amend', 'handoff', 'note'];
-    case 'task': return [...code, 'stop_output', 'resume_output', 'note', 'set_timer', 'cancel', 'claim', 'release', 'share', 'finish_task'];
+    case 'task': return [...code, 'stop_output', 'resume_output', 'note', 'set_timer', 'cancel', 'claim', 'release', 'share', 'ask', 'finish_task'];
     default: return [];
   }
 }
@@ -117,7 +118,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => s
     ? 'Your verdict on one of the voice\'s answers under review: confirm, correct (shown struck through, your text below), or expand.'
     : 'Your verdict on one of the answers under review: confirm it, correct it (the original is shown struck through, your text below it), or expand it.',
   handoff: role => role === 'reviewer'
-    ? 'Wake the head for work a correction needs (starting a worker, fixing something promised but not done). The note says what.'
+    ? 'Wake the head for work a correction needs (starting a worker, fixing something promised but not done). The note says what. Never use it to say that nothing is needed.'
     : 'Wake the head (slower, smarter) for anything you should not handle yourself. The note says what is needed.',
   set_watch: 'Install a watch: a code reflex that reacts in ~0 ms without you.',
   run_program: 'Run a JavaScript program (the body of an async function) as a code limb.',
@@ -129,4 +130,5 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => s
   release: 'Release your claims (all, or the given paths).',
   share: 'Share a discovery that other workers should know (e.g. a root cause).',
   finish_task: 'Finish: first say your answer to the user, then call this with a one-line summary.',
+  ask: 'Ask the user something you need answered before you can go on. It is posted in the chat and ends your turn: you wait, and their answer wakes you with your conversation intact. Do not also finish.',
 };

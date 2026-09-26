@@ -1,3 +1,9 @@
+/**
+ * What model calls used. `input` excludes cached tokens; output includes reasoning. `cost` is in USD at list price
+ * (also for subscription models), or null when the model has no known price.
+ */
+export interface ModelUsage { input: number; output: number; cacheRead?: number; cacheWrite?: number; cost?: number | null }
+
 /** A tool as offered to a model. `parameters` is plain JSON schema. */
 export interface ToolSpec {
   name: string;
@@ -19,6 +25,11 @@ export interface MindRunInput {
   callTool(name: string, args: Record<string, unknown>): Promise<string>;
   signal: AbortSignal;
   /**
+   * True once the limb has ended its turn with a tool (finish_task, ask): the mind should stop after the current
+   * step and return normally, with its usage, rather than ask the model for another step.
+   */
+  ended?(): boolean;
+  /**
    * Set for task limbs: the mind should keep conversation history under this key across runs,
    * until {@link Mind.forget} is called. Reactive runs have no key and start fresh.
    */
@@ -32,8 +43,7 @@ export interface MindRunResult {
   stopReason?: 'done' | 'max_steps';
   /** Final assistant text, if any. The user never sees it unless the limb calls `say`. */
   text?: string;
-  /** cost: model price in USD for this run, when the provider reports it. */
-  usage?: { input: number; output: number; cacheRead?: number; cost?: number };
+  usage?: ModelUsage;
 }
 
 /** Runs one LLM limb wake. The Hub implements it with a real model; tests use a scripted one. */

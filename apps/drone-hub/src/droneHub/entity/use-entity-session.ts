@@ -5,7 +5,8 @@ import { requestJson } from '../http';
 export type EntityConfig = { headModel: string; taskModel: string; voiceModel: string; reasoning: string; evaluator: 'off' | 'jev' | 'qwen'; workspace: string; allowCommands: boolean; summaries?: boolean; review?: 'off' | 'separate' | 'head' };
 type EntityState = { config: EntityConfig; snapshot: EntitySnapshot; events: EntityEvent[]; sessionId: string | null };
 
-const MAX_EVENTS = 3000;
+/** The same as the Hub sends on connect, so a reconnect shows what the live view showed. */
+const MAX_EVENTS = 2000;
 
 /** Live view of the Hub's entity session: initial state, then events and snapshots over SSE. */
 export function useEntitySession(enabled: boolean) {
@@ -29,8 +30,9 @@ export function useEntitySession(enabled: boolean) {
     });
     source.addEventListener('snapshot', (raw) => {
       try {
-        const snapshot = JSON.parse((raw as MessageEvent<string>).data) as EntitySnapshot;
-        setState((current) => current ? { ...current, snapshot } : current);
+        // Only the sections that changed since the last one; the rest stay as they were.
+        const patch = JSON.parse((raw as MessageEvent<string>).data) as Partial<EntitySnapshot>;
+        setState((current) => current ? { ...current, snapshot: { ...current.snapshot, ...patch } } : current);
       } catch { /* ignore malformed snapshots */ }
     });
     return () => source.close();
@@ -52,7 +54,7 @@ export function useEntitySession(enabled: boolean) {
     control: (action: 'start' | 'pause' | 'resume' | 'reset') => post('/api/entity/control', { action }),
     input: (type: string, data: Record<string, unknown>) => post('/api/entity/input', { type, data }),
     configure: (update: Partial<EntityConfig>) => post('/api/entity/config', update),
-    worker: (id: string, action: 'message' | 'stop', text?: string) => post('/api/entity/worker', { id, action, text }),
+    worker: (id: string, action: 'message' | 'stop' | 'rename', text?: string) => post('/api/entity/worker', { id, action, text }),
     reroute: (seq: number, how: 'separate' | 'fork') => post('/api/entity/reroute', { seq, how }),
   };
 }

@@ -127,9 +127,12 @@ export function useEntityReplay() {
     const shown = events.slice(0, index + 1);
     let snapshot = { ...states[frame], t: event?.t ?? 0 } as EntitySnapshot;
     if (fromLog) {
-      // Frames carry the channels' world, levels and senses; limbs, stops, notes and health are the log's.
+      // Frames carry the channels' world, levels and senses; limbs, stops, notes, health and usage are the log's.
       const runtime = replayRuntime(shown, events.find((e) => e.type === 'session_started')?.data.setup as never);
-      snapshot = { ...snapshot, limbs: snapshotLimbs(runtime), stops: runtime.stops, self: { notes: runtime.notes }, health: runtime.health };
+      snapshot = {
+        ...snapshot, limbs: snapshotLimbs(runtime), stops: runtime.stops, self: { notes: runtime.notes }, health: runtime.health,
+        usage: runtime.usage, usageBy: runtime.usageBy,
+      };
     }
     return { events: shown, snapshot, event };
   }, [recording, states, events, index, fromLog]);

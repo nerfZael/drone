@@ -1,11 +1,11 @@
 import { Levels, type Channel, type EffectSpec } from './channel.js';
 import { JevService, type Evaluator, type JevOptions, type SenseInfo } from './jev.js';
 import { EventLog, isEntityActor, matches } from './log.js';
-import type { Mind, ToolSpec } from './mind.js';
+import type { Mind, ModelUsage, ToolSpec } from './mind.js';
 import { describeToolArgs, toolResultOk, type Summarizer, type WorkSummary } from './summary.js';
 import { runProgram, type ProgramOutcome } from './program.js';
 import { headSystemPrompt, reviewerSystemPrompt, taskSystemPrompt, voiceSystemPrompt } from './prompts.js';
-import { initialRuntimeState, reduceRuntime, snapshotLimbs, WORKER_ACTIVE, type Claim, type LimbSnapshot, type CodeLimb, type LimbState, type LimbStatus, type LlmLimb, type OutputStop, type ReactiveLimb, type RuntimeSetup, type RuntimeState, type WatchLimb, type WorkerLimb } from './runtime-state.js';
+import { initialRuntimeState, reduceRuntime, snapshotLimbs, WORKER_ACTIVE, type Claim, type LimbSnapshot, type CodeLimb, type LimbState, type LimbStatus, type LlmLimb, type OutputStop, type ReactiveLimb, type RuntimeSetup, type RuntimeState, type Usage, type WatchLimb, type WorkerLimb } from './runtime-state.js';
 import { toJsonSchema, validate } from './schema.js';
 import { mayUseEffect, runtimeTools, TOOL_DESCRIPTIONS, TOOL_SCHEMAS, type ToolName } from './tools.js';
 import type { Caller, EntityEvent, EventMatcher } from './types.js';
@@ -98,6 +98,9 @@ export interface EntitySnapshot {
   limbs: LimbSnapshot[];
   senses: SenseInfo[];
   jev: { available: boolean; calls: number; perMinute: number };
+  /** What every model call in the session has used, and the part of it that went to work summaries and senses. */
+  usage: Usage;
+  usageBy: { summaries: Usage; senses: Usage };
 }
 
 /** Workers waiting for a slot, at most. */
@@ -205,8 +208,8 @@ export class Entity {
     this.log.append('session_resumed', 'user', { paused_for_ms: pausedFor });
     for (const wait of this.pausable) this.schedulePausable(wait);
     for (const resolve of this.pauseWaiters.splice(0)) resolve();
-    this.wake('head', `resumed after ${Math.round(pausedFor / 1000)} s pause`);
-    for (const limb of this.workers()) if (limb.status === 'running' && !limb.runs.length) this.wake(limb.id, 'resumed');
+    this.wake('head', `resumed after ${Math.round(pausedFor / 1000)} s pause; workers carry on by themselves, so say nothing unless the user needs to know something that is not in the chat yet`);
+    for (const limb of this.workers()) if (limb.status === 'running' && !limb.runs.length && limb.asking === undefined) this.wake(limb.id, 'resumed');
   }
 
   /** Aborts everything and starts a clean session. Returns the old log so the host can archive it. */
@@ -345,10 +348,10 @@ export class Entity {
   }
 
   /** Answers of a review run that did not complete: requeued after a pause, otherwise marked unchecked. */
-  private abandonReview(limb: LlmLimb, why: 'aborted' | 'failed'): void {
+  private abandonReview(limb: LlmLimb, why: 'aborted' | 'failed' | 'retry'): void {
     if (limb.id !== this.reviewerId() || !this.state.reviewing.length || limb.runs.length || this.status === 'idle') return;
     const seqs = [...this.state.reviewing];
-    if (why === 'aborted' && this.status === 'paused') { this.log.append('review_requeued', 'system', { seqs }); return; }
+    if (why === 'retry' || (why === 'aborted' && this.status === 'paused')) { this.log.append('review_requeued', 'system', { seqs }); return; }
     for (const seq of seqs) this.log.append('message_reviewed', limb.id, { seq, verdict: 'unchecked', reason: why });
   }
 
@@ -396,7 +399,7 @@ export class Entity {
     }
     if (this.config.review !== 'off') this.maybeReview(now);
     // Standing watches and programs of the head (a mirror, the draft sense) need no heartbeat; only work in progress does.
-    const active = this.workers().some(l => WORKER_ACTIVE.includes(l.status));
+    const active = this.workers().some(l => WORKER_ACTIVE.includes(l.status) && l.asking === undefined);
     const head = this.llm('head')!;
     if (active && !head.runs.length && now - (head.lastRunAt ?? 0) > this.config.headHeartbeatMs) this.wake('head', 'heartbeat');
   }
@@ -671,10 +674,13 @@ export class Entity {
       if (stale) return `stale: "${stale.type}" happened after you read the state (#${stale.seq}). Nothing was done; re-check and retry if still right.`;
     }
     if (spec.paths) {
-      const refused = this.claimPaths(limb.kind === 'code' ? this.llm(limb.parent ?? 'head')! : limb, spec.paths(args), 'writing');
+      const writer = limb.kind === 'code' ? this.llm(limb.parent ?? 'head')! : limb;
+      const refused = this.claimPaths(writer, spec.paths(args), 'writing');
       if (refused) {
-        this.wake('head', `claim conflict: ${caller.limbId} tried to write ${refused}`);
-        return `refused: ${refused}. Nothing was written. Coordinate (share a note, wait, or work elsewhere) instead of overwriting.`;
+        // Logged, so views can show who blocks whom without reading the refusal text.
+        this.log.append('write_refused', writer.id, { path: refused.path, holder: refused.holder.limb });
+        this.wake('head', `claim conflict: ${caller.limbId} tried to write ${refused.text}`);
+        return `refused: ${refused.text}. Nothing was written. Coordinate (share a note, wait, or work elsewhere) instead of overwriting.`;
       }
     }
     if (limb.kind === 'code' && !spec.readonly) {
@@ -716,18 +722,23 @@ export class Entity {
     const notices = worker ? [...worker.notices] : [];
     const why = [reason, ...notices].filter(Boolean).join(' | ').slice(0, 3000);
     const readSeq = this.log.length;
+    /** Where this run's new events begin, so a retry after a crash is shown them again. */
+    const shownFrom = limb.seenSeq;
     const prompt = this.render(limb, why);
     this.log.append('run_started', limb.id, { run: runId, reason: why, ...(notices.length ? { notices: notices.length } : {}) });
     const startedAt = this.now();
     const tools = this.toolsFor(limb);
     const allowed = new Set(tools.map(t => t.name));
+    /** Set when the limb ends its turn itself (finish_task, ask); the run then stops after this step. */
+    let ended = false;
     this.mind.run({
       limbId: limb.id, runId, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model,
-      system: this.systemPrompt(limb), prompt, tools, signal: abort.signal,
+      system: this.systemPrompt(limb), prompt, tools, signal: abort.signal, ended: () => ended,
       sessionKey: worker ? limb.id : undefined,
       maxSteps: worker ? this.config.taskMaxSteps : this.config.headMaxSteps,
       callTool: async (name, args) => {
         if (abort.signal.aborted) return 'error: this run was stopped';
+        if (ended) return 'error: your turn is over; stop here.';
         if (!allowed.has(name)) return `error: you cannot use "${name}"; your tools are ${[...allowed].join(', ')}`;
         // A cancelled worker may still tell the user where it got to and finish; everything else is refused.
         if (worker?.cancelRequested && name !== 'say' && name !== 'finish_task' && name !== 'note' && !this.effects.get(name)?.spec.readonly) {
@@ -747,10 +758,10 @@ export class Entity {
           return 'superseded: a newer run of you has woken with newer events and is handling things now. Nothing was done. Leave a note if you know something it should, then stop.';
         }
         this.log.append('tool_called', limb.id, { run: runId, name, summary: describeToolArgs(name, args ?? {}) });
-        const result = await this.callTool(limb, runId, readSeq, abort, name, args ?? {});
+        const result = await this.callTool(limb, runId, readSeq, () => { ended = true; }, name, args ?? {});
         const ok = toolResultOk(result);
         // Busy workers hear about steers, discoveries and claims with their next tool result, without being stopped.
-        const updates = worker && worker.status === 'running' && !abort.signal.aborted ? [...worker.notices] : [];
+        const updates = worker && worker.status === 'running' && !ended ? [...worker.notices] : [];
         this.log.append('tool_done', limb.id, { run: runId, name, ok, ...(ok ? {} : { note: result.slice(0, 200) }), ...(updates.length ? { notices: updates.length } : {}) });
         if (worker) this.maybeSummarize(worker);
         return updates.length ? `${result}\n\n[updates while you worked]\n${updates.join('\n')}` : result;
@@ -760,7 +771,8 @@ export class Entity {
       live.aborts.delete(runId);
       this.wakeIfPending(limb);
       this.finishReview(limb);
-      if (worker && worker.status === 'running' && !abort.signal.aborted) {
+      // A worker that ended its turn itself (finished, or asked and waits) is already where it should be.
+      if (worker && worker.status === 'running' && !abort.signal.aborted && !ended) {
         if (worker.notices.length) this.wake(worker.id, 'updates arrived');
         else if (result.stopReason === 'max_steps') {
           // Out of turns while still working: continue with the same conversation, up to a cap.
@@ -768,23 +780,29 @@ export class Entity {
             this.log.append('task_continued', worker.id, { continuations: worker.continuations + 1 });
             this.wake(worker.id, 'you ran out of turns in your last run; continue where you left off, and call finish_task when done');
           } else this.finishTask(worker, `stopped after ${worker.continuations} continuations without finishing (step limit)`, 'failed');
+        } else if (worker.asking !== undefined && !worker.cancelRequested) {
+          // It asked the user something it needs: it waits for the answer, which wakes it (see steer), instead of finishing.
         } else this.finishTask(worker, result.text?.trim() || this.lastSaidBy(worker.id) || 'ended without a summary', worker.cancelRequested ? 'cancelled' : 'done');
       }
     }, error => {
       const aborted = abort.signal.aborted;
-      this.log.append('run_finished', limb.id, { run: runId, ms: Math.round(this.now() - startedAt), ...(aborted || this.status !== 'running' ? { aborted: true } : { failed: true }) });
+      // What the steps before the failure used is spent all the same; a mind can attach it to the error.
+      const used = (error as { usage?: ModelUsage } | null)?.usage;
+      this.log.append('run_finished', limb.id, { run: runId, ms: Math.round(this.now() - startedAt), ...(aborted || this.status !== 'running' ? { aborted: true } : { failed: true }), ...(used ? { usage: used } : {}) });
       live.aborts.delete(runId);
       // The conversation may not hold what this run was shown, so the next wake shows everything again.
       live.sent = undefined;
       this.wakeIfPending(limb);
-      // A review that crashed or was aborted checked nothing: never show its answers as confirmed.
-      this.abandonReview(limb, aborted ? 'aborted' : 'failed');
-      if (aborted || this.status !== 'running') {
+      const crashed = !aborted && this.status === 'running';
+      const retry = crashed && this.recentCrashes(limb) < this.config.restartMax;
+      // A review that crashed or was aborted checked nothing: never show its answers as confirmed. Retried, it looks again.
+      this.abandonReview(limb, aborted ? 'aborted' : retry ? 'retry' : 'failed');
+      if (!crashed) {
         // Paused mid-run: if the session was resumed before this run wound down, resume() found it still busy and skipped it.
-        if (this.status === 'running' && worker && worker.status === 'running' && !worker.runs.length) this.wake(worker.id, 'resumed');
+        if (this.status === 'running' && worker && worker.status === 'running' && !worker.runs.length && worker.asking === undefined) this.wake(worker.id, 'resumed');
         return;
       }
-      this.crashed(limb, error instanceof Error ? error.message : String(error));
+      this.crashed(limb, error instanceof Error ? error.message : String(error), why, runId, shownFrom);
     });
   }
 
@@ -806,15 +824,27 @@ export class Entity {
     this.wake(limb.id, reason);
   }
 
-  private crashed(limb: LlmLimb, message: string): void {
-    this.log.append('limb_failed', limb.id, { error: message.slice(0, 500) });
-    this.addHealth(`${limb.id} crashed: ${message.slice(0, 200)}`);
+  private recentCrashes(limb: LlmLimb): number {
     const now = this.now();
-    if (limb.crashes.filter(t => now - t < this.config.restartWindowMs).length > this.config.restartMax) {
+    return limb.crashes.filter(t => now - t < this.config.restartWindowMs).length;
+  }
+
+  /**
+   * A run that failed (a provider error, say) is retried, at most restartMax times in restartWindowMs. A worker
+   * continues its conversation; the head and voice run again for what woke them, unless a newer run already took
+   * over; a review goes back to the queue. Past the cap a worker fails, and the others wait for the next event.
+   */
+  private crashed(limb: LlmLimb, message: string, reason: string, runId: string, shownFrom: number): void {
+    const retry = this.recentCrashes(limb) < this.config.restartMax;
+    this.log.append('limb_failed', limb.id, { error: message.slice(0, 500), retry, ...(retry ? { shown_from: shownFrom } : {}) });
+    this.addHealth(`${limb.id} crashed: ${message.slice(0, 200)}`);
+    if (!retry) {
       if (limb.role === 'task') this.finishTask(limb, `failed: ${message}`, 'failed');
-      return; // the head stays up but is not retried; the next event wakes it again
+      return;
     }
-    if (limb.role === 'task' && limb.status === 'running') this.wake(limb.id, `restart after crash: ${message.slice(0, 200)}`);
+    const why = `retry after a crash (${message.slice(0, 120)}): ${reason}`;
+    if (limb.role === 'task') { if (limb.status === 'running') this.wake(limb.id, why); }
+    else if (limb.role !== 'reviewer' && limb.latestRun === runId) this.wake(limb.id, why);
   }
 
   private finishTask(limb: WorkerLimb, result: string, status: 'done' | 'failed' | 'cancelled' | 'killed'): void {
@@ -975,6 +1005,16 @@ export class Entity {
   /** A message from the user straight to one worker (the Work view's "Message"). */
   messageWorker(id: string, text: string): string { return this.steer('user', id, text); }
 
+  /** The user renames a worker; every view and every limb's state use the new name. */
+  renameWorker(id: string, name: string): string {
+    const worker = this.workerOf(id);
+    const clean = name.replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!worker) return `error: no worker "${id}"`;
+    if (!clean) return 'error: the name is empty';
+    if (clean !== worker.name) this.log.append('limb_renamed', 'user', { id, name: clean });
+    return `${id} is now "${clean}"`;
+  }
+
   /** Stops a worker on the user's request (the Work view's "Stop"). */
   stopWorker(id: string): string {
     if (!this.workerOf(id)) return `error: no worker "${id}"`;
@@ -994,7 +1034,11 @@ export class Entity {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
     summarizer.summarize({ task: limb.task ?? '', activity: this.activityOf(limb) }, controller.signal)
-      .then(summary => { if (this.status !== 'idle') this.log.append('work_summary', 'system', { limb: limb.id, ...clean(summary) }); })
+      .then(summary => {
+        if (this.status === 'idle') return;
+        this.log.append('work_summary', 'system', { limb: limb.id, ...clean(summary) });
+        if (summary.usage) this.log.append('usage', 'system', { kind: 'summaries', limb: limb.id, ...summary.usage });
+      })
       .catch(error => { if (this.status !== 'idle') this.addHealth(`summary for ${limb.id} failed: ${error instanceof Error ? error.message : String(error)}`); })
       .finally(() => { clearTimeout(timer); live.summarizing = false; });
   }
@@ -1024,10 +1068,11 @@ export class Entity {
     return undefined;
   }
 
-  private claimPaths(limb: LlmLimb, paths: string[], note: string): string | null {
+  /** Claims the paths for a limb, or says which one another limb holds. */
+  private claimPaths(limb: LlmLimb, paths: string[], note: string): { path: string; holder: Claim; text: string } | null {
     for (const path of paths) {
       const holder = this.claimHolder(path, limb.id);
-      if (holder) return `"${path}" is claimed by ${holder.limb} (${holder.note || 'no note'}) since ${this.ago(holder.since)}`;
+      if (holder) return { path, holder, text: `"${path}" is claimed by ${holder.limb} (${holder.note || 'no note'}) since ${this.ago(holder.since)}` };
     }
     for (const path of paths) if (this.state.claims[path]?.limb !== limb.id) this.log.append('claimed', limb.id, { path, note });
     return null;
@@ -1093,7 +1138,7 @@ export class Entity {
   }
 
   /** A runtime tool or channel effect called by an LLM limb. Whether it may use it was checked against runtimeTools already. */
-  private callTool(limb: LlmLimb, runId: string, readSeq: number, abort: AbortController, name: string, args: Record<string, unknown>): Promise<string> | string {
+  private callTool(limb: LlmLimb, runId: string, readSeq: number, endTurn: () => void, name: string, args: Record<string, unknown>): Promise<string> | string {
     const caller: Caller = { limbId: limb.id, kind: 'llm', runId, readSeq };
     const worker = limb.role === 'task' ? limb : undefined;
     const schema = TOOL_SCHEMAS[name as ToolName];
@@ -1146,7 +1191,7 @@ export class Entity {
       case 'claim': {
         const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
         const refused = this.claimPaths(limb, paths, String(args.note ?? ''));
-        return refused ? `refused: ${refused}` : `claimed ${paths.join(', ')}`;
+        return refused ? `refused: ${refused.text}` : `claimed ${paths.join(', ')}`;
       }
       case 'release': return `released ${this.releaseClaims(limb.id, Array.isArray(args.paths) ? args.paths.map(String) : undefined)} claim(s)`;
       case 'share':
@@ -1158,9 +1203,18 @@ export class Entity {
         this.log.append('handoff', limb.id, { note: String(args.note ?? '').slice(0, 2000) });
         this.wake('head', `${limb.role} handed off: ${String(args.note ?? '').slice(0, 300)}`);
         return 'handed off to the head';
+      case 'ask': {
+        if (!worker) return 'error: only workers ask';
+        // Posted in the main chat even for a batch worker: the user must see it to answer.
+        return this.commit(caller, 'say', { text: String(args.question ?? ''), question: true, thread: false, ...(worker.replyTo !== undefined ? { reply_to: worker.replyTo } : {}) }).then(result => {
+          if (!result.startsWith('sent')) return result;
+          endTurn();
+          return 'asked; you wait for the answer, which wakes you';
+        });
+      }
       case 'finish_task':
         if (!worker) return 'error: only workers finish tasks';
-        abort.abort();
+        endTurn();
         this.finishTask(worker, String(args.result ?? ''), worker.cancelRequested ? 'cancelled' : 'done');
         return 'task finished';
       default:
@@ -1360,6 +1414,8 @@ export class Entity {
       limbs: snapshotLimbs(this.state),
       senses: this.jev.list(),
       jev: { available: this.jev.available, calls: jev.calls, perMinute: jev.perMinute },
+      usage: { ...this.state.usage },
+      usageBy: { summaries: { ...this.state.usageBy.summaries }, senses: { ...this.state.usageBy.senses } },
     };
   }
 }
@@ -1368,7 +1424,7 @@ export class Entity {
 export const DRAFT_PAUSE_MS = 700;
 export const DRAFT_ATTENTION_QUESTION = 'Does the unsent draft already contain a question or request to the entity that is clear enough to answer or act on?';
 
-const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'senses_dropped', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'watch_fired', 'health', 'timer_set', 'review_started', 'review_requeued']);
+const HIDDEN_EVENTS = new Set(['run_started', 'run_finished', 'draft_changed', 'sensed', 'senses_dropped', 'judged', 'program_log', 'tool_called', 'tool_done', 'work_summary', 'usage', 'watch_fired', 'health', 'timer_set', 'review_started', 'review_requeued']);
 
 
 

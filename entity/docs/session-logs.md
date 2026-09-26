@@ -21,7 +21,7 @@ The Hub also serves them: `GET /api/entity/sessions` lists them (newest first, w
 
 The snapshot after event N is every frame with `seq <= N` applied in order, each patch replacing whole sections (several frames can share a `seq`). So channel state (chat, keypad, held keys) is exact at every step. The runtime's own state (limbs with their status and runs, watches and programs, output stops, claims, notes, health) is rebuilt from `events.jsonl` alone with `replayRuntime` and `snapshotLimbs` from `@entity/core/state`, which has no Node dependencies; the bench's replay does exactly that, so a limb's status is exact at every event too. Older recordings, whose logs lack the setup, are replayed from their frames.
 
-The live view keeps the last 2000 events from the server; replay loads a session's whole log.
+The live view keeps the last 2000 events from the server; replay loads a session's whole log. It follows the session over `GET /api/entity/stream` (server-sent events): `state` is the whole state (on connect, after Start and after Reset), `event` is one logged event, and `snapshot` carries only the snapshot sections that changed since the last one, plus `t`; the bench merges it into what it has.
 
 ## Replay in the bench
 

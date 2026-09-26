@@ -90,7 +90,7 @@ With Jev and code limbs off, broken or silent, the entity must still behave at l
 - **Workers don't stop short.** A worker that runs out of turns while still working is continued in the same conversation, up to 4 times, then marked failed with what it had.
 - **Heartbeat.** An internal 50 ms tick rechecks level watches. The head gets a heartbeat wake every 3 minutes while workers are running, queued or waiting, never otherwise: its own standing watches and programs (a mirror, the draft sense) don't count, so ticking costs almost nothing.
 - **Health is visible.** Jev timeouts and failed code limbs become events and show up in health. A limb that sees its reflexes are down can do the work itself.
-- **LLM limbs fail too.** A crashed worker run is retried up to 3 times in a minute, then the worker is marked failed. Every crash is logged as `limb_failed`. The head is not retried; the next event wakes it again. A backup model is not built yet.
+- **LLM limbs fail too.** A crashed run (a provider error, say) is retried up to 3 times in a minute: a worker continues its conversation, the head and voice run again for what woke them, so a user message is never lost to one failed call, and a review goes back to the queue. Past the cap a worker is marked failed. Every crash is logged as `limb_failed`. A backup model is not built yet.
 - **Answers get a second look.** With review on, a stronger model reviews every answer of the front limb and corrects it in the open ([parallel-conversation.md](parallel-conversation.md#second-looks)).
 - **Limbs can do everything the fast tiers do**, only slower. Reflexes and programs are optimisations, never the only path to a behaviour.
 

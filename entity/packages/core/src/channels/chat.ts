@@ -67,10 +67,11 @@ export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld
             text: { type: 'string', maxLength: 4000 },
             reply_to: { type: 'integer', minimum: 1, description: 'The message seq this answers (threads)' },
             thread: { type: 'boolean', description: 'Post only in your own thread, not in the main chat. Workers in a batch do this by default; pass false only for a question the user must answer.' },
+            question: { type: 'boolean', description: 'This asks the user something you need answered before you can go on. A worker then waits for the answer instead of finishing.' },
           },
         },
-        apply(args: { text: string; reply_to?: number; thread?: boolean }, ctx) {
-          ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}), ...(args.thread ? { thread: true } : {}) });
+        apply(args: { text: string; reply_to?: number; thread?: boolean; question?: boolean }, ctx) {
+          ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}), ...(args.thread ? { thread: true } : {}), ...(args.question ? { question: true } : {}) });
           return args.thread ? 'posted in your thread' : 'sent';
         },
       },

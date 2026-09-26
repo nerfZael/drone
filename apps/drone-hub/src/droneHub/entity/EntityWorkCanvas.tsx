@@ -15,7 +15,7 @@ import {
  * entity/docs/work-canvas.md. Layout is ours (work-canvas-model.ts); xyflow only pans, zooms and draws.
  */
 
-type OnWorker = (id: string, action: 'message' | 'stop', text?: string) => void;
+type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string) => void;
 
 /** What the chat and the canvas highlight together: a chat message, or a worker. */
 export type WorkLink = { message?: number; worker?: string; from?: 'chat' | 'canvas' } | null;
@@ -27,7 +27,6 @@ interface Ctx {
   selected: string | null;
   expanded: ReadonlySet<string>;
   flashing: ReadonlySet<string>;
-  names: Record<string, string>;
   nameOf(id: string): string;
   shownAs(id: string): string | undefined;
   select(id: string | null): void;
@@ -73,7 +72,6 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   const [selected, setSelected] = React.useState<string | null>(null);
   const [hovered, setHovered] = React.useState<string[] | null>(null);
   const [sizes, setSizes] = React.useState<ReadonlyMap<string, { w: number; h: number }>>(() => new Map());
-  const names = useNames(events);
   // The snapshot's clock only moves when an event arrives; folding and durations need time to pass in quiet moments too.
   const t = useLiveClock(snapshot, live);
   const timed = React.useMemo(() => (t === snapshot.t ? snapshot : { ...snapshot, t }), [snapshot, t]);
@@ -153,14 +151,15 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   }, [nodes.length, sizes.size]);
 
   const ctx: Ctx = {
-    t, live, focus, selected, expanded, flashing, names: names.map,
-    nameOf: id => names.map[id] ?? model.workers.get(id)?.name ?? id,
+    t, live, focus, selected, expanded, flashing,
+    nameOf: id => model.workers.get(id)?.name ?? id,
     shownAs: id => model.shownAs.get(id),
     select: setSelected,
     hover: (ids, next) => { setHovered(ids); onLink?.(ids ? next ?? (ids.length === 1 ? { worker: ids[0] } : null) : null); },
     toggleExpanded: id => setExpanded(prev => toggled(prev, id)),
     toggleFold: key => setOpenFolds(prev => toggled(prev, key)),
-    rename: names.set,
+    // A rename is the Hub's: every view, the chat and the entity's own state use it.
+    rename: (id, name) => { if (live && name.trim()) onWorker(id, 'rename', name.trim()); },
     reroute: live ? onReroute : undefined,
   };
   const worker = selected ? model.workers.get(selected) : undefined;
@@ -334,7 +333,7 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
   const dim = !!ctx.focus && !ctx.focus.has(cardId(w.id));
   const finished = w.state === 'done';
   return (
-    <div role="button" tabIndex={0} aria-label={`${ctx.names[w.id] ?? w.name}, ${w.label}`}
+    <div role="button" tabIndex={0} aria-label={`${w.name}, ${w.label}`}
       onClick={() => ctx.select(ctx.selected === w.id ? null : w.id)}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ctx.select(w.id); } }}
       onMouseEnter={() => ctx.hover([w.id])} onMouseLeave={() => ctx.hover(null)}
@@ -342,7 +341,7 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
       style={{ width: CARD_W }}>
       <span className="absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r" style={{ background: tone(w) }} />
       <div className="flex min-w-0 items-center gap-1.5">
-        <Name id={w.id} name={ctx.names[w.id] ?? w.name} />
+        <Name id={w.id} name={w.name} />
         <span className="ml-auto shrink-0"><CardStatus w={w} t={ctx.t} /></span>
         <button type="button" aria-expanded={open} aria-label={open ? 'Collapse' : 'Expand'} onClick={e => { e.stopPropagation(); ctx.toggleExpanded(w.id); }}
           className="shrink-0 rounded px-1 text-[12px] leading-none text-[var(--muted)] hover:bg-[var(--hover)]" style={{ transform: open ? 'rotate(180deg)' : undefined }}>⌄</button>
@@ -420,7 +419,7 @@ function GroupView({ data }: NodeProps<Node<GroupData, 'batch'>>) {
               <button key={w.id} type="button" onClick={() => ctx.select(w.id)}
                 className={`grid grid-cols-[10px_minmax(0,10em)_minmax(0,1fr)] items-center gap-1.5 rounded px-1 py-0.5 text-left text-[12px] hover:bg-[var(--hover)] ${ctx.selected === w.id ? 'bg-[var(--hover)]' : ''}`}>
                 <span style={{ color: STATE_COLOR[w.state] }}><Dot /></span>
-                <span className="truncate">{ctx.names[w.id] ?? w.name}</span>
+                <span className="truncate">{w.name}</span>
                 <span className="truncate text-[var(--muted)]">{statusText(w, ctx.nameOf)}</span>
               </button>
             ))}
@@ -429,7 +428,7 @@ function GroupView({ data }: NodeProps<Node<GroupData, 'batch'>>) {
       ) : (
         <div className="grid gap-[2px]" style={{ gridTemplateColumns: 'repeat(20, minmax(0, 1fr))' }}>
           {group.members.map(w => (
-            <button key={w.id} type="button" aria-label={`${ctx.names[w.id] ?? w.name}: ${w.label}`} title={`${ctx.names[w.id] ?? w.name} · ${w.label}\n${statusText(w, ctx.nameOf)}`}
+            <button key={w.id} type="button" aria-label={`${w.name}: ${w.label}`} title={`${w.name} · ${w.label}\n${statusText(w, ctx.nameOf)}`}
               onClick={() => ctx.select(w.id)}
               className={`aspect-square rounded-[2px] p-0 ${ctx.selected === w.id ? 'outline outline-2 outline-offset-1 outline-[var(--fg)]' : 'hover:outline hover:outline-2 hover:outline-offset-1 hover:outline-[var(--fg)]'}`}
               style={w.status === 'queued' ? { boxShadow: 'inset 0 0 0 1px var(--muted)' } : { background: STATE_COLOR[w.state], opacity: w.state === 'done' ? 0.45 : 0.85 }} />
@@ -510,7 +509,7 @@ function TopStrip({ model, t, onPick, onFit }: { model: CanvasModel; t: number; 
           </span>
         ) : null}
         <span title="Session time">{clock(t)}</span>
-        <span title={model.costTotal > 0 ? 'Model cost this session' : 'Tokens this session (subscription models report no price)'}>{spend(model.costTotal, model.tokensTotal)}</span>
+        <span title={model.usageDetail}>{spend(model.costTotal, model.tokensTotal)}</span>
       </span>
       <button type="button" onClick={onFit} className="shrink-0 rounded border border-[var(--border)] px-2 text-[var(--muted)] hover:bg-[var(--hover)]">Fit</button>
     </div>
@@ -526,7 +525,7 @@ function Drawer({ w, events, t, live, onWorker, onClose }: { w: WorkItem; events
   return (
     <aside className="absolute inset-y-0 right-0 z-10 grid w-[360px] max-w-full grid-rows-[auto_minmax(0,1fr)] border-l border-[var(--border)] bg-[var(--panel)] shadow-lg" aria-label={`${w.name} details`}>
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
-        <span className="min-w-0 truncate font-semibold" title={w.id}>{ctx.names[w.id] ?? w.name}</span>
+        <span className="min-w-0 truncate font-semibold" title={w.id}>{w.name}</span>
         <CardStatus w={w} t={t} />
         <button type="button" aria-label="Close" onClick={onClose} className="ml-auto rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]">✕</button>
       </div>
@@ -644,25 +643,6 @@ function useGhosts(nodes: WorkNode[], model: CanvasModel): WorkNode[] {
   return ghosts;
 }
 
-/** Names you gave workers, kept in this browser per session (keyed by when the session started). */
-function useNames(events: EntityEvent[]) {
-  // Every event's wall clock is the session start plus its t, so this stays the same when the live buffer drops old events.
-  const session = events[0] ? Math.round(events[0].at - events[0].t) : 0;
-  const key = `entity.workNames.${session}`;
-  const [map, setMap] = React.useState<Record<string, string>>({});
-  React.useEffect(() => {
-    try { setMap(JSON.parse(localStorage.getItem(key) ?? '{}')); } catch { setMap({}); }
-  }, [key]);
-  const set = React.useCallback((id: string, name: string) => {
-    setMap(prev => {
-      const next = { ...prev };
-      if (name.trim()) next[id] = name.trim(); else delete next[id];
-      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* the name still applies until reload */ }
-      return next;
-    });
-  }, [key]);
-  return { map, set };
-}
 
 /** The time of day of an event (HH:MM), falling back to session time when there is no wall clock. */
 const timeOfDay = (at: number | undefined, t: number) => (at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : clock(t));

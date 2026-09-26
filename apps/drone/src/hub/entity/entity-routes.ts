@@ -80,8 +80,9 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
 
   router.post('/api/entity/worker', async ({ readJson, json, fail }) => {
     const body = await readJson<{ id?: string; action?: string; text?: string }>();
-    if (!body?.id || (body.action !== 'message' && body.action !== 'stop')) return fail(400, 'id and action (message or stop) are required');
+    if (!body?.id || (body.action !== 'message' && body.action !== 'stop' && body.action !== 'rename')) return fail(400, 'id and action (message, stop or rename) are required');
     if (body.action === 'message' && (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000)) return fail(400, 'text must be 1-4000 characters');
+    if (body.action === 'rename' && (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 60)) return fail(400, 'a name must be 1-60 characters');
     const result = current().worker(String(body.id), body.action, body.text ?? '');
     if (result.startsWith('error')) return fail(400, result.replace(/^error: /, ''));
     json(200, { ok: true, result });

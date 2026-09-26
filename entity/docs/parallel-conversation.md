@@ -50,6 +50,8 @@ Routing is the entity's hardest call, so wrong guesses are cheap to fix. On the 
 
 Workers speak for themselves. Each reply is tagged with the worker and the message it answers (`reply_to`, filled in automatically), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes says its result, then calls `finish_task` with a one-line summary.
 
+A worker that cannot go on without the user calls `ask`. The question is posted in the chat (as `say` with `question: true`, in the main chat even for a batch worker) and the worker's turn ends. It waits instead of finishing: it holds its slot, the heartbeat and Resume leave it alone, and the Work canvas shows it as asking you. Your answer, sent to it directly or routed to it by the front limb as a steer, wakes it with its conversation intact.
+
 ## Second looks
 
 Fast answers are reviewed by a stronger model, and the runtime decides what gets reviewed, not the fast model.
@@ -64,7 +66,7 @@ Fast answers are reviewed by a stronger model, and the runtime decides what gets
 
 - **Shared state.** Every worker sees the other workers, their tasks and status, their claims, and shared discoveries.
 - **Mid-run updates.** A busy worker gets updates attached to its next tool result: a steer, a sibling's discovery, a new claim. So it hears about changes within seconds, without being stopped.
-- **Claims.** A worker claims the files or areas it is working on (`claim`), and writing a file claims it automatically. Writing to a path another worker holds is rejected with who holds it, so conflicts surface at the moment of the write.
+- **Claims.** A worker claims the files or areas it is working on (`claim`), and writing a file claims it automatically. Writing to a path another worker holds is rejected with who holds it, so conflicts surface at the moment of the write, and logged as `write_refused`, so the worker shows as blocked by the holder until its next successful call.
 - **Discoveries.** `share(text)` broadcasts a finding ("the bug is in token refresh, not the form") to every worker.
 - **Orchestration.** A refused write on a claimed path wakes the head to reconcile: steer one worker, put their work in order, or cancel duplicates.
 
@@ -82,4 +84,6 @@ Paths are resolved inside the workspace root, and `.git` is never written. All w
 
 ## Cost
 
-Parallel strong workers cost more. The queue caps how many run at once, the router picks the model per request, and the Work canvas shows each worker's cost or tokens. Finished workers keep their conversation (the 12 most recent) so they can be forked or asked follow-ups; failed and stopped workers drop theirs, and Reset drops all.
+Parallel strong workers cost more. The queue caps how many run at once, the router picks the model per request, and the Work canvas shows each worker's cost. Finished workers keep their conversation (the 12 most recent) so they can be forked or asked follow-ups; failed and stopped workers drop theirs, and Reset drops all.
+
+Costs are in USD at list prices, for subscription (Codex) models too, so you can see what the work is worth. The Hub prices every model call from its usage price table: the models.dev catalog, plus manual prices, plus long-context rates it ships for the models that have them (gpt-6-sol and gpt-6-luna above 272k input tokens, for both `openai` and `openai-codex`). Each call is priced on its own, with input, cache reads, cache writes and output (reasoning included) at their own rates, and a call whose whole input is over the threshold at the long-context rates. The entity keeps these totals per limb and for the session, including a worker's final turn and runs that crash or are paused; work summaries and senses (Jev) count too and are shown apart. A call whose model has no known price is counted as unpriced, never as $0.

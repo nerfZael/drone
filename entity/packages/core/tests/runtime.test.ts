@@ -598,3 +598,17 @@ test('restore: a session rebuilt from its log comes back paused, closes what can
   await until(() => b.of('timer').length === 1, 3000); // and the timer, with the time it had left
   expect(b.mind.runs.some(r => r.role === 'head' && r.prompt.includes('"woken_because":"timer \\"check in\\""'))).toBe(true);
 });
+
+test('a crashed head run is retried for what woke it, so a user message is not lost to a provider error', async () => {
+  let failures = 1;
+  const h = setup(async (input, call) => {
+    if (input.role !== 'head' || lastUserMessage(input) !== 'hi' || !input.prompt.includes('user message')) return;
+    if (failures-- > 0) throw new Error('WebSocket closed 1011');
+    await call('say', { text: 'hello!' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.said().includes('hello!'));
+  expect(h.of('limb_failed')[0].data).toMatchObject({ error: 'WebSocket closed 1011', retry: true });
+  expect(h.of('run_started').at(-1)!.data.reason).toContain('retry after a crash (WebSocket closed 1011): user message');
+});

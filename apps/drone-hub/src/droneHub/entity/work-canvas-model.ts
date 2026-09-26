@@ -108,6 +108,8 @@ export interface CanvasModel {
   head?: { reason: string; since: number };
   costTotal: number;
   tokensTotal: number;
+  /** Hover text: the spend by kind. */
+  usageDetail: string;
 }
 
 export interface CanvasUi {
@@ -127,7 +129,7 @@ export const moreId = (id: string) => `more:${id}`;
 export const stackId = (s: Stack) => (s.kind === 'card' ? cardId(s.id) : s.kind === 'group' ? groupId(s.id) : moreId(s.id));
 
 export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui: CanvasUi): CanvasModel {
-  const { workers: items, head, costTotal, tokensTotal } = deriveWork(snapshot, events);
+  const { workers: items, head, costTotal, tokensTotal, usageDetail } = deriveWork(snapshot, events);
   const workers = new Map(items.map(w => [w.id, w]));
   const limbs = new Map(snapshot.limbs.map(l => [l.id, l]));
   const spawned = new Map<string, EntityEvent>();
@@ -150,18 +152,16 @@ export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui
   // Lineage columns: a fork sits right of its source, gated work right of what it waits for.
   const col = new Map<string, number>();
   for (const w of [...items].sort((a, b) => a.createdAt - b.createdAt)) {
-    const spawn = spawned.get(w.id);
-    const from = spawn?.data.fork_of ? String(spawn.data.fork_of) : spawn?.data.after ? String(spawn.data.after) : undefined;
+    const from = w.parent ?? w.after;
     col.set(w.id, from && col.has(from) ? col.get(from)! + 1 : 0);
   }
 
   // Arrows between work. Their ends are mapped to whatever shows each worker once rows and folds are known.
   const rawEdges: CanvasEdge[] = [];
   for (const w of items) {
-    const spawn = spawned.get(w.id);
-    if (spawn?.data.fork_of && workers.has(String(spawn.data.fork_of))) rawEdges.push({ id: `fork:${w.id}`, from: String(spawn.data.fork_of), to: w.id, kind: 'fork' });
-    if (spawn?.data.after && workers.has(String(spawn.data.after))) {
-      const target = workers.get(String(spawn.data.after))!;
+    if (w.parent && workers.has(w.parent)) rawEdges.push({ id: `fork:${w.id}`, from: w.parent, to: w.id, kind: 'fork' });
+    if (w.after && workers.has(w.after)) {
+      const target = workers.get(w.after)!;
       rawEdges.push({ id: `wait:${w.id}`, from: target.id, to: w.id, kind: 'wait', released: target.endedAt !== undefined });
     }
     const holder = w.label === 'blocked' ? w.blockedBy : undefined;
@@ -275,7 +275,7 @@ export function deriveCanvas(snapshot: EntitySnapshot, events: EntityEvent[], ui
   if (queued.length) attention.push({ id: queued[0].id, kind: 'queued', text: `${queued.length} queued` });
 
   const entityChips = snapshot.limbs.filter(l => (l.parent === 'head' || l.parent === 'voice') && (l.role === 'watch' || l.role === 'program') && l.status === 'running').map(l => chip(l, snapshot.t));
-  return { rows, shownAs, edges, entityChips, attention, workers, head, costTotal, tokensTotal };
+  return { rows, shownAs, edges, entityChips, attention, workers, head, costTotal, tokensTotal, usageDetail };
 }
 
 function stacksFor(list: WorkItem[], col: Map<string, number>, groupTitles: Map<string, string>, chipsFor: (owner: string) => Chip[], message: EntityEvent | undefined): Stack[] {

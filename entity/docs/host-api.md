@@ -25,18 +25,19 @@ entity.subscribe(event => …);                     // every logged event
 | `start`, `pause`, `resume`, `reset`, `close` | The user controls ([architecture.md](architecture.md#user-controls)); `reset` returns the archived log |
 | `input(type, data)` | A user event from a channel, e.g. `chat_message`, `draft_changed`, `key_down` |
 | `hostEvent(type, data)` | An event from the host itself (`by: 'host'`), not validated |
-| `snapshot()` | Status, world, levels, stops, health, limbs, senses and Jev usage, for UIs |
+| `snapshot()` | Status, world, levels, stops, health, limbs (with their links, blocks, questions and usage), senses, Jev calls and model usage, for UIs |
+| `restore(events)` | Rebuilds a session from its log, paused ([session-logs.md](session-logs.md)) |
 | `subscribe(listener)` | Events as they are logged |
-| `messageWorker(id, text)`, `stopWorker(id)` | The Work view's Message and Stop |
+| `messageWorker(id, text)`, `stopWorker(id)`, `renameWorker(id, name)` | The Work view's Message, Stop and rename |
 | `reroute(seq, 'separate' \| 'fork')` | Move a user message to its own worker or a fork ([parallel-conversation.md](parallel-conversation.md#when-routing-is-a-guess)) |
 
 The host also supplies these:
 
 | Interface | Does | Drone Hub's |
 |---|---|---|
-| `Mind` | `run(input)`: one LLM run with a system prompt, a rendered context, tools and a step limit; returns usage and whether it ran out of steps. Optional `forget(key)` and `fork(from, to)` for worker conversations | `PiAiMind`: pi-ai with Codex models, conversations in memory |
-| `Evaluator` | Answers a batch of questions about the world with probabilities | Jev through the AI Gateway, or qwen on Cerebras |
-| `Summarizer` | Turns a worker's task and activity into done / doing / next steps | gpt-6-luna on low reasoning |
+| `Mind` | `run(input)`: one LLM run with a system prompt, a rendered context, tools and a step limit; returns its usage (tokens by kind and cost, also attached to a thrown error) and whether it ran out of steps; stops after the step in which the limb ended its turn (`ended()`). Optional `forget(key)` and `fork(from, to)` for worker conversations | `PiAiMind`: pi-ai with Codex models, conversations in memory |
+| `Evaluator` | Answers a batch of questions about the world with probabilities, and may report what that cost | Jev through the AI Gateway, or qwen on Cerebras |
+| `Summarizer` | Turns a worker's task and activity into done / doing / next steps, and may report what that cost | gpt-6-luna on low reasoning |
 
 ## Channels
 

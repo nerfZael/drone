@@ -39,6 +39,20 @@ interface LlmBase extends LimbBase {
   seenSeq: number;
   lastRunAt?: number;
   crashes: number[];
+  /** What its model runs have used so far (cost in USD, when the provider reports it). */
+  usage: Usage;
+}
+
+/** Token totals (input without cache; output with reasoning) and their cost in USD at list price; `unpriced` calls had no known price. */
+export interface Usage { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpriced: number }
+
+/** Adds one call's usage to a total. */
+export function addUsage(total: Usage, used: { input?: number | null; output?: number | null; cacheRead?: number | null; cacheWrite?: number | null; cost?: number | null }): void {
+  total.input += used.input ?? 0;
+  total.output += used.output ?? 0;
+  total.cacheRead += used.cacheRead ?? 0;
+  total.cacheWrite += used.cacheWrite ?? 0;
+  if (typeof used.cost === 'number') total.cost += used.cost; else total.unpriced++;
 }
 
 /** The head, the voice and the reviewer: permanent, and fresh on every wake. */
@@ -52,6 +66,13 @@ export interface WorkerLimb extends LlmBase {
   replyTo?: number;
   waitFor?: string;
   group?: string;
+  /** Where it came from: the worker it was forked from, and the one it was dispatched to wait for. */
+  forkOf?: string;
+  after?: string;
+  /** The worker holding a file its last write needed; cleared by its next successful tool call. */
+  blockedBy?: { limb: string; path: string };
+  /** The message where it asked the user something it needs to go on; it waits for the answer. */
+  asking?: number;
   result?: string;
   /** Updates it gets with its next tool result or wake, and steers queued for when it finishes. */
   notices: string[];
@@ -120,6 +141,9 @@ export interface RuntimeState {
   /** Time spent paused so far, and since when the session is paused now. */
   pausedMs: number;
   pausedSince?: number;
+  /** What every model call in the session has used, and the part of it that went to work summaries and senses (Jev). */
+  usage: Usage;
+  usageBy: { summaries: Usage; senses: Usage };
 }
 
 /** A limb as views see it: one flat shape for every kind. */
@@ -128,6 +152,7 @@ export interface LimbSnapshot {
   runs: { id: string; reason: string; startedAt: number; firstToolAt?: number }[];
   task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
   createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
+  forkOf?: string; after?: string; blockedBy?: { limb: string; path: string }; asking?: number; usage?: Usage;
 }
 
 /** The limbs as views show them, from the runtime state alone. */
@@ -137,8 +162,11 @@ export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
     id: l.id, kind: l.kind, role: l.role, name: l.name, parent: l.parent, status: l.status, createdAt: l.createdAt, endedAt: l.endedAt,
     claims: claims.filter(c => c.limb === l.id).map(c => c.path),
     runs: l.kind === 'llm' ? l.runs.map(r => ({ id: r.id, reason: r.reason, startedAt: r.startedAt, firstToolAt: r.firstToolAt })) : [],
-    ...(l.kind === 'llm' ? { model: l.model } : { label: l.label }),
-    ...(l.role === 'task' ? { task: l.task, result: l.result, group: l.group, replyTo: l.replyTo, waitFor: l.waitFor } : {}),
+    ...(l.kind === 'llm' ? { model: l.model, usage: { ...l.usage } } : { label: l.label }),
+    ...(l.role === 'task' ? {
+      task: l.task, result: l.result, group: l.group, replyTo: l.replyTo, waitFor: l.waitFor,
+      forkOf: l.forkOf, after: l.after, blockedBy: l.blockedBy, asking: l.asking,
+    } : {}),
     ...(l.role === 'watch' ? { watch: l.watch, fires: l.fires } : {}),
     ...(l.role === 'program' ? { code: l.code } : {}),
   }));
@@ -146,13 +174,14 @@ export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
 
 export const WORKER_ACTIVE: readonly LimbStatus[] = ['running', 'queued', 'waiting'];
 
-const llm = (init: Pick<LlmBase, 'id' | 'name' | 'model' | 'status' | 'createdAt'> & Partial<LlmBase>) => ({ kind: 'llm' as const, runs: [], seenSeq: 0, crashes: [], ...init });
+const noUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 });
+const llm = (init: Pick<LlmBase, 'id' | 'name' | 'model' | 'status' | 'createdAt'> & Partial<LlmBase>) => ({ kind: 'llm' as const, runs: [], seenSeq: 0, crashes: [], usage: noUsage(), ...init });
 
 export function initialRuntimeState(setup: RuntimeSetup): RuntimeState {
   const limbs: Record<string, LimbState> = { head: { ...llm({ id: 'head', name: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'head' } };
   if (setup.review === 'separate') limbs.reviewer = { ...llm({ id: 'reviewer', name: 'reviewer', parent: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'reviewer' };
   if (setup.models.voice) limbs.voice = { ...llm({ id: 'voice', name: 'voice', parent: 'head', model: setup.models.voice, status: 'idle', createdAt: 0 }), role: 'voice' };
-  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0, timers: [], pausedMs: 0 };
+  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0, timers: [], pausedMs: 0, usage: noUsage(), usageBy: { summaries: noUsage(), senses: noUsage() } };
 }
 
 /** Rebuilds the runtime state from a log. */
@@ -217,19 +246,43 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       if (selfWorker && typeof data.notices === 'number') selfWorker.notices.splice(0, data.notices);
       return;
     }
-    case 'run_finished':
-      if (selfLlm) selfLlm.runs = selfLlm.runs.filter(r => r.id !== data.run);
+    case 'run_finished': {
+      if (!selfLlm) return;
+      selfLlm.runs = selfLlm.runs.filter(r => r.id !== data.run);
+      const used = data.usage as Parameters<typeof addUsage>[1] | null | undefined;
+      if (used) { addUsage(selfLlm.usage, used); addUsage(state.usage, used); }
       return;
+    }
+    case 'usage': {
+      // Model calls outside the limbs: work summaries and senses.
+      const bucket = data.kind === 'summaries' || data.kind === 'senses' ? state.usageBy[data.kind] : undefined;
+      if (bucket) addUsage(bucket, data);
+      addUsage(state.usage, data);
+      return;
+    }
     case 'tool_called': {
       const run = selfLlm?.runs.find(r => r.id === data.run);
       if (run) run.firstToolAt ??= t;
       return;
     }
     case 'tool_done':
-      if (selfWorker && typeof data.notices === 'number') selfWorker.notices.splice(0, data.notices);
+      if (!selfWorker) return;
+      if (typeof data.notices === 'number') selfWorker.notices.splice(0, data.notices);
+      if (data.ok) selfWorker.blockedBy = undefined;
       return;
+    case 'write_refused':
+      if (selfWorker) selfWorker.blockedBy = { limb: String(data.holder), path: String(data.path) };
+      return;
+    case 'limb_renamed': {
+      const target = limb(data.id);
+      if (target) target.name = String(data.name);
+      return;
+    }
     case 'limb_failed':
-      if (selfLlm) push(selfLlm.crashes, t, 10);
+      if (!selfLlm) return;
+      push(selfLlm.crashes, t, 10);
+      // A retry is shown again the events the failed run was shown.
+      if (typeof data.shown_from === 'number') selfLlm.seenSeq = Math.min(selfLlm.seenSeq, data.shown_from);
       return;
     case 'limb_spawned': {
       const status = (str(data.status) ?? (data.queued ? 'queued' : 'running')) as LimbStatus;
@@ -237,6 +290,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
         ...llm({ id: String(data.id), name: String(data.name), parent: 'head', model: String(data.model), status, createdAt: t, decidedAt: t }),
         role: 'task', task: String(data.task), replyTo: typeof data.reply_to === 'number' ? data.reply_to : undefined,
         waitFor: status === 'waiting' ? str(data.after) : undefined, group: str(data.group),
+        forkOf: str(data.fork_of), after: str(data.after),
         notices: [], later: [], continuations: 0,
         // What happened before it existed is in its state and task, not news to it.
         seenSeq: event.seq,
@@ -279,6 +333,8 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       selfWorker.status = data.status as LimbStatus;
       selfWorker.endedAt = t;
       selfWorker.result = String(data.result ?? '');
+      selfWorker.blockedBy = undefined;
+      selfWorker.asking = undefined;
       state.kept = state.kept.filter(id => id !== selfWorker.id);
       if (selfWorker.status === 'done') {
         state.kept.push(selfWorker.id);
@@ -290,6 +346,8 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       const target = worker(data.id);
       if (!target) return;
       const note = steerNote(by, String(data.text));
+      // A message for a worker that asked the user something is taken as the answer.
+      target.asking = undefined;
       if (data.when === 'after' && WORKER_ACTIVE.includes(target.status)) target.later.push(note);
       else target.notices.push(note);
       return;
@@ -323,6 +381,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     }
     case 'chat_message': {
+      if (selfWorker && data.question) selfWorker.asking = event.seq;
       const batch = typeof data.group === 'string' ? state.batches[data.group] : undefined;
       if (batch && batch.message === undefined) { batch.message = event.seq; batch.text = String(data.text); }
       return;

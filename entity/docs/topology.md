@@ -24,7 +24,7 @@ One table per role decides which tools a limb gets (`runtimeTools` in `tools.ts`
 | Head | all | `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, and `amend` with review `head` |
 | Voice | all | `note`, `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `handoff` |
 | Reviewer | read-only | `amend`, `handoff`, `note` |
-| Worker | all | `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `claim`, `release`, `share`, `finish_task` |
+| Worker | all | `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `claim`, `release`, `share`, `ask`, `finish_task` |
 | Watch, program | their author's | — |
 
 The front limb (and the head) may cancel any worker; other limbs only their own watches and programs.
@@ -39,7 +39,7 @@ The front limb (and the head) may cancel any worker; other limbs only their own 
 Lifecycle borrows from Erlang/OTP supervision trees: parents supervise their children.
 
 - **Cancel.** A cancel lets the child finish within a grace period; `now: true` (a kill, in OTP terms) drops its partial work. Everything up to then stays in the log. Jev can do neither: it only returns numbers.
-- **Restarts.** A worker whose run crashes is woken again, at most 3 times in a minute; past that it is finished as failed. Every crash is logged as `limb_failed`. The head is not restarted; the next event wakes it. Code limbs are not restarted.
+- **Restarts.** A worker whose run crashes is woken again, at most 3 times in a minute; past that it is finished as failed. Every crash is logged as `limb_failed`. The head and the voice are run again for what woke them, with the same cap, unless a newer run already took over, and a crashed review goes back to the queue; past the cap they wait for the next event. A retry is shown the events the failed run was shown. Code limbs are not restarted.
 
 ## Rules
 

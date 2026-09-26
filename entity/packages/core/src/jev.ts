@@ -1,3 +1,4 @@
+import type { ModelUsage } from './mind.js';
 import type { EventLog } from './log.js';
 import type { EntityEvent } from './types.js';
 
@@ -9,7 +10,8 @@ export interface EvalQuestion {
 
 /** Backs `judge` and `sense`: Jev, or a small fast LLM in the same role. */
 export interface Evaluator {
-  evaluate(questions: EvalQuestion[], state: string, signal: AbortSignal): Promise<Record<string, number>>;
+  /** The probability of "yes" per question id; with `usage`, what the call cost, counted in the session's totals. */
+  evaluate(questions: EvalQuestion[], state: string, signal: AbortSignal): Promise<Record<string, number> | { answers: Record<string, number>; usage?: ModelUsage }>;
 }
 
 export interface JevOptions {
@@ -181,7 +183,11 @@ export class JevService {
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs);
     const started = performance.now();
     try {
-      return await this.evaluator.evaluate(questions, this.renderState(), controller.signal);
+      const result = await this.evaluator.evaluate(questions, this.renderState(), controller.signal);
+      if (!('answers' in result && result.answers && typeof result.answers === 'object')) return result as Record<string, number>;
+      const { answers, usage } = result as { answers: Record<string, number>; usage?: ModelUsage };
+      if (usage) this.log.append('usage', 'system', { kind: 'senses', ...usage });
+      return answers;
     } catch (error) {
       if (!this.closed) {
         const message = controller.signal.aborted ? `timed out after ${this.opts.timeoutMs} ms` : error instanceof Error ? error.message : String(error);
