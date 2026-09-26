@@ -698,12 +698,13 @@ test('review: the reviewer is told when each answer was said, and can withdraw i
 });
 
 test('chat limits: a long message is refused with what to do; after two refusals the runtime shortens it, a worker\'s into a file', async () => {
-  const long = 'First sentence of the plan. ' + 'x'.repeat(900);
+  const long = 'First sentence of the plan. ' + 'x'.repeat(1300);
+  const longList = Array.from({ length: 120 }, (_, i) => `- item ${i}`).join('\n');
   const results: string[] = [];
   const saved: { limb: string; text: string }[] = [];
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'go') {
-      for (let i = 0; i < 3; i++) results.push(await call('say', { text: 'y'.repeat(500) }));
+      for (let i = 0; i < 3; i++) results.push(await call('say', { text: longList }));
       await call('dispatch', { task: 'write it up' });
     }
     if (input.role === 'task') {
@@ -714,11 +715,11 @@ test('chat limits: a long message is refused with what to do; after two refusals
   h.entity.start();
   h.entity.input('chat_message', { text: 'go' });
   await until(() => h.of('task_done').length === 1);
-  expect(results[0]).toContain('too long for chat (500/300');
+  expect(results[0]).toContain(`too long for chat (${longList.length}/800`);
   expect(results[3]).toContain('Write the details to a file under artifacts/');
   const said = h.of('chat_message', b => b !== 'user');
   const head = said.find(e => e.by === 'head' && String(e.data.text).endsWith('… (shortened)'))!;
-  expect(String(head.data.text).length).toBeLessThanOrEqual(300);
+  expect(String(head.data.text).length).toBeLessThanOrEqual(800);
   const worker = said.find(e => e.by.startsWith('worker'))!;
   expect(worker.data).toMatchObject({ text: 'First sentence of the plan. (full text in artifacts/plan.md)', files: ['artifacts/plan.md'] });
   expect(saved[0].text).toBe(long);
@@ -798,4 +799,62 @@ test('chat: the same message twice in one wake is refused, and a question is not
   expect(results[1]).toContain('already sent exactly this message');
   const asked = h.of('chat_message').find(e => e.data.text === 'A few questions:')!;
   expect(h.of('review_queued').some(e => e.data.seq === asked.seq)).toBe(false);
+});
+
+test('chat shape: a scannable list passes, a dense paragraph, headings and tables are refused with how to fix them', async () => {
+  const { chatShapeProblem } = await import('../src/entity.js');
+  const list = 'The project has:\n\n' + ['apps/ (application code)', 'packages/ (shared packages)', 'scripts/', 'supabase/', 'docs/', 'teams/'].map(x => `- ${x}`).join('\n');
+  expect(chatShapeProblem(list, 300)).toBeNull();
+  expect(chatShapeProblem('Short one.\n\nAnother short one.', 300)).toBeNull();
+  expect(chatShapeProblem('```\n' + 'x'.repeat(500) + '\n```', 300)).toBeNull(); // code is not prose
+  expect(chatShapeProblem('word '.repeat(80), 300)).toContain('too dense for chat (399/300');
+  expect(chatShapeProblem('## Plan\n\n- one', 300)).toContain('no headings');
+  expect(chatShapeProblem('| a | b |\n|---|---|', 300)).toContain('no tables');
+  // Refused twice, then sent as it is: a message is never lost for its shape.
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') for (let i = 0; i < 3; i++) results.push(await call('say', { text: 'word '.repeat(80).trim() }));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 3);
+  expect(results.slice(0, 2).every(r => r.includes('too dense'))).toBe(true);
+  expect(results[2]).toBe('sent');
+});
+
+test('workers: a lone worker\'s reply goes to the chat even if it asks for its thread; after it finishes, its summary is written once more', async () => {
+  let summaries = 0;
+  const summarizer = { async summarize() { summaries++; return { done: [`step ${summaries}`], doing: [], next: summaries === 1 ? ['report'] : [] }; } };
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'work' });
+    if (input.role === 'task') {
+      for (let i = 0; i < 3; i++) await call('note', { text: `step ${i}` });
+      await sleep(20); // the summary written while it works
+      await call('say', { text: 'Done: made the thing.', thread: true });
+      await call('finish_task', { result: 'made the thing' });
+    }
+  }, { summarizer, config: { summaryEveryCalls: 2, summaryIntervalMs: 0 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('task_done').length === 1 && h.of('work_summary').length >= 2);
+  expect(h.of('chat_message').find(e => e.data.text === 'Done: made the thing.')!.data.thread).toBeUndefined();
+  const final = h.of('work_summary').at(-1)!;
+  expect(final.seq).toBeGreaterThan(h.of('task_done')[0].seq);
+  expect(final.data.next).toEqual([]);
+});
+
+test('dispatch: the same task as an active worker is refused, so two limbs acting on one message do not start it twice', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'list it') {
+      results.push(await call('dispatch', { task: 'List the directory' }));
+      results.push(await call('dispatch', { task: 'List the directory ' }));
+    }
+    if (input.role === 'task') await new Promise<void>(r => input.signal.addEventListener('abort', () => r()));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'list it' });
+  await until(() => results.length === 2);
+  expect(results[1]).toContain('is already doing exactly this');
+  expect(h.of('limb_spawned')).toHaveLength(1);
 });

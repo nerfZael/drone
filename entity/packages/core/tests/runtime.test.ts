@@ -631,3 +631,21 @@ test('prompts: a section can be replaced, placeholders are filled, and edits app
   expect(systems[1]).toMatch(/CHECKED BY REVIEWER|CHECK IT YOURSELF/);
   expect(systems[1]).toContain('You are the head and the front of the entity.'); // back to the default once the override is gone
 });
+
+test('resume: a message sent while paused is handled by the front limb as a user message, and the head stays out of it', async () => {
+  const runs: { role: string; reason: string }[] = [];
+  const h = setup(async input => { runs.push({ role: input.role, reason: input.prompt.match(/"woken_because":"([^"]*)"/)?.[1] ?? '' }); }, { models: { head: 'test/head', task: 'test/task', voice: 'test/voice' } });
+  h.entity.start();
+  await until(() => runs.length >= 1);
+  await sleep(20);
+  h.entity.pause();
+  h.entity.input('chat_message', { text: 'copy the readme' });
+  await sleep(30);
+  const before = runs.length;
+  h.entity.resume();
+  await until(() => runs.length > before);
+  await sleep(30);
+  const after = runs.slice(before);
+  expect(after[0]).toMatchObject({ role: 'voice', reason: 'user message' });
+  expect(after.some(r => r.role === 'head')).toBe(false);
+});

@@ -61,7 +61,7 @@ export function EntityBench() {
           <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input}
             onWorker={session.worker} onOpenWorker={showWorker} onOpenFile={openFile} sessionId={state.sessionId} />
           {keypad ? <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} /> : null}
-          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} />
+          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} onOpenFile={openFile} />
             : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} open={openWorker} onReroute={session.reroute} onOpenFile={openFile} />
             : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>

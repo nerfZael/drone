@@ -25,9 +25,46 @@ const steers = (events: RoutingEvent[]) => events.filter(e => e.type === 'steere
 const userMessage = (events: RoutingEvent[], text: string) => events.find(e => e.type === 'chat_message' && e.by === 'user' && e.data.text === text);
 const afterMessage = (events: RoutingEvent[], text: string) => { const m = userMessage(events, text); return m ? events.filter(e => e.seq > m.seq) : []; };
 
-const optionsAfter = (events: RoutingEvent[], text: string) => afterMessage(events, text).filter(e => e.type === 'chat_message' && e.by !== 'user' && Array.isArray(e.data.options));
+/** Questions with answers to click, in either form: options on one question, or several questions each with options. */
+const optionsAfter = (events: RoutingEvent[], text: string) => afterMessage(events, text).filter(e => e.type === 'chat_message' && e.by !== 'user'
+  && (Array.isArray(e.data.options) || (Array.isArray(e.data.questions) && (e.data.questions as { options?: unknown[] }[]).some(q => Array.isArray(q.options) && q.options.length))));
 
 export const ROUTING_CASES: RoutingCase[] = [
+  {
+    name: 'looking at a read-only workspace is done, not refused',
+    source: 'a live session: "I cannot inspect StorySpark because it is read-only for me"',
+    workspaces: ['entity-home: your home folder (read, write)', 'host:storyspark: StorySpark (host; read) · default'],
+    messages: [{ text: 'Hey, so what do you see in this directory?' }],
+    check: events => {
+      const said = afterMessage(events, 'Hey, so what do you see in this directory?').filter(e => e.type === 'chat_message' && e.by !== 'user').map(e => String(e.data.text));
+      const refused = said.find(t => /can.?t (inspect|look|list|see|read)|cannot (inspect|look|list|see|read)|write access/i.test(t));
+      const acted = workers(events).length + events.filter(e => e.type === 'tool_called' && ['list_files', 'read_file'].includes(String(e.data.name))).length;
+      return !refused && acted ? null : refused ? `refused: ${refused.slice(0, 100)}` : 'nothing done';
+    },
+  },
+  {
+    name: 'copying from a read-only workspace into a writable one is done, not refused',
+    source: 'a live session: "I cannot transfer it: StorySpark is read-only"',
+    workspaces: ['entity-home: your home folder (read, write)', 'host:storyspark: StorySpark (host; read) · default'],
+    messages: [{ text: 'Can you copy the README from StorySpark into your home folder?' }],
+    check: events => {
+      const asked = optionsAfter(events, 'Can you copy the README from StorySpark into your home folder?').length;
+      const acted = workers(events).length + events.filter(e => e.type === 'tool_called' && ['transfer_files', 'write_file', 'read_file'].includes(String(e.data.name))).length;
+      return acted && !asked ? null : `${workers(events).length} worker(s), ${asked} refusal question(s)`;
+    },
+  },
+  {
+    name: 'an answer that names several things is a scannable list, not a dense paragraph',
+    source: 'a live session: a directory listing written as one long sentence',
+    messages: [{ text: 'Quick overview: what are the main differences between TCP and UDP?' }],
+    check: events => {
+      const said = afterMessage(events, 'Quick overview: what are the main differences between TCP and UDP?').filter(e => e.type === 'chat_message' && e.by !== 'user');
+      const text = String(said[0]?.data.text ?? '');
+      if (!text) return `no answer; ${workers(events).length} worker(s)`;
+      const items = text.split('\n').filter(line => /^\s*([-*+]|\d+[.)])\s/.test(line)).length;
+      return items >= 2 ? null : `${items} list item(s) in: ${text.slice(0, 120)}`;
+    },
+  },
   {
     name: 'asked for some questions: one message with several questions, each with options',
     source: 'a live session: four questions written as plain text',

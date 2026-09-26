@@ -109,13 +109,39 @@ export async function workspaceToolDefinitions(): Promise<{ name: string; descri
       resolveTarget: () => { throw new Error('definitions only'); },
       exposeTargetParameter: true,
     })
-    .map((tool: any) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
+    .map((tool: any) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
+    .concat(TRANSFER_DEFINITION);
 }
+
+/**
+ * Copying between workspaces (a file or folder from one to another). Blip builds this tool per selection, listing the
+ * workspace ids it allows; the entity's tools are fixed for a session, so its ids are plain strings, and the service's
+ * own tool checks read access on the source and write access on the destination at call time.
+ */
+const TRANSFER_DEFINITION = {
+  name: 'transfer_files',
+  description: 'Copy one file or a folder between two workspaces (for example from a repository into your home folder). Needs Read on the source and Write on the destination.',
+  parameters: {
+    type: 'object', additionalProperties: false, required: ['sourceTarget', 'sourcePath', 'destinationTarget', 'destinationPath'],
+    properties: {
+      sourceTarget: { type: 'string', description: 'The workspace id to copy from' },
+      sourcePath: { type: 'string', description: 'Workspace-relative source file or folder' },
+      destinationTarget: { type: 'string', description: `The workspace id to copy to (${ENTITY_HOME_TARGET_ID} for your home folder)` },
+      destinationPath: { type: 'string', description: 'Workspace-relative destination path' },
+      overwrite: { type: 'boolean', description: 'Replace existing destination files. Defaults to false.' },
+      resumeToken: { type: 'string', description: 'Token returned by a partially completed transfer, to skip files already copied' },
+    },
+  } as Record<string, unknown>,
+};
 
 /** Files a write touches, for claims: `<target>:<path>`, so two workspaces never share a claim. */
 function writtenPaths(tool: string, args: Record<string, any>, world: WorkspacesWorld): string[] {
   const target = typeof args.target === 'string' && args.target ? args.target : world.access.defaultTargetId ?? ENTITY_HOME_TARGET_ID;
   const paths: string[] = [];
+  if (tool === 'transfer_files') {
+    const dest = typeof args.destinationTarget === 'string' && args.destinationTarget ? args.destinationTarget : target;
+    return typeof args.destinationPath === 'string' && args.destinationPath ? [`${dest}:${args.destinationPath.replace(/^\.?\/+/, '')}`] : [];
+  }
   if (tool === 'move_path') paths.push(args.from, args.to);
   else if (tool === 'apply_patch') {
     for (const line of String(args.patch ?? '').split('\n')) {
@@ -139,7 +165,8 @@ export function workspacesChannel(
     const run = def.name === 'bash';
     return {
       name: def.name,
-      description: `${def.description}${run ? ' Needs Run access to the workspace.' : readonly ? '' : ' Needs Write access to the workspace.'} target: a workspace id from your state; omitted, the default workspace.`,
+      description: def.name === 'transfer_files' ? def.description
+        : `${def.description}${run ? ' Needs Run access to the workspace.' : readonly ? '' : ' Needs Write access to the workspace.'} target: a workspace id from your state; omitted, the default workspace.`,
       parameters: def.parameters as unknown as Schema,
       risk: 'limb',
       ...(readonly ? { readonly: true } : { output: false }),

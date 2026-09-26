@@ -5,6 +5,7 @@ import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { Dot, Pips, Steps, STATE_COLOR, WorkerDetail, clock, spend, type WorkItem } from './EntityWork';
 import { EntityComposer, EntityMessage, questionAnswer, type ChatOption, type ChatQuestion } from './EntityChat';
 import { WorkingElapsedStatus } from '../chat/WorkingElapsedStatus';
+import { LimbLog, LimbPanel } from './EntityLimbPanel';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import {
   CARD_W, LINE_W, cardId, deriveCanvas, foldId, groupId, layoutCanvas, lineId, moreId,
@@ -17,7 +18,7 @@ import {
  * entity/docs/work-canvas.md. Layout is ours (work-canvas-model.ts); xyflow only pans, zooms and draws.
  */
 
-type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number, picks?: string[]) => Promise<boolean> | void;
+export type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number, picks?: string[]) => Promise<boolean> | void;
 
 /** What the chat and the canvas highlight together: a chat message, or a worker. */
 
@@ -183,7 +184,7 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, open, onRer
               <Rules rules={layout.rules} width={layout.width} />
             </ReactFlow>
           )}
-          {worker ? <Drawer w={worker} events={events} snapshot={snapshot} t={t} live={live} onWorker={onWorker} onOpenFile={onOpenFile} onClose={() => setSelected(null)} /> : null}
+          {worker ? <WorkerDrawer w={worker} events={events} snapshot={snapshot} t={t} live={live} onWorker={onWorker} onOpenFile={onOpenFile} onClose={() => setSelected(null)} /> : null}
         </div>
       </div>
     </CanvasCtx.Provider>
@@ -338,12 +339,17 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
         <button type="button" aria-expanded={open} aria-label={open ? 'Collapse' : 'Expand'} onClick={e => { e.stopPropagation(); ctx.toggleExpanded(w.id); }}
           className="shrink-0 rounded px-1 text-[12px] leading-none text-[var(--muted)] hover:bg-[var(--hover)]" style={{ transform: open ? 'rotate(180deg)' : undefined }}>⌄</button>
       </div>
-      <div className={`min-w-0 text-[12px] text-[var(--fg-secondary,var(--fg))] ${open ? '' : 'line-clamp-2'}`} title={statusText(w, ctx.nameOf)}>
-        {statusText(w, ctx.nameOf)}
-      </div>
+      {/* Its summary when it has one: short steps say more than the status line, which can run long. */}
+      {w.steps ? (
+        <div className="min-w-0 text-[12px]"><Steps w={w} limit={open ? undefined : 4} /></div>
+      ) : (
+        <div className={`min-w-0 text-[12px] text-[var(--fg-secondary,var(--fg))] ${open ? '' : 'line-clamp-2'}`} title={statusText(w, ctx.nameOf)}>
+          {statusText(w, ctx.nameOf)}
+        </div>
+      )}
       {open ? (
         <div className="grid gap-1.5 border-t border-[var(--border)] pt-1.5 text-[12px]">
-          <Steps w={w} />
+          {w.steps ? null : <Steps w={w} />}
           {card.chips.map(c => <div key={c.id} className="text-[var(--muted)]"><ChipIcon kind={c.kind} /> {c.detail}</div>)}
           {w.claims.length ? <div className="flex flex-wrap gap-1">{w.claims.map(c => <span key={c} className="rounded bg-[var(--panel-alt)] px-1 font-mono text-[11px]">{c}</span>)}</div> : null}
           {w.model ? <div className="font-mono text-[11px] text-[var(--muted)]">{w.model}</div> : null}
@@ -506,9 +512,10 @@ function TopStrip({ model, t, onPick, onFit }: { model: CanvasModel; t: number; 
   );
 }
 
-function Drawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }: { w: WorkItem; events: EntityEvent[]; snapshot: EntitySnapshot; t: number; live: boolean; onWorker: OnWorker; onOpenFile?(path: string): void; onClose(): void }) {
-  const ctx = useCtx();
+/** A worker's side panel, on the Work canvas and in the Brain: its thread (with the composer) and its log. */
+export function WorkerDrawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }: { w: WorkItem; events: EntityEvent[]; snapshot: EntitySnapshot; t: number; live: boolean; onWorker: OnWorker; onOpenFile?(path: string): void; onClose(): void }) {
   const bottom = React.useRef<HTMLDivElement | null>(null);
+  const name = snapshot.limbs.find(l => l.id === w.id)?.name ?? w.name;
   // The worker's thread: the message that started it and the task it was given, then what it said and what it was told.
   const thread = events.filter(e => (e.type === 'chat_message' && e.by === w.id) || (e.type === 'steered' && e.data.id === w.id));
   const origin = w.replyTo !== undefined ? events.find(e => e.seq === w.replyTo) : undefined;
@@ -519,49 +526,43 @@ function Drawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }:
   const working = live && !!lastRun && !events.some(e => e.type === 'run_finished' && e.by === w.id && e.data.run === lastRun.data.run);
   React.useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [thread.length, working]);
   return (
-    <aside className="absolute inset-y-0 right-0 z-10 grid w-[420px] max-w-full grid-rows-[auto_minmax(0,1fr)_auto] border-l border-[var(--border)] bg-[var(--panel)] shadow-lg" aria-label={`${w.name} details`}>
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
-        <span className="min-w-0 truncate font-semibold" title={w.id}>{w.name}</span>
-        <CardStatus w={w} t={t} />
-        {live && running ? (
-          <button type="button" onClick={() => void onWorker(w.id, 'stop')} title={`Stop ${w.name}`}
-            className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 text-[12px] hover:bg-[var(--hover)]" style={{ color: STATE_COLOR.stop }}>Stop</button>
-        ) : null}
-        <button type="button" aria-label="Close" onClick={onClose} className={`${live && running ? '' : 'ml-auto '}rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]`}>✕</button>
-      </div>
-      <div className="grid content-start gap-2 overflow-y-auto">
-        <WorkerDetail w={w} />
-        <div className="dh-chat-transcript flex flex-col gap-4 px-4 pb-3 pt-1">
-          {origin ? <EntityMessage mine at={origin.at} label={`you · ${timeOfDay(origin.at, origin.t)}`} text={String(origin.data.text ?? '')} title={timeTitle(origin.at, origin.t, w.createdAt)} /> : null}
-          {w.task ? (
-            <details className="text-[12px] text-[var(--muted)]">
-              <summary className="cursor-pointer" title={started ? timeTitle(started.at, started.t, w.createdAt) : undefined}>Task given{started ? ` by ${started.by}` : ''} · {started ? timeOfDay(started.at, started.t) : ''}</summary>
-              <div className="mt-1 whitespace-pre-wrap text-[var(--fg-secondary,var(--fg))]">{w.task}</div>
-            </details>
-          ) : null}
-          {thread.map(e => (
-            <EntityMessage key={e.seq} mine={e.type === 'steered'} at={e.at} title={timeTitle(e.at, e.t, w.createdAt)}
-              label={`${e.type === 'steered' ? (e.by === 'user' ? 'you' : `you, via ${e.by}`) : ctx.nameOf(w.id)} · ${timeOfDay(e.at, e.t)}`}
-              text={String(e.data.text ?? '')}
-              files={Array.isArray(e.data.files) ? e.data.files as string[] : undefined} onOpenFile={onOpenFile}
-              options={Array.isArray(e.data.options) ? e.data.options as ChatOption[] : undefined}
-              questions={Array.isArray(e.data.questions) ? e.data.questions as ChatQuestion[] : undefined}
-              onAnswerAll={(picks, text) => { void onWorker(w.id, 'message', text, e.seq, picks); }}
-              answer={Array.isArray(e.data.options) || Array.isArray(e.data.questions) ? questionAnswer(e, events, snapshot) : null} answerDisabled={!live}
-              onChoose={choice => { void onWorker(w.id, 'message', choice, e.seq); }} />
-          ))}
-          {!thread.length && !origin && !working ? <div className="text-[12px] text-[var(--muted)]">Nothing said yet.</div> : null}
-          {working ? <WorkingElapsedStatus startedAt={lastRun!.at} /> : null}
-          <div ref={bottom} />
+    <LimbPanel title={name} titleHint={w.id} status={<CardStatus w={w} t={t} />} onClose={onClose}
+      actions={live && running ? (
+        <button type="button" onClick={() => void onWorker(w.id, 'stop')} title={`Stop ${name}`}
+          className="rounded border border-[var(--border)] px-2 py-0.5 text-[12px] hover:bg-[var(--hover)]" style={{ color: STATE_COLOR.stop }}>Stop</button>
+      ) : null}
+      log={<LimbLog id={w.id} snapshot={snapshot} limb={snapshot.limbs.find(l => l.id === w.id)} events={events} now={t} />}
+      footer={live && (running || w.kept) ? (
+        <div><EntityComposer id={`worker:${w.id}`} label={name} placeholder="Message this worker" onSend={text => onWorker(w.id, 'message', text)} /></div>
+      ) : undefined}
+      thread={
+        <div className="grid content-start gap-2">
+          <WorkerDetail w={w} />
+          <div className="dh-chat-transcript flex flex-col gap-4 px-4 pb-3 pt-1">
+            {origin ? <EntityMessage mine at={origin.at} label={`you · ${timeOfDay(origin.at, origin.t)}`} text={String(origin.data.text ?? '')} title={timeTitle(origin.at, origin.t, w.createdAt)} /> : null}
+            {w.task ? (
+              <details className="text-[12px] text-[var(--muted)]">
+                <summary className="cursor-pointer" title={started ? timeTitle(started.at, started.t, w.createdAt) : undefined}>Task given{started ? ` by ${started.by}` : ''} · {started ? timeOfDay(started.at, started.t) : ''}</summary>
+                <div className="mt-1 whitespace-pre-wrap text-[var(--fg-secondary,var(--fg))]">{w.task}</div>
+              </details>
+            ) : null}
+            {thread.map(e => (
+              <EntityMessage key={e.seq} mine={e.type === 'steered'} at={e.at} title={timeTitle(e.at, e.t, w.createdAt)}
+                label={`${e.type === 'steered' ? (e.by === 'user' ? 'you' : `you, via ${e.by}`) : name} · ${timeOfDay(e.at, e.t)}`}
+                text={String(e.data.text ?? '')}
+                files={Array.isArray(e.data.files) ? e.data.files as string[] : undefined} onOpenFile={onOpenFile}
+                options={Array.isArray(e.data.options) ? e.data.options as ChatOption[] : undefined}
+                questions={Array.isArray(e.data.questions) ? e.data.questions as ChatQuestion[] : undefined}
+                onAnswerAll={(picks, text) => { void onWorker(w.id, 'message', text, e.seq, picks); }}
+                answer={Array.isArray(e.data.options) || Array.isArray(e.data.questions) ? questionAnswer(e, events, snapshot) : null} answerDisabled={!live}
+                onChoose={choice => { void onWorker(w.id, 'message', choice, e.seq); }} />
+            ))}
+            {!thread.length && !origin && !working ? <div className="text-[12px] text-[var(--muted)]">Nothing said yet.</div> : null}
+            {working ? <WorkingElapsedStatus startedAt={lastRun!.at} /> : null}
+            <div ref={bottom} />
+          </div>
         </div>
-      </div>
-      {live && (running || w.kept) ? (
-        <div>
-          <EntityComposer id={`worker:${w.id}`} label={w.name} placeholder="Message this worker"
-            onSend={text => onWorker(w.id, 'message', text)} />
-        </div>
-      ) : <span />}
-    </aside>
+      } />
   );
 }
 
@@ -569,7 +570,7 @@ function Drawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }:
  * What a card says the worker is doing: its current step from the summary, or what it was asked to do. Never the tool it
  * happens to be calling (that changes every second, and external agents don't report it).
  */
-function statusText(w: WorkItem, nameOf: (id: string) => string): string {
+export function statusText(w: WorkItem, nameOf: (id: string) => string): string {
   if (w.waitFor && w.status === 'waiting') return `Starts when ${nameOf(w.waitFor)} finishes`;
   if (w.state === 'done' || w.state === 'stop') return w.result ?? w.label;
   if (w.steps?.doing[0]) return w.steps.doing[0];
@@ -675,7 +676,7 @@ function useModifierHeld(): boolean {
 const firstLine = (text: string) => { const line = text.split('\n')[0].trim(); return line.length > 140 ? `${line.slice(0, 139)}…` : line; };
 
 /** The card's state: calm words and how long it has been at it, not the tool it is calling. */
-function CardStatus({ w }: { w: WorkItem; t: number }) {
+export function CardStatus({ w }: { w: WorkItem; t: number }) {
   const busy = w.state === 'act' || w.state === 'think';
   const label = busy ? 'working' : w.label === 'idle' ? 'idle' : w.label.startsWith('after ') ? 'waiting' : w.label;
   return (
@@ -686,7 +687,7 @@ function CardStatus({ w }: { w: WorkItem; t: number }) {
 }
 
 /** Thinking and acting are both just "working" on the canvas, in one colour. */
-const tone = (w: WorkItem) => STATE_COLOR[w.state === 'think' ? 'act' : w.state];
+export const tone = (w: WorkItem) => STATE_COLOR[w.state === 'think' ? 'act' : w.state];
 
 const toggled = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (next.has(key)) next.delete(key); else next.add(key); return next; };
 

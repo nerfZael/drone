@@ -264,7 +264,7 @@ export function EntityComposer({ id, label, placeholder, disabled, onSend, onDra
   const sent = React.useRef(false);
   return (
     <div className="dh-entity-composer">
-    <ChatInput resetKey={id} droneName={label} placeholder={placeholder} focusTargetId={`entity:${id}`}
+    <ChatInput resetKey={id} droneName={label} placeholder={placeholder} disabledReason={disabled ? placeholder : undefined} focusTargetId={`entity:${id}`}
       draftValue={draft}
       onDraftValueChange={(next) => {
         setDraft(next);
@@ -359,25 +359,28 @@ function Digest({ items, nameOf, onOpenFile, onOpenWorker }: {
   return (
     <div aria-label={`${items.length} updates`} className="rounded-[var(--radius-xlarge,12px)] bg-[var(--surface-softest)] px-3 py-2">
       <div className="mb-1 text-[11px] text-[var(--muted)]">{items.length} updates · {at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-      <div className="grid gap-0.5">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
         {items.map(m => {
           const text = String(m.data.text ?? '');
           const files = Array.isArray(m.data.files) ? m.data.files as string[] : [];
           const expanded = open.has(m.seq);
+          const toggle = () => setOpen(prev => { const next = new Set(prev); if (next.has(m.seq)) next.delete(m.seq); else next.add(m.seq); return next; });
           return (
-            <div key={m.seq} data-seq={m.seq} className="rounded-md px-1.5 py-1">
+            <div key={m.seq} data-seq={m.seq} className="min-w-0 rounded-md px-1.5 py-1">
               <div className="flex min-w-0 items-baseline gap-2 text-[13px]">
                 <button type="button" className="flex-shrink-0 font-medium hover:underline" title="Open it on the Work canvas" onClick={() => onOpenWorker?.(m.by)}>{nameOf(m.by)}</button>
-                <button type="button" aria-expanded={expanded} className={`min-w-0 flex-1 text-left text-[var(--fg-secondary,var(--fg))] ${expanded ? '' : 'truncate'}`}
-                  onClick={() => setOpen(prev => { const next = new Set(prev); if (next.has(m.seq)) next.delete(m.seq); else next.add(m.seq); return next; })}>
+                {/* The first line when folded; the toggle stays in place either way, so it can always be collapsed again. */}
+                <button type="button" onClick={toggle} className="min-w-0 flex-1 truncate text-left text-[var(--fg-secondary,var(--fg))]">
                   {expanded ? null : text.split('\n')[0]}
                 </button>
                 {files.map(f => (
                   <button key={f} type="button" title={`Open ${f}`} onClick={() => onOpenFile?.(f)}
                     className="flex-shrink-0 rounded bg-[var(--surface-strong)] px-1.5 text-[11px] hover:bg-[var(--hover)]">{f.split('/').pop()}</button>
                 ))}
+                <button type="button" aria-expanded={expanded} aria-label={expanded ? 'Collapse' : 'Expand'} onClick={toggle}
+                  className="flex-shrink-0 rounded px-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]">{expanded ? 'Less' : 'More'}</button>
               </div>
-              {expanded ? <div className="mt-1"><ChatMessageBody role="assistant" text={text} /></div> : null}
+              {expanded ? <div className="mt-1 min-w-0"><ChatMessageBody role="assistant" text={text} /></div> : null}
             </div>
           );
         })}

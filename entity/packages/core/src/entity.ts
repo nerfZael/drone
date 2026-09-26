@@ -25,6 +25,8 @@ interface LimbLive {
   callsSinceSummary: number;
   lastSummaryAt: number;
   summarizing?: boolean;
+  /** A final summary is due once the one being written ends. */
+  finalPending?: boolean;
   /** A wake that must wait for the run in flight to end (a worker finishing and continuing at once). */
   wakeAfterRun?: string;
   /** A worker's state sections as it was last shown them, so its next wake shows only what changed. */
@@ -33,11 +35,12 @@ interface LimbLive {
 
 export interface EntityConfig {
   /**
-   * The chat is for short messages: the most characters a model-backed limb may say at once (the front limb, a worker
-   * in the main chat, a worker in its own thread), and how many chat messages it may send in one wake. Longer text
-   * belongs in a file, linked from the message.
+   * The chat is for messages that are easy to read: the most characters a model-backed limb may say at once (the front
+   * limb, a worker in the main chat, a worker in its own thread), the longest block of prose (`paragraph`: what makes
+   * text dense), and how many chat messages it may send in one wake. Longer text belongs in a file, linked from the
+   * message.
    */
-  chatLimits: { front: number; worker: number; thread: number; perWake: number };
+  chatLimits: { front: number; worker: number; thread: number; paragraph: number; perWake: number };
   /** Debounce before a user message wakes the head, so bursts arrive together. */
   messageDebounceMs: number;
   /** While the user is still typing after sending, wait until their draft has been quiet this long... */
@@ -122,11 +125,35 @@ export interface EntitySnapshot {
 const MAX_QUEUED = 500;
 
 const DEFAULT_CONFIG: EntityConfig = {
-  chatLimits: { front: 300, worker: 600, thread: 1500, perWake: 2 },
+  chatLimits: { front: 800, worker: 1200, thread: 2000, paragraph: 300, perWake: 2 },
   messageDebounceMs: 150, messageSettleMs: 1000, messageSettleMaxMs: 6000, tickMs: 50, headHeartbeatMs: 180_000, headMaxSteps: 8, taskMaxSteps: 24,
   maxTasks: 6, review: 'off', reviewQuietMs: 3000, maxCodeLimbs: 32, reflexPerSecond: 30, limbPerSecond: 5, cancelGraceMs: 3000,
   restartMax: 3, restartWindowMs: 60_000, freezeMaxMs: 600_000, draftAttention: true, codeLimbs: true, keptSessions: 12, taskContinuations: 4, summaryEveryCalls: 4, summaryIntervalMs: 20_000, summaryMax: 200, recentEvents: 40,
 };
+
+/**
+ * Why a chat message would be hard to read, or null. Chat is a conversation, not a document: no headings or tables,
+ * and no block of prose longer than `paragraph` characters. List items and code blocks are not prose.
+ */
+export function chatShapeProblem(text: string, paragraph: number): string | null {
+  const lines = text.split('\n');
+  let inCode = false;
+  let block = '';
+  let longest = 0;
+  const end = () => { longest = Math.max(longest, block.trim().length); block = ''; };
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) { inCode = !inCode; end(); continue; }
+    if (inCode) continue;
+    if (/^\s{0,3}#{1,6}\s/.test(line)) return 'no headings in chat: use a short list or short paragraphs, or put a document in a file and link it.';
+    if (/^\s*\|.*\|\s*$/.test(line)) return 'no tables in chat: use a short list, or put the table in a file and link it.';
+    // A blank line or a list item ends a paragraph; a list item is its own block.
+    if (!line.trim()) { end(); continue; }
+    if (/^\s*([-*+]|\d+[.)])\s/.test(line)) { end(); block = line; end(); continue; }
+    block += ` ${line}`;
+  }
+  end();
+  return longest > paragraph ? `a paragraph is too dense for chat (${longest}/${paragraph} characters): split it into short paragraphs, or a list with one item per line.` : null;
+}
 
 class Stopped extends Error {}
 
@@ -224,7 +251,13 @@ export class Entity {
     this.log.append('session_resumed', 'user', { paused_for_ms: pausedFor });
     for (const wait of this.pausable) this.schedulePausable(wait);
     for (const resolve of this.pauseWaiters.splice(0)) resolve();
-    this.wake('head', `resumed after ${Math.round(pausedFor / 1000)} s pause; workers carry on by themselves, so say nothing unless the user needs to know something that is not in the chat yet`);
+    // Messages sent while paused were not handled (wakes do nothing while paused): the front limb takes them now, as
+    // any message, and with a separate voice in front the head stays out of it.
+    const front = this.frontLimb();
+    const seen = this.llm(front)?.seenSeq ?? 0;
+    const unhandled = this.log.all().some(e => e.type === 'chat_message' && e.by === 'user' && e.seq > seen);
+    if (unhandled) this.wake(front, 'user message');
+    if (!unhandled) this.wake('head', `resumed after ${Math.round(pausedFor / 1000)} s pause; workers carry on by themselves, so say nothing unless the user needs to know something that is not in the chat yet`);
     for (const limb of this.workers()) if (limb.status === 'running' && !limb.runs.length && limb.asking === undefined) this.wake(limb.id, 'resumed');
   }
 
@@ -896,6 +929,7 @@ export class Entity {
     if (!WORKER_ACTIVE.includes(limb.status)) return;
     const keptBefore = [...this.state.kept];
     this.log.append('task_done', limb.id, { status, result: result.slice(0, 4000), task: limb.task ?? '' });
+    if (status === 'done') this.finalSummary(limb);
     // Conversations are kept for the most recent finished workers only; failed and stopped ones are dropped at once.
     for (const id of keptBefore) if (!this.state.kept.includes(id) && id !== limb.id) this.mind.forget?.(id);
     if (status !== 'done') this.mind.forget?.(limb.id);
@@ -923,6 +957,10 @@ export class Entity {
     const queued = this.workers().filter(l => l.status === 'queued').length;
     if (queued >= MAX_QUEUED) return `error: ${queued} workers are already queued (max ${MAX_QUEUED}); cancel some first`;
     if (args.after && !this.workerOf(args.after)) return `error: no worker "${args.after}" to wait for`;
+    // The same task twice is a slip (two limbs acting on one message), never two pieces of work.
+    // Batch items may share a task on purpose (six reviewers of the same code), so only single dispatches are checked.
+    const same = !args.fork_of && !args.group && this.workers().find(l => WORKER_ACTIVE.includes(l.status) && l.task?.trim() === args.task.trim());
+    if (same) return `error: ${same.id} "${same.name}" is already doing exactly this; steer it if anything should change, and do not repeat what it says.`;
     const source = args.fork_of ? this.workerOf(args.fork_of) : undefined;
     if (args.fork_of && !source) return `error: no worker "${args.fork_of}" to fork`;
     const id = this.nextId('worker');
@@ -1087,6 +1125,23 @@ export class Entity {
     live.callsSinceSummary++;
     if (!summarizer || live.summarizing || limb.status !== 'running' || this.summaries >= this.config.summaryMax) return;
     if (live.callsSinceSummary < this.config.summaryEveryCalls || this.now() - live.lastSummaryAt < this.config.summaryIntervalMs) return;
+    this.summarize(limb);
+  }
+
+  /**
+   * Every worker that finishes gets a summary of what it did (one more, if it had them while it worked), so its card
+   * says what happened in a few short steps, not where it was a moment before the end.
+   */
+  private finalSummary(limb: WorkerLimb): void {
+    const live = this.liveOf(limb.id);
+    if (!this.options.summarizer || this.summaries >= this.config.summaryMax) return;
+    if (live.summarizing) { live.finalPending = true; return; }
+    this.summarize(limb);
+  }
+
+  private summarize(limb: WorkerLimb): void {
+    const summarizer = this.options.summarizer!;
+    const live = this.liveOf(limb.id);
     live.summarizing = true;
     live.callsSinceSummary = 0;
     live.lastSummaryAt = this.now();
@@ -1100,7 +1155,11 @@ export class Entity {
         if (summary.usage) this.log.append('usage', 'system', { kind: 'summaries', limb: limb.id, ...summary.usage });
       })
       .catch(error => { if (this.status !== 'idle') this.addHealth(`summary for ${limb.id} failed: ${error instanceof Error ? error.message : String(error)}`); })
-      .finally(() => { clearTimeout(timer); live.summarizing = false; });
+      .finally(() => {
+        clearTimeout(timer);
+        live.summarizing = false;
+        if (live.finalPending) { live.finalPending = false; this.finalSummary(limb); }
+      });
   }
 
   /** What a worker has done so far, in order, for the summarizer. */
@@ -1280,6 +1339,8 @@ export class Entity {
       default:
         if (worker && name === 'say' && args.reply_to === undefined && worker.replyTo !== undefined) args = { ...args, reply_to: worker.replyTo };
         if (worker && name === 'say' && worker.group && args.thread === undefined) args = { ...args, thread: true };
+        // Only a batch worker keeps to its thread: anyone else's reply, above all its result, belongs in the chat.
+        if (worker && name === 'say' && !worker.group && args.thread === true) args = { ...args, thread: false };
         return this.commit(caller, name, args);
     }
   }
@@ -1408,9 +1469,16 @@ export class Entity {
     if (chat.sent.has(same)) return 'error: you already sent exactly this message in this wake; do not repeat it.';
     if (chat.said >= limits.perWake) return `error: you already sent ${chat.said} messages this wake; say everything in one message, or put it in a file and link it.`;
     const text = String(args.text ?? '');
-    const threaded = !!worker && (args.thread === true || (!!worker.group && args.thread !== false));
+    const threaded = !!worker?.group && args.thread !== false;
     const limit = worker ? (threaded ? limits.thread : limits.worker) : limits.front;
-    if (text.length <= limit) return args;
+    // Readability is about density as much as length: a scannable list reads easily, one long paragraph does not.
+    // Past two refusals in a wake the message goes as it is rather than not at all.
+    if (text.length <= limit) {
+      const shape = chatShapeProblem(text, limits.paragraph);
+      if (!shape || chat.refused >= 2) return args;
+      chat.refused++;
+      return `error: ${shape} Nothing was sent; send it again in that shape.`;
+    }
     if (chat.refused < 2) {
       chat.refused++;
       return worker

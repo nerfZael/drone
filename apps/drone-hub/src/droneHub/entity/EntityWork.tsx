@@ -179,19 +179,34 @@ export function Pips({ w }: { w: WorkItem }) {
   );
 }
 
-export function Steps({ w }: { w: WorkItem }) {
+/**
+ * A worker's done / doing / next, from its summary. With `limit`, a compact view for a card: what it is doing and any
+ * blocker first, then its latest done steps, then what is next, and how many more there are.
+ */
+export function Steps({ w, limit }: { w: WorkItem; limit?: number }) {
   if (!w.steps) return <div className="text-[12px] text-[var(--muted)] opacity-80">No summary yet.</div>;
-  const item = (glyph: string, color: string, text: string, key: string, dim?: boolean) => (
-    <li key={key} className={`grid grid-cols-[14px_1fr] gap-1.5 ${dim ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary,var(--fg))]'}`}>
-      <span className="text-center text-[11px] leading-[19px]" style={{ color }}>{glyph}</span><span>{text}</span>
-    </li>
-  );
+  type Item = { glyph: string; color: string; text: string; key: string; dim?: boolean; rank: number; order: number };
+  const all: Item[] = [
+    ...w.steps.done.map((text, i) => ({ glyph: '✓', color: STATE_COLOR.done, text, key: `d${i}`, rank: 2, order: i })),
+    ...w.steps.doing.map((text, i) => ({ glyph: '●', color: STATE_COLOR[w.state], text, key: `o${i}`, rank: 0, order: 100 + i })),
+    ...w.steps.next.map((text, i) => ({ glyph: '○', color: 'var(--muted)', text, key: `x${i}`, dim: true, rank: 3, order: 200 + i })),
+    ...(w.steps.blocker ? [{ glyph: '!', color: STATE_COLOR.need, text: w.steps.blocker, key: 'b', rank: 1, order: 300 }] : []),
+  ];
+  // Which to keep when there are too many: doing and blockers, then the most recent done, then the nearest next.
+  let shown = all;
+  if (limit && all.length > limit) {
+    const pick = [...all].sort((a, b) => a.rank - b.rank || (a.rank === 2 ? b.order - a.order : a.order - b.order)).slice(0, limit);
+    shown = all.filter(item => pick.includes(item));
+  }
   return (
     <ul className="m-0 grid list-none gap-0.5 p-0">
-      {w.steps.done.map((s, i) => item('✓', STATE_COLOR.done, s, `d${i}`))}
-      {w.steps.doing.map((s, i) => item('●', STATE_COLOR[w.state], s, `o${i}`))}
-      {w.steps.next.map((s, i) => item('○', 'var(--muted)', s, `x${i}`, true))}
-      {w.steps.blocker ? item('!', STATE_COLOR.need, w.steps.blocker, 'b') : null}
+      {shown.map(item => (
+        <li key={item.key} className={`grid grid-cols-[14px_1fr] gap-1.5 ${item.dim ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary,var(--fg))]'}`}>
+          <span className="text-center text-[11px] leading-[19px]" style={{ color: item.color }}>{item.glyph}</span>
+          <span className={limit ? 'truncate' : undefined} title={limit ? item.text : undefined}>{item.text}</span>
+        </li>
+      ))}
+      {shown.length < all.length ? <li className="pl-[20px] text-[11px] text-[var(--muted)]">+{all.length - shown.length} more</li> : null}
     </ul>
   );
 }

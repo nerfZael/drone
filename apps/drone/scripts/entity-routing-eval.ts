@@ -2,13 +2,14 @@
  * Routing eval for the entity: plays each case in entity/evals/routing-cases.ts against the real front-limb model
  * (Codex, on the subscription) with stand-in workers that stay busy, and reports which routing decisions were right.
  *
- *   bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--head openai-codex/gpt-6-luna] [--voice <model>] [--only <text>]
+ *   bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--head openai-codex/gpt-6-luna] [--voice <model>] [--only <text>] [--concurrency 8]
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Entity, chatChannel, keypadChannel, workspaceChannel, type Channel, type Mind } from '@entity/core';
 import { PiAiMind } from '../src/hub/entity/entity-mind';
+import { priceModelCall } from '../src/hub/usage/priceModelCall';
 import { ROUTING_CASES, type RoutingCase } from '../../../entity/evals/routing-cases';
 
 const arg = (name: string) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : undefined; };
@@ -20,7 +21,8 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** The real model for the head and voice; workers just stay busy until stopped, so routing is all that is judged. */
 function routingMind(c: RoutingCase): Mind {
-  const real = new PiAiMind('medium');
+  // Priced like the Hub prices every model call: list price, subscription models too.
+  const real = new PiAiMind('medium', undefined, priceModelCall);
   const asked = new Set<string>();
   return {
     run: async input => {
@@ -44,7 +46,9 @@ function grantedWorkspaces(lines: string[]): Channel {
   };
 }
 
-async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number }> {
+type Spend = { cost: number; tokens: number; unpriced: number };
+
+async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number; spend: Spend }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'entity-routing-'));
   const entity = new Entity({
     mind: routingMind(c),
@@ -75,7 +79,9 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
     // On a failure, show what the front limb did, so the cause is visible without replaying.
     const acts = events.filter(e => e.type === 'tool_called' && (e.by === 'head' || e.by === 'voice') && e.data.name !== 'note').map(e => `${e.data.name}(${String(e.data.summary ?? '').slice(0, 60)})`);
     const why = failure && `${failure} · front did: ${acts.join(', ') || 'nothing'}`;
-    return { ok: why === null, why, ms: Date.now() - started };
+    const u = entity.snapshot().usage;
+    const spend = { cost: u.cost, tokens: u.input + u.output + u.cacheRead + u.cacheWrite, unpriced: u.unpriced };
+    return { ok: why === null, why, ms: Date.now() - started, spend };
   } finally {
     entity.close();
     rmSync(dir, { recursive: true, force: true });
@@ -85,14 +91,25 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
 const cases = ROUTING_CASES.filter(c => !only || c.name.includes(only));
 console.log(`routing eval: ${cases.length} case(s) × ${repeat}, head ${head}${voice ? `, voice ${voice}` : ''}\n`);
 let passed = 0, total = 0;
-// Cases run at the same time; each has its own entity.
-const results = await Promise.all(cases.flatMap(c => Array.from({ length: repeat }, () => play(c).then(r => ({ c, r })))));
+// Cases run a few at a time, each with its own entity: many at once gets throttled by the model provider, which
+// fails cases for reasons that have nothing to do with routing.
+const concurrency = Number(arg('concurrency') ?? 8);
+const jobs = cases.flatMap(c => Array.from({ length: repeat }, () => c));
+const results: { c: RoutingCase; r: Awaited<ReturnType<typeof play>> }[] = [];
+let next = 0;
+await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+  while (next < jobs.length) { const c = jobs[next++]; results.push({ c, r: await play(c) }); }
+}));
+const money = (cost: number) => `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
+const sum = (list: Spend[]): Spend => list.reduce((a, b) => ({ cost: a.cost + b.cost, tokens: a.tokens + b.tokens, unpriced: a.unpriced + b.unpriced }), { cost: 0, tokens: 0, unpriced: 0 });
 for (const c of cases) {
   const mine = results.filter(x => x.c === c);
   const ok = mine.filter(x => x.r.ok).length;
   passed += ok; total += mine.length;
-  console.log(`${ok === mine.length ? 'PASS' : 'FAIL'} ${ok}/${mine.length}  ${c.name}`);
+  console.log(`${ok === mine.length ? 'PASS' : 'FAIL'} ${ok}/${mine.length}  ${c.name}  (${money(sum(mine.map(x => x.r.spend)).cost)})`);
   for (const x of mine) if (!x.r.ok) console.log(`       ${x.r.why}`);
 }
-console.log(`\n${passed}/${total} passed`);
+// What the run cost: every model call the entities made, at list price, even on a subscription.
+const spent = sum(results.map(x => x.r.spend));
+console.log(`\n${passed}/${total} passed · ${money(spent.cost)} at list price · ${Math.round(spent.tokens / 1000)}k tokens${spent.unpriced ? ` · ${spent.unpriced} call(s) with no known price` : ''}`);
 process.exit(0);
