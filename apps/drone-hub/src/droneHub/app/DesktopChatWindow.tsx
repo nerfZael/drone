@@ -1,4 +1,5 @@
 import React from 'react';
+import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
 import { createPortal } from 'react-dom';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { registerAppDialogSurface } from '../../ui/AppConfirmDialog';
@@ -24,6 +25,10 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
   const popup = React.useRef<Window | null>(null);
   const cleanup = React.useRef<(() => void) | null>(null);
   const [outside, setOutside] = React.useState(false);
+  // Focusing this window makes its own composer the target of composer shortcuts again.
+  const composers = useOptionalActiveComposer();
+  const activateInRef = React.useRef(composers?.activateIn);
+  activateInRef.current = composers?.activateIn;
   const [pinned, setPinned] = React.useState(false);
   const [error, setError] = React.useState('');
   const name = `${kind === 'tool' ? 'drone-hub-tool' : 'drone-hub-chat'}:${chatKey}`;
@@ -71,7 +76,7 @@ export function DesktopChatWindow({ chatKey, chatTarget, title, request, onClose
     // Confirmations raised from this chat open here, not in the Hub window behind it.
     const unregisterDialogSurface = registerAppDialogSurface(child.document);
     const unregisterEditorZoom = registerEditorZoomWindow(child);
-    const focused = () => { host.dataset.desktopChatFocused = 'true'; };
+    const focused = () => { host.dataset.desktopChatFocused = 'true'; activateInRef.current?.(child.document); };
     const blurred = () => { host.dataset.desktopChatFocused = 'false'; };
     host.dataset.desktopChatFocused = String(child.document.hasFocus());
     child.addEventListener('focus', focused);

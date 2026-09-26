@@ -1,5 +1,6 @@
 import { AttachmentViewerDialog, portalContainerOf, type ViewedAttachment } from '../media/AttachmentViewerDialog';
 import React from 'react';
+import { browserMicrophoneOwnerLabel } from './browser-microphone-coordinator';
 import {
   CHAT_ATTACHMENT_POLICY,
   validateChatAttachments,
@@ -210,6 +211,8 @@ export type ChatInputProps = {
   modeHint?: string;
   /** The empty composer's hint; "Ask the agent" by default. */
   placeholder?: string;
+  /** Why the composer is disabled, shown where its controls would otherwise just grey out. */
+  disabledReason?: string;
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
@@ -268,6 +271,7 @@ export function ChatInput({
   focusTargetId,
   modeHint = '',
   placeholder = 'Ask the agent',
+  disabledReason,
   attachmentsEnabled,
   attachmentMode = 'images',
   composerContext,
@@ -391,6 +395,7 @@ export function ChatInput({
   React.useEffect(() => {
     return activeComposer.registerComposer({
       id: activeComposerTargetId,
+      ownerDocument: () => composerRootRef.current?.ownerDocument ?? null,
       requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
       isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
@@ -623,6 +628,19 @@ export function ChatInput({
   );
   const voiceRecordButtonDisabled =
     composerLocked || voiceActionInFlight || continuousVoiceActive || microphoneOwnedElsewhere;
+  // Why recording cannot start right now, for the button's tooltip and the shortcut.
+  const microphoneOwner = continuousDictation?.microphoneOwner ?? null;
+  const voiceRecordDisabledReason = composerLocked
+    ? disabledReason ?? 'Messages cannot be sent here right now.'
+    : voiceActionInFlight
+      ? 'Finishing the last voice message…'
+      : continuousVoiceActive
+        ? 'Continuous voice steering is on.'
+        : microphoneOwnedElsewhere && microphoneOwner
+          ? microphoneOwner === 'voice-message'
+            ? 'Another chat is recording a voice message.'
+            : `${browserMicrophoneOwnerLabel(microphoneOwner)} is using the microphone.`
+          : null;
   const continuousVoiceButtonDisabled =
     !continuousVoiceEnabled ||
     composerLocked ||
@@ -1086,6 +1104,11 @@ export function ChatInput({
   }
 
   function toggleVoiceRecordingFromShortcut(): boolean {
+    if (voiceRecordingStatus === 'idle' && voiceRecordDisabledReason) {
+      // Say why instead of doing nothing.
+      setAttachmentError(voiceRecordDisabledReason);
+      return true;
+    }
     if (composerLocked || continuousVoiceActive || microphoneOwnedElsewhere) return false;
     if (voiceRecordingStatus === 'idle') {
       readComposerSelection();
@@ -1632,7 +1655,7 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Record voice message"
+                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1916,7 +1939,7 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Record voice message"
+                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

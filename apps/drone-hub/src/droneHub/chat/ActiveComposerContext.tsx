@@ -8,6 +8,8 @@ import type { ChatVoiceRecordingStatus } from './use-chat-voice-recorder';
 export type ActiveComposer = {
   id: string;
   requiresExplicitFocus?: boolean;
+  /** The window the composer is in: the Hub's own, or a desktop window of its own (the entity bench, a detached chat). */
+  ownerDocument?(): Document | null;
   isEligible(): boolean;
   isReadable?(): boolean;
   appendTranscript(text: string): void;
@@ -24,6 +26,8 @@ export type ActiveComposer = {
 
 type ActiveComposerContextValue = {
   activeComposerId: string | null;
+  /** Makes a window's own composer the target again when that window gets focus. */
+  activateIn(doc: Document): void;
   registerComposer(composer: ActiveComposer): () => void;
   focusComposer(id: string): void;
   ensureTargetId(): string | null;
@@ -53,6 +57,8 @@ const ActiveComposerContext = React.createContext<ActiveComposerContextValue | n
 export class ActiveComposerRegistry {
   private readonly composers = new Map<string, ActiveComposer>();
   private activeId: string | null = null;
+  /** The last active composer in each window, so returning to a window returns to its composer. */
+  private readonly lastByDocument = new WeakMap<Document, string>();
   private focusScope: (() => string | null | undefined) | null = null;
   private readonly listeners = new Set<() => void>();
 
@@ -83,6 +89,22 @@ export class ActiveComposerRegistry {
   focusWithin(resolve: () => string | null | undefined): void {
     this.focusScope = resolve;
     this.ensureTargetId();
+  }
+
+  /**
+   * The window the user is in now: if the active composer is in another one, switch to this window's last active
+   * composer (or its first available one). Shortcuts pressed in a window then act there, not in a window left behind.
+   */
+  activateIn(doc: Document): void {
+    const current = this.activeId ? this.composers.get(this.activeId) : null;
+    if (!current || current.ownerDocument?.() === doc) return;
+    const rememberedId = this.lastByDocument.get(doc);
+    const remembered = rememberedId ? this.composers.get(rememberedId) : undefined;
+    const here = remembered?.isEligible() ? remembered
+      : [...this.composers.values()].find(composer => composer.ownerDocument?.() === doc && !composer.requiresExplicitFocus && composer.isEligible());
+    if (!here) return;
+    this.focusScope = null;
+    this.setActiveId(here.id);
   }
 
   focusDefault(): void {
@@ -226,6 +248,8 @@ export class ActiveComposerRegistry {
   private setActiveId(next: string | null): void {
     if (this.activeId === next) return;
     this.activeId = next;
+    const doc = next ? this.composers.get(next)?.ownerDocument?.() : null;
+    if (doc && next) this.lastByDocument.set(doc, next);
     for (const listener of this.listeners) listener();
   }
 }
@@ -249,14 +273,21 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       const target = event.target instanceof Element ? event.target : null;
       if (target) routeComposerFocus(target, registry, markCurrentChatComposerEditorModeTarget);
     };
+    // Back in the Hub's window (from a desktop window of its own): its composer is the target again.
+    const backHere = () => registry.activateIn(document);
+    document.addEventListener('pointerdown', backHere, true);
     document.addEventListener('pointerdown', routeFocus, true);
     document.addEventListener('focusin', routeFocus, true);
+    window.addEventListener('focus', backHere);
     return () => {
+      document.removeEventListener('pointerdown', backHere, true);
       document.removeEventListener('pointerdown', routeFocus, true);
       document.removeEventListener('focusin', routeFocus, true);
+      window.removeEventListener('focus', backHere);
     };
   }, [registry]);
   const ensureTargetId = React.useCallback(() => registry.ensureTargetId(), [registry]);
+  const activateIn = React.useCallback((doc: Document) => registry.activateIn(doc), [registry]);
   const appendTranscript = React.useCallback(
     (targetId: string, text: string) => registry.appendTranscript(targetId, text),
     [registry],
@@ -290,6 +321,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
   const value = React.useMemo<ActiveComposerContextValue>(
     () => ({
       activeComposerId,
+      activateIn,
       registerComposer,
       focusComposer,
       ensureTargetId,
@@ -307,6 +339,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
     }),
     [
       activeComposerId,
+      activateIn,
       appendTranscript,
       applyComposer,
       clearComposer,
