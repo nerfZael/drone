@@ -49,6 +49,8 @@ test('entity routes: start, send input, and see the entity act; bad input and ru
     // A clicked option answers a question: the message carries the question's seq.
     const answered = (await call('POST', '/api/entity/input', { type: 'chat_message', data: { text: 'Staging', reply_to: 2 } })).body.seq;
     expect(session.state().events.find(e => e.seq === answered)?.data).toEqual({ text: 'Staging', reply_to: 2 });
+    const several = (await call('POST', '/api/entity/input', { type: 'chat_message', data: { text: '1. Both\n2. —', reply_to: 2, picks: ['Both', ''] } })).body.seq;
+    expect(session.state().events.find(e => e.seq === several)?.data).toEqual({ text: '1. Both\n2. —', reply_to: 2, picks: ['Both', ''] });
     expect((await call('POST', '/api/entity/input', { type: 'key_down', data: { key: 'x' } })).status).toBe(400);
     expect((await call('POST', '/api/entity/input', { type: 'teleport', data: {} })).status).toBe(400);
     expect((await call('POST', '/api/entity/config', { evaluator: 'jev' })).status).toBe(409);

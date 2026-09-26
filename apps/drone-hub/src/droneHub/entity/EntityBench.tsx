@@ -5,7 +5,6 @@ import { KEYS, seconds } from './bench-format';
 import { UiButton } from '../../ui/components/Button';
 import { EntityBrain } from './EntityBrain';
 import { EntityWork } from './EntityWork';
-import type { WorkLink } from './EntityWorkCanvas';
 import { EntityTimeline, useEntityReplay, useReplayKeys } from './EntityTimeline';
 import { useEntitySession, type EntityConfig } from './use-entity-session';
 import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
@@ -31,7 +30,6 @@ export function EntityBench() {
   const openFile = React.useCallback((path: string) => { setTarget(t => ({ path, sequence: (t?.sequence ?? 0) + 1 })); setView('files'); }, []);
   const replay = useEntityReplay();
   // The chat and the Work canvas highlight each other, and a worker's reply in the chat opens it on the canvas.
-  const [link, setLink] = React.useState<WorkLink>(null);
   const [openWorker, setOpenWorker] = React.useState<{ id: string; n: number } | null>(null);
   const showWorker = React.useCallback((id: string) => { setView('work'); setOpenWorker(o => ({ id, n: (o?.n ?? 0) + 1 })); }, []);
   useReplayKeys(replay);
@@ -61,10 +59,10 @@ export function EntityBench() {
           ? (brain || view === 'work' ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]')
           : (brain || view === 'work' ? 'grid-cols-[minmax(260px,0.9fr)_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1fr)_minmax(300px,1.2fr)]')}`}>
           <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input}
-            onWorker={session.worker} link={view === 'work' ? link : null} onOpenWorker={showWorker} onOpenFile={openFile} sessionId={state.sessionId} />
+            onWorker={session.worker} onOpenWorker={showWorker} onOpenFile={openFile} sessionId={state.sessionId} />
           {keypad ? <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} /> : null}
           {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} />
-            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} link={link} onLink={l => setLink(l && { ...l, from: 'canvas' })} open={openWorker} onReroute={session.reroute} onOpenFile={openFile} />
+            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} open={openWorker} onReroute={session.reroute} onOpenFile={openFile} />
             : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>
       )}

@@ -12,6 +12,8 @@ export interface RoutingCase {
   source?: string;
   /** Messages in order; `after` is the pause before sending, in ms (default 3000); `click` sends it as a click on the latest question's options. */
   messages: { text: string; after?: number; click?: boolean }[];
+  /** The workspaces the session has, as the Hub shows them to the limbs (id: name (kind; access)). Default: a plain folder. */
+  workspaces?: string[];
   /** The stand-in worker asks the user this on its first run (the `ask` tool), then waits. */
   workerAsks?: string;
   /** Returns null when routing was right, or what was wrong. */
@@ -26,6 +28,34 @@ const afterMessage = (events: RoutingEvent[], text: string) => { const m = userM
 const optionsAfter = (events: RoutingEvent[], text: string) => afterMessage(events, text).filter(e => e.type === 'chat_message' && e.by !== 'user' && Array.isArray(e.data.options));
 
 export const ROUTING_CASES: RoutingCase[] = [
+  {
+    name: 'asked for some questions: one message with several questions, each with options',
+    source: 'a live session: four questions written as plain text',
+    messages: [{ text: "I want to build a small arcade game. Ask me some questions first." }],
+    check: events => {
+      const asked = afterMessage(events, "I want to build a small arcade game. Ask me some questions first.").filter(e => e.type === 'chat_message' && e.by !== 'user' && Array.isArray(e.data.questions));
+      const questions = (asked[0]?.data.questions ?? []) as { options?: unknown[] }[];
+      if (questions.length < 2) return `no message with several questions (${asked.length} with questions); ${workers(events).length} worker(s)`;
+      if (!questions.some(q => Array.isArray(q.options) && q.options.length)) return 'questions without options';
+      return workers(events).length === 0 ? null : `asked, but also started ${workers(events).length} worker(s)`;
+    },
+  },
+  {
+    name: 'work the workspace does not allow is raised with options, not quietly scaled down',
+    source: 'entity-sessions/20260926-172930-vwsg',
+    workspaces: ['entity-home: your home folder (read, write)', 'host:storyspark: StorySpark (host; read) · default'],
+    messages: [{ text: "Let's build an arcade game in the workspace." }],
+    check: events => {
+      const asked = optionsAfter(events, "Let's build an arcade game in the workspace.");
+      return asked.length && workers(events).length === 0 ? null : `${asked.length} question(s) with options, ${workers(events).length} worker(s)`;
+    },
+  },
+  {
+    name: 'work the workspace allows is started without asking',
+    workspaces: ['entity-home: your home folder (read, write)', 'host:storyspark: StorySpark (host; read, write) · default'],
+    messages: [{ text: 'Add a CONTRIBUTING.md to the workspace with a short how-to-contribute section.' }],
+    check: events => (workers(events).length === 1 && !optionsAfter(events, 'Add a CONTRIBUTING.md to the workspace with a short how-to-contribute section.').length ? null : `${workers(events).length} worker(s), asked: ${optionsAfter(events, 'Add a CONTRIBUTING.md to the workspace with a short how-to-contribute section.').length}`),
+  },
   {
     name: 'related new work while a worker runs: ask same worker or a separate one, with options',
     messages: [{ text: 'Can you implement a login page for the app?' }, { text: 'Can you also implement a signup page?', after: 8000 }],

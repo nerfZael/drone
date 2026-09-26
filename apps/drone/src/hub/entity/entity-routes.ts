@@ -34,6 +34,12 @@ async function entityModelChoices(isModel: (id: string) => Promise<boolean>) {
 
 export const ENTITY_WORKSPACE_ID = 'entity-workspace';
 
+/** One answer per question (up to twenty), '' for a question left unanswered; anything else is dropped. */
+function cleanPicks(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.length) return undefined;
+  return value.slice(0, 20).map(p => String(p ?? '').slice(0, 500));
+}
+
 const CONTROL_ACTIONS = new Set(['start', 'pause', 'resume', 'reset']);
 const INPUT_TYPES = new Set(['chat_message', 'draft_changed', 'key_down', 'key_up']);
 
@@ -132,7 +138,9 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
     if (typeof data.text === 'string' && data.text.length > 8000) return fail(400, 'text is too long');
     // A chat message may answer a question: reply_to is that question's seq (a clicked option).
     const replyTo = body.type === 'chat_message' && Number.isInteger(data.reply_to) && (data.reply_to as number) > 0 ? { reply_to: data.reply_to as number } : {};
-    const event = (await current()).input(body.type, body.type.startsWith('key') ? { key: String(data.key) } : { text: data.text, ...replyTo });
+    // Answers to several questions at once: one per question, in order.
+    const picks = body.type === 'chat_message' && replyTo.reply_to ? cleanPicks(data.picks) : undefined;
+    const event = (await current()).input(body.type, body.type.startsWith('key') ? { key: String(data.key) } : { text: data.text, ...replyTo, ...(picks ? { picks } : {}) });
     json(200, { ok: true, seq: event.seq });
   });
 
@@ -192,12 +200,12 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
   });
 
   router.post('/api/entity/worker', async ({ readJson, json, fail }) => {
-    const body = await readJson<{ id?: string; action?: string; text?: string; answers?: number }>();
+    const body = await readJson<{ id?: string; action?: string; text?: string; answers?: number; picks?: unknown }>();
     if (!body?.id || (body.action !== 'message' && body.action !== 'stop' && body.action !== 'rename')) return fail(400, 'id and action (message, stop or rename) are required');
     if (body.action === 'message' && (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000)) return fail(400, 'text must be 1-4000 characters');
     if (body.action === 'rename' && (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 60)) return fail(400, 'a name must be 1-60 characters');
     const answers = Number.isInteger(body.answers) && (body.answers as number) > 0 ? body.answers : undefined;
-    const result = (await current()).worker(String(body.id), body.action, body.text ?? '', answers);
+    const result = (await current()).worker(String(body.id), body.action, body.text ?? '', answers, answers !== undefined ? cleanPicks(body.picks) : undefined);
     if (result.startsWith('error')) return fail(400, result.replace(/^error: /, ''));
     json(200, { ok: true, result });
   });

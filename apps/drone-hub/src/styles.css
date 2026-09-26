@@ -3974,11 +3974,13 @@ select:disabled optgroup {
 }
 
 /*
- * The entity bench's composers (its chat and a worker's thread): the usual
- * rounded card, inset from the edges, with the slim floating chat's shorter rows.
+ * The entity bench's composers (its chat and a worker's thread): a compact rounded
+ * card, well inset from the edges, sitting on the chat's own background rather
+ * than a footer strip of its own.
  */
 .dh-entity-composer .dh-chat-composer {
-  padding: 0 .5rem .5rem;
+  padding: 0 1.5rem .5rem;
+  background: transparent;
 }
 
 .dh-entity-composer .dh-chat-composer-box {
@@ -3987,30 +3989,30 @@ select:disabled optgroup {
 }
 
 .dh-entity-composer .dh-chat-composer-row {
-  padding-left: .625rem;
-  padding-right: .625rem;
+  padding-left: .5rem;
+  padding-right: .5rem;
 }
 
 .dh-entity-composer .dh-chat-composer-row--collapsed {
-  min-height: 2.25rem;
+  min-height: 2rem;
   padding-left: .25rem;
   padding-right: .25rem;
 }
 
 .dh-entity-composer .dh-chat-composer-row--collapsed textarea {
-  min-height: 2.25rem;
-  padding-top: .4375rem;
-  padding-bottom: .4375rem;
+  min-height: 2rem;
+  padding-top: .3125rem;
+  padding-bottom: .3125rem;
 }
 
 .dh-entity-composer .dh-chat-composer-toolbar {
-  min-height: 2.25rem;
+  min-height: 2rem;
   padding: 0 .25rem .25rem;
 }
 
 .dh-entity-composer .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
-  width: 1.875rem;
-  height: 1.875rem;
+  width: 1.625rem;
+  height: 1.625rem;
 }
 
 /* Chat scopes take programmatic focus for shortcuts; no focus ring on the panel itself. */

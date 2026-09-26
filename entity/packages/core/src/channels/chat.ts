@@ -1,4 +1,5 @@
 import type { Channel } from '../channel.js';
+import type { Schema } from '../types.js';
 import { isEntityActor } from '../log.js';
 
 /** An answer the user can click. */
@@ -15,7 +16,21 @@ export function cleanOptions(value: unknown): ChatOption[] | undefined {
   return options.length ? options : undefined;
 }
 
-export interface ChatMessage { seq: number; by: string; text: string; t: number; options?: ChatOption[]; files?: string[]; replyTo?: number; corrects?: number; expands?: number; correctedBy?: number; withdrawn?: boolean }
+/** One of several questions asked together, each with its own answers to click. */
+export interface ChatQuestion { question: string; options?: ChatOption[] }
+
+/** Up to twenty questions, each cleaned like options; empty ones are dropped. */
+export function cleanQuestions(value: unknown): ChatQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const questions = value
+    .map(q => ({ question: String((q as ChatQuestion)?.question ?? '').trim().slice(0, 500), options: cleanOptions((q as ChatQuestion)?.options) }))
+    .filter(q => q.question)
+    .slice(0, 20)
+    .map(q => (q.options ? q : { question: q.question }));
+  return questions.length ? questions : undefined;
+}
+
+export interface ChatMessage { seq: number; by: string; text: string; t: number; options?: ChatOption[]; questions?: ChatQuestion[]; files?: string[]; replyTo?: number; corrects?: number; expands?: number; correctedBy?: number; withdrawn?: boolean }
 
 export interface ChatWorld {
   messages: ChatMessage[];
@@ -34,6 +49,9 @@ export interface ChatChannelOptions {
    */
   checkFiles?(paths: string[]): string | null;
 }
+
+/** The answers a question offers to click. */
+const OPTIONS: Schema = { type: 'array', maxItems: 6, description: 'Answers the user can click instead of typing, for a question with a few likely answers. Mark the one you recommend.', items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } };
 
 /** Chat: messages from both sides, the user's live draft, and the entity's own draft. */
 export function chatChannel(options_: ChatChannelOptions = {}): Channel<ChatWorld> {
@@ -69,6 +87,7 @@ export function chatChannel(options_: ChatChannelOptions = {}): Channel<ChatWorl
           seq: event.seq, by: event.by, text, t: event.t,
           ...(Array.isArray(event.data.options) ? { options: event.data.options as ChatOption[] } : {}),
           ...(Array.isArray(event.data.files) ? { files: event.data.files as string[] } : {}),
+          ...(Array.isArray(event.data.questions) ? { questions: event.data.questions as ChatQuestion[] } : {}),
           ...(typeof event.data.reply_to === 'number' ? { replyTo: event.data.reply_to } : {}),
           ...(typeof event.data.corrects === 'number' ? { corrects: event.data.corrects } : {}),
           ...(typeof event.data.expands === 'number' ? { expands: event.data.expands } : {}),
@@ -98,16 +117,22 @@ export function chatChannel(options_: ChatChannelOptions = {}): Channel<ChatWorl
             reply_to: { type: 'integer', minimum: 1, description: 'The message seq this answers (threads)' },
             thread: { type: 'boolean', description: 'Post only in your own thread, not in the main chat. Workers in a batch do this by default; pass false only for a question the user must answer.' },
             question: { type: 'boolean', description: 'This asks the user something you need answered before you can go on. A worker then waits for the answer instead of finishing.' },
+            questions: {
+              type: 'array', maxItems: 20,
+              description: 'Several questions asked together, each with its own answers to click (the recommended one marked). The user answers them all at once. Use it instead of listing questions in the text, which then just introduces them.',
+              items: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 500 }, options: OPTIONS } },
+            },
             files: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 }, description: 'Files in your home folder this message links, relative to it (a write-up, a spec). Shown as links the user can open.' },
-            options: { type: 'array', maxItems: 6, description: 'Answers the user can click instead of typing, for a question with a few likely answers. Mark the one you recommend.', items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } },
+            options: OPTIONS,
           },
         },
-        apply(args: { text: string; reply_to?: number; thread?: boolean; question?: boolean; options?: ChatOption[]; files?: string[] }, ctx) {
+        apply(args: { text: string; reply_to?: number; thread?: boolean; question?: boolean; options?: ChatOption[]; questions?: ChatQuestion[]; files?: string[] }, ctx) {
           const options = cleanOptions(args.options);
+          const questions = cleanQuestions(args.questions);
           const files = [...new Set((args.files ?? []).map(f => String(f).trim().replace(/^\.?\/+/, '')).filter(Boolean))];
           const problem = files.length ? options_.checkFiles?.(files) : null;
           if (problem) return `error: ${problem}. Nothing was sent; write the file first, or fix the path.`;
-          ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}), ...(args.thread ? { thread: true } : {}), ...(args.question ? { question: true } : {}), ...(options ? { options } : {}), ...(files.length ? { files } : {}) });
+          ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}), ...(args.thread ? { thread: true } : {}), ...(args.question ? { question: true } : {}), ...(options ? { options } : {}), ...(questions ? { questions } : {}), ...(files.length ? { files } : {}) });
           return args.thread ? 'posted in your thread' : 'sent';
         },
       },
@@ -129,7 +154,7 @@ export function chatChannel(options_: ChatChannelOptions = {}): Channel<ChatWorl
     render(world, { ago }) {
       return {
         volatile: {
-          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}${m.corrects ? ` (correction of #${m.corrects})` : ''}${m.expands ? ` (adds to #${m.expands})` : ''}: ${m.correctedBy ? `[WRONG, corrected by #${m.correctedBy}] ` : ''}${m.withdrawn ? '[WITHDRAWN: this correction was itself wrong] ' : ''}${m.text}${m.options ? ` [options: ${m.options.map(o => `${o.label}${o.recommended ? ' (recommended)' : ''}`).join(' | ')}]` : ''}${m.files ? ` [files: ${m.files.join(', ')}]` : ''} (${ago(m.t)})`),
+          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}${m.corrects ? ` (correction of #${m.corrects})` : ''}${m.expands ? ` (adds to #${m.expands})` : ''}: ${m.correctedBy ? `[WRONG, corrected by #${m.correctedBy}] ` : ''}${m.withdrawn ? '[WITHDRAWN: this correction was itself wrong] ' : ''}${m.text}${m.options ? ` [options: ${m.options.map(o => `${o.label}${o.recommended ? ' (recommended)' : ''}`).join(' | ')}]` : ''}${m.questions ? ` [questions: ${m.questions.map((q, i) => `${i + 1}) ${q.question}${q.options ? ` (options: ${q.options.map(o => `${o.label}${o.recommended ? ' (recommended)' : ''}`).join(' | ')})` : ''}`).join(' ')}]` : ''}${m.files ? ` [files: ${m.files.join(', ')}]` : ''} (${ago(m.t)})`),
           user_draft_unsent: world.draft ? { text: world.draft.text, typing_for: ago(world.draft.startedAt).replace(' ago', ''), last_key: ago(world.draft.lastKeyAt) } : null,
           your_draft: world.entityDraft?.text ?? null,
         },

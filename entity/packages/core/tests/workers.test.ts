@@ -754,3 +754,48 @@ test('chat: linked files are checked by the host and shown with the message', as
   expect(results[0]).toContain('artifacts/missing.md does not exist');
   expect(h.of('chat_message').find(e => e.data.text === 'here')!.data.files).toEqual(['artifacts/plan.md']);
 });
+
+test('questions: several at once, each with options, from say and from ask; clicked answers reach the worker in order', async () => {
+  const prompts: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head') prompts.push(input.prompt);
+    if (input.role === 'head' && lastUserMessage(input) === 'ask me some questions') {
+      await call('say', { text: 'A few questions:', questions: [{ question: 'Keyboard or touch?', options: [{ label: 'Both', recommended: true }, { label: 'Keyboard' }] }, { question: 'Any name in mind?' }, { question: ' ' }] });
+    }
+    if (input.role === 'head' && lastUserMessage(input) === 'build it') await call('dispatch', { task: 'build' });
+    if (input.role === 'task') {
+      if (!h.of('steered').length) { await call('ask', { question: 'Before I start:', questions: [{ question: 'Standalone?', options: [{ label: 'Yes' }, { label: 'No' }] }, { question: 'Style?' }] }); return; }
+      await call('finish_task', { result: 'built' });
+    }
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'ask me some questions' });
+  await until(() => h.said().includes('A few questions:'));
+  const asked = h.of('chat_message').find(e => e.data.text === 'A few questions:')!;
+  expect(asked.data.questions).toEqual([{ question: 'Keyboard or touch?', options: [{ label: 'Both', recommended: true }, { label: 'Keyboard' }] }, { question: 'Any name in mind?' }]);
+  h.entity.input('chat_message', { text: 'build it' });
+  await until(() => h.said().includes('Before I start:'));
+  const workerQuestion = h.of('chat_message').find(e => e.data.text === 'Before I start:')!;
+  expect((workerQuestion.data.questions as unknown[]).length).toBe(2);
+  h.entity.messageWorker(workerQuestion.by, '1. Standalone? Yes\n2. Style? Pixel art', workerQuestion.seq, ['Yes', 'Pixel art']);
+  await until(() => h.of('task_done').length === 1);
+  expect(h.of('steered')[0].data).toMatchObject({ answers: workerQuestion.seq, picks: ['Yes', 'Pixel art'] });
+  // The chat shows the questions to whoever reads it.
+  expect(prompts.some(p => p.includes('[questions: 1) Keyboard or touch? (options: Both (recommended) | Keyboard) 2) Any name in mind?]'))).toBe(true);
+});
+
+test('chat: the same message twice in one wake is refused, and a question is not queued for review', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'ask me') {
+      for (let i = 0; i < 2; i++) results.push(await call('say', { text: 'A few questions:', questions: [{ question: 'Which?', options: [{ label: 'A' }] }] }));
+    }
+  }, { config: { review: 'separate' } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'ask me' });
+  await until(() => results.length === 2);
+  expect(results[0]).toBe('sent');
+  expect(results[1]).toContain('already sent exactly this message');
+  const asked = h.of('chat_message').find(e => e.data.text === 'A few questions:')!;
+  expect(h.of('review_queued').some(e => e.data.seq === asked.seq)).toBe(false);
+});

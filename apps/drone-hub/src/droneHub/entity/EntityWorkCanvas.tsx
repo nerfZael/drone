@@ -3,7 +3,7 @@ import { Background, BaseEdge, Handle, Position, ReactFlow, ViewportPortal, type
 import '@xyflow/react/dist/style.css';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
 import { Dot, Pips, Steps, STATE_COLOR, WorkerDetail, clock, spend, type WorkItem } from './EntityWork';
-import { EntityComposer, EntityMessage, questionAnswer, type ChatOption } from './EntityChat';
+import { EntityComposer, EntityMessage, questionAnswer, type ChatOption, type ChatQuestion } from './EntityChat';
 import { WorkingElapsedStatus } from '../chat/WorkingElapsedStatus';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import {
@@ -17,10 +17,9 @@ import {
  * entity/docs/work-canvas.md. Layout is ours (work-canvas-model.ts); xyflow only pans, zooms and draws.
  */
 
-type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number) => Promise<boolean> | void;
+type OnWorker = (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number, picks?: string[]) => Promise<boolean> | void;
 
 /** What the chat and the canvas highlight together: a chat message, or a worker. */
-export type WorkLink = { message?: number; worker?: string; from?: 'chat' | 'canvas' } | null;
 
 interface Ctx {
   t: number;
@@ -59,13 +58,10 @@ const EDGE_STYLE = {
   blocked: { stroke: STATE_COLOR.stop, dash: '1 5', width: 2 },
 } as const;
 
-export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLink, open, onReroute, onOpenFile }: {
+export function EntityWorkCanvas({ snapshot, events, live, onWorker, open, onReroute, onOpenFile }: {
   snapshot: EntitySnapshot; events: EntityEvent[]; live: boolean; onWorker: OnWorker;
   /** Override how a message was routed: its own worker, or a fork of the worker it went to. */
   onReroute?(seq: number, how: 'separate' | 'fork'): void;
-  /** Highlighted from the chat. */
-  link?: WorkLink;
-  onLink?(link: WorkLink): void;
   /** A request from the chat to open a worker; `n` changes with every request. */
   open?: { id: string; n: number } | null;
   /** Opens a file a worker linked, in the entity's home folder. */
@@ -86,26 +82,16 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
   const { pulsing, flashing } = usePulses(events, model, live);
 
   React.useEffect(() => { if (open) setSelected(open.id); }, [open]);
-  // A worker chosen elsewhere (a reply clicked in the chat) is highlighted here.
-  const linked = React.useMemo(() => {
-    if (!link) return null;
-    if (link.worker) return [link.worker];
-    const ids = [...model.workers.values()].filter(w => w.replyTo === link.message).map(w => w.id);
-    // Only a steer made for this message: before the user's next message.
-    const next = events.find(e => e.type === 'chat_message' && e.by === 'user' && e.seq > link.message!);
-    const steered = events.find(e => e.type === 'steered' && e.by !== 'user' && e.seq > link.message! && (!next || e.seq < next.seq));
-    return ids.length ? ids : steered ? [String(steered.data.id)] : null;
-  }, [link, model, events]);
   // Dimming what is unrelated is a lens you ask for: it applies only while Ctrl or ⌘ is held.
   const lens = useModifierHeld();
   const focus = React.useMemo(() => {
     if (!lens) return null;
-    const ids = hovered ?? linked ?? (selected ? [selected] : null);
+    const ids = hovered ?? (selected ? [selected] : null);
     if (!ids) return null;
     const nodes = new Set(ids.map(id => model.shownAs.get(id)).filter((n): n is string => !!n));
     for (const e of model.edges) { if (nodes.has(e.from)) nodes.add(e.to); else if (nodes.has(e.to)) nodes.add(e.from); }
     return nodes;
-  }, [lens, hovered, linked, selected, model]);
+  }, [lens, hovered, selected, model]);
 
   const at = React.useMemo(() => new Map(layout.placed.map(p => [p.id, p])), [layout]);
   const nodes = React.useMemo(() => buildNodes(model, at, sizes), [model, at, sizes]);
@@ -154,8 +140,6 @@ export function EntityWorkCanvas({ snapshot, events, live, onWorker, link, onLin
     fitted.current = true;
     requestAnimationFrame(() => { flow.current?.fitView(FIT); setTimeout(() => setSettled(true), 400); });
   }, [nodes.length, sizes.size]);
-
-  React.useEffect(() => { onLink?.(selected ? { worker: selected } : null); }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ctx: Ctx = {
     t, live, focus, selected, expanded, flashing,
@@ -561,7 +545,9 @@ function Drawer({ w, events, snapshot, t, live, onWorker, onOpenFile, onClose }:
               text={String(e.data.text ?? '')}
               files={Array.isArray(e.data.files) ? e.data.files as string[] : undefined} onOpenFile={onOpenFile}
               options={Array.isArray(e.data.options) ? e.data.options as ChatOption[] : undefined}
-              answer={Array.isArray(e.data.options) ? questionAnswer(e, events, snapshot) : null} answerDisabled={!live}
+              questions={Array.isArray(e.data.questions) ? e.data.questions as ChatQuestion[] : undefined}
+              onAnswerAll={(picks, text) => { void onWorker(w.id, 'message', text, e.seq, picks); }}
+              answer={Array.isArray(e.data.options) || Array.isArray(e.data.questions) ? questionAnswer(e, events, snapshot) : null} answerDisabled={!live}
               onChoose={choice => { void onWorker(w.id, 'message', choice, e.seq); }} />
           ))}
           {!thread.length && !origin && !working ? <div className="text-[12px] text-[var(--muted)]">Nothing said yet.</div> : null}

@@ -292,9 +292,9 @@ export class EntitySession {
   }
 
   /** Work view actions on one worker. */
-  worker(id: string, action: 'message' | 'stop' | 'rename', text = '', answers?: number): string {
+  worker(id: string, action: 'message' | 'stop' | 'rename', text = '', answers?: number, picks?: string[]): string {
     if (action === 'rename') return this.entity.renameWorker(id, text);
-    return action === 'message' ? this.entity.messageWorker(id, text, answers) : this.entity.stopWorker(id);
+    return action === 'message' ? this.entity.messageWorker(id, text, answers, picks) : this.entity.stopWorker(id);
   }
 
   /** The user overrides how a message was routed (the Work canvas's corrections). */

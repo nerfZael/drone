@@ -337,6 +337,8 @@ export class Entity {
   private queueReview(event: EntityEvent): void {
     if (this.config.review === 'off' || event.type !== 'chat_message' || event.by !== this.frontLimb()) return;
     if (event.data.thread || event.data.group || event.data.corrects || event.data.expands) return;
+    // A question (options to click, several questions) asks rather than answers: there is nothing to check.
+    if (Array.isArray(event.data.options) || Array.isArray(event.data.questions)) return;
     // The head reviewing its own answers adds nothing; with review 'head', only a separate voice is reviewed.
     if (this.config.review === 'head' && event.by === 'head') return;
     this.log.append('review_queued', 'system', { seq: event.seq });
@@ -757,8 +759,8 @@ export class Entity {
     const allowed = new Set(tools.map(t => t.name));
     /** Set when the limb ends its turn itself (finish_task, ask); the run then stops after this step. */
     let ended = false;
-    /** Chat messages this wake, and messages refused for length (after two refusals the runtime shortens them itself). */
-    const chat = { said: 0, refused: 0 };
+    /** Chat messages this wake, messages refused for length (after two refusals the runtime shortens them itself), and what was sent. */
+    const chat = { said: 0, refused: 0, sent: new Set<string>() };
     this.mind.run({
       limbId: limb.id, runId, role: limb.role === 'head' || limb.role === 'reviewer' ? 'head' : limb.role === 'voice' ? 'voice' : 'task', model: limb.model,
       system: this.systemPrompt(limb), prompt, tools, signal: abort.signal, ended: () => ended,
@@ -794,7 +796,10 @@ export class Entity {
         }
         this.log.append('tool_called', limb.id, { run: runId, name, summary: describeToolArgs(name, args ?? {}) });
         const result = await this.callTool(limb, runId, readSeq, () => { ended = true; }, name, args ?? {});
-        if (name === 'say' && toolResultOk(result)) chat.said++;
+        if (name === 'say' && toolResultOk(result)) {
+          chat.said++;
+          chat.sent.add(JSON.stringify([args?.text, args?.options ?? null, args?.questions ?? null, args?.files ?? null]));
+        }
         const ok = toolResultOk(result);
         // Busy workers hear about steers, discoveries and claims with their next tool result, without being stopped.
         const updates = worker && worker.status === 'running' && !ended ? [...worker.notices] : [];
@@ -1005,12 +1010,12 @@ export class Entity {
   }
 
   /** A message for one worker, delivered with its next tool result (or reviving it if idle). */
-  private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now', answers?: number): string {
+  private steer(by: string, id: string, text: string, when: 'now' | 'after' = 'now', answers?: number, picks?: string[]): string {
     const limb = this.workerOf(id);
     if (!limb) return `error: no worker "${id}"`;
     const active = WORKER_ACTIVE.includes(limb.status);
     if (!active && (limb.status !== 'done' || !this.state.kept.includes(limb.id))) return `error: ${id} is ${limb.status} and its conversation is gone; dispatch a fresh worker instead`;
-    this.log.append('steered', by, { id, text, ...(when === 'after' ? { when } : {}), ...(answers !== undefined ? { answers } : {}) });
+    this.log.append('steered', by, { id, text, ...(when === 'after' ? { when } : {}), ...(answers !== undefined ? { answers } : {}), ...(picks?.length ? { picks } : {}) });
     // More work for later: the worker finishes what it is doing first, then continues in the same conversation.
     if (when === 'after' && active) return `${id} will continue with this once it finishes its current work`;
     if (limb.status === 'queued' || limb.status === 'waiting') return `${id} is ${limb.status === 'queued' ? 'queued' : `waiting for ${limb.waitFor}`}; it gets this when it starts`;
@@ -1054,8 +1059,11 @@ export class Entity {
   }
 
   /** A message from the user straight to one worker (the Work view's "Message"). */
-  /** The user messages a worker directly; `answers` is the seq of its question when the user clicked an option. */
-  messageWorker(id: string, text: string, answers?: number): string { return this.steer('user', id, text, 'now', answers); }
+  /**
+   * The user messages a worker directly; `answers` is the seq of its question when the user clicked an option, and
+   * `picks` the answer to each of its questions, in order ('' for one left unanswered).
+   */
+  messageWorker(id: string, text: string, answers?: number, picks?: string[]): string { return this.steer('user', id, text, 'now', answers, picks); }
 
   /** The user renames a worker; every view and every limb's state use the new name. */
   renameWorker(id: string, name: string): string {
@@ -1258,7 +1266,7 @@ export class Entity {
       case 'ask': {
         if (!worker) return 'error: only workers ask';
         // Posted in the main chat even for a batch worker: the user must see it to answer.
-        return this.commit(caller, 'say', { text: String(args.question ?? ''), question: true, thread: false, ...(Array.isArray(args.options) ? { options: args.options } : {}), ...(worker.replyTo !== undefined ? { reply_to: worker.replyTo } : {}) }).then(result => {
+        return this.commit(caller, 'say', { text: String(args.question ?? ''), question: true, thread: false, ...(Array.isArray(args.options) ? { options: args.options } : {}), ...(Array.isArray(args.questions) ? { questions: args.questions } : {}), ...(worker.replyTo !== undefined ? { reply_to: worker.replyTo } : {}) }).then(result => {
           if (!result.startsWith('sent')) return result;
           endTurn();
           return 'asked; you wait for the answer, which wakes you';
@@ -1393,8 +1401,11 @@ export class Entity {
    * (when the host can write one) and the chat gets its first sentence and the link, anything else is cut at the limit.
    * A wake may send only a few messages. Returns the arguments to send, or why the message was refused.
    */
-  private checkChat(limb: LlmLimb, worker: WorkerLimb | undefined, args: Record<string, unknown>, chat: { said: number; refused: number }): Record<string, unknown> | string {
+  private checkChat(limb: LlmLimb, worker: WorkerLimb | undefined, args: Record<string, unknown>, chat: { said: number; refused: number; sent: Set<string> }): Record<string, unknown> | string {
     const limits = this.config.chatLimits;
+    // The same message twice in one wake is a slip, never something the user needs to read again.
+    const same = JSON.stringify([args.text, args.options ?? null, args.questions ?? null, args.files ?? null]);
+    if (chat.sent.has(same)) return 'error: you already sent exactly this message in this wake; do not repeat it.';
     if (chat.said >= limits.perWake) return `error: you already sent ${chat.said} messages this wake; say everything in one message, or put it in a file and link it.`;
     const text = String(args.text ?? '');
     const threaded = !!worker && (args.thread === true || (!!worker.group && args.thread !== false));

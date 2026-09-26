@@ -79,3 +79,17 @@ test('digests: worker messages that arrive together are one group; questions and
   ], by => by.startsWith('worker'));
   expect(groups.map(g => g.map(x => x.seq))).toEqual([[1], [2, 3, 4], [5], [6], [7]]);
 });
+
+test('several questions: chips per question with the recommended one preselected, one button to send; once answered, the picks show', async () => {
+  const { QuestionsCard, answersText } = await import('../src/droneHub/entity/EntityChat');
+  const questions = [{ question: 'Keyboard or touch?', options: [{ label: 'Both', recommended: true }, { label: 'Keyboard' }] }, { question: 'A name?' }];
+  const open = renderToStaticMarkup(<QuestionsCard questions={questions} answer={null} onSubmit={() => undefined} />);
+  expect(open).toContain('Send answers');
+  expect(open).toMatch(/aria-checked="true"[^>]*>✓ Both/);
+  expect(open).toContain('Answer…');
+  const answered = renderToStaticMarkup(<QuestionsCard questions={questions} answer={{ picks: ['Keyboard', 'Comet'] }} />);
+  expect(answered).not.toContain('Send answers');
+  expect(answered).toContain('✓ Keyboard');
+  expect(answered).toContain('✓ Comet');
+  expect(answersText(questions, ['Both', ''])).toBe('1. Keyboard or touch? Both\n2. A name? —');
+});

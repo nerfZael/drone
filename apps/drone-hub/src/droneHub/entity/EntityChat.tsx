@@ -5,7 +5,6 @@ import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { seconds } from './bench-format';
-import type { WorkLink } from './EntityWorkCanvas';
 
 /** Sends a message; resolves false when it was not delivered, so the composer keeps the text. */
 export type SendText = (text: string) => Promise<boolean> | boolean | void;
@@ -13,9 +12,10 @@ export type SendText = (text: string) => Promise<boolean> | boolean | void;
 export type ChatOption = { label: string; recommended?: boolean };
 
 /** A question from the entity or a worker that is still waiting for the user. */
-export type OpenQuestion = { seq: number; by: string; name: string; text: string; options?: ChatOption[]; worker: boolean; inThread: boolean };
+export type OpenQuestion = { seq: number; by: string; name: string; text: string; options?: ChatOption[]; questions?: ChatQuestion[]; worker: boolean; inThread: boolean };
+export type ChatQuestion = { question: string; options?: ChatOption[] };
 
-const asksSomething = (e: EntityEvent) => e.data.question === true || Array.isArray(e.data.options) || /\?\s*$/.test(String(e.data.text ?? ''));
+const asksSomething = (e: EntityEvent) => e.data.question === true || Array.isArray(e.data.options) || Array.isArray(e.data.questions) || /\?\s*$/.test(String(e.data.text ?? ''));
 
 /**
  * Questions still waiting for the user, from the log, wherever they were asked (a worker's thread too). The entity's own
@@ -39,7 +39,8 @@ export function openQuestions(events: EntityEvent[], snapshot: EntitySnapshot): 
     } else if (chats.some(e => e.by === 'user' && e.seq > q.seq)) continue;
     open.push({
       seq: q.seq, by: q.by, name: worker?.name ?? (q.by === 'head' || q.by === 'voice' ? 'Entity' : q.by), text: String(q.data.text ?? ''),
-      options: Array.isArray(q.data.options) ? q.data.options as ChatOption[] : undefined, worker: !!worker, inThread: q.data.thread === true,
+      options: Array.isArray(q.data.options) ? q.data.options as ChatOption[] : undefined,
+      questions: Array.isArray(q.data.questions) ? q.data.questions as ChatQuestion[] : undefined, worker: !!worker, inThread: q.data.thread === true,
     });
   }
   return open;
@@ -89,15 +90,82 @@ export function routingNotes(message: EntityEvent, events: EntityEvent[], nameOf
  * A question's answer, if it has one: for a worker's question the click that answered it (or just that the worker
  * stopped waiting), for the entity's own question the user's message in reply to it.
  */
-export function questionAnswer(question: EntityEvent, events: EntityEvent[], snapshot: EntitySnapshot): { text?: string } | null {
+export type QuestionAnswer = { text?: string; picks?: string[] };
+export function questionAnswer(question: EntityEvent, events: EntityEvent[], snapshot: EntitySnapshot): QuestionAnswer | null {
+  const picksOf = (e: EntityEvent) => (Array.isArray(e.data.picks) ? { picks: e.data.picks as string[] } : {});
   const worker = snapshot.limbs.find(l => l.id === question.by && l.role === 'task');
   if (worker) {
     const click = events.find(e => e.type === 'steered' && e.data.id === worker.id && e.data.answers === question.seq);
-    if (click) return { text: String(click.data.text) };
+    if (click) return { text: String(click.data.text), ...picksOf(click) };
     return worker.asking === question.seq ? null : question.data.question ? {} : null;
   }
   const reply = events.find(e => e.type === 'chat_message' && e.by === 'user' && e.data.reply_to === question.seq);
-  return reply ? { text: String(reply.data.text) } : null;
+  return reply ? { text: String(reply.data.text), ...picksOf(reply) } : null;
+}
+
+/** The reply several answers make: one line per question, "—" for one left unanswered. */
+export function answersText(questions: ChatQuestion[], picks: string[]): string {
+  return questions.map((q, i) => `${i + 1}. ${q.question} ${picks[i]?.trim() || '—'}`).join('\n');
+}
+
+/**
+ * Several questions answered at once: each with its options as chips (the recommended one preselected) and room to type
+ * another answer; one button sends them all. Once answered, each question shows what was picked.
+ */
+export function QuestionsCard({ questions, answer, disabled, compact, onSubmit }: {
+  questions: ChatQuestion[]; answer: QuestionAnswer | null; disabled?: boolean; compact?: boolean;
+  onSubmit?(picks: string[], text: string): void;
+}) {
+  const [picks, setPicks] = React.useState<string[]>(() => questions.map(q => q.options?.find(o => o.recommended)?.label ?? ''));
+  const [typing, setTyping] = React.useState<number | null>(null);
+  const done = !!answer;
+  const shown = done ? (answer.picks ?? []) : picks;
+  const set = (i: number, value: string) => setPicks(prev => prev.map((p, j) => (j === i ? value : p)));
+  const chip = 'rounded-md px-2 py-0.5 text-[12px] transition-colors';
+  return (
+    <div className={`grid gap-2.5 ${compact ? '' : 'mt-2.5'}`}>
+      {questions.map((q, i) => {
+        const pick = shown[i] ?? '';
+        const typed = !!pick && !q.options?.some(o => o.label === pick);
+        return (
+          <div key={i} role="radiogroup" aria-label={q.question} className="grid gap-1">
+            <div className="text-[13px]"><span className="text-[var(--muted)]">{i + 1}.</span> {q.question}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {q.options?.map(o => {
+                const on = pick === o.label;
+                return (
+                  <button key={o.label} type="button" role="radio" aria-checked={on} disabled={done || disabled}
+                    onClick={e => { e.stopPropagation(); set(i, on ? '' : o.label); }}
+                    className={`${chip} ${on ? 'bg-[var(--surface-strong)] text-[var(--fg)]' : done ? 'text-[var(--muted)] opacity-60' : 'bg-[var(--surface-softest)] hover:bg-[var(--hover)]'}`}>
+                    {on ? '✓ ' : ''}{o.label}{o.recommended ? <span className="ml-1 text-[var(--muted)]">· recommended</span> : null}
+                  </button>
+                );
+              })}
+              {done ? (typed ? <span className={`${chip} bg-[var(--surface-strong)]`}>✓ {pick}</span> : !pick ? <span className="text-[12px] text-[var(--muted)]">—</span> : null)
+                : typing === i || typed ? (
+                  <input autoFocus={typing === i} aria-label={`Your answer to ${q.question}`} value={typed ? pick : ''} placeholder="Your answer" disabled={disabled}
+                    onChange={e => set(i, e.target.value)} onClick={e => e.stopPropagation()}
+                    onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setTyping(null); } }}
+                    className="min-w-[10rem] flex-1 rounded-md bg-[var(--surface-softest)] px-2 py-0.5 text-[12px] outline-none" />
+                ) : (
+                  <button type="button" disabled={disabled} onClick={e => { e.stopPropagation(); setTyping(i); set(i, ''); }}
+                    className={`${chip} text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]`}>{q.options?.length ? 'Other…' : 'Answer…'}</button>
+                )}
+            </div>
+          </div>
+        );
+      })}
+      {!done && onSubmit ? (
+        <div>
+          <button type="button" disabled={disabled || picks.every(p => !p.trim())}
+            onClick={e => { e.stopPropagation(); onSubmit(picks, answersText(questions, picks)); }}
+            className="rounded-md bg-[var(--surface-strong)] px-3 py-1 text-[12px] font-medium hover:bg-[var(--hover)] disabled:opacity-40">
+            Send answers
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /** Answers to click: soft rows, the recommended one tagged, the chosen one filled and checked, the rest faded once answered. */
@@ -131,15 +199,17 @@ function Options({ options, answer, disabled, onChoose }: { options: ChatOption[
  * A message in the agent chat's design: the user's on the right, everyone else's on the left with markdown. `label`
  * names who said it when that isn't the entity itself, and `meta` carries replies, reviews and the like.
  */
-export function EntityMessage({ mine, at, label, meta, text, struck, linked, title, onClick, seq, options, answer, answerDisabled, onChoose, files, onOpenFile, notes, onOpenWorker }: {
-  mine: boolean; at?: number; label?: string | null; meta?: React.ReactNode; text: string; struck?: boolean; linked?: boolean;
+export function EntityMessage({ mine, at, label, meta, text, struck, title, onClick, seq, options, answer, answerDisabled, onChoose, questions, onAnswerAll, files, onOpenFile, notes, onOpenWorker }: {
+  mine: boolean; at?: number; label?: string | null; meta?: React.ReactNode; text: string; struck?: boolean;
   title?: string; onClick?(): void; seq?: number;
   /** Files the message links, in the entity's home folder. */
   files?: string[]; onOpenFile?(path: string): void;
   /** Under a user message: what the entity did with it. */
   notes?: { text: string; worker?: string }[]; onOpenWorker?(id: string): void;
   /** Clickable answers to this message's question. */
-  options?: ChatOption[]; answer?: { text?: string } | null; answerDisabled?: boolean; onChoose?(label: string): void;
+  options?: ChatOption[]; answer?: QuestionAnswer | null; answerDisabled?: boolean; onChoose?(label: string): void;
+  /** Several questions, answered together. */
+  questions?: ChatQuestion[]; onAnswerAll?(picks: string[], text: string): void;
 }) {
   const header = label || meta ? (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-[var(--muted)]">
@@ -148,8 +218,7 @@ export function EntityMessage({ mine, at, label, meta, text, struck, linked, tit
     </span>
   ) : undefined;
   return (
-    <div data-seq={seq} data-linked={linked || undefined} title={title}
-      className={`-mx-2 rounded-[var(--radius-xlarge,12px)] px-2 transition-colors ${linked ? 'bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]' : ''} ${onClick ? 'cursor-pointer' : ''}`}
+    <div data-seq={seq} title={title} className={onClick ? 'cursor-pointer' : undefined}
       onClick={onClick}>
       <ChatMessageFrame role={mine ? 'user' : 'assistant'} at={at ? new Date(at).toISOString() : undefined} showRoleLabel={false}
         headerEnd={header} hoverActions={<ChatMessageCopyAction text={text} position="inline" />}>
@@ -157,6 +226,7 @@ export function EntityMessage({ mine, at, label, meta, text, struck, linked, tit
           <ChatMessageBody role={mine ? 'user' : 'assistant'} text={text} />
         </div>
         {options?.length ? <Options options={options} answer={answer ?? null} disabled={answerDisabled} onChoose={onChoose} /> : null}
+        {questions?.length ? <QuestionsCard questions={questions} answer={answer ?? null} disabled={answerDisabled} onSubmit={onAnswerAll} /> : null}
         {files?.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {files.map(f => (
@@ -229,14 +299,14 @@ function useDismissed(sessionId: string | null): [ReadonlySet<number>, (seq: num
 /** Questions waiting for the user, above the composer: answer with an option or a short reply, jump to one, or dismiss it. */
 function NeedsYou({ questions, disabled, onAnswer, onShow, onDismiss }: {
   questions: OpenQuestion[]; disabled: boolean;
-  onAnswer(q: OpenQuestion, text: string): void; onShow(q: OpenQuestion): void; onDismiss(q: OpenQuestion): void;
+  onAnswer(q: OpenQuestion, text: string, picks?: string[]): void; onShow(q: OpenQuestion): void; onDismiss(q: OpenQuestion): void;
 }) {
   const [all, setAll] = React.useState(false);
   const [replying, setReplying] = React.useState<{ seq: number; text: string } | null>(null);
   if (!questions.length) return null;
   const shown = all ? questions : questions.slice(-2);
   return (
-    <div aria-label="Questions waiting for you" className="mx-2 mb-1.5 rounded-[var(--radius-large,10px)] bg-[var(--surface-softest)] px-3 py-2">
+    <div aria-label="Questions waiting for you" className="mx-6 mb-1.5 rounded-[var(--radius-large,10px)] bg-[var(--surface-softest)] px-3 py-2">
       <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
         Needs you · {questions.length}
         {questions.length > shown.length ? <button type="button" className="ml-auto normal-case tracking-normal hover:text-[var(--fg)]" onClick={() => setAll(true)}>Show all</button> : null}
@@ -252,7 +322,9 @@ function NeedsYou({ questions, disabled, onAnswer, onShow, onDismiss }: {
               </button>
               <button type="button" aria-label="Dismiss" title="Dismiss" onClick={() => onDismiss(q)} className="flex-shrink-0 rounded px-1 text-[var(--muted)] hover:bg-[var(--hover)]">✕</button>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
+            {q.questions?.length ? (
+              <QuestionsCard compact questions={q.questions} answer={null} disabled={disabled} onSubmit={(picks, text) => onAnswer(q, text, picks)} />
+            ) : <div className="flex flex-wrap items-center gap-1.5">
               {q.options?.map(o => (
                 <button key={o.label} type="button" disabled={disabled} onClick={() => onAnswer(q, o.label)}
                   className="rounded-md bg-[var(--surface-strong)] px-2 py-0.5 text-[12px] hover:bg-[var(--hover)] disabled:opacity-50">
@@ -269,7 +341,7 @@ function NeedsYou({ questions, disabled, onAnswer, onShow, onDismiss }: {
                 <button type="button" disabled={disabled} onClick={() => setReplying({ seq: q.seq, text: '' })}
                   className="rounded-md px-2 py-0.5 text-[12px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-50">Reply…</button>
               )}
-            </div>
+            </div>}
           </div>
         ))}
       </div>
@@ -278,8 +350,8 @@ function NeedsYou({ questions, disabled, onAnswer, onShow, onDismiss }: {
 }
 
 /** Several worker messages that arrived together: one line each (name, first line, files), expanding in place. */
-function Digest({ items, nameOf, linked, onOpenFile, onOpenWorker }: {
-  items: EntityEvent[]; nameOf(id: string): string; linked(m: EntityEvent): boolean;
+function Digest({ items, nameOf, onOpenFile, onOpenWorker }: {
+  items: EntityEvent[]; nameOf(id: string): string;
   onOpenFile?(path: string): void; onOpenWorker?(id: string): void;
 }) {
   const [open, setOpen] = React.useState<ReadonlySet<number>>(() => new Set());
@@ -293,8 +365,7 @@ function Digest({ items, nameOf, linked, onOpenFile, onOpenWorker }: {
           const files = Array.isArray(m.data.files) ? m.data.files as string[] : [];
           const expanded = open.has(m.seq);
           return (
-            <div key={m.seq} data-seq={m.seq} data-linked={linked(m) || undefined}
-              className={`rounded-md px-1.5 py-1 ${linked(m) ? 'bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]' : ''}`}>
+            <div key={m.seq} data-seq={m.seq} className="rounded-md px-1.5 py-1">
               <div className="flex min-w-0 items-baseline gap-2 text-[13px]">
                 <button type="button" className="flex-shrink-0 font-medium hover:underline" title="Open it on the Work canvas" onClick={() => onOpenWorker?.(m.by)}>{nameOf(m.by)}</button>
                 <button type="button" aria-expanded={expanded} className={`min-w-0 flex-1 text-left text-[var(--fg-secondary,var(--fg))] ${expanded ? '' : 'truncate'}`}
@@ -316,15 +387,13 @@ function Digest({ items, nameOf, linked, onOpenFile, onOpenWorker }: {
 }
 
 /** The conversation with the entity: its messages, workers' replies, second looks at fast answers, and the composer. */
-export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWorker, link, onOpenWorker, onOpenFile, sessionId }: {
+export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWorker, onOpenWorker, onOpenFile, sessionId }: {
   events: EntityEvent[]; snapshot: EntitySnapshot; disabled: boolean; replaying?: boolean;
   onInput(type: string, data: Record<string, unknown>): Promise<boolean> | void;
   /** Answers a worker's question directly (a clicked option). */
-  onWorker?(id: string, action: 'message', text: string, answers: number): Promise<boolean> | void;
+  onWorker?(id: string, action: 'message', text: string, answers: number, picks?: string[]): Promise<boolean> | void;
   /** Opens a linked file of the entity's home folder. */
   onOpenFile?(path: string): void;
-  /** A worker chosen on the Work canvas: its messages are marked here. */
-  link?: WorkLink;
   onOpenWorker?(id: string): void;
   /** The recording, so dismissed questions are remembered for it on this device. */
   sessionId?: string | null;
@@ -348,12 +417,6 @@ export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWor
   const chat = snapshot.world.chat as { entityDraft?: { text: string } | null } | undefined;
   React.useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [messages.length, chat?.entityDraft?.text]);
   const workerOf = (id: string) => snapshot.limbs.find(l => l.id === id && l.role === 'task');
-  const linkedTo = (m: EntityEvent) => !!link && (link.message === m.seq || (!!link.worker && (m.by === link.worker || workerOf(link.worker)?.replyTo === m.seq)));
-  React.useEffect(() => {
-    // Only a highlight that came from the canvas scrolls the chat; hovering here must not move what you point at.
-    if (!link || link.from === 'chat') return;
-    list.current?.querySelector('[data-linked="true"]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [link]);
   // The tray holds questions you might miss: not the one the chat already ends with.
   const lastInChat = messages[messages.length - 1];
   const waiting = openQuestions(events, snapshot).filter(q => !dismissed.has(q.seq) && !(q.seq === lastInChat?.seq && !q.inThread));
@@ -390,9 +453,11 @@ export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWor
         files={Array.isArray(m.data.files) ? m.data.files as string[] : undefined} onOpenFile={onOpenFile}
         notes={mine ? routingNotes(m, events, id => snapshot.limbs.find(l => l.id === id)?.name ?? id) : undefined} onOpenWorker={onOpenWorker}
         options={Array.isArray(m.data.options) ? m.data.options as ChatOption[] : undefined}
-        answer={Array.isArray(m.data.options) ? questionAnswer(m, events, snapshot) : null} answerDisabled={disabled}
+        questions={Array.isArray(m.data.questions) ? m.data.questions as ChatQuestion[] : undefined}
+        onAnswerAll={(picks, text) => { void (worker ? onWorker?.(m.by, 'message', text, m.seq, picks) : onInput('chat_message', { text, reply_to: m.seq, picks })); }}
+        answer={Array.isArray(m.data.options) || Array.isArray(m.data.questions) ? questionAnswer(m, events, snapshot) : null} answerDisabled={disabled}
         onChoose={choice => { void (worker ? onWorker?.(m.by, 'message', choice, m.seq) : onInput('chat_message', { text: choice, reply_to: m.seq })); }}
-        text={updated.get(m.seq) ?? String(m.data.text)} linked={linkedTo(m)}
+        text={updated.get(m.seq) ?? String(m.data.text)}
         struck={reviewed?.state === 'corrected' || reviewed?.state === 'withdrawn'}
         title={`#${m.seq} ${m.by} at ${seconds(m.t)}${worker ? ' · click to open it on the Work canvas' : ''}`}
         onClick={worker ? () => onOpenWorker?.(m.by) : undefined} />
@@ -404,7 +469,7 @@ export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWor
         <div className="dh-chat-transcript flex flex-col gap-4 px-4 py-4">
           {messages.length === 0 ? <div className="text-[var(--muted)]">{disabled ? 'Press Start to wake the entity.' : 'Say something, or press keys.'}</div> : null}
           {digestGroups(messages, by => !!workerOf(by)).map(group => group.length > 1 ? (
-            <Digest key={group[0].seq} items={group} nameOf={id => workerOf(id)?.name ?? id} linked={linkedTo} onOpenFile={onOpenFile} onOpenWorker={onOpenWorker} />
+            <Digest key={group[0].seq} items={group} nameOf={id => workerOf(id)?.name ?? id} onOpenFile={onOpenFile} onOpenWorker={onOpenWorker} />
           ) : renderMessage(group[0]))}
           {chat?.entityDraft?.text ? (
             <ChatMessageFrame role="assistant" showRoleLabel={false} className="border-dashed italic text-[var(--muted)]">
@@ -416,7 +481,7 @@ export function ChatPane({ events, snapshot, disabled, replaying, onInput, onWor
       </div>
       <div>
         <NeedsYou questions={waiting} disabled={disabled}
-          onAnswer={(q, text) => { void (q.worker ? onWorker?.(q.by, 'message', text, q.seq) : onInput('chat_message', { text, reply_to: q.seq })); }}
+          onAnswer={(q, text, picks) => { void (q.worker ? onWorker?.(q.by, 'message', text, q.seq, picks) : onInput('chat_message', { text, reply_to: q.seq, ...(picks ? { picks } : {}) })); }}
           onShow={q => { if (q.inThread) onOpenWorker?.(q.by); else jump(q.seq); }}
           onDismiss={q => setDismissed(q.seq)} />
         <EntityComposer id="entity-chat" label="the entity" disabled={disabled}

@@ -64,7 +64,8 @@ export function useEntitySession(enabled: boolean) {
     input: (type: string, data: Record<string, unknown>) => post('/api/entity/input', { type, data }),
     configure: (update: Partial<EntityConfig>) => post('/api/entity/config', update),
     /** `answers` is the seq of the worker's question when the text is a clicked option. */
-    worker: (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number) => post('/api/entity/worker', { id, action, text, ...(answers !== undefined ? { answers } : {}) }),
+    worker: (id: string, action: 'message' | 'stop' | 'rename', text?: string, answers?: number, picks?: string[]) =>
+      post('/api/entity/worker', { id, action, text, ...(answers !== undefined ? { answers } : {}), ...(picks ? { picks } : {}) }),
     reroute: (seq: number, how: 'separate' | 'fork') => post('/api/entity/reroute', { seq, how }),
   };
 }

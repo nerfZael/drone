@@ -7,7 +7,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Entity, chatChannel, keypadChannel, workspaceChannel, type Mind } from '@entity/core';
+import { Entity, chatChannel, keypadChannel, workspaceChannel, type Channel, type Mind } from '@entity/core';
 import { PiAiMind } from '../src/hub/entity/entity-mind';
 import { ROUTING_CASES, type RoutingCase } from '../../../entity/evals/routing-cases';
 
@@ -34,11 +34,21 @@ function routingMind(c: RoutingCase): Mind {
   };
 }
 
+/** Workspaces as the Hub's workspaces channel shows them (state only: routing is judged before any file is touched). */
+function grantedWorkspaces(lines: string[]): Channel {
+  return {
+    name: 'workspaces',
+    describe: 'The workspaces you may use: repositories, folders and drones the user granted this session, and your own home folder. What each allows (read, write, run commands) is in state; a call it does not allow is refused.',
+    inputs: [], effects: [], init: () => ({}), reduce() {},
+    render: () => ({ stable: { workspaces: lines } }),
+  };
+}
+
 async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'entity-routing-'));
   const entity = new Entity({
     mind: routingMind(c),
-    channels: [chatChannel(), keypadChannel(), workspaceChannel({ root: dir })],
+    channels: [chatChannel(), keypadChannel(), c.workspaces ? grantedWorkspaces(c.workspaces) : workspaceChannel({ root: dir })],
     models: { head, task: head, voice },
     config: { review: 'off', draftAttention: false },
   });
