@@ -87,6 +87,8 @@ type DroneHubUiState = {
   chatHeaderRepoPath: string;
   sidebarReposCollapsed: boolean;
   sidebarAutoMinimize: boolean;
+  /** One workspace layout for every drone instead of one per drone. */
+  sharedWorkspaceLayout: boolean;
   showRecentDronesOnly: boolean;
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
@@ -163,6 +165,7 @@ type DroneHubUiState = {
   setChatHeaderRepoPath: (next: Updater<string>) => void;
   setSidebarReposCollapsed: (next: Updater<boolean>) => void;
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
+  setSharedWorkspaceLayout: (next: Updater<boolean>) => void;
   setShowRecentDronesOnly: (next: Updater<boolean>) => void;
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
@@ -346,6 +349,7 @@ type DroneHubUiPersistedState = Pick<
   | 'chatHeaderRepoPath'
   | 'sidebarReposCollapsed'
   | 'sidebarAutoMinimize'
+  | 'sharedWorkspaceLayout'
   | 'showRecentDronesOnly'
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
@@ -961,6 +965,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       chatHeaderRepoPath: '',
       sidebarReposCollapsed: false,
       sidebarAutoMinimize: false,
+      sharedWorkspaceLayout: false,
       showRecentDronesOnly: false,
       sidebarGroupingMode: 'groups',
       sidebarDensityMode: 'default',
@@ -1055,6 +1060,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
       setSidebarAutoMinimize: (next) =>
         set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
+      setSharedWorkspaceLayout: (next) =>
+        set((s) => ({ sharedWorkspaceLayout: resolveNext(s.sharedWorkspaceLayout, next) })),
       setShowRecentDronesOnly: (next) =>
         set((s) => ({ showRecentDronesOnly: resolveNext(s.showRecentDronesOnly, next) })),
       setSidebarGroupingMode: (next) =>
@@ -1493,6 +1500,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         chatHeaderRepoPath: state.chatHeaderRepoPath,
         sidebarReposCollapsed: state.sidebarReposCollapsed,
         sidebarAutoMinimize: state.sidebarAutoMinimize,
+        sharedWorkspaceLayout: state.sharedWorkspaceLayout,
         showRecentDronesOnly: state.showRecentDronesOnly,
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
@@ -1573,6 +1581,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarAutoMinimize: normalizeBoolean(
             persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize,
           ),
+          sharedWorkspaceLayout: persisted.sharedWorkspaceLayout === true,
           showRecentDronesOnly: normalizeBoolean(
             persisted.showRecentDronesOnly ?? currentState.showRecentDronesOnly,
           ),
@@ -1805,6 +1814,7 @@ export function useDroneSidebarUiState() {
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
+      sharedWorkspaceLayout: s.sharedWorkspaceLayout,
       showRecentDronesOnly: s.showRecentDronesOnly,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
@@ -1828,6 +1838,7 @@ export function useDroneSidebarUiState() {
       setAppView: s.setAppView,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
+      setSharedWorkspaceLayout: s.setSharedWorkspaceLayout,
       setShowRecentDronesOnly: s.setShowRecentDronesOnly,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
@@ -1864,6 +1875,7 @@ export function useSelectedDroneWorkspaceUiState() {
       outputView: s.outputView,
       selectedChat: s.selectedChat,
       terminalEmulator: s.terminalEmulator,
+      sharedWorkspaceLayout: s.sharedWorkspaceLayout,
       setSidebarCollapsed: s.setSidebarCollapsed,
       setAgentMenuOpen: s.setAgentMenuOpen,
       setTerminalMenuOpen: s.setTerminalMenuOpen,

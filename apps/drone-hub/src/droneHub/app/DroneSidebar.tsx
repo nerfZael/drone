@@ -51,6 +51,7 @@ import {
   IconMore,
   IconPlus,
   IconSettings,
+  IconSharedLayout,
   IconSidebarCollapse,
   IconSidebarExpand,
   IconSpinner,
@@ -1159,6 +1160,7 @@ export function DroneSidebar({
     selectedGroupMultiChat,
     sidebarReposCollapsed,
     sidebarAutoMinimize,
+    sharedWorkspaceLayout,
     showRecentDronesOnly,
     sidebarDockSide,
     sidebarGroupOrder,
@@ -1189,6 +1191,7 @@ export function DroneSidebar({
     setDraftChat,
     setHomeOpen,
     setSidebarAutoMinimize,
+    setSharedWorkspaceLayout,
     setShowRecentDronesOnly,
     setActiveRepoPath,
     setSidebarCollapsed,
@@ -3647,6 +3650,17 @@ export function DroneSidebar({
                 onClick={() => useEntityWindow.getState().show()}
                 label="Open the entity test bench"
                 icon={<IconEntity className="opacity-70" />}
+              />
+            ) : null}
+            {sidebarCapabilities.repoFooter ? (
+              <UiToolbarIconButton
+                onClick={() => setSharedWorkspaceLayout((prev) => !prev)}
+                label={sharedWorkspaceLayout
+                  ? 'Using one layout for every drone. Click to give each drone its own layout again'
+                  : 'Use one layout for every drone'}
+                icon={<IconSharedLayout className="opacity-70" />}
+                tone="accent"
+                pressed={sharedWorkspaceLayout}
               />
             ) : null}
             {sidebarCapabilities.repoFooter ? (

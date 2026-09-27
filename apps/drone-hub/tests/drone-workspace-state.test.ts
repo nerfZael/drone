@@ -100,8 +100,8 @@ describe('per-drone workspace state', () => {
     const workspaceTools = readAppSource('app/use-workspace-tools.ts');
 
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
-    expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
-    expect(selectedWorkspace).toContain('key={currentDrone.id}');
+    expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout, sharedLayout)');
+    expect(selectedWorkspace).toContain("key={`${sharedWorkspaceLayout ? 'shared' : 'drone'}:${currentDrone.id}`}");
     expect(workspaceTools).toContain('visibleToolTabsByDrone');
     expect(workspaceTools).toContain('[droneId]: tabs');
     expect(selectedWorkspace).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');

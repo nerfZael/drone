@@ -10,6 +10,7 @@ const CHANGES_PULL_REQUEST_SELECTION_STORAGE_KEY = profileStorageKey(
 const CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY = profileStorageKey(
   'droneHub.changesPendingPullRequestOpenByDrone',
 );
+const PULL_REQUEST_OPEN_BY_REPO_STORAGE_KEY = profileStorageKey('droneHub.pullRequestOpenByRepo');
 
 export type ChangesOpenPullRequestDetail = {
   droneId: string;
@@ -152,6 +153,43 @@ export function selectedPullRequestForDrone(droneIdRaw: string): number | null {
 
 export function clearSelectedPullRequestForDrone(droneIdRaw: string): void {
   setSelectedPullRequestForDrone(droneIdRaw, null);
+}
+
+// 0 records a pull request closed in the repo; a missing repo has no record yet.
+function readPullRequestOpenByRepo(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PULL_REQUEST_OPEN_BY_REPO_STORAGE_KEY) ?? '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Remembers the pull request open for a repo, or none, so every drone of the repo shows it. */
+export function recordPullRequestOpenForRepo(repoPathRaw: string, pullNumberRaw: number | null): void {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return;
+  const pullNumber = Number(pullNumberRaw);
+  const next = readPullRequestOpenByRepo();
+  next[repoPath] = Number.isFinite(pullNumber) && pullNumber > 0 ? Math.floor(pullNumber) : 0;
+  try {
+    localStorage.setItem(PULL_REQUEST_OPEN_BY_REPO_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * The pull request open in this drone's repo, made the drone's selection so its
+ * Changes view shows the same one. Without a repo record, the drone's own selection.
+ */
+export function adoptPullRequestOpenForRepo(droneIdRaw: string, repoPathRaw: string): number | null {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  const recorded = repoPath ? readPullRequestOpenByRepo()[repoPath] : undefined;
+  if (typeof recorded !== 'number') return selectedPullRequestForDrone(droneIdRaw);
+  const pullNumber = recorded > 0 ? Math.floor(recorded) : null;
+  setSelectedPullRequestForDrone(droneIdRaw, pullNumber);
+  return pullNumber;
 }
 
 export function requestedPullRequestForDrone(droneIdRaw: string): number | null {

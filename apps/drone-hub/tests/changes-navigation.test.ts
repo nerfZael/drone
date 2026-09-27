@@ -6,6 +6,8 @@ import {
   requestAgentRunChanges,
   requestChangesPullRequest,
   selectedPullRequestForDrone,
+  adoptPullRequestOpenForRepo,
+  recordPullRequestOpenForRepo,
 } from '../src/droneHub/changes/navigation';
 
 class LocalStorageMock {
@@ -92,5 +94,22 @@ describe('changes navigation requests', () => {
 
     expect(selectedPullRequestForDrone('drone-a')).toBeNull();
     expect(selectedPullRequestForDrone('drone-b')).toBe(12);
+  });
+});
+
+describe('pull request open per repo', () => {
+  test('another drone of the repo adopts the open pull request, and a closed one', () => {
+    requestChangesPullRequest({ droneId: 'drone-b', pullNumber: 3 });
+    // Nothing recorded for the repo yet: the drone keeps its own selection.
+    expect(adoptPullRequestOpenForRepo('drone-b', '/repo')).toBe(3);
+
+    recordPullRequestOpenForRepo('/repo', 12);
+    expect(adoptPullRequestOpenForRepo('drone-b', '/repo')).toBe(12);
+    expect(selectedPullRequestForDrone('drone-b')).toBe(12);
+    expect(adoptPullRequestOpenForRepo('drone-c', '/other')).toBeNull();
+
+    recordPullRequestOpenForRepo('/repo', null);
+    expect(adoptPullRequestOpenForRepo('drone-b', '/repo')).toBeNull();
+    expect(selectedPullRequestForDrone('drone-b')).toBeNull();
   });
 });

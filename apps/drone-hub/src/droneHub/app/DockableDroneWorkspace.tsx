@@ -29,6 +29,7 @@ import { consumeKeepFocusOnChatActivation, focusChatWindow } from './focus-chat-
 import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
+import { openedFileTabId } from './opened-file-tabs';
 import { ChangesExplorerContext } from '../changes/changes-explorer-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
 import { dropOverlayContextFromEvent, emptySlotDirectionForDrop, isCollapsedEmptySlot, isNoOpDropOverlay } from './workspace-drop-overlay';
@@ -111,6 +112,8 @@ type DockableDroneWorkspaceProps = {
   onAfterToolPanelRemove?: () => void;
   /** Files opened in their own workspace windows by dragging editor tabs onto the grid. */
   fileWindows?: WorkspaceFileWindows;
+  /** Use the one layout shared by every drone instead of this drone's own. */
+  sharedLayout?: boolean;
 };
 
 export type WorkspaceFileWindow = { tabId: string; path: string; name: string };
@@ -140,6 +143,8 @@ const NEW_TOOL_PANEL_MAX_WIDTH = 1200;
 const EDITOR_PANEL_MIN_WIDTH = 480;
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
 const LEGACY_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.global');
+// Not the legacy key above: that one is deleted once a drone has its own layout.
+export const SHARED_WORKSPACE_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.shared');
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
 const disposedWorkspaceIds = new Set<string>();
 
@@ -409,15 +414,21 @@ function parseStoredLayout(raw: string | null): SerializedDockview | null {
   }
 }
 
-function readStoredLayout(droneId: string): SerializedDockview | null {
+function readStoredLayout(droneId: string, shared: boolean): SerializedDockview | null {
   if (typeof localStorage === 'undefined') return null;
+  // The shared layout starts from the chat alone, never from a drone's layout.
+  if (shared) return parseStoredLayout(localStorage.getItem(SHARED_WORKSPACE_LAYOUT_STORAGE_KEY));
   const stored = parseStoredLayout(localStorage.getItem(workspaceLayoutStorageKey(droneId)));
   if (stored) return stored;
   return parseStoredLayout(localStorage.getItem(LEGACY_LAYOUT_STORAGE_KEY));
 }
 
-function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
+function writeStoredLayout(droneId: string, layout: SerializedDockview, shared: boolean): void {
   if (typeof localStorage === 'undefined') return;
+  if (shared) {
+    localStorage.setItem(SHARED_WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+    return;
+  }
   localStorage.setItem(workspaceLayoutStorageKey(droneId), JSON.stringify(layout));
   // The global layout predates per-drone workspaces. Once it has been copied
   // into a drone-specific key, do not seed every newly visited drone with it.
@@ -560,6 +571,21 @@ export function migrateWorkspaceExplorerPanels(api: DockviewApi): void {
     panel.api.updateParameters({ ...params, [flag]: true });
   }
   active?.api.setActive();
+}
+
+/**
+ * A shared layout can hold file windows of the drone it was last arranged in.
+ * They show that drone's files, so they close without resizing their neighbours,
+ * and the files stay open in that drone's editor.
+ */
+export function removeOtherDronesFileWindows(api: DockviewApi, droneId: string): void {
+  for (const panel of [...api.panels]) {
+    if (!panel.id.startsWith(FILE_PANEL_PREFIX)) continue;
+    const params = (panel.params ?? {}) as { droneId?: unknown; tabId?: unknown };
+    const tabId = String(params.tabId ?? fileTabIdFromPanelId(panel.id) ?? '');
+    const owner = typeof params.droneId === 'string' ? params.droneId : null;
+    if (owner ? owner !== droneId : !tabId.startsWith(openedFileTabId(droneId, ''))) api.removePanel(panel);
+  }
 }
 
 export function resetWorkspaceToChat(api: DockviewApi): void {
@@ -898,6 +924,7 @@ export function DockableDroneWorkspace({
   fileWindows,
   hideFloatingSideChats = false,
   onRevealFloatingSideChats,
+  sharedLayout = false,
 }: DockableDroneWorkspaceProps) {
   const revealFloatingSideChatsRef = React.useRef<(() => void) | null>(null);
   revealFloatingSideChatsRef.current = hideFloatingSideChats ? onRevealFloatingSideChats ?? null : null;
@@ -1185,15 +1212,17 @@ export function DockableDroneWorkspace({
 
   const persistCurrentLayout = React.useCallback(() => {
     const api = apiRef.current;
-    if (!api || suppressSaveRef.current || unmountingRef.current || disposedWorkspaceIds.has(currentDrone.id)) return;
+    if (!api || suppressSaveRef.current || unmountingRef.current) return;
+    // A deleted drone's own layout is gone; the shared one outlives it.
+    if (!sharedLayout && disposedWorkspaceIds.has(currentDrone.id)) return;
     try {
       const layout = api.toJSON();
       if (!layout.panels[CHAT_PANEL_ID]) return;
-      writeStoredLayout(currentDrone.id, layout);
+      writeStoredLayout(currentDrone.id, layout, sharedLayout);
     } catch {
       // Ignore layout persistence failures; the active workspace can keep running.
     }
-  }, [currentDrone.id]);
+  }, [currentDrone.id, sharedLayout]);
 
   const changeDockedWindows = React.useCallback((action: () => void) => {
     if (arrangingWorkspaceRef.current || restoringPresetRef.current) throw new Error('The workspace is already being arranged.');
@@ -1395,9 +1424,11 @@ export function DockableDroneWorkspace({
     if (!api) return;
     suppressSaveRef.current = true;
     try {
-      const stored = readStoredLayout(currentDrone.id);
+      const stored = readStoredLayout(currentDrone.id, sharedLayout);
       if (stored) {
         api.fromJSON(stored, { reuseExistingPanels: true });
+        // Runs before handleReady subscribes to removals, so nothing rebalances.
+        if (sharedLayout) removeOtherDronesFileWindows(api, currentDrone.id);
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
         migrateWorkspaceExplorerPanels(api);
@@ -1413,7 +1444,7 @@ export function DockableDroneWorkspace({
       updateWorkspacePanelState();
       persistCurrentLayout();
     }
-  }, [currentDrone.id, persistCurrentLayout, updateWorkspacePanelState]);
+  }, [currentDrone.id, sharedLayout, persistCurrentLayout, updateWorkspacePanelState]);
 
   const applyToolOpenRequest = React.useCallback(() => {
     if (openRequestNonce === lastAppliedOpenRequestRef.current) return;

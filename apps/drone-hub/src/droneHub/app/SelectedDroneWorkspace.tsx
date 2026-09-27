@@ -689,6 +689,7 @@ export function SelectedDroneWorkspace({
     outputView,
     selectedChat,
     terminalEmulator,
+    sharedWorkspaceLayout,
     setSidebarCollapsed,
     setTerminalMenuOpen,
     setHeaderOverflowOpen,
@@ -2437,7 +2438,9 @@ export function SelectedDroneWorkspace({
             promoteNewChatActionErrorById={promoteNewChatActionErrorById}
           />
         )}
-        key={currentDrone.id}
+        // Remounting loads the layout for the new drone or mode; the shared one is the same every time.
+        key={`${sharedWorkspaceLayout ? 'shared' : 'drone'}:${currentDrone.id}`}
+        sharedLayout={sharedWorkspaceLayout}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
         activeToolTab={rightPanelTab}

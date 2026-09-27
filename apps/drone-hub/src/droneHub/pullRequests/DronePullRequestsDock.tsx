@@ -21,9 +21,12 @@ import {
   clearSelectedPullRequestForDrone,
   requestChangesPullRequest,
   selectedPullRequestForDrone,
+  adoptPullRequestOpenForRepo,
+  recordPullRequestOpenForRepo,
   type ChangesOpenPullRequestDetail,
 } from '../changes/navigation';
 import { PullRequestListView } from './PullRequestListView';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { readPullRequestMergeMethod, writePullRequestMergeMethod } from './pull-request-preferences';
 import { mergeBlockedReason } from './pull-request-ui';
 
@@ -106,7 +109,13 @@ export function DronePullRequestsDock({
 }) {
   const confirm = useAppConfirmDialog();
   const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [activePullRequestNumber, setActivePullRequestNumber] = React.useState<number | null>(() => selectedPullRequestForDrone(droneId));
+  // With one layout for every drone, the open pull request follows the repo between its drones.
+  const followRepo = useDroneHubUiStore((s) => s.sharedWorkspaceLayout);
+  const openPullRequestForDrone = React.useCallback(
+    () => (followRepo ? adoptPullRequestOpenForRepo(droneId, repoPath) : selectedPullRequestForDrone(droneId)),
+    [droneId, followRepo, repoPath],
+  );
+  const [activePullRequestNumber, setActivePullRequestNumber] = React.useState<number | null>(openPullRequestForDrone);
   const [listData, setListData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
   const [listLoading, setListLoading] = React.useState(false);
   const [listError, setListError] = React.useState<string | null>(null);
@@ -136,8 +145,8 @@ export function DronePullRequestsDock({
   }, [mergeMethod]);
 
   React.useEffect(() => {
-    setActivePullRequestNumber(selectedPullRequestForDrone(droneId));
-  }, [droneId]);
+    setActivePullRequestNumber(openPullRequestForDrone());
+  }, [openPullRequestForDrone]);
 
   React.useEffect(() => {
     const onOpenPullRequestEvent = (event: Event) => {
@@ -146,10 +155,11 @@ export function DronePullRequestsDock({
       const pullNumber = Number(detail.pullNumber);
       if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
       setActivePullRequestNumber(Math.floor(pullNumber));
+      if (followRepo) recordPullRequestOpenForRepo(repoPath, pullNumber);
     };
     window.addEventListener(CHANGES_OPEN_PULL_REQUEST_EVENT, onOpenPullRequestEvent as EventListener);
     return () => window.removeEventListener(CHANGES_OPEN_PULL_REQUEST_EVENT, onOpenPullRequestEvent as EventListener);
-  }, [droneId]);
+  }, [droneId, followRepo, repoPath]);
 
   React.useEffect(() => {
     if (!actionNotice) return;
@@ -462,9 +472,10 @@ export function DronePullRequestsDock({
 
   const closeDetailView = React.useCallback(() => {
     clearSelectedPullRequestForDrone(droneId);
+    if (followRepo) recordPullRequestOpenForRepo(repoPath, null);
     setActivePullRequestNumber(null);
     setRefreshNonce((n) => n + 1);
-  }, [droneId]);
+  }, [droneId, followRepo, repoPath]);
 
   return (
     <UiPanel flush surface="alternate" className="relative h-full w-full">

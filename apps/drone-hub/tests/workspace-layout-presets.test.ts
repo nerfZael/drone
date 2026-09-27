@@ -183,3 +183,18 @@ test('closed docked forks stay hidden across refreshes while existing floating f
   expect(readSideChatWorkspaceState('drone').closedWindows).toEqual([]);
   expect(api.getPanel(floating.id)).toBe(floating);
 });
+
+test('a shared layout closes only file windows of other drones', async () => {
+  const { removeOtherDronesFileWindows } = await import('../src/droneHub/app/DockableDroneWorkspace');
+  const { filePanelId } = await import('../src/droneHub/app/file-tab-drag');
+  const { openedFileTabId } = await import('../src/droneHub/app/opened-file-tabs');
+  layout();
+  const own = openedFileTabId('b', '/b/app.ts');
+  const other = openedFileTabId('a', '/a/app.ts');
+  const legacy = openedFileTabId('a', '/a/old.ts');
+  api.addPanel({ id: filePanelId(own), component: 'file', params: { tabId: own, path: '/b/app.ts', droneId: 'b' }, position: { direction: 'right' } });
+  api.addPanel({ id: filePanelId(other), component: 'file', params: { tabId: other, path: '/a/app.ts', droneId: 'a' }, position: { direction: 'right' } });
+  api.addPanel({ id: filePanelId(legacy), component: 'file', params: { tabId: legacy, path: '/a/old.ts' }, position: { direction: 'right' } });
+  removeOtherDronesFileWindows(api, 'b');
+  expect(api.panels.map(panel => panel.id).sort()).toEqual(['agent-chat', filePanelId(own), 'tool:editor', 'tool:terminal'].sort());
+});
