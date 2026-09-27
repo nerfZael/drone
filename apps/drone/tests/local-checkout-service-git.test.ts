@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LocalCheckoutService } from '../src/hub/local-checkout-service';
+import { localCheckoutStateFromRegistry } from '../src/hub/local-checkout-model';
 
 type RunResult = { code: number; stdout: string; stderr: string };
 
@@ -108,11 +109,10 @@ async function createGitHarness() {
   let timestamp = 0;
 
   const service = new LocalCheckoutService({
-    loadRegistry: async () => registry,
-    loadRegistryCompatibilityBase: async () => registry,
-    updateRegistry: async (mutator: (value: any) => any) => await mutator(registry),
-    findDroneIdByRef: (_value: any, ref: string) =>
-      registry.drones[ref] ? { kind: 'real', id: ref } : null,
+    readState: async () => localCheckoutStateFromRegistry(registry),
+    writeState: async (state) => { registry.settings.localCheckout = state; },
+    resolveDroneRef: async (ref) =>
+      registry.drones[ref] ? { kind: 'real', id: ref, drone: registry.drones[ref] } : null,
     droneRuntime: () => 'container',
     droneRootPath: () => exportsRoot,
     gitTopLevel: async (repoPath: string) =>

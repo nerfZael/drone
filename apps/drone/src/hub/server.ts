@@ -42,7 +42,6 @@ import {
 import {
   loadRegistry,
   loadRegistryRawSnapshot,
-  loadRegistryCompatibilityBase,
   updateRegistry as updateHostRegistry,
 } from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
@@ -357,6 +356,7 @@ import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
 import { GlobalShortcutService } from './global-shortcut-service';
 import { LocalCheckoutService } from './local-checkout-service';
+import { readLocalCheckoutState, writeLocalCheckoutState } from './local-checkout-store';
 import {
   createResourceSubscriptionDeliveryAuthorizer,
   createCustomEventHistorySourceReader,
@@ -6009,10 +6009,12 @@ async function startDroneHubApiServerWithLifecycle(
   });
 
   const localCheckoutService = new LocalCheckoutService({
-    loadRegistry,
-    loadRegistryCompatibilityBase,
-    updateRegistry,
-    findDroneIdByRef,
+    readState: readLocalCheckoutState,
+    writeState: async (state) => {
+      await writeLocalCheckoutState(state);
+      hubChangeEvents.emitRegistryWrite();
+    },
+    resolveDroneRef: resolveCanonicalDroneOrPendingForReadRef,
     droneRuntime,
     droneRootPath,
     gitTopLevel,
