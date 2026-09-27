@@ -7,7 +7,7 @@ import { expect, test } from 'bun:test';
 import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
-import { NODE_HEIGHT_PX } from '../src/droneHub/canvas/node-metrics';
+import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
 import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
@@ -514,8 +514,9 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     await act(async () => Simulate.change(input, { target: { value: 'A much longer name that should grow while typing' } } as never));
     expect(parseFloat((card('plan') as unknown as HTMLElement).style.width)).toBeGreaterThan(parseFloat(originalWidth));
     expect((card('plan') as unknown as HTMLElement).style.transform).toBe(originalTransform);
-    await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
+    await act(async () => Simulate.change(input, { target: { value: 'plan' } } as never));
     expect((card('plan') as unknown as HTMLElement).style.width).toBe(originalWidth);
+    await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
     const renamePositions: Array<{ x: number; y: number }> = [];
     const unsubscribe = useDroneCanvasStore.subscribe((state) => {
       const renamed = selectCanvasBoard(state, 'alpha').nodesByDroneId[alpha('plan b')];
@@ -1129,7 +1130,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     await act(async () => useDroneCanvasStore.getState().setPan(150, 250));
     await act(async () => Simulate.doubleClick(viewport, { button: 0, clientX: 600, clientY: 500 }));
     const draft = Object.values(useDroneCanvasStore.getState().nodesByDroneId)[0];
-    expect(draft.x).toBe(450 - 96 / 2);
+    expect(draft.x).toBe(450 - getNodeWidthPx('Untitled') / 2);
     expect(draft.y).toBe(250 - NODE_HEIGHT_PX / 2);
   } finally {
     unsubscribe();

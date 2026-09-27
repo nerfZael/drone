@@ -2,12 +2,14 @@ import { parseCanvasChatNodeId } from '../app/app-config';
 
 export const NODE_HEIGHT_PX = 44;
 export const CHAT_NODE_HEIGHT_PX = 38;
-export const NODE_MIN_WIDTH_PX = 96;
+export const NODE_MIN_WIDTH_PX = 64;
 /** A drone card's runtime icon and its gap to the title. */
 export const DRONE_NODE_CHROME_WIDTH_PX = 20;
 const NODE_MAX_WIDTH_PX = 560;
 const NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX = 7.2;
 const NODE_HORIZONTAL_PADDING_PX = 24;
+// Sub-pixel rounding between the probe and the card.
+const NODE_LABEL_MEASURE_SLACK_PX = 2;
 
 export function getNodeHeightPx(nodeIdRaw: string): number {
   return parseCanvasChatNodeId(nodeIdRaw) ? CHAT_NODE_HEIGHT_PX : NODE_HEIGHT_PX;
@@ -22,7 +24,7 @@ export const NODE_MAX_LABEL_TEXT_BOOST = 1.3;
 export function getChatLabelTextBoost(labelRaw: string, nodeWidthPx: number): number {
   const label = String(labelRaw ?? '').trim();
   const measured = label ? measureNodeLabelPx(label) : null;
-  const estimatedTextWidth = Math.max(1, label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX, measured ?? 0);
+  const estimatedTextWidth = Math.max(1, measured ?? label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX);
   const available = nodeWidthPx - NODE_DENSE_HORIZONTAL_PADDING_PX - NODE_BORDER_PX;
   return Math.max(1, Math.min(NODE_MAX_LABEL_TEXT_BOOST, available / estimatedTextWidth));
 }
@@ -72,9 +74,10 @@ function measureNodeLabelPx(label: string): number | null {
  */
 export function getNodeWidthPx(labelRaw: string, chromeWidthPx = 0): number {
   const label = String(labelRaw ?? '').trim();
-  const estimate = label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX;
+  // The per-character estimate runs wide for most fonts; it is only for when nothing can be measured.
   const measured = label ? measureNodeLabelPx(label) : null;
-  const contentWidth = Math.ceil(Math.max(estimate, measured ?? 0)) + chromeWidthPx;
+  const textWidth = measured !== null ? measured + NODE_LABEL_MEASURE_SLACK_PX : label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX;
+  const contentWidth = Math.ceil(textWidth) + chromeWidthPx;
   return Math.max(
     NODE_MIN_WIDTH_PX,
     Math.min(NODE_MAX_WIDTH_PX, contentWidth + NODE_HORIZONTAL_PADDING_PX),

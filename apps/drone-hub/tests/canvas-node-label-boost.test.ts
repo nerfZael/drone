@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { NODE_MAX_LABEL_TEXT_BOOST, getChatLabelTextBoost, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
 
 test('a short label in a minimum-width node grows to the cap', () => {
-  expect(getChatLabelTextBoost('default', getNodeWidthPx('default'))).toBe(NODE_MAX_LABEL_TEXT_BOOST);
+  expect(getChatLabelTextBoost('ab', getNodeWidthPx('ab'))).toBe(NODE_MAX_LABEL_TEXT_BOOST);
 });
 
 test('a long label only takes the slack its estimate leaves', () => {
