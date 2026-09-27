@@ -66,6 +66,7 @@ import {
 } from './chat-composer-editor-mode-shortcut';
 import { ChatVoiceSendCoordinator } from './chat-voice-send-coordinator';
 
+const useLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
 
@@ -601,7 +602,7 @@ export function ChatInput({
     return () => cancelAnimationFrame(id);
   }, [autoFocus, editorMode, resetKey]);
 
-  React.useEffect(() => {
+  useLayoutEffect(() => {
     resizeTextarea();
   }, [draft, resetKey, resizeTextarea]);
 

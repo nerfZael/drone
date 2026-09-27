@@ -5,9 +5,10 @@ import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 import { DndContext } from '@dnd-kit/core';
-import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
+import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
+import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
 import { beginChatDeletion, markChatsDeleted, useChatDeletionStore } from '../src/droneHub/app/chat-deletion-store';
 import {
@@ -39,6 +40,7 @@ type DockProps = React.ComponentProps<typeof DroneCanvasDock>;
 type CloneChat = NonNullable<DockProps['onCloneChat']>;
 
 function Dock({
+  children,
   drone,
   onCreateChat,
   onCloneChat,
@@ -49,6 +51,7 @@ function Dock({
   onCreateCanvasDroneFromDraft,
   chatNodeStateById = {},
 }: {
+  children?: React.ReactNode;
   drone: DroneSummary;
   onCreateChat?: (droneId: string) => Promise<boolean>;
   onCloneChat?: CloneChat;
@@ -62,6 +65,7 @@ function Dock({
   const noop = () => {};
   return (
     <ActiveComposerProvider><DndContext>
+      {children}
       <DroneCanvasDock
         boardDrone={drone}
         droneById={{ alpha: drone }}
@@ -248,6 +252,102 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     const globalButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Global')!;
     await act(async () => globalButton.click());
     expect(nodeIds()).toEqual([createCanvasChatNodeId('beta', 'default')]);
+
+    // A retained shared canvas keeps the global view and in-progress message
+    // while the selected drone changes underneath it.
+    const globalNode = createCanvasChatNodeId('beta', 'default');
+    await act(async () => {
+      getCanvasBoardActions(null).setSelectedDroneIds([globalNode]);
+      getCanvasBoardActions(null).setViewport(120, 80, 0.75);
+    });
+    const globalViewport = container.querySelector('[data-drone-canvas-viewport="1"]');
+    const globalInput = container.querySelector('[data-canvas-message-bar] textarea')!;
+    await act(async () => Simulate.change(globalInput as unknown as Element, { target: { value: 'Keep this global message' } } as never));
+    const beta = { ...makeDrone(['default', 'review']), id: 'beta', name: 'Beta' };
+    await act(async () => root.render(<Dock drone={beta} />));
+    expect(container.querySelector('[data-drone-canvas-viewport="1"]')).toBe(globalViewport);
+    expect(container.querySelector('[data-canvas-message-bar] textarea')).toBe(globalInput);
+    expect((globalInput as unknown as HTMLTextAreaElement).value).toBe('Keep this global message');
+    expect(nodeIds()).toEqual([globalNode]);
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), null)).toMatchObject({
+      panX: 120, panY: 80, scale: 0.75, selectedDroneIds: [globalNode],
+    });
+    // The drone tab still follows the newly selected drone without remounting.
+    await act(async () => useDroneCanvasStore.getState().setScope('drone'));
+    expect(nodeIds().sort()).toEqual(['default', 'review'].map((name) => createCanvasChatNodeId('beta', name)).sort());
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('global canvas drags only show agent chat drop actions while over that chat pane', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global' });
+  useDroneCanvasStore.getState().upsertNodes([
+    { droneId: alpha('default'), label: 'default', x: 0, y: 0 },
+    { droneId: createCanvasChatNodeId('beta', 'default'), label: 'Beta', x: 200, y: 0 },
+  ]);
+  function AgentPane({ id }: { id: string }) {
+    const drop = useFleetAssignmentDropState({ currentDrone: { id } as DroneSummary,
+      currentDroneLabel: id, openDroneErrorModal: () => {}, onRequestDropActions: () => ({ ok: true }) });
+    return <div ref={drop.setFleetDropNodeRef} data-test-agent={id} data-hint={drop.fleetDropHintVisible}
+      data-fleet-assignment-drop-zone="1" data-fleet-assignment-owner-id={id}>Agent conversation</div>;
+  }
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const move = async (type: string, x: number) => {
+    await act(async () => {
+      dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: 100, buttons: type === 'mouseup' ? 0 : 1 }));
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+  };
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])}>
+      <AgentPane id="beta" /><AgentPane id="gamma" />
+    </Dock>));
+    const card = container.querySelector(`[data-drone-id="${alpha('default')}"]`)!;
+    const betaCard = container.querySelector(`[data-drone-id="${createCanvasChatNodeId('beta', 'default')}"]`)!;
+    const viewport = container.querySelector('[data-drone-canvas-viewport]')!;
+    const betaPane = container.querySelector('[data-test-agent="beta"]')!;
+    const gammaPane = container.querySelector('[data-test-agent="gamma"]')!;
+    // happy-dom has no hit testing. Exercise real drag handling against each surface.
+    Object.defineProperty(dom.document, 'elementsFromPoint', { configurable: true,
+      value: (x: number) => [x < 200 ? viewport : x < 400 ? betaCard : x < 600 ? betaPane : gammaPane] });
+    await act(async () => Simulate.mouseDown(card as unknown as Element, { button: 0, clientX: 10, clientY: 10 }));
+    await move('mousemove', 100);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 300); // Another card owned by the same drone as the open agent chat.
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 500); // Explicitly entering that chat still permits a drop.
+    expect(betaPane.getAttribute('data-hint')).toBe('true');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 700);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('true');
+    await move('mousemove', 100);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mouseup', 100);
+    expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')]!.x).not.toBe(0);
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
@@ -744,6 +844,101 @@ test('dragging a card onto the canvas composer references it in the message with
   }
 });
 
+
+test('rectangle selection opens exactly one selected card only after release', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => { frames.set(++frameId, run); return frameId; },
+    cancelAnimationFrame: (id: number) => frames.delete(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
+  const droneCard = createCanvasDroneNodeId('alpha');
+  const chatCard = alpha('fork');
+  useDroneCanvasStore.getState().upsertNodes([
+    { droneId: droneCard, label: 'Alpha', x: 100, y: 100 },
+    { droneId: chatCard, label: 'fork', x: 500, y: 100 },
+  ]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const opened: string[] = [];
+  const pointer = (type: string, x: number, y: number) => dom.dispatchEvent(new dom.MouseEvent(type, {
+    clientX: x, clientY: y, buttons: type === 'mouseup' ? 0 : 1,
+  }));
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'fork'], [['fork', 'default']])}
+      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
+    const viewport = container.querySelector('[data-drone-canvas-viewport]') as unknown as HTMLElement;
+    viewport.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1000, 800) as unknown as DOMRect;
+    const start = async (x: number, ctrlKey = false) => {
+      await act(async () => Simulate.mouseDown(viewport, { button: 0, clientX: x, clientY: 90, ctrlKey }));
+    };
+    const release = async (x: number) => {
+      // The final move is still queued: mouseup must use the flushed selection.
+      await act(async () => { pointer('mousemove', x, 110); pointer('mouseup', x, 110); });
+    };
+    await start(90);
+    await release(110);
+    expect(opened).toEqual(['alpha:default']);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard]);
+    opened.length = 0;
+    await start(490);
+    await release(510);
+    expect(opened).toEqual(['alpha:fork']);
+    opened.length = 0;
+
+    await start(90);
+    await act(async () => {
+      pointer('mousemove', 110, 110);
+      for (const [id, run] of [...frames]) { frames.delete(id); run(0); }
+    });
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard]);
+    expect(opened).toEqual([]); // A transient single hit during a larger drag must not navigate.
+    await release(510);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard, chatCard]);
+    expect(opened).toEqual([]);
+
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
+    await start(490, true);
+    await release(510);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard, chatCard]);
+    expect(opened).toEqual([]); // Count the whole additive selection, not just new hits.
+    await start(900);
+    await release(920);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([]);
+    expect(opened).toEqual([]);
+    await start(90);
+    await act(async () => { pointer('mousemove', 110, 110); dom.dispatchEvent(new dom.Event('blur')); });
+    expect(opened).toEqual([]); // Cancelling a gesture must not open its selection.
+
+    await act(async () => useDroneCanvasStore.getState().setScope('drone'));
+    const actions = getCanvasBoardActions('alpha');
+    await act(async () => {
+      actions.setViewport({ panX: 0, panY: 0, scale: 1 });
+      actions.moveNodes([{ droneId: alpha('default'), x: 100, y: 100 }, { droneId: chatCard, x: 500, y: 100 }]);
+    });
+    await start(490);
+    await release(510);
+    expect(opened).toEqual(['alpha:fork']);
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
 
 test('canvas gestures avoid unrelated card renders and layout reads, and use the latest panned coordinates', async () => {
   const dom = new Window({ url: 'http://localhost' });

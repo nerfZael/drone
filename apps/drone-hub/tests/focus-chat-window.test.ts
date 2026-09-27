@@ -32,11 +32,12 @@ function harness() {
   };
   const composer = { focus: () => { document.activeElement = composer; interaction(composer); } };
   let ready = false;
+  let focusOptions: FocusOptions | undefined;
   const scope = {
     isConnected: true, tabIndex: 0,
     contains: (node: any) => node === scope || node === composer,
     querySelector: () => ready ? composer : null,
-    focus: () => { document.activeElement = scope; interaction(scope); },
+    focus: (options?: FocusOptions) => { focusOptions = options; document.activeElement = scope; interaction(scope); },
   };
   let mounted = false;
   let available = true;
@@ -50,6 +51,7 @@ function harness() {
     mutate: () => { if (observed) callback(); },
     interaction,
     observed: () => observed,
+    focusOptions: () => focusOptions,
   };
 }
 
@@ -59,6 +61,7 @@ test('focus waits for the window portal and stays on the chat when its composer 
   expect(h.document.activeElement).toBeNull();
   h.mount(); h.mutate(); h.frame();
   expect(h.document.activeElement).toBe(h.scope);
+  expect(h.focusOptions()).toEqual({ preventScroll: true });
   h.loadComposer(); h.mutate(); h.frame();
   expect(h.document.activeElement).toBe(h.scope);
   expect(h.observed()).toBe(false);

@@ -893,6 +893,7 @@ export function DroneCanvasDock({
   const nodeDragRef = React.useRef<NodeDragState | null>(null);
   const panDragRef = React.useRef<PanDragState | null>(null);
   const marqueeDragRef = React.useRef<MarqueeDragState | null>(null);
+  const selectionAnchorRef = React.useRef<string | null>(null);
   const nodeElementByDroneIdRef = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const lastSyncedSidebarSelectionRef = React.useRef<string>('');
   const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -1560,6 +1561,18 @@ export function DroneCanvasDock({
     });
   }, [inlineRenamingDroneId]);
 
+  const activateCanvasNode = React.useCallback((nodeId: string) => {
+    if (isCanvasDraftNodeId(nodeId)) return;
+    const droneId = parseCanvasDroneNodeId(nodeId);
+    if (droneId) {
+      onActivateChat?.(droneId, 'default');
+      return;
+    }
+    const chat = parseCanvasChatNodeId(nodeId);
+    // Side chats included: selection opens their chat as the main chat.
+    if (chat) onActivateChat?.(chat.droneId, chat.chatName);
+  }, [onActivateChat]);
+
   React.useEffect(() => {
     const onWindowMouseMove = (event: MouseEvent) => {
       // The mouseup can be lost (released over a webview, outside the window, or swallowed by another handler),
@@ -1595,17 +1608,21 @@ export function DroneCanvasDock({
             ),
           );
           if (draggedDroneIds.length > 0) {
-            const assignmentTarget = resolveCanvasAssignmentDropTarget(
-              nodeDrag.droneIds,
-              resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY),
-            );
+            const pointTarget = resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY);
+            const assignmentTarget = resolveCanvasAssignmentDropTarget(nodeDrag.droneIds, pointTarget);
             setAssignmentHoverNodeId(assignmentTarget.canvasNodeId);
             setAssignmentHoverTargetCount(assignmentTarget.targetDroneIds.length);
-            dispatchCanvasAssignmentPreview({
+            // Repositioning cards and hovering other canvas nodes are local to
+            // the canvas. Only advertise a chat drop when the pointer enters it.
+            dispatchCanvasAssignmentPreview(pointTarget?.kind === 'chat-pane' ? {
               droneIds: draggedDroneIds,
               overDroneId: assignmentTarget.ownerDroneId,
-            });
+            } : null);
           }
+        } else {
+          setAssignmentHoverNodeId(null);
+          setAssignmentHoverTargetCount(0);
+          dispatchCanvasAssignmentPreview(null);
         }
         moveNodes(
           nodeDrag.droneIds.map((droneId) => {
@@ -1723,6 +1740,16 @@ export function DroneCanvasDock({
       }
       marqueeDragRef.current = null;
       setSelectionBox(null);
+      if (marqueeDrag?.moved) {
+        // Read after moves.flush(): React may not have rendered the final
+        // rectangle yet. Include existing cards in an additive selection.
+        const selected = getView().selectedDroneIds;
+        if (selected.length === 1) {
+          selectionAnchorRef.current = selected[0];
+          setMessageBarExpanded(true);
+          activateCanvasNode(selected[0]);
+        }
+      }
     };
 
     const onWindowBlur = () => {
@@ -1755,7 +1782,7 @@ export function DroneCanvasDock({
       window.removeEventListener('mouseup', onWindowMouseUp, true);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
+  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
 
   const applyZoomAt = React.useCallback(
     (nextScaleRaw: number, anchorClientX: number, anchorClientY: number) => {
@@ -2061,7 +2088,6 @@ export function DroneCanvasDock({
     upsertNodes,
   ]);
 
-  const selectionAnchorRef = React.useRef<string | null>(null);
   const onNodeMouseDown = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
       if (inlineRenamingDroneId === droneId) {
@@ -2127,19 +2153,9 @@ export function DroneCanvasDock({
       }
       selectionAnchorRef.current = droneId;
       setSelectedDroneIds([droneId]);
-      if (!isCanvasDraftNodeId(droneId)) {
-        const canvasDroneId = parseCanvasDroneNodeId(droneId);
-        if (canvasDroneId) {
-          onActivateChat?.(canvasDroneId, 'default');
-          return;
-        }
-        const chatRef = parseCanvasChatNodeId(droneId);
-        if (!chatRef) return;
-        // Side chats included: a card opens its chat as the main chat.
-        onActivateChat?.(chatRef.droneId, chatRef.chatName);
-      }
+      activateCanvasNode(droneId);
     },
-    [focusViewportElement, nodeOrder, onActivateChat, selectedDroneIds, setSelectedDroneIds],
+    [activateCanvasNode, focusViewportElement, nodeOrder, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onNodeDoubleClick = React.useCallback(

@@ -780,6 +780,7 @@ export function SelectedDroneWorkspace({
     updatePinned: updateTranscriptPinned,
   } = usePinnedTranscriptScroll({
     contextKey: `${currentDrone.id}:${activeChatName}`,
+    initialPosition: 'bottom',
     contentVersion: externalTranscriptTimeline,
     enabled:
       currentDrone.hubPhase === 'error' ||
@@ -2438,8 +2439,8 @@ export function SelectedDroneWorkspace({
             promoteNewChatActionErrorById={promoteNewChatActionErrorById}
           />
         )}
-        // Remounting loads the layout for the new drone or mode; the shared one is the same every time.
-        key={`${sharedWorkspaceLayout ? 'shared' : 'drone'}:${currentDrone.id}`}
+        // The shared dock survives selection changes; only drone-scoped content changes.
+        key={sharedWorkspaceLayout ? 'shared' : `drone:${currentDrone.id}`}
         sharedLayout={sharedWorkspaceLayout}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}

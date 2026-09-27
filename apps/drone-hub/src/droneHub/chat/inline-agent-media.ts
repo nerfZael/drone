@@ -67,10 +67,10 @@ function normalizeInlineMediaBasePath(rawBase: string | undefined): string {
   return base || '/work/repo';
 }
 
-function normalizeInlineMediaFilePath(
+function normalizeInlineMediaPath(
   rawRef: string,
   basePathRaw?: string,
-): { path: string; kind: InlineAgentMediaKind } | null {
+): string | null {
   const trimmed = String(rawRef ?? '').trim();
   if (!trimmed) return null;
   if (trimmed.includes('\0')) return null;
@@ -91,12 +91,19 @@ function normalizeInlineMediaFilePath(
   token = token.replace(/\/+/g, '/');
   if (!token) return null;
   if (token.includes('/../') || token.startsWith('../') || token.endsWith('/..')) return null;
-  const kind = mediaKindForPath(token);
-  if (!kind) return null;
   const basePath = normalizeInlineMediaBasePath(basePathRaw);
-  if (token.startsWith('/')) return { path: token, kind };
-  if (token.startsWith('work/repo/') || token.startsWith('dvm-data/home/')) return { path: `/${token}`, kind };
-  return { path: `${basePath}/${token}`, kind };
+  if (token.startsWith('/')) return token;
+  if (token.startsWith('work/repo/') || token.startsWith('dvm-data/home/')) return `/${token}`;
+  return `${basePath}/${token}`;
+}
+
+function normalizeInlineMediaFilePath(
+  rawRef: string,
+  basePathRaw?: string,
+): { path: string; kind: InlineAgentMediaKind } | null {
+  const path = normalizeInlineMediaPath(rawRef, basePathRaw);
+  const kind = path && mediaKindForPath(path);
+  return path && kind ? { path, kind } : null;
 }
 
 function inlineMediaLabelFromPath(rawPath: string, kind: InlineAgentMediaKind): string {
@@ -123,6 +130,39 @@ export function collectInlineAgentMedia(textRaw: string, droneIdRaw?: string, ba
     if (!entry.src || seen.has(entry.src)) return;
     seen.add(entry.src);
     out.push(entry);
+  };
+  const isBasename = (raw: string) => !raw.replace(/^\.\//, '').includes('/') && !raw.includes('\\');
+  const directories: Array<{ path: string; index: number }> = [];
+  for (const match of text.matchAll(/`([^`\n]+\/)`/g)) {
+    const path = normalizeInlineMediaPath(match[1], basePathRaw);
+    if (path) directories.push({ path, index: match.index! });
+  }
+  const allDirectories = new Set(directories.map(item => item.path));
+  const contextualMediaIds = new Set<string>();
+  const pushLocal = (raw: string, index: number) => {
+    if (!droneId) return;
+    let directory: string | undefined;
+    if (isBasename(raw)) {
+      // A later comparison folder must not invalidate the folder introducing
+      // this image. Separate paragraphs can introduce their own output folder.
+      const precedingInParagraph = new Set(directories
+        .filter(item => item.index < index && !/\n\s*\n/.test(text.slice(item.index, index)))
+        .map(item => item.path));
+      if (precedingInParagraph.size === 1) directory = [...precedingInParagraph][0];
+      else if (allDirectories.size === 1) directory = [...allDirectories][0];
+    }
+    const mediaRef = normalizeInlineMediaFilePath(raw, directory ?? basePathRaw);
+    if (!mediaRef) return;
+    const id = `${droneId}:${mediaRef.path}`;
+    if (directory) contextualMediaIds.add(id);
+    push({
+      id,
+      kind: mediaRef.kind,
+      src: `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(mediaRef.path)}`,
+      linkHref: raw,
+      fileRef: { raw, path: mediaRef.path, line: null, column: null },
+      label: inlineMediaLabelFromPath(mediaRef.path, mediaRef.kind),
+    });
   };
 
   const urlCandidatePatterns = [/https?:\/\/[^\s<>()]+(?:\([^\s<>()]*\)[^\s<>()]*)*/gi];
@@ -174,59 +214,57 @@ export function collectInlineAgentMedia(textRaw: string, droneIdRaw?: string, ba
       });
       continue;
     }
-    if (!droneId) continue;
-    const mediaRef = normalizeInlineMediaFilePath(rawHref, basePathRaw);
-    if (!mediaRef) continue;
-    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(mediaRef.path)}`;
-    push({
-      id: `${droneId}:${mediaRef.path}`,
-      kind: mediaRef.kind,
-      src,
-      linkHref: rawHref,
-      fileRef: { raw: rawHref, path: mediaRef.path, line: null, column: null },
-      label: inlineMediaLabelFromPath(mediaRef.path, mediaRef.kind),
-    });
+    pushLocal(rawHref, match.index!);
   }
 
   const inlineCodeRegex = /`([^`\n]+)`/g;
   for (const match of text.matchAll(inlineCodeRegex)) {
-    if (!droneId) continue;
     const raw = String(match[1] ?? '').trim();
     if (!raw) continue;
-    const mediaRef = normalizeInlineMediaFilePath(raw, basePathRaw);
-    if (!mediaRef) continue;
-    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(mediaRef.path)}`;
-    push({
-      id: `${droneId}:${mediaRef.path}`,
-      kind: mediaRef.kind,
-      src,
-      linkHref: raw,
-      fileRef: { raw, path: mediaRef.path, line: null, column: null },
-      label: inlineMediaLabelFromPath(mediaRef.path, mediaRef.kind),
-    });
+    pushLocal(raw, match.index!);
   }
 
   const bareMediaPathRegex = new RegExp(
     `(?:^|[\\s"'(<[{])((?:\\.{1,2}\\/)?(?:[^\\s"'\\\`<>()[\\]{}:]+\\/)*[^\\s"'\\\`<>()[\\]{}:]+\\.(?:${MEDIA_EXTENSION_PATTERN})(?:\\?[^\\s"'\\\`<>()[\\]{}]+)?(?:#[^\\s"'\\\`<>()[\\]{}]+)?)`,
     'gi',
   );
-  const textWithoutMarkdownLinks = text.replace(/\[[^\]]*]\(([^)\s]+)\)/g, ' ');
+  // Keep offsets intact so local context is still measured in the original text.
+  const textWithoutMarkdownLinks = text.replace(/\[[^\]]*]\(([^)\s]+)\)/g, match => ' '.repeat(match.length));
   for (const match of textWithoutMarkdownLinks.matchAll(bareMediaPathRegex)) {
-    if (!droneId) continue;
     const rawPath = String(match[1] ?? '').trim();
     if (!rawPath) continue;
-    const mediaRef = normalizeInlineMediaFilePath(rawPath, basePathRaw);
-    if (!mediaRef) continue;
-    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(mediaRef.path)}`;
-    push({
-      id: `${droneId}:${mediaRef.path}`,
-      kind: mediaRef.kind,
-      src,
-      linkHref: rawPath,
-      fileRef: { raw: rawPath, path: mediaRef.path, line: null, column: null },
-      label: inlineMediaLabelFromPath(mediaRef.path, mediaRef.kind),
-    });
+    pushLocal(rawPath, match.index!);
   }
 
-  return out.slice(0, 8);
+  // Resolve remaining short mentions from fully located references and avoid
+  // duplicate previews. Context-resolved images keep their paragraph's folder.
+  const explicitPathsByName = new Map<string, Set<string>>();
+  for (const media of out) {
+    if (!media.fileRef || (isBasename(media.fileRef.raw) && !contextualMediaIds.has(media.id))) continue;
+    const paths = explicitPathsByName.get(media.label) ?? new Set<string>();
+    paths.add(media.fileRef.path);
+    explicitPathsByName.set(media.label, paths);
+  }
+  const resolved: InlineAgentMedia[] = [];
+  const resolvedSources = new Set<string>();
+  for (const media of out) {
+    let next = media;
+    if (media.fileRef && isBasename(media.fileRef.raw) && !contextualMediaIds.has(media.id)) {
+      const explicitPaths = explicitPathsByName.get(media.label);
+      // All explicitly named versions already have previews; the short mention
+      // adds no useful preview when more than one file shares its name.
+      if (explicitPaths && explicitPaths.size > 1) continue;
+      const path = explicitPaths?.size === 1 ? [...explicitPaths][0] : null;
+      if (path) next = {
+        ...media,
+        id: `${droneId}:${path}`,
+        src: `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(path)}`,
+        fileRef: { ...media.fileRef, path },
+      };
+    }
+    if (resolvedSources.has(next.src)) continue;
+    resolvedSources.add(next.src);
+    resolved.push(next);
+  }
+  return resolved.slice(0, 8);
 }

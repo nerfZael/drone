@@ -600,6 +600,7 @@ export function AssistantDock({
     scrollToBottom: scrollAssistantToBottom,
   } = usePinnedTranscriptScroll({
     contextKey: `${nativeDroneId}:${nativeChatName}:${activeThreadId}`,
+    initialPosition: 'bottom',
     contentVersion: transcriptContentVersion,
     enabled: !filesOpen,
   });

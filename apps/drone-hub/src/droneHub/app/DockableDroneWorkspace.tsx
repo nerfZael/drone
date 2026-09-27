@@ -599,7 +599,7 @@ function ChatPanel({ containerApi }: IDockviewPanelProps) {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle(mainChatName || DEFAULT_CHAT_NAME);
   }, [containerApi, mainChatName]);
-  return <UiPanel flush className="h-full outline-none" data-main-workspace-chat="true" data-chat-drone-id={droneId} data-chat-name={mainChatName}>{content}</UiPanel>;
+  return <UiPanel flush className="h-full outline-none" data-main-workspace-chat="true" data-chat-drone-id={droneId} data-chat-name={mainChatName}><React.Fragment key={droneId}>{content}</React.Fragment></UiPanel>;
 }
 
 /** Main chat tab: the chat name with its estimated cost. It never closes. */
@@ -654,7 +654,11 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
       <EditorPaneContext.Provider value={api.id === EXPLORER_PANEL_ID ? 'explorer' : 'editor'}>
         <TerminalHeaderControlsContext.Provider value>
           <ChangesExplorerContext.Provider value={tab === 'changes' ? ctx.changesExplorerHost : undefined}>
-            {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
+            {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : (
+              <React.Fragment key={tab === 'canvas' ? 'canvas' : ctx.droneId}>
+                {ctx.renderToolPane(tab, paneKey)}
+              </React.Fragment>
+            )}
           </ChangesExplorerContext.Provider>
         </TerminalHeaderControlsContext.Provider>
       </EditorPaneContext.Provider>
@@ -662,7 +666,7 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
   );
 }
 
-function FilePanel({ api, params }: IDockviewPanelProps<{ tabId?: string; path?: string; name?: string; droneId?: string }>) {
+function FilePanel({ api, containerApi, params }: IDockviewPanelProps<{ tabId?: string; path?: string; name?: string; droneId?: string }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   const tabId = String(params.tabId ?? fileTabIdFromPanelId(api.id) ?? '');
   const path = String(params.path ?? '');
@@ -673,8 +677,9 @@ function FilePanel({ api, params }: IDockviewPanelProps<{ tabId?: string; path?:
 
   React.useEffect(() => {
     // The file was closed elsewhere, so the window has nothing left to show.
-    if (stale) api.close();
-  }, [api, stale]);
+    // A shared-workspace switch may already have removed it before this effect.
+    if (stale && containerApi.getPanel(api.id)) api.close();
+  }, [api, containerApi, stale]);
   React.useEffect(() => {
     api.setTitle(dirty ? `${name}*` : name);
   }, [api, dirty, name]);
@@ -951,6 +956,7 @@ export function DockableDroneWorkspace({
   const renderFilePane = fileWindows?.render;
   const workspaceElementRef = React.useRef<HTMLDivElement | null>(null);
   const [readyVersion, setReadyVersion] = React.useState(0);
+  const initializingLayoutRef = React.useRef(true);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
   const workspaceLayoutRevisionRef = React.useRef(0);
@@ -1161,6 +1167,7 @@ export function DockableDroneWorkspace({
 
   const previousMainChatRef = React.useRef<{ droneId: string; chatName: string | undefined; returnRequest: typeof sideChatReturnRequest } | null>(null);
   React.useEffect(() => {
+    const switchedDrone = previousMainChatRef.current !== null && previousMainChatRef.current.droneId !== currentDrone.id;
     const previous = previousMainChatRef.current?.chatName;
     const previousReturnRequest = previousMainChatRef.current?.returnRequest;
     if (previousMainChatRef.current?.droneId === currentDrone.id && previous === mainChatName) return;
@@ -1168,6 +1175,8 @@ export function DockableDroneWorkspace({
     const root = workspaceElementRef.current;
     if (!api || !root) return;
     previousMainChatRef.current = { droneId: currentDrone.id, chatName: mainChatName, returnRequest: sideChatReturnRequest };
+    // Keep the active shared tool (and its focus) when changing its drone.
+    if (sharedLayout && switchedDrone) return;
     if (sideChatFocusRequest?.droneId === currentDrone.id &&
       sideChatFocusRequest.chatName !== mainChatName && previous === undefined) return;
     const promoted = sideChats.some((chat) => chat.name === mainChatName);
@@ -1187,7 +1196,7 @@ export function DockableDroneWorkspace({
             .find((element) => element.dataset.sideChatName === previous && !element.closest('.dv-tabs-container')),
       () => root.isConnected,
     );
-  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest, sideChatFocusRequest, readyVersion, revealFloatingSideChats]);
+  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest, sideChatFocusRequest, readyVersion, revealFloatingSideChats, sharedLayout]);
 
   React.useEffect(() => {
     if (!useMobileLayout) return;
@@ -1399,6 +1408,13 @@ export function DockableDroneWorkspace({
       afterResize?.();
       return;
     }
+    // Restore the initial geometry before displaying the restored panes. The
+    // deferred path remains necessary for interactive Dockview removals.
+    if (initializingLayoutRef.current) {
+      resize(api);
+      afterResize?.();
+      return;
+    }
     const revision = workspaceLayoutRevisionRef.current;
     window.setTimeout(() => {
       const currentApi = apiRef.current;
@@ -1427,7 +1443,7 @@ export function DockableDroneWorkspace({
       const stored = readStoredLayout(currentDrone.id, sharedLayout);
       if (stored) {
         api.fromJSON(stored, { reuseExistingPanels: true });
-        // Runs before handleReady subscribes to removals, so nothing rebalances.
+        // Runs before the layout effect subscribes to removals, so nothing rebalances.
         if (sharedLayout) removeOtherDronesFileWindows(api, currentDrone.id);
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
@@ -1551,117 +1567,168 @@ export function DockableDroneWorkspace({
       apiRef.current = event.api;
       loadLayout();
       applyToolOpenRequest();
+      initializingLayoutRef.current = false;
       setReadyVersion((version) => version + 1);
 
-      const layoutDisposable = event.api.onDidLayoutChange(() => {
-        if (arrangingWorkspaceRef.current || restoringPresetRef.current) return;
-        // A slot dragged shut is removed only once the pointer is released
-        // (see the pointerup effect): pulling a view out from under Dockview's
-        // divider drag would break the drag still in progress.
-        if (!suppressSaveRef.current) syncEmptyWorkspaceSlots(event.api, { removeCollapsed: !pointerDownRef.current });
-        updateWorkspacePanelState();
-        schedulePersistCurrentLayout();
-      });
-      const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
-        if (arrangingWorkspaceRef.current || restoringPresetRef.current || !panel) return;
-        const tab = tabFromPanel(panel);
-        if (tab) onActiveToolTabChange?.(tab);
-      });
-      // A file tab dragged out of the editor's tab strip may land anywhere on
-      // the grid and opens there in its own window. Dragging within the strip
-      // itself is a reorder and must not light up the editor pane.
-      const fileDragOverDisposable = event.api.onUnhandledDragOverEvent((drag) => {
-        if (!hasFileTabDragPayload(dragEventOf(drag.nativeEvent))) return;
-        const target = drag.nativeEvent.target;
-        if (target instanceof Element && target.closest('[data-file-tab-strip]')) return;
-        drag.accept();
-      });
-      const fileDropDisposable = event.api.onDidDrop((drop) => {
-        const payload = readFileTabDragPayload(dragEventOf(drop.nativeEvent));
-        if (!payload || payload.droneId !== currentDrone.id) return;
-        openFileWindow(payload, drop.position, drop.group?.id ?? null);
-      });
-      // Dockview ignores a pane's whole content dropped onto one of its own
-      // edges. Treat it as "shrink into that half": insert an empty slot on
-      // the opposite side so the pane keeps only the half the user pointed at.
-      const dropDisposable = event.api.onWillDrop((drop) => {
-        const direction = emptySlotDirectionForDrop(dropOverlayContextFromEvent(drop, event.api, workspaceElementRef.current));
-        const group = drop.group;
-        if (!direction || !group) return;
-        drop.preventDefault();
-        event.api.addGroup({
-          referenceGroup: group,
-          direction,
-          initialWidth: Math.max(1, Math.round(group.width / 2)),
-          initialHeight: Math.max(1, Math.round(group.height / 2)),
-          skipSetActive: true,
-        });
-        syncEmptyWorkspaceSlots(event.api);
-        persistCurrentLayout();
-      });
-      // Hide drop highlights Dockview would ignore on release (a lone panel
-      // dropped on its own centre or header, a group onto itself) and
-      // workspace-edge highlights that duplicate the adjacent pane's own edge zone.
-      const overlayDisposable = event.api.onWillShowOverlay((overlay) => {
-        if (isNoOpDropOverlay(dropOverlayContextFromEvent(overlay, event.api, workspaceElementRef.current))) {
-          overlay.preventDefault();
-        }
-      });
-      const removeDisposable = event.api.onDidRemovePanel((panel) => {
-        if (restoringPresetRef.current) return;
-        const panelId = panel.id;
-        const reattachingFile = reattachingFilePanelsRef.current.delete(panelId);
-        const pendingTimer = removedPanelTimersRef.current.get(panelId);
-        if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);
-        // Dockview fires this before it drops the emptied group and hands that
-        // group's space to a neighbour, so this is the explorer's real sidebar
-        // width. Measured now so closing the editor cannot leave the explorer
-        // stretched across the freed space.
-        const explorerWidths = standaloneExplorerWidths(event.api, panelId);
-
-        // Dockview emits removal events while moving panels between groups as
-        // well as when panels are actually closed. Wait until the move has
-        // settled before changing React state or rebalancing the grid; doing
-        // either during the drag can interrupt Dockview and snap the panel
-        // back to its previous position.
-        const timer = window.setTimeout(() => {
-          removedPanelTimersRef.current.delete(panelId);
-          const api = apiRef.current;
-          if (!api) return;
-          if (api.getPanel(panelId)) return;
-
-          if (reattachingFile || panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
-            updateWorkspacePanelState();
-            persistCurrentLayout();
-            return;
-          }
-
-          const closedFileTabId = fileTabIdFromPanelId(panelId);
-          if (closedFileTabId) fileWindowsRef.current?.onClosed?.(closedFileTabId);
-
-          if (panelId !== CHAT_PANEL_ID) {
-            updateWorkspacePanelState();
-            rebalanceWorkspaceGridGroups(onAfterToolPanelRemove, { explorerWidths });
-            return;
-          }
-
-          suppressSaveRef.current = true;
-          try {
-            ensureChatPanel(api);
-            updateWorkspacePanelState();
-          } finally {
-            suppressSaveRef.current = false;
-          }
-          persistCurrentLayout();
-        }, 0);
-        removedPanelTimersRef.current.set(panelId, timer);
-      });
-      updateWorkspacePanelState();
-      disposablesRef.current.forEach((disposable) => disposable.dispose());
-      disposablesRef.current = [layoutDisposable, activePanelDisposable, fileDragOverDisposable, fileDropDisposable, dropDisposable, overlayDisposable, removeDisposable];
     },
-    [applyToolOpenRequest, currentDrone.id, loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, openFileWindow, persistCurrentLayout, rebalanceWorkspaceGridGroups, schedulePersistCurrentLayout, updateWorkspacePanelState],
+    [applyToolOpenRequest, loadLayout],
   );
+
+  const displayedDroneIdRef = React.useRef(currentDrone.id);
+  React.useLayoutEffect(() => {
+    const previousDroneId = displayedDroneIdRef.current;
+    displayedDroneIdRef.current = currentDrone.id;
+    if (previousDroneId === currentDrone.id || !sharedLayout) return;
+    const api = apiRef.current;
+    if (!api) return;
+    // File windows and forked chats belong to their source drone. Removing
+    // them during navigation must not close editor tabs or rebalance tools.
+    workspaceLayoutRevisionRef.current++;
+    cancelPendingChatFocusRef.current?.();
+    removedPanelTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    removedPanelTimersRef.current.clear();
+    reattachingFilePanelsRef.current.clear();
+    lastAppliedOpenRequestRef.current = openRequestNonce;
+    suppressSaveRef.current = true;
+    restoringPresetRef.current = true;
+    try {
+      for (const panel of [...api.panels]) {
+        if (!panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) continue;
+        if (workspaceElementRef.current && panel.group.api.location.type === 'floating') {
+          saveSideChatWorkspaceState(previousDroneId, { floatingBounds: {
+            [panel.id.slice(SIDE_CHAT_PANEL_PREFIX.length)]: measureSideChatBounds(panel.group.element, workspaceElementRef.current),
+          } });
+        }
+        api.removePanel(panel);
+      }
+      removeOtherDronesFileWindows(api, currentDrone.id);
+    } finally {
+      restoringPresetRef.current = false;
+      suppressSaveRef.current = false;
+    }
+    lastDetachedFileTabsRef.current = null;
+    lastVisibleToolTabsRef.current = '';
+    updateWorkspacePanelState();
+    persistCurrentLayout();
+  }, [currentDrone.id, sharedLayout, openRequestNonce, persistCurrentLayout, updateWorkspacePanelState]);
+
+  // A shared dock outlives the selected drone. Subscribe with current callbacks
+  // without loading the saved layout again or replacing any tool panels.
+  React.useLayoutEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    const layoutDisposable = api.onDidLayoutChange(() => {
+      if (arrangingWorkspaceRef.current || restoringPresetRef.current) return;
+      // A slot dragged shut is removed only once the pointer is released
+      // (see the pointerup effect): pulling a view out from under Dockview's
+      // divider drag would break the drag still in progress.
+      if (!suppressSaveRef.current) syncEmptyWorkspaceSlots(api, { removeCollapsed: !pointerDownRef.current });
+      updateWorkspacePanelState();
+      schedulePersistCurrentLayout();
+    });
+    const activePanelDisposable = api.onDidActivePanelChange((panel) => {
+      if (arrangingWorkspaceRef.current || restoringPresetRef.current || !panel) return;
+      const tab = tabFromPanel(panel);
+      if (tab) onActiveToolTabChange?.(tab);
+    });
+    // A file tab dragged out of the editor's tab strip may land anywhere on
+    // the grid and opens there in its own window. Dragging within the strip
+    // itself is a reorder and must not light up the editor pane.
+    const fileDragOverDisposable = api.onUnhandledDragOverEvent((drag) => {
+      if (!hasFileTabDragPayload(dragEventOf(drag.nativeEvent))) return;
+      const target = drag.nativeEvent.target;
+      if (target instanceof Element && target.closest('[data-file-tab-strip]')) return;
+      drag.accept();
+    });
+    const fileDropDisposable = api.onDidDrop((drop) => {
+      const payload = readFileTabDragPayload(dragEventOf(drop.nativeEvent));
+      if (!payload || payload.droneId !== currentDrone.id) return;
+      openFileWindow(payload, drop.position, drop.group?.id ?? null);
+    });
+    // Dockview ignores a pane's whole content dropped onto one of its own
+    // edges. Treat it as "shrink into that half": insert an empty slot on
+    // the opposite side so the pane keeps only the half the user pointed at.
+    const dropDisposable = api.onWillDrop((drop) => {
+      const direction = emptySlotDirectionForDrop(dropOverlayContextFromEvent(drop, api, workspaceElementRef.current));
+      const group = drop.group;
+      if (!direction || !group) return;
+      drop.preventDefault();
+      api.addGroup({
+        referenceGroup: group,
+        direction,
+        initialWidth: Math.max(1, Math.round(group.width / 2)),
+        initialHeight: Math.max(1, Math.round(group.height / 2)),
+        skipSetActive: true,
+      });
+      syncEmptyWorkspaceSlots(api);
+      persistCurrentLayout();
+    });
+    // Hide drop highlights Dockview would ignore on release (a lone panel
+    // dropped on its own centre or header, a group onto itself) and
+    // workspace-edge highlights that duplicate the adjacent pane's own edge zone.
+    const overlayDisposable = api.onWillShowOverlay((overlay) => {
+      if (isNoOpDropOverlay(dropOverlayContextFromEvent(overlay, api, workspaceElementRef.current))) {
+        overlay.preventDefault();
+      }
+    });
+    const removeDisposable = api.onDidRemovePanel((panel) => {
+      if (restoringPresetRef.current) return;
+      const panelId = panel.id;
+      const reattachingFile = reattachingFilePanelsRef.current.delete(panelId);
+      const pendingTimer = removedPanelTimersRef.current.get(panelId);
+      if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);
+      // Dockview fires this before it drops the emptied group and hands that
+      // group's space to a neighbour, so this is the explorer's real sidebar
+      // width. Measured now so closing the editor cannot leave the explorer
+      // stretched across the freed space.
+      const explorerWidths = standaloneExplorerWidths(api, panelId);
+
+      // Dockview emits removal events while moving panels between groups as
+      // well as when panels are actually closed. Wait until the move has
+      // settled before changing React state or rebalancing the grid; doing
+      // either during the drag can interrupt Dockview and snap the panel
+      // back to its previous position.
+      const timer = window.setTimeout(() => {
+        removedPanelTimersRef.current.delete(panelId);
+        const api = apiRef.current;
+        if (!api) return;
+        if (api.getPanel(panelId)) return;
+
+        if (reattachingFile || panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
+          updateWorkspacePanelState();
+          persistCurrentLayout();
+          return;
+        }
+
+        const closedFileTabId = fileTabIdFromPanelId(panelId);
+        if (closedFileTabId) fileWindowsRef.current?.onClosed?.(closedFileTabId);
+
+        if (panelId !== CHAT_PANEL_ID) {
+          updateWorkspacePanelState();
+          rebalanceWorkspaceGridGroups(onAfterToolPanelRemove, { explorerWidths });
+          return;
+        }
+
+        suppressSaveRef.current = true;
+        try {
+          ensureChatPanel(api);
+          updateWorkspacePanelState();
+        } finally {
+          suppressSaveRef.current = false;
+        }
+        persistCurrentLayout();
+      }, 0);
+      removedPanelTimersRef.current.set(panelId, timer);
+    });
+
+    updateWorkspacePanelState();
+    const disposables = [layoutDisposable, activePanelDisposable, fileDragOverDisposable, fileDropDisposable, dropDisposable, overlayDisposable, removeDisposable];
+    disposablesRef.current = disposables;
+    return () => disposables.forEach((disposable) => disposable.dispose());
+  }, [readyVersion, currentDrone.id, onActiveToolTabChange, onAfterToolPanelRemove, openFileWindow, persistCurrentLayout, rebalanceWorkspaceGridGroups, schedulePersistCurrentLayout, updateWorkspacePanelState]);
+
+  const persistLayoutOnUnmountRef = React.useRef(persistCurrentLayout);
+  persistLayoutOnUnmountRef.current = persistCurrentLayout;
 
   React.useLayoutEffect(() => {
     // React Strict Mode runs this setup/cleanup pair twice on mount. Re-arm the
@@ -1673,14 +1740,14 @@ export function DockableDroneWorkspace({
         window.clearTimeout(layoutSaveTimerRef.current);
         layoutSaveTimerRef.current = null;
       }
-      persistCurrentLayout();
+      persistLayoutOnUnmountRef.current();
       unmountingRef.current = true;
       removedPanelTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       removedPanelTimersRef.current.clear();
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [];
     };
-  }, [persistCurrentLayout]);
+  }, []);
 
   const handleWorkspaceMouseDownCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -1790,11 +1857,13 @@ export function DockableDroneWorkspace({
                 </UiPanel>
               ) : (
                 <UiPanel flush surface="alternate" className="h-full">
-                  {renderToolPane(activeToolTab, 'single')}
+                  <React.Fragment key={activeToolTab === 'canvas' ? 'canvas' : currentDrone.id}>
+                    {renderToolPane(activeToolTab, 'single')}
+                  </React.Fragment>
                 </UiPanel>
               )
             ) : (
-              <UiPanel flush className="h-full" data-main-workspace-chat="true" data-chat-drone-id={currentDrone.id} data-chat-name={mainChatName}>{chatContent}</UiPanel>
+              <UiPanel flush className="h-full" data-main-workspace-chat="true" data-chat-drone-id={currentDrone.id} data-chat-name={mainChatName}><React.Fragment key={currentDrone.id}>{chatContent}</React.Fragment></UiPanel>
             )}
           </UiPanelBody>
         </UiPanel>
