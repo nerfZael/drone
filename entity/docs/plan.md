@@ -128,6 +128,23 @@ A from-scratch rewrite as one spec (`entity/evals/prompts/router-rewrite.json`, 
 
 The rewrite missed each of three cases once in three: a list written as prose, a question before parallel work, and a steer instead of a queue for "when that's done". It had to match the current router to replace it, so the current router stays the default; the rewrite is kept to try with `--prompts`. Reviewer and voice are now off by default and marked experimental: one head deciding alone was as right and more coherent.
 
+### Entity against a plain orchestrator (2026-09-27)
+
+The same cases against `apps/drone/scripts/baseline-orchestrator.ts` (`--harness baseline`): one model keeping its conversation, one turn at a time (a message during a turn waits for the next), worker notices added to the conversation, the same router prompt and tools without code limbs, and a base section that describes a conversation instead of snapshots. Three runs each, back to back:
+
+| Harness | Pass | Cost | Tokens | First action | First reply |
+|---|---|---|---|---|---|
+| Entity (head alone) | 54/54 | $0.06 | 3.2M | 3.8 s | 5.2 s |
+| Plain orchestrator | 48/54 | $0.03 | 0.8M | 5.6 s | 7.8 s |
+
+The orchestrator's misses:
+- It dispatched to a read-only workspace, then cancelled and asked (1/3). It had seen the workspaces once, at the start; the entity sees them in every snapshot.
+- It asked "same worker or separate?" in plain text, without options, so there was nothing to click (1/3).
+- It asked about "Separately, …" instead of dispatching (2/3).
+- On "thanks" (2/3), the first turn was still running when the message came, so the first dispatch landed after it. This is a waiting-for-the-turn miss, not a wrong decision.
+
+So on chat routing, the snapshot and the head that never waits for its own turn are worth about a tenth more right decisions and 2–2.5 s faster replies, at twice the cost: the whole state is re-sent each wake. That is a real edge, but a moderate one. What no plain orchestrator has (code limbs, reactions to events other than chat) is not measured here.
+
 ## Later
 
 Everything designed but not built is in [future.md](future.md).

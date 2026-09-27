@@ -2,7 +2,9 @@
  * Routing eval for the entity: plays each case in entity/evals/routing-cases.ts against the real front-limb model
  * (Codex, on the subscription) with stand-in workers that stay busy, and reports which routing decisions were right.
  *
- *   bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--head openai-codex/gpt-6-luna] [--voice <model>] [--only <text>] [--concurrency 8]
+ *   bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--head openai-codex/gpt-6-luna] [--voice <model>] [--only <text>] [--concurrency 8] [--harness baseline]
+ *
+ * --harness baseline plays the cases against a plain orchestrator (baseline-orchestrator.ts) instead of the entity.
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,12 +13,14 @@ import { Entity, chatChannel, keypadChannel, workspaceChannel, type Channel, typ
 import { PiAiMind } from '../src/hub/entity/entity-mind';
 import { priceModelCall } from '../src/hub/usage/priceModelCall';
 import { ROUTING_CASES, type RoutingCase } from '../../../entity/evals/routing-cases';
+import { BaselineOrchestrator } from './baseline-orchestrator';
 
 const arg = (name: string) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : undefined; };
 const repeat = Number(arg('repeat') ?? 1);
 const head = arg('head') ?? 'openai-codex/gpt-6-luna';
 const voice = arg('voice');
 const only = arg('only');
+const baseline = arg('harness') === 'baseline';
 // Replacement texts for prompt sections, from a JSON file ({ "router": "..." }): to test a different prompt without editing the real one.
 const promptsFile = arg('prompts');
 const prompts = promptsFile ? JSON.parse(readFileSync(promptsFile, 'utf8')) as Record<string, string> : undefined;
@@ -55,6 +59,7 @@ type Latency = { firstAction: number[]; firstReply: number[] };
 
 async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; ms: number; spend: Spend; latency: Latency }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'entity-routing-'));
+  if (baseline) return playBaseline(c, dir);
   const entity = new Entity({
     mind: routingMind(c),
     channels: [chatChannel(), keypadChannel(), c.workspaces ? grantedWorkspaces(c.workspaces) : workspaceChannel({ root: dir })],
@@ -81,33 +86,65 @@ async function play(c: RoutingCase): Promise<{ ok: boolean; why: string | null; 
       if (entity.snapshot().limbs.find(l => l.id === front)?.runs.length) quietSince = Date.now();
       else if (Date.now() - quietSince > 5000) break;
     }
-    const events = entity.log.all();
-    const failure = c.check(events as never);
-    // On a failure, show what the front limb did, so the cause is visible without replaying.
-    const acts = events.filter(e => e.type === 'tool_called' && (e.by === 'head' || e.by === 'voice') && e.data.name !== 'note').map(e => `${e.data.name}(${String(e.data.summary ?? '').slice(0, 60)})`);
-    const why = failure && `${failure} · front did: ${acts.join(', ') || 'nothing'}`;
-    // Latency per user message, until the next one: what a person waits for.
-    const latency: Latency = { firstAction: [], firstReply: [] };
-    const userMessages = events.filter(e => e.type === 'chat_message' && e.by === 'user');
-    userMessages.forEach((m, i) => {
-      const until = userMessages[i + 1]?.seq ?? Infinity;
-      const after = events.filter(e => e.seq > m.seq && e.seq < until);
-      const action = after.find(e => e.type === 'tool_called' && e.by === front && e.data.name !== 'note');
-      const reply = after.find(e => e.type === 'chat_message' && e.by !== 'user');
-      if (action) latency.firstAction.push(action.t - m.t);
-      if (reply) latency.firstReply.push(reply.t - m.t);
-    });
     const u = entity.snapshot().usage;
-    const spend = { cost: u.cost, tokens: u.input + u.output + u.cacheRead + u.cacheWrite, unpriced: u.unpriced };
-    return { ok: why === null, why, ms: Date.now() - started, spend, latency };
+    return judge(c, entity.log.all() as never, front, started, u);
   } finally {
     entity.close();
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
+/** Checks a played case and measures it: the same for the entity and the baseline. */
+function judge(c: RoutingCase, events: { seq: number; t: number; type: string; by: string; data: Record<string, unknown> }[], front: string, started: number, u: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpriced: number }) {
+  const failure = c.check(events as never);
+  // On a failure, show what the front limb did, so the cause is visible without replaying.
+  const acts = events.filter(e => e.type === 'tool_called' && (e.by === 'head' || e.by === 'voice') && e.data.name !== 'note').map(e => `${e.data.name}(${String(e.data.summary ?? '').slice(0, 60)})`);
+  const why = failure && `${failure} · front did: ${acts.join(', ') || 'nothing'}`;
+  // Latency per user message, until the next one: what a person waits for.
+  const latency: Latency = { firstAction: [], firstReply: [] };
+  const userMessages = events.filter(e => e.type === 'chat_message' && e.by === 'user');
+  userMessages.forEach((m, i) => {
+    const until = userMessages[i + 1]?.seq ?? Infinity;
+    const after = events.filter(e => e.seq > m.seq && e.seq < until);
+    const action = after.find(e => e.type === 'tool_called' && e.by === front && e.data.name !== 'note');
+    const reply = after.find(e => e.type === 'chat_message' && e.by !== 'user');
+    if (action) latency.firstAction.push(action.t - m.t);
+    if (reply) latency.firstReply.push(reply.t - m.t);
+  });
+  const spend = { cost: u.cost, tokens: u.input + u.output + u.cacheRead + u.cacheWrite, unpriced: u.unpriced };
+  return { ok: why === null, why, ms: Date.now() - started, spend, latency };
+}
+
+/** The same case against the plain orchestrator: same messages, clicks, settling, checks and measures. */
+async function playBaseline(c: RoutingCase, dir: string): Promise<Awaited<ReturnType<typeof play>>> {
+  const orchestrator = new BaselineOrchestrator({
+    mind: new PiAiMind('medium', undefined, priceModelCall), model: head, workerAsks: c.workerAsks, workspaces: c.workspaces, prompts,
+    channels: [chatChannel(), ...(c.workspaces ? [] : [workspaceChannel({ root: dir })])],
+  });
+  const started = Date.now();
+  try {
+    await sleep(2000);
+    for (const m of c.messages) {
+      await sleep(m.after ?? 3000);
+      const question = m.click ? [...orchestrator.log.all()].reverse().find(e => e.type === 'chat_message' && (Array.isArray(e.data.options) || Array.isArray(e.data.questions))) : undefined;
+      if (m.click && !question) continue;
+      orchestrator.input('chat_message', { text: m.text, ...(question ? { reply_to: question.seq } : {}) });
+    }
+    let quietSince = Date.now();
+    for (const end = Date.now() + 90_000; Date.now() < end;) {
+      await sleep(250);
+      if (orchestrator.busy()) quietSince = Date.now();
+      else if (Date.now() - quietSince > 5000) break;
+    }
+    return judge(c, orchestrator.log.all() as never, 'head', started, orchestrator.usage);
+  } finally {
+    orchestrator.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const cases = ROUTING_CASES.filter(c => !only || c.name.includes(only));
-console.log(`routing eval: ${cases.length} case(s) × ${repeat}, head ${head}${voice ? `, voice ${voice}` : ''}\n`);
+console.log(`routing eval${baseline ? ' (baseline orchestrator)' : ''}: ${cases.length} case(s) × ${repeat}, head ${head}${voice ? `, voice ${voice}` : ''}\n`);
 let passed = 0, total = 0;
 // Cases run a few at a time, each with its own entity: many at once gets throttled by the model provider, which
 // fails cases for reasons that have nothing to do with routing.
