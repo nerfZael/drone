@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { writeNativeChatHistory } from './native-chat-cache';
 import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import type {
   BlipContextUsage,
@@ -382,9 +383,16 @@ export function useBlipThreadSession({
         : (bootstrapHistory?.entries ?? []),
     [bootstrapHistory?.entries, entries, entriesThreadId, threadId],
   );
+  const historyMessagesRef = React.useRef(new WeakMap<BlipHistoryEntry, ReturnType<typeof messageFromHistoryEntry>>());
   const messages = React.useMemo(
     () => [
-      ...visibleEntries.map(messageFromHistoryEntry),
+      ...visibleEntries.map((entry) => {
+        const cached = historyMessagesRef.current.get(entry);
+        if (cached) return cached;
+        const message = messageFromHistoryEntry(entry);
+        historyMessagesRef.current.set(entry, message);
+        return message;
+      }),
       ...(runtimeThreadId === threadId ? Object.values(toolProgress) : []),
     ],
     [runtimeThreadId, threadId, toolProgress, visibleEntries],
@@ -393,6 +401,18 @@ export function useBlipThreadSession({
     !enabled || !threadId || entriesThreadId === threadId || Boolean(bootstrapHistory);
   const activeContextUsage =
     entriesThreadId === threadId ? contextUsage : (bootstrapHistory?.contextUsage ?? null);
+
+  React.useEffect(() => {
+    if (!threadId || !historyReady || entriesThreadId !== threadId) return;
+    writeNativeChatHistory({
+      version: 1,
+      threadId,
+      sessionId: bootstrapHistory?.sessionId ?? null,
+      entries,
+      contextUsage: activeContextUsage ?? undefined,
+      page: { limit: ASSISTANT_HISTORY_PAGE_SIZE, beforeCursor: activeBeforeCursor, hasOlder: activeHasOlder },
+    });
+  }, [activeBeforeCursor, activeContextUsage, activeHasOlder, bootstrapHistory?.sessionId, entries, entriesThreadId, historyReady, threadId]);
 
   return {
     messages,

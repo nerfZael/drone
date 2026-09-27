@@ -1,5 +1,7 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { ChangeRequestView } from '@drone/hub-model/change-requests';
+import { droneHubQueryClient } from '../query-client';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
@@ -30,7 +32,7 @@ export function LinkedChangeRequestCards({
     <div className="mt-3 flex flex-col gap-2.5" aria-label="Change requests linked in this message">
       {requestNumbers.map((requestNumber) => (
         <LinkedChangeRequestCard
-          key={requestNumber}
+          key={`${droneId}:${requestNumber}`}
           droneId={droneId}
           requestNumber={requestNumber}
           disabled={disabled}
@@ -53,35 +55,32 @@ function LinkedChangeRequestCard({
   initiallyExpanded: boolean;
 }) {
   const confirm = useAppConfirmDialog();
-  const [request, setRequest] = React.useState<ChangeRequestView | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ['linked-change-request', droneId, requestNumber],
+    queryFn: () => getRepositoryChangeRequestByNumber(droneId, requestNumber),
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+  }, droneHubQueryClient);
+  const request = query.data ?? null;
+  const loading = query.isPending;
+  const [actionError, setError] = React.useState<string | null>(null);
+  const error = actionError ?? (query.error ? errorMessage(query.error) : null);
+  const setRequest = React.useCallback((next: ChangeRequestView) => {
+    void droneHubQueryClient.cancelQueries({
+      queryKey: ['linked-change-request'],
+      predicate: (entry) => entry.queryKey[2] === requestNumber,
+    });
+    droneHubQueryClient.setQueriesData<ChangeRequestView>({
+      queryKey: ['linked-change-request'],
+      predicate: (entry) => entry.queryKey[2] === requestNumber,
+    }, next);
+  }, [requestNumber]);
   const [busy, setBusy] = React.useState<'merge' | 'close' | null>(null);
   const [expanded, setExpanded] = React.useState(initiallyExpanded);
 
   React.useEffect(() => {
     setExpanded(initiallyExpanded);
   }, [initiallyExpanded]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setRequest(null);
-    setLoading(true);
-    setError(null);
-    getRepositoryChangeRequestByNumber(droneId, requestNumber)
-      .then((loaded) => {
-        if (!cancelled) setRequest(loaded);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(errorMessage(cause));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [droneId, requestNumber]);
 
   const openRequest = React.useCallback(() => {
     requestOpenChangeRequest({ droneId, requestNumber });
@@ -105,7 +104,7 @@ function LinkedChangeRequestCard({
     } finally {
       setBusy(null);
     }
-  }, [busy, confirm, disabled, request]);
+  }, [busy, confirm, disabled, request, setRequest]);
 
   const close = React.useCallback(async () => {
     if (!request || request.status !== 'open' || disabled || busy) return;
@@ -126,7 +125,7 @@ function LinkedChangeRequestCard({
     } finally {
       setBusy(null);
     }
-  }, [busy, confirm, disabled, request]);
+  }, [busy, confirm, disabled, request, setRequest]);
 
   const isOpen = request?.status === 'open';
   const status = request ? changeRequestStatusLabel(request) : loading ? 'loading' : 'unavailable';

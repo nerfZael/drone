@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { normalizeCompanionShortcutDurations, type CompanionShortcutDurations } from '../companion/companion-shortcut';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { createPersistenceBatch } from './batched-persistence';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppView, DraftChatState, DroneErrorModalState } from './app-types';
 import {
@@ -955,6 +956,9 @@ function schedulePersistChatInputDrafts(value: Record<string, string>): void {
 
 const initialChatInputDrafts = readPersistedChatInputDrafts();
 
+const uiPersistence = createPersistenceBatch(createJSONStorage<Partial<DroneHubUiPersistedState>>(() => localStorage));
+export const batchDroneHubUiUpdates = uiPersistence.batch;
+
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
@@ -1489,7 +1493,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     {
       name: profileStorageKey('droneHub.ui'),
       version: 21,
-      storage: createJSONStorage(() => localStorage),
+      storage: uiPersistence.storage,
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({

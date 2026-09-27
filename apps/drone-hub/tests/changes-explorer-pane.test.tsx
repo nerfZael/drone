@@ -41,15 +41,20 @@ test('the separate changes explorer selects the main diff, survives moving and r
   const movedExplorer = dom.document.createElement('div');
   dom.document.body.append(main, explorer, movedExplorer);
   const root = createRoot(main as unknown as HTMLElement);
-  const render = (host: typeof explorer | null | undefined) => root.render(
-    <QueryClientProvider client={client}>
-      <ChangesExplorerContext.Provider value={host as unknown as HTMLElement | null | undefined}>
-        <DroneChangesDock droneId={droneId} repoAttached repoPath="/work/repo" disabled={false}
-          initialViewMode="stacked" persistViewPreferences={false}
-          onRevealFileInFiles={() => {}} onOpenFileInEditor={() => {}} />
-      </ChangesExplorerContext.Provider>
-    </QueryClientProvider>,
-  );
+  const openedFiles: string[] = [];
+  let editorCallbackVersion = 0;
+  const render = (host: typeof explorer | null | undefined) => {
+    const version = editorCallbackVersion;
+    root.render(
+      <QueryClientProvider client={client}>
+        <ChangesExplorerContext.Provider value={host as unknown as HTMLElement | null | undefined}>
+          <DroneChangesDock droneId={droneId} repoAttached repoPath="/work/repo" disabled={false}
+            initialViewMode="stacked" persistViewPreferences={false}
+            onRevealFileInFiles={() => {}} onOpenFileInEditor={(path) => openedFiles.push(`${version}:${path}`)} />
+        </ChangesExplorerContext.Provider>
+      </QueryClientProvider>,
+    );
+  };
   const step = async (action: () => void) => {
     await act(async () => { action(); await new Promise((resolve) => setTimeout(resolve, 10)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
@@ -64,6 +69,12 @@ test('the separate changes explorer selects the main diff, survives moving and r
     expect(main.textContent).not.toContain('first.ts');
     expect(main.querySelector('[aria-label="Resize changes explorer"]')).toBeNull();
     expect(requests.some((url) => url.includes('second.ts'))).toBe(true);
+
+    // Focus changes recreate workspace callbacks without changing the pane's data.
+    editorCallbackVersion = 1;
+    await step(() => render(explorer));
+    await step(() => main.querySelector<HTMLButtonElement>('[aria-label="Open file in editor"]')!.click());
+    expect(openedFiles).toEqual(['1:second.ts']);
 
     await step(() => render(movedExplorer));
     expect(explorer.children.length).toBe(0);
@@ -111,6 +122,28 @@ test('the separate changes explorer selects the main diff, survives moving and r
     expect(explorer.querySelector('aside')).not.toBeNull();
     await step(() => explorer.querySelector<HTMLButtonElement>('button[title="second.ts"]')!.click());
     expect(main.textContent).toContain('second.ts');
+
+    let reviewRenders = 0;
+    const reviewOverride = {
+      kind: 'change-request' as const, number: 1, revisionKey: 'revision-1',
+      payload: null, loading: true, error: null,
+      renderHeader: () => { reviewRenders += 1; return <span>Review header</span>; },
+      loadDiff: async () => ({ diff: '', truncated: false }),
+    };
+    const renderReview = (override = reviewOverride) => root.render(
+      <QueryClientProvider client={client}>
+        <DroneChangesDock droneId={droneId} repoAttached repoPath="/work/repo" disabled={false}
+          fixedContextMode="pull-request" reviewOverride={override}
+          onRevealFileInFiles={() => {}} onOpenFileInEditor={() => {}} onReviewBack={() => {}} />
+      </QueryClientProvider>,
+    );
+    await step(() => renderReview());
+    const initialReviewRenders = reviewRenders;
+    expect(initialReviewRenders).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i += 1) await step(() => renderReview());
+    expect(reviewRenders).toBe(initialReviewRenders);
+    await step(() => renderReview({ ...reviewOverride, revisionKey: 'revision-2' }));
+    expect(reviewRenders).toBeGreaterThan(initialReviewRenders);
   } finally {
     await act(async () => root.unmount());
     client.clear();

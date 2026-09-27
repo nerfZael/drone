@@ -198,13 +198,13 @@ export function ChatMessageBody({
           {images.map((image) => (
             <button key={image.key} type="button" aria-label={`View ${image.alt || 'image'}`} title="View full size"
               onClick={(event) => setViewed({ attachment: { kind: 'image', name: image.alt || 'Image', src: image.src }, container: portalContainerOf(event.currentTarget) })}
-              className="cursor-zoom-in rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+              className="h-44 w-[260px] max-w-full cursor-zoom-in rounded bg-[var(--surface-inset)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
               <img
                 src={image.src}
                 alt={image.alt}
                 loading="lazy"
                 decoding="async"
-                className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
+                className="h-full w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
               />
             </button>
           ))}

@@ -7,6 +7,8 @@ import type { useFileEditorState } from '../src/droneHub/app/use-file-editor-sta
 import { createPortal } from 'react-dom';
 import { EditorPaneContext } from '../src/droneHub/app/editor-pane-context';
 import { ChangesExplorerContext } from '../src/droneHub/changes/changes-explorer-context';
+import { requestFileExplorerOpen } from '../src/droneHub/files/file-explorer-navigation';
+import type { RightPanelTab } from '../src/droneHub/app/app-config';
 
 let dom: Window;
 let root: Root | undefined;
@@ -69,7 +71,7 @@ afterEach(async () => {
   }
 });
 
-async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = () => <div>editor</div>) {
+async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = () => <div>editor</div>, startWithChanges = true) {
   const { createRoot } = await import('react-dom/client');
   const { flushSync } = await import('react-dom');
   const { DockableDroneWorkspace, ensureWorkspaceToolPanel } =
@@ -112,6 +114,7 @@ async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = 
   };
   function App() {
     const [detached, setDetached] = React.useState<string[]>([]);
+    const [activeToolTab, setActiveToolTab] = React.useState<RightPanelTab>('changes');
     editor = useFileEditorState({
       currentDrone: drone,
       requestJson: request,
@@ -129,7 +132,8 @@ async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = 
       <DockableDroneWorkspace
         currentDrone={drone}
         paneHeaderMode="normal"
-        activeToolTab="changes"
+        activeToolTab={activeToolTab}
+        onActiveToolTabChange={setActiveToolTab}
         openRequestNonce={1}
         chatContent={<div>chat</div>}
         renderToolPane={renderToolPane}
@@ -158,9 +162,89 @@ async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = 
     () => layouts.read(drone.id),
   );
   const api = getWorkspaceLayoutSource(drone.id)!.api;
-  flushSync(() => ensureWorkspaceToolPanel(api, 'changes', 'single'));
+  if (startWithChanges) flushSync(() => ensureWorkspaceToolPanel(api, 'changes', 'single'));
   return { files, api, closed, flushSync, host, editor: () => editor };
 }
+
+test('directory navigation opens only File Explorer, reuses its position, and preserves existing windows', async () => {
+  const { ensureWorkspaceToolPanel, migrateWorkspaceExplorerPanels } =
+    await import('../src/droneHub/app/DockableDroneWorkspace');
+  function Tool({ tab }: { tab: string }) {
+    const pane = React.useContext(EditorPaneContext);
+    return <div data-test-pane={tab === 'editor' && pane === 'explorer' ? 'file-explorer' : tab} />;
+  }
+  const f = await editorFixture((tab) => <Tool tab={tab} />, false);
+  f.flushSync(() => requestFileExplorerOpen('another-drone'));
+  expect(f.api.panels.map((panel) => panel.id)).toEqual(['agent-chat']);
+  f.flushSync(() => requestFileExplorerOpen('integration'));
+  await settle();
+  expect(f.api.panels.map((panel) => panel.id).sort()).toEqual(['agent-chat', 'file-explorer']);
+  expect(f.api.activePanel?.id).toBe('file-explorer');
+  expect(f.host.querySelector('[data-test-pane="file-explorer"]')).not.toBeNull();
+  expect(f.host.querySelector('[data-test-pane="editor"]')).toBeNull();
+
+  // Restoring a folder-only layout must not manufacture an editor either.
+  const saved = f.api.toJSON();
+  f.flushSync(() => {
+    f.api.fromJSON(saved, { reuseExistingPanels: true });
+    migrateWorkspaceExplorerPanels(f.api);
+  });
+  expect(f.api.getPanel('tool:editor')).toBeUndefined();
+  f.flushSync(() => {
+    ensureWorkspaceToolPanel(f.api, 'editor', 'single');
+    ensureWorkspaceToolPanel(f.api, 'changes', 'single');
+    f.api.getPanel('file-explorer')!.api.moveTo({ group: f.api.getPanel('agent-chat')!.group, position: 'below' });
+  });
+  const explorerGroup = f.api.getPanel('file-explorer')!.group;
+  const layout = f.api.toJSON().grid;
+  f.flushSync(() => requestFileExplorerOpen('integration'));
+  await settle();
+  expect(f.api.getPanel('file-explorer')!.group).toBe(explorerGroup);
+  expect(f.api.toJSON().grid).toEqual(layout);
+  expect(f.api.activePanel?.id).toBe('file-explorer');
+  for (const pane of ['file-explorer', 'editor', 'changes']) {
+    expect(f.host.querySelectorAll(`[data-test-pane="${pane}"]`)).toHaveLength(1);
+  }
+});
+
+test('mobile directory navigation shows only the explorer until a file requests the editor', async () => {
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const { createRoot } = await import('react-dom/client');
+  const { flushSync } = await import('react-dom');
+  const { DockableDroneWorkspace } = await import('../src/droneHub/app/DockableDroneWorkspace');
+  let openEditor!: () => void;
+  function Tool() {
+    const pane = React.useContext(EditorPaneContext);
+    return <div data-test-pane={pane === 'explorer' ? 'file-explorer' : 'editor'} />;
+  }
+  function App() {
+    const [tab, setTab] = React.useState<RightPanelTab>('changes');
+    const [nonce, setNonce] = React.useState(0);
+    openEditor = () => { setTab('editor'); setNonce((value) => value + 1); };
+    return <DockableDroneWorkspace
+      currentDrone={{ id: 'mobile' } as any}
+      paneHeaderMode="normal"
+      activeToolTab={tab}
+      onActiveToolTabChange={setTab}
+      openRequestNonce={nonce}
+      chatContent={<div>chat</div>}
+      renderToolPane={() => <Tool />}
+      previewTab="preview"
+    />;
+  }
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  flushSync(() => root!.render(<App />));
+  flushSync(() => requestFileExplorerOpen('mobile'));
+  await settle();
+  expect(host.querySelector('[data-test-pane="file-explorer"]')).not.toBeNull();
+  expect(host.querySelector('[data-test-pane="editor"]')).toBeNull();
+  flushSync(() => openEditor());
+  await settle();
+  expect(host.querySelector('[data-test-pane="editor"]')).not.toBeNull();
+  expect(host.querySelector('[data-test-pane="file-explorer"]')).toBeNull();
+});
 
 test('Editor, Changes, and both explorers remain rendered when independently moved and restored', async () => {
   const { ensureWorkspaceToolPanel, migrateEditorChangesPanels, migrateWorkspaceExplorerPanels } =

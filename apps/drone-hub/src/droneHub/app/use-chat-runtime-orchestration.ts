@@ -42,6 +42,7 @@ import {
 import {
   chatRuntimeCacheKey,
   readFreshChatRuntimeCache,
+  readChatRuntimeSnapshot,
   writeChatRuntimeCache,
 } from './chat-runtime-cache';
 import { chatConfigAvailableForSelection } from './chat-selection-model';
@@ -240,7 +241,7 @@ export function useChatRuntimeOrchestration({
     () => chatRuntimeCacheKey(selectedDrone, selectedChat || 'default'),
     [selectedChat, selectedDrone],
   );
-  const selectedRuntimeCache = readFreshChatRuntimeCache(selectedChatCacheKey);
+  const selectedRuntimeCache = readChatRuntimeSnapshot(selectedChatCacheKey);
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
   const [stopResponseError, setStopResponseError] = React.useState<string | null>(null);
   const [cliTypingChatKey, setCliTypingChatKey] = React.useState<string | null>(null);
@@ -413,7 +414,7 @@ export function useChatRuntimeOrchestration({
     const shouldPrimeSessionLoading =
       chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
     const cachedTranscript = shouldPrimeTranscriptLoading
-      ? readFreshChatRuntimeCache(selectedChatCacheKey)?.transcripts ?? null
+      ? readChatRuntimeSnapshot(selectedChatCacheKey)?.transcripts ?? null
       : null;
     if (cachedTranscript && selectedDrone && selectedChat) {
       markChatLoadCacheHit(
@@ -929,7 +930,7 @@ export function useChatRuntimeOrchestration({
     let consecutiveTransientFailures = 0;
     let stateEtag: string | null = null;
     const controller = new AbortController();
-    let chatConfigResolved = chatConfigAvailableForSelection(
+    let chatConfigResolved = Boolean(readFreshChatRuntimeCache(selectedChatCacheKey)?.chatInfo) && chatConfigAvailableForSelection(
       selectedChatInfoRef.current.value,
       selectedChatInfoRef.current.key,
       selectedChatCacheKey,
@@ -950,7 +951,7 @@ export function useChatRuntimeOrchestration({
       let keepLoading = false;
       let retrySoon = false;
       const cacheWasVisible = Boolean(
-        readFreshChatRuntimeCache(selectedChatCacheKey)?.transcripts,
+        readChatRuntimeSnapshot(selectedChatCacheKey)?.transcripts,
       );
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
@@ -1125,7 +1126,7 @@ export function useChatRuntimeOrchestration({
   React.useEffect(() => {
     if (chatUiMode !== 'cli' || !selectedDrone || !selectedChat) return;
     if (
-      chatConfigAvailableForSelection(
+      readFreshChatRuntimeCache(selectedChatCacheKey)?.chatInfo && chatConfigAvailableForSelection(
         selectedChatInfoRef.current.value,
         selectedChatInfoRef.current.key,
         selectedChatCacheKey,

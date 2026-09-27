@@ -1,6 +1,7 @@
 import type { AgentRunFileChangeCounts, AgentRunFileChangeEntry } from '@blip/protocol';
 
 import { requestJsonWithTimeout } from '../http';
+import { droneHubQueryClient } from '../query-client';
 
 export type LoadedAgentRunDiff = {
   patch: string;
@@ -50,15 +51,28 @@ export async function loadAgentRunDiffFiles(
 ): Promise<LoadedAgentRunDiffFiles> {
   const offset = Math.max(0, Math.floor(options?.offset ?? 0));
   const limit = Math.max(1, Math.floor(options?.limit ?? 20));
-  const result = await requestJsonWithTimeout<{
-    ok: true;
-    files: LoadedAgentRunDiffFiles;
-  }>(
-    `/api/agent-run-diffs/${encodeURIComponent(artifactId)}/files?offset=${offset}&limit=${limit}`,
-    { signal: options?.signal },
-    15_000,
-  );
-  return result.files;
+  options?.signal?.throwIfAborted();
+  // Artifacts are immutable. Share both completed pages and in-flight reads;
+  // cancelling one card must not cancel another card's request.
+  const files = await droneHubQueryClient.fetchQuery({
+    queryKey: ['agent-run-diff-files', artifactId, offset, limit],
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
+    queryFn: async ({ signal }) => {
+      const result = await requestJsonWithTimeout<{ ok: true; files: LoadedAgentRunDiffFiles }>(
+        `/api/agent-run-diffs/${encodeURIComponent(artifactId)}/files?offset=${offset}&limit=${limit}`,
+        { signal },
+        15_000,
+      );
+      return result.files;
+    },
+  });
+  options?.signal?.throwIfAborted();
+  return files;
+}
+
+export function cachedAgentRunDiffFiles(artifactId: string, limit = 20): LoadedAgentRunDiffFiles | undefined {
+  return droneHubQueryClient.getQueryData(['agent-run-diff-files', artifactId, 0, limit]);
 }
 
 export function agentRunDiffError(error: any): Extract<AgentRunDiffState, { status: 'error' }> {

@@ -488,11 +488,23 @@ export type DroneChangesDockProps = {
   onOpenFileInEditor: (repoRelativePath: string) => void;
 };
 
+const MemoizedHistoricalChangesView = React.memo(AgentRunHistoricalChangesView);
+
 export function DroneChangesDock(props: DroneChangesDockProps) {
   const { acceptHistoricalRunChanges = false, droneId } = props;
+  // Workspace focus updates recreate action callbacks. Keep the heavy view's
+  // props stable while invoking the handlers from the latest committed render.
+  const actionsRef = React.useRef(props);
+  React.useLayoutEffect(() => {
+    actionsRef.current = props;
+  });
+  const onOpenFileInEditor = React.useCallback((path: string) => actionsRef.current.onOpenFileInEditor(path), []);
+  const onRevealFileInFiles = React.useCallback((path: string) => actionsRef.current.onRevealFileInFiles(path), []);
+  const onReviewBack = React.useCallback(() => actionsRef.current.onReviewBack?.(), []);
   const [historicalRun, setHistoricalRun] = React.useState<ChangesOpenAgentRunDetail | null>(() =>
     acceptHistoricalRunChanges ? consumeRequestedAgentRunChanges(droneId) : null,
   );
+  const closeHistoricalRun = React.useCallback(() => setHistoricalRun(null), []);
 
   React.useEffect(() => {
     if (!acceptHistoricalRunChanges) return;
@@ -506,7 +518,7 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
 
   if (historicalRun) {
     return (
-      <AgentRunHistoricalChangesView
+      <MemoizedHistoricalChangesView
         key={[
           historicalRun.fileChanges.capturedAt,
           historicalRun.initialSelection.workspaceTargetId,
@@ -514,15 +526,22 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
         ].join(':')}
         fileChanges={historicalRun.fileChanges}
         initialSelection={historicalRun.initialSelection}
-        onClose={() => setHistoricalRun(null)}
+        onClose={closeHistoricalRun}
       />
     );
   }
 
-  return <LiveDroneChangesDock {...props} />;
+  return (
+    <LiveDroneChangesDock
+      {...props}
+      onOpenFileInEditor={onOpenFileInEditor}
+      onRevealFileInFiles={onRevealFileInFiles}
+      onReviewBack={props.onReviewBack ? onReviewBack : null}
+    />
+  );
 }
 
-function LiveDroneChangesDock({
+const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   droneId,
   repoAttached,
   repoPath,
@@ -1115,7 +1134,7 @@ function LiveDroneChangesDock({
   }, [commitExplorerTree, commitFileSelectedPath]);
 
   const recomputeExplorerWidth = React.useCallback(() => {
-    if (viewMode !== 'split') return;
+    if (separateExplorer || viewMode !== 'split') return;
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
     setSplitLayoutWidthPx((current) =>
@@ -1133,6 +1152,7 @@ function LiveDroneChangesDock({
     explorerManualWidthPx,
     explorerResizing,
     explorerWidthOptions,
+    separateExplorer,
     viewMode,
   ]);
 
@@ -1298,7 +1318,7 @@ function LiveDroneChangesDock({
   }, [recomputeExplorerWidth]);
 
   React.useEffect(() => {
-    if (viewMode !== 'split') return;
+    if (separateExplorer || viewMode !== 'split') return;
     const splitEl = splitLayoutRef.current;
     if (!splitEl) return;
 
@@ -1328,7 +1348,7 @@ function LiveDroneChangesDock({
       if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [recomputeExplorerWidth, viewMode]);
+  }, [recomputeExplorerWidth, separateExplorer, viewMode]);
 
   React.useEffect(() => {
     if (viewMode === 'split') return;
@@ -2945,7 +2965,10 @@ function LiveDroneChangesDock({
       onResetZoom={resetExplorerZoom}
     />
   );
-  const explorerContents = (
+  const showChangesExplorer =
+    primaryView === 'changes' && repoAttached && !disabled && !showingInitialLoad && !listError && entries.length > 0 &&
+    (separateExplorer ? Boolean(explorerHost) : viewMode === 'split' && !showingPullRequestOverview);
+  const explorerContents = showChangesExplorer ? (
     <>
       {explorerHeader}
       <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
@@ -2996,8 +3019,8 @@ function LiveDroneChangesDock({
         )}
       </div>
     </>
-  );
-  const detachedExplorerContents = !repoAttached ? (
+  ) : null;
+  const detachedExplorerContents = !explorerHost ? null : !repoAttached ? (
     <UiPaneState kind="unavailable" title="Repository unavailable" />
   ) : disabled || showingInitialLoad ? (
     <UiCenteredLoadingState message={disabled ? 'Waiting for repository…' : initialLoadingLabel} />
@@ -3602,4 +3625,4 @@ function LiveDroneChangesDock({
       )}
     </UiPanel>
   );
-}
+});

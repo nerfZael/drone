@@ -1,4 +1,5 @@
 import React from 'react';
+import { shallow } from 'zustand/shallow';
 import { useCompactChat } from '../chat/use-compact-chat';
 import {
   nativeAgentFailurePresentation,
@@ -1514,7 +1515,7 @@ export function ToolRunActivity({
   );
 }
 
-export function AssistantMessageRow({
+export const AssistantMessageRow = React.memo(function AssistantMessageRow({
   message,
   forkCheckpointId,
   messageExtras,
@@ -1702,4 +1703,8 @@ export function AssistantMessageRow({
       {footer && !footerPlaced ? <div className="dh-chat-message-footer mt-2">{footer}</div> : null}
     </ChatMessageFrame>
   );
-}
+}, (previous, next) => {
+  const { messageExtras: previousExtras, ...previousProps } = previous;
+  const { messageExtras: nextExtras, ...nextProps } = next;
+  return shallow(previousProps, nextProps) && shallow(previousExtras, nextExtras);
+});

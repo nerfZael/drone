@@ -29,6 +29,7 @@ import { consumeKeepFocusOnChatActivation, focusChatWindow } from './focus-chat-
 import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
+import { OPEN_FILE_EXPLORER_EVENT } from '../files/file-explorer-navigation';
 import { openedFileTabId } from './opened-file-tabs';
 import { ChangesExplorerContext } from '../changes/changes-explorer-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
@@ -996,6 +997,7 @@ export function DockableDroneWorkspace({
   const useMobileLayout = isMobileViewport && !hasOpenedSideChats;
   const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
   const [mobileToolPaneOpen, setMobileToolPaneOpen] = React.useState(false);
+  const [mobileExplorerOnly, setMobileExplorerOnly] = React.useState(false);
   const markPreviewHostChanged = React.useCallback(() => {
     setPreviewHostVersion((version) => version + 1);
   }, []);
@@ -1464,6 +1466,7 @@ export function DockableDroneWorkspace({
 
   const applyToolOpenRequest = React.useCallback(() => {
     if (openRequestNonce === lastAppliedOpenRequestRef.current) return;
+    setMobileExplorerOnly(false);
     if (useMobileLayout) {
       lastAppliedOpenRequestRef.current = openRequestNonce;
       setMobileToolPaneOpen(true);
@@ -1758,6 +1761,39 @@ export function DockableDroneWorkspace({
     applyToolOpenRequest();
   }, [applyToolOpenRequest]);
 
+  React.useEffect(() => {
+    const openExplorer = (event: Event) => {
+      if ((event as CustomEvent<{ droneId: string }>).detail?.droneId !== currentDrone.id) return;
+      if (useMobileLayout) {
+        setMobileExplorerOnly(true);
+        setMobileToolPaneOpen(true);
+        setMobileActivePanel('tool');
+        onActiveToolTabChange?.('editor');
+        return;
+      }
+      const api = apiRef.current;
+      if (!api) return;
+      const previousWidths = captureGridGroupWidths(api);
+      let addedPanel = false;
+      suppressSaveRef.current = true;
+      try {
+        ensureChatPanel(api);
+        addedPanel = ensureExplorerPanel(api, CHAT_PANEL_ID, 'single');
+        api.getPanel(EXPLORER_PANEL_ID)?.api.setActive();
+      } finally {
+        suppressSaveRef.current = false;
+      }
+      updateWorkspacePanelState();
+      if (addedPanel) {
+        resizeWorkspaceGridGroupsLater((currentApi) => fitAddedGridGroups(currentApi, previousWidths));
+      } else {
+        persistCurrentLayout();
+      }
+    };
+    window.addEventListener(OPEN_FILE_EXPLORER_EVENT, openExplorer);
+    return () => window.removeEventListener(OPEN_FILE_EXPLORER_EVENT, openExplorer);
+  }, [currentDrone.id, useMobileLayout, onActiveToolTabChange, updateWorkspacePanelState, resizeWorkspaceGridGroupsLater, persistCurrentLayout]);
+
   React.useLayoutEffect(() => {
     const workspaceRoot = document.querySelector<HTMLElement>('[data-drone-workspace-root="1"]');
     const previewHost = document.querySelector<HTMLElement>(PREVIEW_HOST_SELECTOR);
@@ -1807,6 +1843,7 @@ export function DockableDroneWorkspace({
     previewHostVersion,
     reportPreviewHostChange,
     mobileToolPaneOpen,
+    mobileExplorerOnly,
   ]);
 
   React.useEffect(() => {
@@ -1835,7 +1872,7 @@ export function DockableDroneWorkspace({
                 size="small"
                 options={[
                   { value: 'chat', label: 'Chat' },
-                  { value: 'tool', label: RIGHT_PANEL_TAB_LABELS[activeToolTab] },
+                  { value: 'tool', label: mobileExplorerOnly ? 'File Explorer' : RIGHT_PANEL_TAB_LABELS[activeToolTab] },
                 ]}
                 onValueChange={(value) => {
                   setMobileActivePanel(value);
@@ -1846,7 +1883,13 @@ export function DockableDroneWorkspace({
           ) : null}
           <UiPanelBody>
             {mobileActivePanel === 'tool' && mobileToolPaneOpen ? (
-              activeToolTab === previewTab ? (
+              mobileExplorerOnly ? (
+                <UiPanel flush surface="alternate" className="h-full">
+                  <EditorPaneContext.Provider value="explorer">
+                    <React.Fragment key={currentDrone.id}>{renderToolPane('editor', 'single')}</React.Fragment>
+                  </EditorPaneContext.Provider>
+                </UiPanel>
+              ) : activeToolTab === previewTab ? (
                 <UiPanel
                   flush
                   surface="alternate"

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Window } from 'happy-dom';
 
 let tokenizeCalls = 0;
 let parsedChangeCount = 2;
@@ -95,6 +97,41 @@ describe('DiffBlock', () => {
     expect(html).toContain('data-tokenized="no"');
     expect(html).toContain('+const value1 = 2;');
     expect(tokenizeCalls).toBe(0);
+  });
+
+  test('unchanged rerenders reuse highlighting but new diff text invalidates it', async () => {
+    const dom = new Window({ url: 'http://localhost' });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+    const host = dom.document.createElement('div');
+    dom.document.body.append(host);
+    const root = createRoot(host as unknown as HTMLElement);
+    const render = (text: string, explicitEmptyRanges: boolean) => root.render(React.createElement(DiffBlock, {
+      state: { status: 'loaded', text },
+      filePath: 'src/example.ts',
+      ...(explicitEmptyRanges ? { expansionRanges: [] } : {}),
+    }));
+    try {
+      await act(async () => render('original diff', true));
+      expect(tokenizeCalls).toBe(1);
+      for (const explicitEmptyRanges of [true, true, false, false]) {
+        await act(async () => render('original diff', explicitEmptyRanges));
+      }
+      expect(tokenizeCalls).toBe(1);
+      await act(async () => render('updated diff', true));
+      expect(tokenizeCalls).toBe(2);
+      expect(host.querySelector('[data-tokenized="yes"]')).not.toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+      dom.happyDOM.abort();
+    }
   });
 
   test('diff above changed-line threshold renders without tokenization', () => {

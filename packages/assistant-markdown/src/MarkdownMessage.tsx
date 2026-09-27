@@ -1259,8 +1259,8 @@ export function MarkdownMessage({
   );
 
   React.useEffect(() => {
-    setTableModes({});
-    setTableSorts({});
+    setTableModes((current) => Object.keys(current).length ? {} : current);
+    setTableSorts((current) => Object.keys(current).length ? {} : current);
     setExpandedTable(null);
     setExpandedTableMode('fit');
   }, [normalizedText]);

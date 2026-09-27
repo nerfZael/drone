@@ -18,7 +18,7 @@ import { useAgentModelCatalog } from './use-agent-model-catalog';
 import { markChatLoadConfigResolved, type ChatLoadSurface } from './chat-load-telemetry';
 import {
   deleteChatRuntimeCache,
-  readFreshChatRuntimeCache,
+  readChatRuntimeSnapshot,
   writeChatRuntimeCache,
 } from './chat-runtime-cache';
 
@@ -72,7 +72,7 @@ export function useChatConfigState({
   });
   const cachedChatInfo =
     chatConfigEligible
-      ? (readFreshChatRuntimeCache(selectedChatInfoKey)?.chatInfo ?? null)
+      ? (readChatRuntimeSnapshot(selectedChatInfoKey)?.chatInfo ?? null)
       : null;
   const [chatInfoState, setChatInfoState] = React.useState<{
     key: string;
@@ -100,7 +100,7 @@ export function useChatConfigState({
             ? next(
                 previous.key === selectedChatInfoKey
                   ? previous.value
-                  : (readFreshChatRuntimeCache(selectedChatInfoKey)?.chatInfo ?? null),
+                  : (readChatRuntimeSnapshot(selectedChatInfoKey)?.chatInfo ?? null),
               )
             : next;
         if (value) writeChatRuntimeCache(selectedChatInfoKey, { chatInfo: value });
@@ -200,9 +200,9 @@ export function useChatConfigState({
       return;
     }
     if (cachedChatInfo) {
-      // The cache expires independently of this selection. Retain its metadata
-      // as active state: runtime readers skip configuration once it is cached.
-      setChatInfo(cachedChatInfo);
+      // Restoring a display snapshot must not make stale configuration fresh.
+      // The runtime reader still fetches configuration when its freshness expires.
+      setChatInfoState({ key: selectedChatInfoKey, value: cachedChatInfo });
       markChatLoadConfigResolved(
         { droneId: selectedDrone, chatName: selectedChat },
         {

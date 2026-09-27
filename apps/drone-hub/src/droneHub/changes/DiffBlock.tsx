@@ -8,6 +8,7 @@ import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 
 const GAP_STEP_SMALL = 10;
 const GAP_STEP_MEDIUM = 20;
+const EMPTY_EXPANSION_RANGES: DiffExpansionRange[] = [];
 export const DIFF_HIGHLIGHT_MAX_RAW_CHARS = 200_000;
 export const DIFF_HIGHLIGHT_MAX_CHANGED_LINES = 4_000;
 
@@ -246,7 +247,7 @@ export function DiffBlock({
   viewType = 'unified',
   expansionSourceId,
   loadExpansionSource,
-  expansionRanges = [],
+  expansionRanges = EMPTY_EXPANSION_RANGES,
   onAddExpansionRange,
 }: {
   state: DiffState | undefined;
@@ -307,15 +308,18 @@ export function DiffBlock({
   );
 
   const renderedFiles = React.useMemo<FileData[]>(
-    () =>
-      parsed.map((file) => {
-        if (!sourceLines || expansionRanges.length === 0) return file;
+    () => {
+      // Preserve the parsed array while there is nothing to expand. A caller's
+      // fresh empty array must not invalidate syntax highlighting for unchanged text.
+      if (!sourceLines || expansionRanges.length === 0) return parsed;
+      return parsed.map((file) => {
         const expandedHunks = expansionRanges.reduce(
           (hunks, range) => expandFromRawCode(hunks, sourceLines, range.start, range.end),
           file.hunks,
         );
         return { ...file, hunks: expandedHunks };
-      }),
+      });
+    },
     [expansionRanges, parsed, sourceLines],
   );
 

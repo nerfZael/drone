@@ -15,7 +15,7 @@ import { useCompactChat } from './use-compact-chat';
 import { IconChevron } from '../icons';
 import { requestAgentRunChanges, agentRunChangesDroneId, type AgentRunChangesSelection } from '../changes/navigation';
 import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
-import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
+import { agentRunDiffError, cachedAgentRunDiffFiles, loadAgentRunDiffFiles } from './agent-run-diffs';
 
 const CARD_PAGE_SIZE = 20;
 
@@ -29,33 +29,33 @@ function WorkspaceFiles({
   const attributionUnavailable =
     'attribution' in workspace && workspace.attribution === 'unavailable';
   const legacyEntries = 'entries' in workspace ? workspace.entries : null;
-  const [entries, setEntries] = React.useState<AgentRunFileChangeEntry[]>(legacyEntries ?? []);
+  const artifactId = workspace.diffArtifactId;
+  const cached = artifactId ? cachedAgentRunDiffFiles(artifactId, CARD_PAGE_SIZE) : undefined;
+  const previewEntries = agentRunWorkspacePreviewEntries(workspace);
+  const [entries, setEntries] = React.useState<AgentRunFileChangeEntry[]>(
+    () => legacyEntries ?? cached?.entries ?? previewEntries,
+  );
   const [nextOffset, setNextOffset] = React.useState<number | null>(
-    legacyEntries && legacyEntries.length > CARD_PAGE_SIZE ? CARD_PAGE_SIZE : null,
+    legacyEntries && legacyEntries.length > CARD_PAGE_SIZE ? CARD_PAGE_SIZE : cached?.nextOffset ?? null,
   );
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'loaded' | 'error'>(
-    legacyEntries ? 'loaded' : 'idle',
+    legacyEntries || cached ? 'loaded' : 'idle',
   );
   const [error, setError] = React.useState('');
   const [retryNonce, setRetryNonce] = React.useState(0);
   const [expandedDirectories, setExpandedDirectories] = React.useState<Record<string, boolean>>({});
   const visibleEntries = legacyEntries
     ? legacyEntries.slice(0, nextOffset ?? legacyEntries.length)
-    : entries;
+    : artifactId ? entries : previewEntries;
 
   React.useEffect(() => {
     if (attributionUnavailable) return;
     if (legacyEntries) return;
-    if (!workspace.diffArtifactId) {
-      setEntries(agentRunWorkspacePreviewEntries(workspace));
-      setNextOffset(null);
-      setStatus('loaded');
-      return;
-    }
+    if (!artifactId) return;
     const controller = new AbortController();
     setStatus('loading');
     setError('');
-    void loadAgentRunDiffFiles(workspace.diffArtifactId, {
+    void loadAgentRunDiffFiles(artifactId, {
       offset: 0,
       limit: CARD_PAGE_SIZE,
       signal: controller.signal,
@@ -71,7 +71,7 @@ function WorkspaceFiles({
         setError(agentRunDiffError(reason).message);
       });
     return () => controller.abort();
-  }, [attributionUnavailable, legacyEntries, retryNonce, workspace]);
+  }, [artifactId, attributionUnavailable, legacyEntries, retryNonce]);
 
   const loadMore = () => {
     if (legacyEntries) {
@@ -330,7 +330,10 @@ export function ChangedFilesCard({
         </div>
       ) : null}
       {expanded ? (
-        <div className="dh-changed-files-scrollbar mx-1 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 pb-1.5 pt-0">
+        <div
+          className="dh-changed-files-scrollbar mx-1 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 pb-1.5 pt-0"
+          style={{ height: Math.min(288, 16 + Math.min(CARD_PAGE_SIZE, fileChanges.counts.changed) * 28 + (workspaceCount > 1 ? workspaceCount * 24 : 0)) }}
+        >
           {fileChanges.workspaces.map((workspace) => (
             <div key={workspace.targetId}>
               {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (
@@ -340,6 +343,7 @@ export function ChangedFilesCard({
                 </div>
               ) : null}
               <WorkspaceFiles
+                key={workspace.diffArtifactId ?? workspace.targetId}
                 workspace={workspace}
                 onSelectFile={(entry) =>
                   openPanel({ workspaceTargetId: workspace.targetId, path: entry.path })

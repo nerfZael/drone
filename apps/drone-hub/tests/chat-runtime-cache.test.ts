@@ -2,10 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   CHAT_RUNTIME_CACHE_TTL_MS,
+  CHAT_RUNTIME_SNAPSHOT_TTL_MS,
   chatRuntimeCacheKey,
   chatRuntimeCacheTesting,
   deleteChatRuntimeCache,
   readFreshChatRuntimeCache,
+  readChatRuntimeSnapshot,
   renameChatRuntimeCache,
   writeChatRuntimeCache,
 } from '../src/droneHub/app/chat-runtime-cache';
@@ -31,8 +33,28 @@ function chatInfo(chat: string, agent: any) {
 afterEach(() => chatRuntimeCacheTesting.reset());
 
 describe('chat runtime cache', () => {
+  test('retains stale display content without making configuration fresh or crossing chat identities', () => {
+    const key = chatRuntimeCacheKey('drone-1', 'default');
+    const now = Date.now();
+    const snapshot = { chatInfo: chatInfo('default', { kind: 'native' }), transcripts: [{ id: 'last-visit' } as any] };
+    writeChatRuntimeCache(key, snapshot, now);
+    expect(readFreshChatRuntimeCache(key, now + CHAT_RUNTIME_CACHE_TTL_MS)).toBeNull();
+    expect(readChatRuntimeSnapshot(key, now + CHAT_RUNTIME_CACHE_TTL_MS)).toEqual(snapshot);
+    expect(readChatRuntimeSnapshot(chatRuntimeCacheKey('drone-2', 'default'), now)).toBeNull();
+    expect(readChatRuntimeSnapshot(key, now + CHAT_RUNTIME_SNAPSHOT_TTL_MS)).toBeNull();
+  });
+
+  test('bounds retained visits and preserves the most recent writes', () => {
+    for (let index = 0; index < 100; index += 1) {
+      writeChatRuntimeCache(`chat-${index}`, { transcripts: [{ id: String(index) } as any] });
+    }
+    expect(chatRuntimeCacheTesting.entryCount()).toBe(40);
+    expect(readChatRuntimeSnapshot('chat-0')).toBeNull();
+    expect(readChatRuntimeSnapshot('chat-99')?.transcripts?.[0]?.id).toBe('99');
+  });
+
   test('releases untouched expired chats without a subsequent cache read', async () => {
-    const atMs = Date.now() - CHAT_RUNTIME_CACHE_TTL_MS + 20;
+    const atMs = Date.now() - CHAT_RUNTIME_SNAPSHOT_TTL_MS + 20;
     writeChatRuntimeCache('untouched', { transcripts: [{ id: 'old' } as any] }, atMs);
     expect(chatRuntimeCacheTesting.entryCount()).toBe(1);
     await Bun.sleep(50);
@@ -41,7 +63,7 @@ describe('chat runtime cache', () => {
   });
 
   test('expires fields independently and preserves refreshed data', async () => {
-    const oldAt = Date.now() - CHAT_RUNTIME_CACHE_TTL_MS + 20;
+    const oldAt = Date.now() - CHAT_RUNTIME_SNAPSHOT_TTL_MS + 20;
     writeChatRuntimeCache('mixed', { transcripts: [{ id: 'old' } as any], pending: [] }, oldAt);
     const pending = [{ id: 'fresh' } as any];
     writeChatRuntimeCache('mixed', { pending });

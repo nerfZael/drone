@@ -10,6 +10,7 @@ import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
 import { recordUiAction } from './ui-diagnostics';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
+import { requestFileExplorerOpen } from './droneHub/files/file-explorer-navigation';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
@@ -3793,10 +3794,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = currentDrone?.id;
       if (!droneId) return;
       const diagnosticId = beginDesktopWorkspaceLoad('file-open', droneId, resolvedPath);
-      focusEditorPane();
       const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
+        focusEditorPane();
         const cached = openedEditorFileTabs.some((tab) => tab.path === resolvedPath);
         desktopWorkspaceLoads.mark(diagnosticId, 'openTabHit', cached ? 1 : 0);
         setPendingFileOpen(null);
@@ -3816,13 +3817,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         desktopWorkspaceLoads.mark(diagnosticId, 'pathResolved');
         setPendingFileOpen(null);
         if (directory) {
+          requestFileExplorerOpen(droneId);
           desktopWorkspaceLoads.mark(diagnosticId, 'directoryLink', 1);
           const root = normalizeWorkspaceLinkPath(defaultFsPathForCurrentDrone);
           setCurrentFsPath(root && resolvedPath !== root && (root === '/' || resolvedPath.startsWith(`${root}/`))
             ? root : workspaceLinkParent(resolvedPath));
-          setExplorerReveal({ path: resolvedPath, sequence: version });
+          setExplorerReveal({ path: resolvedPath, sequence: version, kind: 'directory' });
           desktopWorkspaceLoads.committed(diagnosticId);
         } else {
+          focusEditorPane();
           revealFileInExplorer(resolvedPath);
           openEditorFile({ ...next, path: resolvedPath, name, initialRead });
         }

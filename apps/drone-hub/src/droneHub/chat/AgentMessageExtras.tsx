@@ -199,11 +199,11 @@ export function AgentMessageExtras({
                   <button
                     type="button"
                     onClick={() => openInlineMediaTarget(media)}
-                    className="block w-full"
+                    className="block w-full aspect-video max-h-[340px]"
                     title={`Open ${media.label} from message link`}
                   >
                     {failedMediaById[media.id] ? (
-                      <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-11 text-[var(--muted)]">
+                      <div className="flex h-full items-center justify-center px-3 text-center text-11 text-[var(--muted)]">
                         Failed to load image.
                       </div>
                     ) : (
@@ -212,7 +212,7 @@ export function AgentMessageExtras({
                         src={media.src}
                         alt={media.label}
                         loading="lazy"
-                        className="h-auto max-h-[340px] w-full bg-[var(--panel)] object-contain"
+                        className="h-full w-full bg-[var(--panel)] object-contain"
                         onError={() =>
                           setFailedMediaById((current) => ({
                             ...current,
