@@ -68,4 +68,30 @@ describe('canvas relationship edges', () => {
 
     expect(edges.map((edge) => edge.variant)).toEqual(['chat-owner', 'chat-owner']);
   });
+
+  test('a copy links to the chat it came from, and to the drone only when that chat is off the canvas', () => {
+    const droneNodeId = createCanvasDroneNodeId('owner');
+    const originalNodeId = createCanvasChatNodeId('owner', 'default');
+    const copyNodeId = createCanvasChatNodeId('owner', 'default - Copy');
+    const bounds = {
+      [droneNodeId]: { x: 100, y: 100, width: 150, height: 44 },
+      [originalNodeId]: { x: 100, y: 240, width: 110, height: 38 },
+      [copyNodeId]: { x: 300, y: 240, width: 140, height: 38 },
+    };
+    const build = (withOriginal: boolean) => buildCanvasRelationshipEdges({
+      preferredNodeByDroneId: { owner: { droneId: droneNodeId } },
+      droneNodeByDroneId: { owner: { droneId: droneNodeId } },
+      chatNodesByDroneId: {
+        owner: withOriginal ? [{ droneId: originalNodeId }, { droneId: copyNodeId }] : [{ droneId: copyNodeId }],
+      },
+      renderedNodeBoundsById: {},
+      fallbackNodeBoundsById: withOriginal ? bounds : { [droneNodeId]: bounds[droneNodeId], [copyNodeId]: bounds[copyNodeId] },
+      fleetParentIdByDroneId: {},
+      fleetAssignedIdsByDroneId: {},
+      forkSourceNodeIdByNodeId: { [copyNodeId]: originalNodeId },
+    });
+
+    expect(build(true).map((edge) => edge.key)).toEqual([`${droneNodeId}~>${originalNodeId}`, `${originalNodeId}|>${copyNodeId}`]);
+    expect(build(false).map((edge) => edge.key)).toEqual([`${droneNodeId}~>${copyNodeId}`]);
+  });
 });

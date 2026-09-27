@@ -31,6 +31,7 @@ import {
   type ComposerReference,
 } from '../chat/composer-references';
 import { IconTune } from '../app/icons';
+import { DroneRuntimeIcon } from '../app/DroneRuntimeIndicator';
 import {
   createCanvasChatNodeId,
   createCanvasDroneNodeId,
@@ -83,6 +84,7 @@ import {
 } from './relationship-edges';
 import {
   CHAT_NODE_HEIGHT_PX,
+  DRONE_NODE_CHROME_WIDTH_PX,
   NODE_HEIGHT_PX,
   NODE_MIN_WIDTH_PX,
   getNodeHeightPx,
@@ -103,7 +105,9 @@ const NODE_LEGIBLE_SCALE = 0.85;
 const NODE_MAX_READABILITY_BOOST = 1.4;
 // Arrowheads shrink with the zoom like the nodes used to, but never below a visible size.
 const EDGE_MARKER_SCREEN_PX = 14;
-const EDGE_DOT_MARKER_SCREEN_PX = 12;
+const EDGE_PLUG_MARKER_SCREEN_PX = 10;
+// Every chat has one of these lines, so they stay quieter than lineage and copy lines.
+const CHAT_OWNER_EDGE_COLOR = 'color-mix(in srgb, var(--canvas-chat-owner-muted) 65%, transparent)';
 const EDGE_MARKER_MIN_SCREEN_PX = 6;
 const FIT_VIEWPORT_PADDING_PX = 48;
 const MIN_DRAFT_SPAWN_COUNT = 1;
@@ -337,17 +341,22 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
           Draft
         </span>
       ) : null}
-      {repoLabel ? (
-        <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
-          {repoLabel}
-        </span>
-      ) : null}
-      {repoBranch ? (
+      {repoLabel || repoBranch ? (
+        // One row centred under the card: at least as wide as the card, and wider when the two
+        // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
-          className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
-          title={repoBranch}
+          className="pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap"
         >
-          {repoBranch}
+          {repoLabel ? (
+            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[260px]`} title={repoLabel}>
+              <span className="truncate">{repoLabel}</span>
+            </span>
+          ) : <span />}
+          {repoBranch ? (
+            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[180px]`} title={repoBranch}>
+              <span className="truncate">{repoBranch}</span>
+            </span>
+          ) : null}
         </span>
       ) : null}
       {/* The title fades while the chat is being deleted; the Deleting badge above says why. */}
@@ -416,10 +425,15 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
             </span>
           </span>
         ) : (
-          <span className={`flex min-w-0 items-center ${droneNode ? 'gap-2' : ''}`}>
+          <span className={`flex min-w-0 items-center ${droneNode ? 'gap-1.5' : ''}`}>
             {droneNode ? (
-              <span className="flex-shrink-0 rounded-[4px] border border-[var(--canvas-chat-owner-muted)] bg-[var(--canvas-chat-owner-subtle)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--canvas-chat-owner)]">
-                Drone
+              // The green frame says drone; the icon says where it runs.
+              <span
+                className="flex h-3.5 w-3.5 flex-shrink-0 text-[var(--canvas-chat-owner)]"
+                data-canvas-drone-runtime={runtime === 'host' ? 'host' : 'container'}
+                title={runtime === 'host' ? 'Drone on the host' : 'Drone in a container'}
+              >
+                <DroneRuntimeIcon runtime={runtime === 'host' ? 'host' : 'container'} className="h-3.5 w-3.5" />
               </span>
             ) : null}
             <span
@@ -434,17 +448,15 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
             >
               {primaryLabel}
             </span>
-            {droneNode && canvasDroneId ? (
-              <span className="flex-shrink-0 text-9 font-mono uppercase text-[var(--muted-dim)]">
-                {runtime === 'host' ? 'Host' : 'Container'}
-              </span>
-            ) : null}
           </span>
         )}
       </span>
     </CardElement>
   );
 });
+
+const CANVAS_NODE_META_CHIP_CLASS =
+  'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]';
 
 function CanvasWorldLayer({ boardDroneId, children }: { boardDroneId: string | null; children: React.ReactNode }) {
   const { panX, panY, scale } = useDroneCanvasStore(
@@ -953,7 +965,7 @@ export function DroneCanvasDock({
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
       if (canvasDroneId) {
         const droneLabel = String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
-        out[node.droneId] = getNodeWidthPx(droneLabel, 'Drone');
+        out[node.droneId] = getNodeWidthPx(droneLabel, DRONE_NODE_CHROME_WIDTH_PX);
         continue;
       }
       const chatRef = parseCanvasChatNodeId(node.droneId);
@@ -1027,6 +1039,23 @@ export function DroneCanvasDock({
     }
     return out;
   }, [droneNodeByDroneId, nodes]);
+  // The global canvas has no board members: read each chat card's source from its drone's summary.
+  const edgeForkSourceNodeIdByNodeId = React.useMemo(() => {
+    if (droneScope) return forkSourceNodeIdByNodeId;
+    const out: Record<string, string> = {};
+    for (const [droneId, chatNodes] of Object.entries(chatNodesByDroneId)) {
+      const drone = droneById[droneId];
+      if (!drone) continue;
+      for (const node of chatNodes) {
+        const chatName = parseCanvasChatNodeId(node.droneId)?.chatName;
+        if (!chatName) continue;
+        const sourceChatName = drone.chatCloneSources?.[chatName]
+          ?? drone.sideChats?.find((sideChat) => sideChat.name === chatName)?.sourceChatName;
+        if (sourceChatName && sourceChatName !== chatName) out[node.droneId] = createCanvasChatNodeId(droneId, sourceChatName);
+      }
+    }
+    return out;
+  }, [chatNodesByDroneId, droneById, droneScope, forkSourceNodeIdByNodeId]);
   const relationshipEdges = React.useMemo(() => {
     return buildCanvasRelationshipEdges({
       preferredNodeByDroneId,
@@ -1036,10 +1065,10 @@ export function DroneCanvasDock({
       fallbackNodeBoundsById,
       fleetParentIdByDroneId,
       fleetAssignedIdsByDroneId,
-      forkSourceNodeIdByNodeId,
+      forkSourceNodeIdByNodeId: edgeForkSourceNodeIdByNodeId,
     });
   }, [
-    forkSourceNodeIdByNodeId,
+    edgeForkSourceNodeIdByNodeId,
     fallbackNodeBoundsById,
     chatNodesByDroneId,
     droneNodeByDroneId,
@@ -2885,14 +2914,14 @@ export function DroneCanvasDock({
                 <marker
                   id={chatOwnerMarkerId}
                   viewBox="0 0 10 10"
-                  refX="5"
+                  refX="9"
                   refY="5"
                   markerUnits="userSpaceOnUse"
-                  markerWidth={edgeMarkerWorldSize(EDGE_DOT_MARKER_SCREEN_PX)}
-                  markerHeight={edgeMarkerWorldSize(EDGE_DOT_MARKER_SCREEN_PX)}
+                  markerWidth={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
+                  markerHeight={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
                   orient="auto"
                 >
-                  <circle cx="5" cy="5" r="3" fill="var(--canvas-chat-owner)" />
+                  <path d="M 1 5 H 9 M 9 2.5 V 7.5" fill="none" stroke={CHAT_OWNER_EDGE_COLOR} strokeWidth="1.6" strokeLinecap="round" />
                 </marker>
               </defs>
               {relationshipEdges.map((edge) => (
@@ -2902,7 +2931,7 @@ export function DroneCanvasDock({
                   fill="none"
                   stroke={
                     edge.variant === 'chat-owner'
-                      ? 'var(--canvas-chat-owner-muted)'
+                      ? CHAT_OWNER_EDGE_COLOR
                       : edge.variant === 'assigned'
                         ? 'var(--canvas-assigned-muted)'
                         : 'var(--canvas-related-muted)'
@@ -2951,13 +2980,16 @@ export function DroneCanvasDock({
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             const nodeHeight = nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
             // A drone board is one drone's chats: its repository and branch are the same on every card.
+            // A chat linked to its drone's card on this canvas shows neither: the drone card does.
+            const repoFromDroneCard = Boolean(chatRef && droneNodeByDroneId[chatRef.droneId]);
+            const showRepo = Boolean(nodeDroneId) && !droneScope && !repoFromDroneCard;
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : nodeDroneId && !droneScope
-                ? String(droneRepoById[nodeDroneId] ?? '').trim()
+              : showRepo
+                ? String(droneRepoById[nodeDroneId!] ?? '').trim()
                 : '';
-            const repoBranch = !draftNode && nodeDroneId && !droneScope
-              ? String(droneById[nodeDroneId]?.repoBranch ?? '').trim()
+            const repoBranch = !draftNode && showRepo
+              ? String(droneById[nodeDroneId!]?.repoBranch ?? '').trim()
               : '';
             const canvasDroneLabel = canvasDroneId
               ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
