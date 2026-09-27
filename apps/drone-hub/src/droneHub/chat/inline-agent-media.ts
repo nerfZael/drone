@@ -139,17 +139,25 @@ export function collectInlineAgentMedia(textRaw: string, droneIdRaw?: string, ba
   }
   const allDirectories = new Set(directories.map(item => item.path));
   const contextualMediaIds = new Set<string>();
-  const pushLocal = (raw: string, index: number) => {
+  const pushLocal = (raw: string, index: number, endIndex: number) => {
     if (!droneId) return;
     let directory: string | undefined;
     if (isBasename(raw)) {
+      // A filename can introduce its location too: `result.png` in `renders/`.
+      // Match the direct relation before considering other folders in the
+      // paragraph, including previous versions mentioned for comparison.
+      const followingDirectory = directories.find(item => item.index >= endIndex);
+      const connector = followingDirectory ? text.slice(endIndex, followingDirectory.index) : '';
+      if (!/\n\s*\n/.test(connector) && /^\s*(?:in|inside|under|from|at)\s+(?:(?:the\s+)?(?:folder|directory)\s+)?$/i.test(connector)) {
+        directory = followingDirectory?.path;
+      }
       // A later comparison folder must not invalidate the folder introducing
       // this image. Separate paragraphs can introduce their own output folder.
       const precedingInParagraph = new Set(directories
         .filter(item => item.index < index && !/\n\s*\n/.test(text.slice(item.index, index)))
         .map(item => item.path));
-      if (precedingInParagraph.size === 1) directory = [...precedingInParagraph][0];
-      else if (allDirectories.size === 1) directory = [...allDirectories][0];
+      if (!directory && precedingInParagraph.size === 1) directory = [...precedingInParagraph][0];
+      else if (!directory && allDirectories.size === 1) directory = [...allDirectories][0];
     }
     const mediaRef = normalizeInlineMediaFilePath(raw, directory ?? basePathRaw);
     if (!mediaRef) return;
@@ -214,14 +222,14 @@ export function collectInlineAgentMedia(textRaw: string, droneIdRaw?: string, ba
       });
       continue;
     }
-    pushLocal(rawHref, match.index!);
+    pushLocal(rawHref, match.index!, match.index! + match[0].length);
   }
 
   const inlineCodeRegex = /`([^`\n]+)`/g;
   for (const match of text.matchAll(inlineCodeRegex)) {
     const raw = String(match[1] ?? '').trim();
     if (!raw) continue;
-    pushLocal(raw, match.index!);
+    pushLocal(raw, match.index!, match.index! + match[0].length);
   }
 
   const bareMediaPathRegex = new RegExp(
@@ -233,7 +241,7 @@ export function collectInlineAgentMedia(textRaw: string, droneIdRaw?: string, ba
   for (const match of textWithoutMarkdownLinks.matchAll(bareMediaPathRegex)) {
     const rawPath = String(match[1] ?? '').trim();
     if (!rawPath) continue;
-    pushLocal(rawPath, match.index!);
+    pushLocal(rawPath, match.index!, match.index! + match[0].length);
   }
 
   // Resolve remaining short mentions from fully located references and avoid

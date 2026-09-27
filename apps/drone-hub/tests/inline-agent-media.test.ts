@@ -2,6 +2,47 @@ import { describe, expect, test } from 'bun:test';
 import { collectInlineAgentMedia } from '../src/droneHub/chat/inline-agent-media';
 
 describe('collectInlineAgentMedia', () => {
+  test('uses the folder after the filename when a later comparison folder is also mentioned', () => {
+    const text = "Round 6 is ready. The rocks are unchanged, and the ore no longer sits on the rock; it's part of the rock surface. " +
+      '`ore-r6-sheet.png` in `graphics-review/environment/ore/` shows front, rear and a close-up, and round 5 is in `round-5/`.';
+    const media = collectInlineAgentMedia(text, 'drone-1', '/work/repo');
+    expect(media.map(item => item.fileRef?.path)).toEqual([
+      '/work/repo/graphics-review/environment/ore/ore-r6-sheet.png',
+    ]);
+  });
+
+  test('an explicit following folder takes precedence over earlier directory context', () => {
+    const media = collectInlineAgentMedia(
+      'Old renders are in `before/`; `result.png` in `after/` is the new version.',
+      'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/after/result.png']);
+  });
+
+  test('following folders resolve bare filenames and markdown links without duplicate previews', () => {
+    for (const mention of ['result.png', '`result.png`', '[result](result.png)', '![result](result.png)']) {
+      const media = collectInlineAgentMedia(
+        `${mention} in the folder \`renders/\`. Previous images are in \`old/\`.`,
+        'host-drone', '/home/dev/project',
+      );
+      expect(media.map(item => item.fileRef?.path)).toEqual(['/home/dev/project/renders/result.png']);
+    }
+  });
+
+  test('a following folder cannot redirect a fully specified path', () => {
+    const media = collectInlineAgentMedia(
+      '`/tmp/result.png` in `renders/` and previous images in `old/`.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/tmp/result.png']);
+  });
+
+  test('does not treat an unrelated later sentence as the filename directory', () => {
+    const media = collectInlineAgentMedia(
+      '`result.png` is ready. Older images in `old/` and `older/` are for comparison.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/result.png']);
+  });
+
   test('uses the image folder before the filename, not a later comparison folder', () => {
     const text = 'I rebuilt the ore concepts. There are two now, A and B, in ' +
       '`graphics-review/environment/ore/`: `ore-r2-side-by-side.png` shows both, and the ' +

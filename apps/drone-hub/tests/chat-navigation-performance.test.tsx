@@ -196,6 +196,24 @@ test('the ore preview recovers from a failed root-path image when its directory 
   expect(opened).toEqual([path]);
 });
 
+test('the round-six ore preview recovers when a following folder arrives after a failed image', async () => {
+  const opened: string[] = [];
+  const preview = (text: string) => <AgentMessageExtras text={text} messageId="ore-round-six"
+    droneId="drone-1" droneHomePath="/work/repo" onOpenFileReference={ref => opened.push(ref.path)} />;
+  await render(preview('`ore-r6-sheet.png`'));
+  host.querySelector('img')!.dispatchEvent(new dom.Event('error') as unknown as Event);
+  await settle();
+  expect(host.textContent).toContain('Failed to load image');
+  await render(preview('`ore-r6-sheet.png` in `graphics-review/environment/ore/` shows front, rear and a close-up, and round 5 is in `round-5/`.'));
+  const image = host.querySelector('img')!;
+  expect(image).not.toBeNull();
+  const path = '/work/repo/graphics-review/environment/ore/ore-r6-sheet.png';
+  expect(new URL(image.src).searchParams.get('path')).toBe(path);
+  expect(host.textContent).not.toContain('Failed to load image');
+  image.closest('button')!.click();
+  expect(opened).toEqual([path]);
+});
+
 function nativeVisit(droneId: string, text: string) {
   const threadId = `thread-${droneId}`;
   const accessScope = { readMode: 'all', writeMode: 'all', executeMode: 'all', droneIds: [] };
