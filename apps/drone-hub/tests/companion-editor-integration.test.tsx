@@ -4,6 +4,9 @@ import { Window } from 'happy-dom';
 import type { Root } from 'react-dom/client';
 import type { CompanionEditorTarget } from '../src/droneHub/files/CompanionEditorFiles';
 import type { useFileEditorState } from '../src/droneHub/app/use-file-editor-state';
+import { createPortal } from 'react-dom';
+import { EditorPaneContext } from '../src/droneHub/app/editor-pane-context';
+import { ChangesExplorerContext } from '../src/droneHub/changes/changes-explorer-context';
 
 let dom: Window;
 let root: Root | undefined;
@@ -66,7 +69,7 @@ afterEach(async () => {
   }
 });
 
-async function editorFixture() {
+async function editorFixture(renderToolPane: (tab: string) => React.ReactNode = () => <div>editor</div>) {
   const { createRoot } = await import('react-dom/client');
   const { flushSync } = await import('react-dom');
   const { DockableDroneWorkspace, ensureWorkspaceToolPanel } =
@@ -129,7 +132,7 @@ async function editorFixture() {
         activeToolTab="changes"
         openRequestNonce={1}
         chatContent={<div>chat</div>}
-        renderToolPane={() => <div>editor</div>}
+        renderToolPane={renderToolPane}
         previewTab="preview"
         fileWindows={{
           openTabIds: editor.openedFileTabs.map((tab) => tab.tabId),
@@ -156,10 +159,72 @@ async function editorFixture() {
   );
   const api = getWorkspaceLayoutSource(drone.id)!.api;
   flushSync(() => ensureWorkspaceToolPanel(api, 'changes', 'single'));
-  return { files, api, closed, flushSync, editor: () => editor };
+  return { files, api, closed, flushSync, host, editor: () => editor };
 }
 
-test('real editor and Dockview preserve drafts, reuse the changes panel, and return a stable layout', async () => {
+test('Editor, Changes, and both explorers remain rendered when independently moved and restored', async () => {
+  const { ensureWorkspaceToolPanel, migrateEditorChangesPanels, migrateWorkspaceExplorerPanels } =
+    await import('../src/droneHub/app/DockableDroneWorkspace');
+  function Tool({ tab }: { tab: string }) {
+    const pane = React.useContext(EditorPaneContext);
+    const changesHost = React.useContext(ChangesExplorerContext);
+    if (tab === 'editor') return <div data-test-pane={pane === 'explorer' ? 'file-explorer' : 'editor'} />;
+    return <>
+      <div data-test-pane="changes" />
+      {changesHost ? createPortal(<div data-test-pane="changes-explorer" />, changesHost) : null}
+    </>;
+  }
+  const f = await editorFixture((tab) => <Tool tab={tab} />);
+  f.flushSync(() => ensureWorkspaceToolPanel(f.api, 'editor', 'single'));
+  await settle();
+  const ids = ['tool:editor', 'file-explorer', 'tool:changes', 'changes-explorer'];
+  const assertAllRendered = () => {
+    for (const pane of ['editor', 'file-explorer', 'changes', 'changes-explorer']) {
+      expect(f.host.querySelectorAll(`[data-test-pane="${pane}"]`)).toHaveLength(1);
+    }
+    expect(new Set(ids.map((id) => f.api.getPanel(id)!.group)).size).toBe(4);
+  };
+  assertAllRendered();
+  const editorGroup = f.api.getPanel('tool:editor')!.group;
+  const changesGroup = f.api.getPanel('tool:changes')!.group;
+  f.flushSync(() => {
+    f.api.getPanel('changes-explorer')!.api.moveTo({ group: editorGroup, position: 'left' });
+    f.api.getPanel('file-explorer')!.api.moveTo({ group: changesGroup, position: 'below' });
+  });
+  await settle();
+  assertAllRendered();
+  expect(f.api.getPanel('tool:editor')!.group).toBe(editorGroup);
+  expect(f.api.getPanel('tool:changes')!.group).toBe(changesGroup);
+
+  const saved = f.api.toJSON();
+  f.flushSync(() => {
+    f.api.fromJSON(saved, { reuseExistingPanels: true });
+    migrateEditorChangesPanels(f.api);
+    migrateWorkspaceExplorerPanels(f.api);
+  });
+  await settle();
+  assertAllRendered();
+  expect(f.api.toJSON().grid).toEqual(saved.grid);
+
+  f.flushSync(() => f.api.getPanel('changes-explorer')!.api.close());
+  await settle();
+  const closedLayout = f.api.toJSON();
+  f.flushSync(() => {
+    f.api.fromJSON(closedLayout);
+    migrateEditorChangesPanels(f.api);
+    migrateWorkspaceExplorerPanels(f.api);
+  });
+  await settle();
+  expect(f.host.querySelector('[data-test-pane="changes-explorer"]')).toBeNull();
+  expect(f.host.querySelector('[data-test-pane="file-explorer"]')).not.toBeNull();
+  expect(f.host.querySelector('[data-test-pane="editor"]')).not.toBeNull();
+  expect(f.host.querySelector('[data-test-pane="changes"]')).not.toBeNull();
+  f.flushSync(() => ensureWorkspaceToolPanel(f.api, 'changes', 'single'));
+  await settle();
+  assertAllRendered();
+});
+
+test('real editor and Dockview preserve drafts, keep Changes open, and return a stable layout', async () => {
   const f = await editorFixture();
   const result = await f.files.open({
     droneId: 'integration',
@@ -180,7 +245,10 @@ test('real editor and Dockview preserve drafts, reuse the changes panel, and ret
   expect(f.editor().openedFileTabs.find((tab) => tab.tabId === ids[0])?.content).toBe(
     'unsaved draft',
   );
-  expect(returned.files.every((file) => file.panelId === 'tool:changes')).toBe(true);
+  expect(returned.files.every((file) => file.panelId === 'tool:editor')).toBe(true);
+  expect(f.api.getPanel('tool:changes')!.params?.tab).toBe('changes');
+  expect(f.api.getPanel('changes-explorer')).toBeDefined();
+  expect(f.api.getPanel('file-explorer')).toBeDefined();
   expect(returned.layout.layoutRevision).toBe(f.files.readLayout().layoutRevision);
 });
 

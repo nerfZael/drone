@@ -62,6 +62,7 @@ export function CommitInspectionView({
   finishCommitListResize,
   resetCommitListWidth,
   splitLayoutRef,
+  separateExplorer = false,
   explorerResizing,
   explorerWidthPx,
   startExplorerResize,
@@ -115,6 +116,7 @@ export function CommitInspectionView({
   finishCommitListResize: React.PointerEventHandler<HTMLDivElement>;
   resetCommitListWidth: () => void;
   splitLayoutRef: React.RefObject<HTMLDivElement | null>;
+  separateExplorer?: boolean;
   explorerResizing: boolean;
   explorerWidthPx: number;
   startExplorerResize: React.PointerEventHandler<HTMLDivElement>;
@@ -299,44 +301,46 @@ export function CommitInspectionView({
                   )}
                 </div>
 
-                <div
-                  role="separator"
-                  aria-orientation="vertical"
-                  className={`dh-changes-split-resize-handle group relative shrink-0 cursor-col-resize touch-none ${
-                    explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
-                  }`}
-                  title="Drag to resize explorer. Double-click to reset to the default width."
-                  onPointerDown={startExplorerResize}
-                  onPointerMove={moveExplorerResize}
-                  onPointerUp={finishExplorerResize}
-                  onPointerCancel={finishExplorerResize}
-                  onLostPointerCapture={finishExplorerResize}
-                  onDoubleClick={resetExplorerWidthPreference}
-                >
-                  <span
-                    className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px ${
-                      explorerResizing ? 'bg-[var(--accent)]' : 'bg-[var(--border-subtle)] group-hover:bg-[var(--accent-muted)]'
+                {!separateExplorer ? <>
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    className={`dh-changes-split-resize-handle group relative shrink-0 cursor-col-resize touch-none ${
+                      explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
                     }`}
-                  />
-                </div>
-
-                <div
-                  className={`shrink-0 overflow-hidden flex flex-col ${
-                    explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
-                  }`}
-                  style={{
-                    width: `${explorerWidthPx}px`,
-                    minWidth: `${explorerWidthPx}px`,
-                    maxWidth: `${explorerWidthPx}px`,
-                  }}
-                >
-                  <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
-                    <span className="text-9 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                      Files
-                    </span>
+                    title="Drag to resize explorer. Double-click to reset to the default width."
+                    onPointerDown={startExplorerResize}
+                    onPointerMove={moveExplorerResize}
+                    onPointerUp={finishExplorerResize}
+                    onPointerCancel={finishExplorerResize}
+                    onLostPointerCapture={finishExplorerResize}
+                    onDoubleClick={resetExplorerWidthPreference}
+                  >
+                    <span
+                      className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px ${
+                        explorerResizing ? 'bg-[var(--accent)]' : 'bg-[var(--border-subtle)] group-hover:bg-[var(--accent-muted)]'
+                      }`}
+                    />
                   </div>
-                  <div className="flex-1 min-h-0 overflow-auto py-1">{renderCommitExplorer(commitExplorerTree, 0)}</div>
-                </div>
+
+                  <div
+                    className={`shrink-0 overflow-hidden flex flex-col ${
+                      explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
+                    }`}
+                    style={{
+                      width: `${explorerWidthPx}px`,
+                      minWidth: `${explorerWidthPx}px`,
+                      maxWidth: `${explorerWidthPx}px`,
+                    }}
+                  >
+                    <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
+                      <span className="text-9 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                        Files
+                      </span>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-auto py-1">{renderCommitExplorer(commitExplorerTree, 0)}</div>
+                  </div>
+                </> : null}
               </div>
             )}
           </>

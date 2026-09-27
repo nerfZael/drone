@@ -51,6 +51,30 @@ function normalizedGrid() {
   return grid;
 }
 
+test('a legacy shared Changes panel restores in place and allows an independent Editor', async () => {
+  const { ensureWorkspaceToolPanel, migrateEditorChangesPanels, migrateWorkspaceExplorerPanels } =
+    await import('../src/droneHub/app/DockableDroneWorkspace');
+  api.addPanel({ id: 'agent-chat', component: 'chat' });
+  api.addPanel({ id: 'tool:editor', component: 'tool', params: { tab: 'changes', splitChanges: true, paneKey: 'bottom' }, position: { direction: 'right' } });
+  api.addPanel({ id: 'file-explorer', component: 'tool', params: { tab: 'changes' }, position: { direction: 'below' } });
+  const saved = api.toJSON();
+  api.fromJSON(saved);
+  const changes = api.getPanel('tool:editor')!;
+  const changesGroup = changes.group;
+  migrateEditorChangesPanels(api);
+  migrateWorkspaceExplorerPanels(api);
+  ensureWorkspaceToolPanel(api, 'editor', 'single');
+  expect(changes.group).toBe(changesGroup);
+  expect(changes.params?.tab).toBe('changes');
+  expect(changes.params?.paneKey).toBe('bottom');
+  expect(api.getPanel('tool:editor:2')!.params?.tab).toBe('editor');
+  expect(api.getPanel('file-explorer')!.params?.tab).toBe('editor');
+  expect(api.getPanel('changes-explorer')!.params?.tab).toBe('changes');
+  expect(ensureWorkspaceToolPanel(api, 'changes', 'single')).toBe(false);
+  expect(ensureWorkspaceToolPanel(api, 'editor', 'single')).toBe(false);
+  expect(api.panels).toHaveLength(5);
+});
+
 test('restores nested split order and exact sizes while preserving the main chat and floating instances', () => {
   layout();
   const floating = api.addPanel({ id: 'side-chat:fork', component: 'sideChat', floating: { x: 44, y: 55, width: 350, height: 240 } });
