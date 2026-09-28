@@ -1003,7 +1003,9 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => Simulate.mouseEnter(card()));
     expect(panel()?.textContent).toContain('Read the parser');
     expect(panel()?.textContent).toContain('Run tests');
-    expect(panel()?.textContent).toContain('$0.42');
+    // Its time and cost are on the card; the panel keeps to the steps, and lists the current step once.
+    expect(panel()?.textContent).not.toContain('$0.42');
+    expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
     await act(async () => Simulate.mouseLeave(card()));
     expect(panel()).toBeNull();
     // So does selecting that one card.

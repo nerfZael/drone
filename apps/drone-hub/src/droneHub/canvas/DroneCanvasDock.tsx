@@ -522,10 +522,15 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
 });
 
 /** One card in full at the canvas's bottom left: every step, its last reply, time and cost. */
-function CanvasStepsPanel({ title, card }: { title: string; card: DetailedCard }) {
+export const CANVAS_STEPS_PANEL_WIDTH_PX = 320;
+
+function CanvasStepsPanel({ title, card, bottomPx }: { title: string; card: DetailedCard; bottomPx: number }) {
+  // The line under the steps is the last reply; while working it is the current step, already listed above.
+  const listed = card.steps ? [...card.steps.done, ...card.steps.doing, ...card.steps.next, card.steps.blocker].includes(card.text)
+    || card.text === `Blocked: ${card.steps.blocker}` : false;
   return (
-    <div data-canvas-steps-panel="" aria-live="polite"
-      className="dh-canvas-work work-card pointer-events-none absolute bottom-2 left-2 z-10 grid w-[min(320px,calc(100%-1rem))] gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--panel)] py-2 pl-3.5 pr-2.5 text-[12px] text-[var(--fg)]">
+    <div data-canvas-steps-panel="" aria-live="polite" style={{ bottom: bottomPx, width: `min(${CANVAS_STEPS_PANEL_WIDTH_PX}px, calc(100% - 1rem))` }}
+      className="dh-canvas-work work-card pointer-events-none absolute left-2 z-10 grid gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--panel)] py-2 pl-3.5 pr-2.5 text-[12px] text-[var(--fg)]">
       <span className="absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r" style={{ background: detailTone(card) }} />
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 truncate text-[13px] font-semibold">{title}</span>
@@ -535,13 +540,9 @@ function CanvasStepsPanel({ title, card }: { title: string; card: DetailedCard }
       </div>
       {card.steps ? <Steps w={{ steps: card.steps, state: WORKER_STATE_OF[card.state] }} /> : null}
       {card.stepsStale ? <div className="text-[11px] text-[var(--muted)]">Summarized while it was working; it stopped before a final summary.</div> : null}
-      {card.text ? (
+      {card.text && !listed ? (
         <div className={`line-clamp-4 break-words ${card.steps ? 'border-t border-[var(--border)] pt-1.5 text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}>{card.text}</div>
       ) : null}
-      <div className="flex items-center gap-2.5 font-mono text-[11px] tabular-nums text-[var(--muted)]">
-        {card.clock ? <span>{card.workingSince !== null ? `working ${card.clock}` : `last worked ${card.clock}`}</span> : null}
-        <span className="ml-auto" title={card.costTitle}>{card.cost}</span>
-      </div>
     </div>
   );
 }
@@ -1255,6 +1256,28 @@ export function DroneCanvasDock({
     return () => clearInterval(timer);
   }, [busyChatKey, canvasDetailedCards]);
   const [hoveredCardId, hoverCard] = React.useState<string | null>(null);
+  // The steps panel sits at the bottom left, above the message bar wherever the two would overlap.
+  const [stepsPanelBottomPx, setStepsPanelBottomPx] = React.useState(8);
+  React.useLayoutEffect(() => {
+    if (!canvasDetailedCards) return;
+    const viewport = viewportRef.current;
+    const bar = viewport?.querySelector<HTMLElement>('[data-canvas-message-bar]');
+    if (!viewport || !bar) return;
+    const place = () => {
+      const area = viewport.getBoundingClientRect();
+      const rect = bar.getBoundingClientRect();
+      const overlaps = !bar.hidden && rect.height > 0 && rect.left - area.left < 8 + CANVAS_STEPS_PANEL_WIDTH_PX + 8;
+      setStepsPanelBottomPx(overlaps ? Math.round(area.bottom - rect.top) + 8 : 8);
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(viewport);
+    observer?.observe(bar);
+    // Showing or hiding the bar changes no size: watch its hidden attribute too.
+    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(place);
+    mutations?.observe(bar, { attributes: true, attributeFilter: ['hidden'], subtree: true });
+    return () => { observer?.disconnect(); mutations?.disconnect(); };
+  }, [canvasDetailedCards]);
   const detailCacheRef = React.useRef<Record<string, { key: string; card: DetailedCard }>>({});
   const detailByNodeId = React.useMemo(() => {
     if (!canvasDetailedCards) return null;
@@ -3333,7 +3356,7 @@ export function DroneCanvasDock({
           const title = focusDroneId
             ? String(effectiveDroneNameById[focusDroneId] ?? '').trim() || focusDroneId
             : parseCanvasChatNodeId(focusId)?.chatName ?? nodesByDroneId[focusId]?.label ?? '';
-          return <CanvasStepsPanel title={title} card={focus} />;
+          return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
         })()}
 
         {selectionBox ? (

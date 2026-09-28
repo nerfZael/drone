@@ -134,7 +134,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
-        ? 'absolute bottom-2 left-1/2 z-20 w-[min(34rem,calc(100%-1rem))] -translate-x-1/2'
+        ? 'absolute bottom-2 left-1/2 z-20 w-[min(26rem,calc(100%-1rem))] -translate-x-1/2'
         : 'flex-shrink-0 px-2 pb-2 pt-1'}
       onMouseDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
