@@ -12,7 +12,7 @@ export type NewChatConfiguration = {
   model?: string;
   reasoning?: string;
   agentPermissionMode: 'read' | 'write' | 'execute';
-  approvalPolicy: 'ask' | 'auto' | 'none';
+  approvalPolicy?: 'ask' | 'auto' | 'none';
 };
 
 export function buildNewChatCreatePayload(input: {
@@ -58,6 +58,7 @@ export function buildNewChatConfiguration(
     ...(model ? { model } : {}),
     ...(reasoning ? { reasoning } : {}),
     agentPermissionMode,
-    approvalPolicy,
+    // Even the default policy is rejected when explicitly sent for other agents.
+    ...(supportsApprovalPolicy ? { approvalPolicy } : {}),
   };
 }
