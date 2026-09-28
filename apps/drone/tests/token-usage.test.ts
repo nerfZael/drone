@@ -42,7 +42,7 @@ describe('new usage accounting', () => {
       store.addPrice({ ...price, input: 100 });
       store.record(run, [observation]);
       expect(store.analytics().totals.estimatedCost).toBe(cost);
-      expect(store.prices()).toHaveLength(2);
+      expect(store.prices().filter((item) => item.provider === 'provider')).toHaveLength(2);
       expect(() => store.addPrice({ ...price, input: -1 })).toThrow();
     } finally { store.close(); }
   });

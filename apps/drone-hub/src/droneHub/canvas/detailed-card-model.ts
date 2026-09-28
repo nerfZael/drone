@@ -18,6 +18,8 @@ export type ChatActivity = {
   unpriced: number;
   /** Of the cost, what summarizing its steps took. */
   stepsCost?: number;
+  /** Usage records counted at the cost their agent reported (finished Claude Code turns). */
+  reported?: number;
   runningSince: string | null;
   lastEndedAt: string | null;
 };
@@ -163,7 +165,7 @@ export function deriveDetailedCard(input: DetailedCardInput, now: number): Detai
     : !input.busy && endedAt !== null ? `${durationText(now - endedAt)} ago` : '';
   const activity = input.activity;
   const costTitle = activity
-    ? `Estimated token cost at list prices: ${costText(activity)}${activity.unpriced ? ` (${activity.unpriced} usage record${activity.unpriced === 1 ? '' : 's'} not priced)` : ''}. Not a subscription charge.`
+    ? `Estimated token cost: ${costText(activity)}${activity.reported ? ', partly as the agent reported it' : ' at list prices'}${activity.unpriced ? ` (${activity.unpriced} usage record${activity.unpriced === 1 ? '' : 's'} not priced)` : ''}. Not a subscription charge.`
     : 'No usage recorded for this chat yet';
   const stepsCost = activity?.stepsCost ? ` Of it, step summaries: ${costText({ estimatedCost: activity.stepsCost })}.` : '';
   const unpricedOnly = activity && !(activity.estimatedCost > 0) && activity.tokens > 0

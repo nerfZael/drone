@@ -3,6 +3,7 @@ import { estimateUsageCost, type UsageAnalytics, type UsageObservation, type Usa
 import { droneRootPath } from '../../host/paths';
 import { openUsageDatabase } from './helpers/openUsageDatabase';
 import { USAGE_SCHEMA } from './usage-schema';
+import { applyBundledAnthropicPrices } from './bundledPrices';
 
 export type UsageExecution = {
   id: string; chatId?: string; droneId?: string; chatName?: string; repo?: string;
@@ -17,6 +18,8 @@ export type ChatActivity = {
   droneId: string; chatName: string; estimatedCost: number; tokens: number; unpriced: number;
   /** Of the cost, what summarizing its steps took. */
   stepsCost: number;
+  /** Usage records counted at the cost their agent reported: finished Claude Code turns, and any with no known price. */
+  reported: number;
   /** When the chat's oldest running execution started, while one runs. */
   runningSince: string | null;
   lastEndedAt: string | null;
@@ -31,6 +34,9 @@ export class UsageStore {
     this.db.exec(USAGE_SCHEMA);
     this.db.prepare("INSERT OR IGNORE INTO metadata VALUES ('tracking_since', ?)").run(new Date().toISOString());
     this.trackingSince = (this.db.prepare("SELECT value FROM metadata WHERE key='tracking_since'").get() as any).value;
+    applyBundledAnthropicPrices(this);
+    this.repairCumulativeSessionTotals();
+    this.repricePricedAnthropicCacheWrites();
   }
 
   record(execution: UsageExecution, observations: UsageObservation[], replace = true): void {
@@ -175,17 +181,19 @@ export class UsageStore {
     const where = filter.droneId ? 'WHERE COALESCE(c.drone_id,e.drone_id)=?' : '';
     return (this.db.prepare(`SELECT COALESCE(c.drone_id,e.drone_id) AS droneId, COALESCE(c.name,e.chat_name) AS chatName,
       COALESCE(SUM(u.cost),0) AS estimatedCost, COALESCE(SUM(u.tokens),0) AS tokens, SUM(u.unpriced) AS unpriced,
+      COALESCE(SUM(u.reported),0) AS reported,
       COALESCE(SUM(CASE WHEN e.purpose='steps' THEN u.cost END),0) AS stepsCost,
       MIN(CASE WHEN e.status='running' AND e.purpose<>'steps' THEN e.started_at END) AS runningSince,
       MAX(CASE WHEN e.status NOT IN ('running','queued','recovering') AND e.purpose<>'steps' THEN e.updated_at END) AS lastEndedAt
       FROM executions e LEFT JOIN chats c ON c.id=e.chat_id
-      LEFT JOIN (SELECT execution_id, SUM(estimated_cost) AS cost,
+      LEFT JOIN (SELECT execution_id, SUM(COALESCE(estimated_cost, reported_cost)) AS cost,
         SUM(COALESCE(input,0)+COALESCE(output,0)+COALESCE(cache_read,0)+COALESCE(cache_write,0)) AS tokens,
-        COUNT(CASE WHEN estimated_cost IS NULL THEN 1 END) AS unpriced
+        COUNT(CASE WHEN estimated_cost IS NULL AND reported_cost IS NULL THEN 1 END) AS unpriced,
+        COUNT(CASE WHEN json_extract(data_json,'$.costSource')='reported' OR (estimated_cost IS NULL AND reported_cost IS NOT NULL) THEN 1 END) AS reported
         FROM observations GROUP BY execution_id) u ON u.execution_id=e.id
       ${where}
       GROUP BY 1, 2 HAVING droneId IS NOT NULL AND chatName IS NOT NULL`).all(...(filter.droneId ? [filter.droneId] : [])) as any[])
-      .map((row) => ({ ...row, unpriced: row.unpriced ?? 0 }));
+      .map((row) => ({ ...row, unpriced: row.unpriced ?? 0, reported: row.reported ?? 0 }));
   }
 
   /** Chats with agent work running now, by their current names. */
@@ -199,14 +207,101 @@ export class UsageStore {
 
   close(): void { this.db.close(); }
 
-  private writeObservation(execution: UsageExecution, observation: UsageObservation): void {
+  /**
+   * Claude Code's end-of-turn totals (`modelUsage`, `costUSD`) cover its whole session so far, not the turn: summed
+   * per turn they count every earlier turn again. A turn keeps what it added since the session's previous turn; the
+   * running totals stay in `cumulative`, for the next turn to subtract.
+   */
+  private sessionTurnDelta(execution: UsageExecution, observation: UsageObservation): UsageObservation {
+    const sessionId = (observation as { sessionId?: string }).sessionId;
+    if (observation.provider !== 'anthropic' || observation.scope !== 'tree' || !sessionId || execution.agent !== 'claude') return observation;
+    const current = (observation as { cumulative?: SessionTotals }).cumulative ?? sessionTotals(observation);
+    const previousRow = this.db.prepare(`SELECT o.data_json FROM observations o JOIN executions e ON e.id=o.execution_id
+      WHERE o.provider='anthropic' AND o.model=? AND o.execution_id<>? AND e.started_at<=?
+        AND json_extract(o.data_json,'$.scope')='tree' AND json_extract(o.data_json,'$.sessionId')=?
+      ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`).get(observation.model, execution.id, execution.startedAt, sessionId) as any;
+    const previousData = previousRow ? JSON.parse(previousRow.data_json) : null;
+    const previous: SessionTotals | null = previousData ? previousData.cumulative ?? sessionTotals(previousData) : null;
+    // A session that restarted its count (a new process) is already per-process: keep it as it is.
+    const continues = previous && TOTAL_FIELDS.every((field) => (current[field] ?? 0) >= (previous[field] ?? 0));
+    const delta = (field: keyof SessionTotals) => current[field] === null ? null
+      : continues ? Math.max(0, (current[field] ?? 0) - (previous![field] ?? 0)) : current[field];
+    return { ...observation, input: delta('input'), output: delta('output'), cacheRead: delta('cacheRead'),
+      cacheWrite: delta('cacheWrite'), reasoning: delta('reasoning'), reportedCost: delta('reportedCost') ?? undefined,
+      cumulative: current } as UsageObservation;
+  }
+
+  /** Once: rewrites Claude session totals recorded before `sessionTurnDelta`, oldest first so each finds its predecessor. */
+  private repairCumulativeSessionTotals(): void {
+    const key = 'claude_session_turn_deltas_v1';
+    if (this.db.prepare('SELECT 1 FROM metadata WHERE key=?').get(key)) return;
+    this.db.transaction(() => {
+      const rows = this.db.prepare(`SELECT e.id, e.agent, e.started_at AS startedAt, o.data_json FROM observations o
+        JOIN executions e ON e.id=o.execution_id
+        WHERE e.agent='claude' AND o.provider='anthropic' AND json_extract(o.data_json,'$.scope')='tree'
+          AND json_extract(o.data_json,'$.cumulative') IS NULL
+        ORDER BY e.started_at, e.rowid`).all() as any[];
+      for (const row of rows) {
+        this.writeObservation({ id: row.id, agent: row.agent, startedAt: row.startedAt, status: 'done' }, JSON.parse(row.data_json));
+      }
+      this.db.prepare('INSERT INTO metadata VALUES (?,?)').run(key, new Date().toISOString());
+    })();
+  }
+
+  /**
+   * Once: prices Anthropic usage again, now that 1-hour cache writes are told apart, Claude Opus 5.5 has a price and
+   * finished Claude turns take the cost Claude reported. Oldest first, so each Claude turn still finds the session
+   * totals of the one before.
+   */
+  private repricePricedAnthropicCacheWrites(): void {
+    const key = 'anthropic_cache_writes_and_claude_reported_costs_v2';
+    if (this.db.prepare('SELECT 1 FROM metadata WHERE key=?').get(key)) return;
+    this.db.transaction(() => {
+      const rows = this.db.prepare(`SELECT e.id, e.agent, e.started_at AS startedAt, o.data_json FROM observations o
+        JOIN executions e ON e.id=o.execution_id WHERE o.provider='anthropic' ORDER BY e.started_at, e.rowid`).all() as any[];
+      for (const row of rows) {
+        this.writeObservation({ id: row.id, agent: row.agent, startedAt: row.startedAt, status: 'done' }, JSON.parse(row.data_json));
+      }
+      this.db.prepare('INSERT INTO metadata VALUES (?,?)').run(key, new Date().toISOString());
+    })();
+  }
+
+  /**
+   * The cost of a finished Claude Code turn is the one Claude reported: it priced what it actually sent (1-hour and
+   * 5-minute cache writes, long context, fast mode, web searches) from Anthropic's current rates. Only the Hub prices
+   * the rest: requests of a turn still running, and agents that report no cost.
+   */
+  private static claudeReportedCost(execution: UsageExecution, observation: UsageObservation): number | null {
+    return execution.agent === 'claude' && observation.provider === 'anthropic' && observation.scope === 'tree'
+      && typeof observation.reportedCost === 'number' ? observation.reportedCost : null;
+  }
+
+  /** A single Anthropic request says which of its cache writes were kept for an hour. */
+  private static oneHourCacheWrites(observation: UsageObservation): number | null {
+    if (observation.provider !== 'anthropic' || typeof observation.cacheWrite1h === 'number') return null;
+    const split = (observation as { raw?: any }).raw?.cache_creation?.ephemeral_1h_input_tokens;
+    return typeof split === 'number' ? split : null;
+  }
+
+  private writeObservation(execution: UsageExecution, incoming: UsageObservation): void {
+    const delta = this.sessionTurnDelta(execution, incoming);
+    let observation = delta;
     const old = this.db.prepare('SELECT price_id,model,provider FROM observations WHERE execution_id=? AND id=?').get(execution.id, observation.id) as any;
     const priceRow = old?.price_id && old.model === observation.model && old.provider === observation.provider
       ? this.db.prepare('SELECT data_json FROM prices WHERE id=?').get(old.price_id) as any
       : this.db.prepare('SELECT data_json FROM prices WHERE provider=? AND model=? AND effective_at<=? ORDER BY effective_at DESC,created_at DESC,rowid DESC LIMIT 1')
         .get(observation.provider, observation.model, execution.startedAt) as any;
     const price: UsagePrice | undefined = priceRow ? JSON.parse(priceRow.data_json) : undefined;
-    const estimate = estimateUsageCost(price, observation, observation.scope === 'request');
+    const reported = UsageStore.claudeReportedCost(execution, delta);
+    if (reported !== null) {
+      // A 1-hour share worked out from the reported cost before is not a count Claude gave: drop it.
+      const { cacheWrite1h: _derived, ...rest } = delta as UsageObservation & { cacheWrite1h?: number | null };
+      observation = { ...rest, costSource: 'reported' } as UsageObservation;
+    } else {
+      const cacheWrite1h = UsageStore.oneHourCacheWrites(delta);
+      if (cacheWrite1h !== null) observation = { ...delta, cacheWrite1h };
+    }
+    const estimate = reported ?? estimateUsageCost(price, observation, observation.scope === 'request');
     this.db.prepare(`INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(execution_id,id) DO UPDATE SET model=excluded.model,provider=excluded.provider,
       input=excluded.input,output=excluded.output,cache_read=excluded.cache_read,cache_write=excluded.cache_write,
@@ -214,8 +309,15 @@ export class UsageStore {
       estimated_cost=excluded.estimated_cost,reported_cost=excluded.reported_cost,data_json=excluded.data_json`)
       .run(execution.id, observation.id, observation.model, observation.provider,
         observation.input, observation.output, observation.cacheRead, observation.cacheWrite, observation.reasoning,
-        observation.complete ? 1 : 0, price?.id ?? null, estimate, observation.reportedCost ?? null, JSON.stringify(observation));
+        observation.complete ? 1 : 0, reported === null ? price?.id ?? null : null, estimate, observation.reportedCost ?? null, JSON.stringify(observation));
   }
+}
+
+type SessionTotals = { input: number | null; output: number | null; cacheRead: number | null; cacheWrite: number | null; reasoning: number | null; reportedCost: number | null };
+const TOTAL_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite', 'reportedCost'] as const;
+function sessionTotals(o: any): SessionTotals {
+  const n = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  return { input: n(o.input), output: n(o.output), cacheRead: n(o.cacheRead), cacheWrite: n(o.cacheWrite), reasoning: n(o.reasoning), reportedCost: n(o.reportedCost) };
 }
 
 let active: { path: string; store: UsageStore } | undefined;

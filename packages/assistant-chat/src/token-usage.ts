@@ -5,6 +5,8 @@ export type TokenCounts = {
   cacheRead: number | null;
   cacheWrite: number | null;
   reasoning: number | null;
+  /** Of the cache writes, those kept for an hour (Anthropic), which cost more than 5-minute ones. */
+  cacheWrite1h?: number | null;
 };
 
 export type UsageObservation = TokenCounts & {
@@ -30,6 +32,8 @@ export type UsagePrice = {
   output: number;
   cacheRead: number | null;
   cacheWrite: number | null;
+  /** 1-hour cache writes; Anthropic charges twice the input rate when a price leaves it out. */
+  cacheWrite1h?: number | null;
   source: string;
   origin?: 'catalog' | 'bundled' | 'manual';
   createdAt: string;
@@ -38,7 +42,11 @@ export type UsagePrice = {
 };
 
 /** USD per million tokens. */
-export type UsagePriceTier = { input: number; output: number; cacheRead: number | null; cacheWrite: number | null };
+export type UsagePriceTier = {
+  input: number; output: number; cacheRead: number | null; cacheWrite: number | null;
+  /** 1-hour cache writes; Anthropic charges twice the input rate when a price leaves it out. */
+  cacheWrite1h?: number | null;
+};
 
 /**
  * The cost in USD, or null when a category used has no rate. Reasoning is inside output. For one request
@@ -52,7 +60,11 @@ export function estimateUsageCost(price: UsagePrice | undefined, counts: TokenCo
   const context = (counts.input ?? 0) + (counts.cacheRead ?? 0) + (counts.cacheWrite ?? 0);
   const rates: UsagePriceTier = singleRequest && price.longContext && context > price.longContext.inputTokensAbove ? price.longContext : price;
   if (!fields.every((field) => counts[field] !== null && (counts[field] === 0 || rates[field] !== null))) return null;
-  return fields.reduce((sum, field) => sum + counts[field]! * (rates[field] ?? 0) / 1_000_000, 0);
+  const oneHour = Math.min(counts.cacheWrite ?? 0, Math.max(0, counts.cacheWrite1h ?? 0));
+  const oneHourRate = rates.cacheWrite1h ?? (price.provider === 'anthropic' ? rates.input * 2 : rates.cacheWrite);
+  if (oneHour > 0 && oneHourRate === null) return null;
+  const standard = fields.reduce((sum, field) => sum + counts[field]! * (rates[field] ?? 0) / 1_000_000, 0);
+  return standard + oneHour * ((oneHourRate ?? 0) - (rates.cacheWrite ?? 0)) / 1_000_000;
 }
 
 export type UsageTotals = TokenCounts & {

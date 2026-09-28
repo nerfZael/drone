@@ -15,6 +15,27 @@ const BUNDLED: Record<string, Bundled> = {
 const SOURCE = 'Bundled with Drone Hub: OpenAI list rates with long-context rates (same table as StorySpark shared llm-costs, shared-rates-2026-09-gpt6-opus55)';
 
 /**
+ * Anthropic models the catalog does not have yet, at Anthropic's list rates: cache writes 1.25x input for 5 minutes,
+ * 2x for an hour. In effect from before the model existed, so its earlier usage is priced too.
+ */
+const BUNDLED_ANTHROPIC: Record<string, Pick<UsagePrice, 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'cacheWrite1h'>> = {
+  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
+};
+const ANTHROPIC_EFFECTIVE_AT = '2026-01-01T00:00:00.000Z';
+const ANTHROPIC_SOURCE = 'Bundled with Drone Hub: Anthropic list rates';
+
+/** Adds a price for each bundled Anthropic model that has none. Idempotent. */
+export function applyBundledAnthropicPrices(store: UsageStore): number {
+  const added: Array<Omit<UsagePrice, 'id' | 'createdAt'>> = [];
+  for (const [model, rates] of Object.entries(BUNDLED_ANTHROPIC)) {
+    if (store.currentPrice('anthropic', model)) continue;
+    added.push({ provider: 'anthropic', model, effectiveAt: ANTHROPIC_EFFECTIVE_AT, origin: 'bundled', source: ANTHROPIC_SOURCE, ...rates });
+  }
+  if (added.length) store.addPrices(added);
+  return added.length;
+}
+
+/**
  * Adds long-context rates to the current price of each bundled model, keeping the current base rates when there are
  * any. Idempotent; a manual price is left alone.
  */
