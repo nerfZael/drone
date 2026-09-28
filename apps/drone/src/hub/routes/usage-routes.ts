@@ -30,6 +30,10 @@ export function registerUsageRoutes(router: HubRouter): void {
     filter.groupBy = group as UsageFilter['groupBy'];
     json(200, { ok: true, ...getUsageStore().analytics(filter) });
   });
+  // Cost and timing per chat, for the canvas's detailed cards; one request for every card.
+  router.get('/api/usage/chats', ({ url, json }) => {
+    json(200, { ok: true, chats: getUsageStore().chatActivity({ droneId: url.searchParams.get('droneId') || undefined }) });
+  });
   router.get('/api/drones/:droneId/chats/:chatName/usage', ({ params, json, fail }) => {
     const chat = readChatMetadataFromStore({ droneId: params.droneId, chatName: params.chatName }).chat;
     if (!chat?.id) fail(404, 'Chat not found');

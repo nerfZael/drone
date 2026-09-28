@@ -8,6 +8,7 @@ import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
 import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
@@ -925,6 +926,104 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(card(chatCard).textContent).toContain('dvm/work');
   } finally {
     await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('detailed cards show state, time and cost, and spread the stored arrangement without moving it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const runningSince = new Date(Date.now() - 65_000).toISOString();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async (input: string | URL | Request) => Response.json(String(input).includes('/api/usage/chats')
+      ? { ok: true, chats: [{ droneId: 'alpha', chatName: 'default', estimatedCost: 0.42, tokens: 1000, unpriced: 0, runningSince, lastEndedAt: null }] }
+      : String(input).includes('/api/chats/steps')
+        ? { ok: true, steps: [{ droneId: 'alpha', chatName: 'default', turnId: 't1', done: ['Read the parser'], doing: ['Splitting the tokenizer'], next: ['Run tests'], final: false, updatedAt: runningSince }] }
+        : String(input).includes('/api/settings/chat-steps')
+          ? { ok: true, settings: { enabled: true, model: 'openai-codex/gpt-6-luna', reasoning: 'low' } }
+          : { ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
+  const chatCard = alpha('default');
+  useDroneCanvasStore.getState().upsertNodes([{ droneId: chatCard, label: 'default', x: 100, y: 200 }]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const card = () => container.querySelector(`[data-drone-id="${chatCard}"]`) as unknown as HTMLElement;
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={{
+      [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: false, lastAgentSnippet: 'Refactoring the parser' },
+    }} />));
+    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
+    const toggle = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Detailed cards') as unknown as HTMLButtonElement;
+    await act(async () => { toggle.click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(card().querySelector('[data-canvas-detailed-card]')?.getAttribute('data-canvas-detailed-card')).toBe('working');
+    // Its steps say what it is doing now, and the dots count them.
+    // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
+    expect(card().textContent).not.toContain('Splitting the tokenizer');
+    expect(card().querySelector('[title*="Splitting the tokenizer"]')).not.toBeNull();
+    expect(card().querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
+    // Its state is the sidebar's icon at the top right, not a word.
+    expect(card().querySelector('[data-canvas-card-state="working"] svg, [data-canvas-card-state="working"] span')).not.toBeNull();
+    expect(card().textContent).not.toContain('working');
+    expect(container.textContent).toContain('Steps: gpt-6-luna · Low');
+    // Its panel opens on the page, not inside the canvas that would clip and cover it.
+    const stepsButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.startsWith('Steps')) as unknown as HTMLButtonElement;
+    await act(async () => { stepsButton.click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    const settingsPanel = dom.document.querySelector('[role="dialog"][aria-label="Chat step tracking"]');
+    expect(settingsPanel?.parentElement).toBe(dom.document.body);
+    expect(container.contains(settingsPanel as never)).toBe(false);
+    await act(async () => (dom.document.querySelector('.fixed.inset-0') as unknown as HTMLElement).click());
+    expect(dom.document.querySelector('[aria-label="Chat step tracking"][role="dialog"]')).toBeNull();
+    expect(card().textContent).toContain('$0.42');
+    expect(card().textContent).toContain('1m');
+    expect(card().style.transform).toContain('translate3d(225px, 250px, 0)');
+    // It looks like the Entity's cards and sits on their darker ground.
+    expect(card().classList.contains('dh-canvas-work')).toBe(true);
+    expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
+    // The card keeps one line; hovering it shows every step in a panel at the canvas's bottom left.
+    expect(card().textContent).not.toContain('Read the parser');
+    expect(card().style.height).toBe('50px');
+    // As wide as its short name and its footer need, not a fixed width.
+    expect(parseFloat(card().style.width)).toBeLessThan(200);
+    const panel = () => container.querySelector('[data-canvas-steps-panel]');
+    expect(panel()).toBeNull();
+    await act(async () => Simulate.mouseEnter(card()));
+    expect(panel()?.textContent).toContain('Read the parser');
+    expect(panel()?.textContent).toContain('Run tests');
+    expect(panel()?.textContent).toContain('$0.42');
+    await act(async () => Simulate.mouseLeave(card()));
+    expect(panel()).toBeNull();
+    // So does selecting that one card.
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([chatCard]));
+    expect(panel()?.textContent).toContain('Read the parser');
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
+    // Dragging moves the stored position by the pointer's distance in compact space.
+    await act(async () => Simulate.mouseDown(card(), { button: 0, clientX: 300, clientY: 400 }));
+    await act(async () => {
+      dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 345, clientY: 425, buttons: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      dom.dispatchEvent(new dom.MouseEvent('mouseup', { clientX: 345, clientY: 425, buttons: 0 }));
+    });
+    expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toMatchObject({ x: 120, y: 220 });
+    await act(async () => useDroneHubUiStore.getState().setCanvasDetailedCards(false));
+    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
+    expect(card().style.transform).toContain('translate3d(120px, 220px, 0)');
+  } finally {
+    await act(async () => root.unmount());
+    useDroneHubUiStore.getState().setCanvasDetailedCards(false);
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);

@@ -68,6 +68,13 @@ function measureNodeLabelPx(label: string): number | null {
   return width;
 }
 
+/** A card title's rendered width at the compact card's size, or its estimate where nothing can be measured. */
+export function nodeLabelWidthPx(labelRaw: string): number {
+  const label = String(labelRaw ?? '').trim();
+  const measured = label ? measureNodeLabelPx(label) : null;
+  return measured !== null ? measured + NODE_LABEL_MEASURE_SLACK_PX : label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX;
+}
+
 /**
  * Card width that fits the whole label. `chromeWidthPx` is what else shares the row
  * (a drone card's runtime icon), so it never squeezes the title.

@@ -167,7 +167,10 @@ export function Dot({ pulse }: { pulse?: boolean }) {
   return <span className={`inline-block h-[7px] w-[7px] shrink-0 rounded-full bg-current ${pulse ? 'motion-safe:animate-pulse' : ''}`} />;
 }
 
-export function Pips({ w }: { w: WorkItem }) {
+/** Also drawn on the canvas's detailed chat cards, which have steps and a state but are not workers. */
+export type StepsOwner = Pick<WorkItem, 'steps' | 'state'>;
+
+export function Pips({ w }: { w: StepsOwner }) {
   if (!w.steps) return <span />;
   const color = STATE_COLOR[w.state];
   return (
@@ -183,7 +186,7 @@ export function Pips({ w }: { w: WorkItem }) {
  * A worker's done / doing / next, from its summary. With `limit`, a compact view for a card: what it is doing and any
  * blocker first, then its latest done steps, then what is next, and how many more there are.
  */
-export function Steps({ w, limit }: { w: WorkItem; limit?: number }) {
+export function Steps({ w, limit }: { w: StepsOwner; limit?: number }) {
   if (!w.steps) return <div className="text-[12px] text-[var(--muted)] opacity-80">No summary yet.</div>;
   type Item = { glyph: string; color: string; text: string; key: string; dim?: boolean; rank: number; order: number };
   const all: Item[] = [

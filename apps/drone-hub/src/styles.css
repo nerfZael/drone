@@ -833,8 +833,9 @@ code, pre {
 .brain-comet { stroke-dasharray: 22 200; animation: brain-comet .42s cubic-bezier(.3,0,.2,1) both; }
 @keyframes entity-flash { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); } }
 .entity-flash { animation: entity-flash .9s ease-out; }
-/* Work canvas palette (from the mockup): a darker ground than the cards, a faint dot grid, softer status colours. */
-.entity-work-canvas {
+/* Work canvas palette (from the mockup): a darker ground than the cards, a faint dot grid, softer status colours.
+   The canvas's detailed cards use it too, on the same ground. */
+.entity-work-canvas, .dh-canvas-work {
   --panel: #161920; --panel-alt: #1c1f27; --hover: #1b1e26; --border: #2a2e39;
   --fg: #e7e9ef; --fg-secondary: #c3c7d2; --muted: #8b91a1; --accent: #9ea2ff; --act: #6ea8ff;
   --green: #58c27a; --orange: #fb8a4c; --yellow: #e0a84a; --red: #e07a7a;
@@ -843,7 +844,8 @@ code, pre {
   background: var(--panel); color: var(--fg);
 }
 .entity-work-canvas .react-flow { background: var(--work-ground); }
-.entity-work-canvas .work-card { box-shadow: var(--work-shadow); }
+.entity-work-canvas .work-card, .dh-canvas-work.work-card { box-shadow: var(--work-shadow); }
+.dh-canvas-work-ground { background: #0f1116; }
 /* Markdown in the entity views, at the bench's size rather than the main chat's. */
 .dh-markdown.entity-md { font-size: 13px; line-height: 1.5; }
 .dh-markdown.entity-md > :first-child { margin-top: 0; }

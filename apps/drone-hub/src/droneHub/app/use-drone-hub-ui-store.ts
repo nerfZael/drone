@@ -133,6 +133,8 @@ type DroneHubUiState = {
   headerOverflowOpen: boolean;
   outputView: OutputView;
   showCanvasLastMessagePreviews: boolean;
+  /** Canvas cards like the Entity's Work cards: status, what it is doing, how long, and cost. */
+  canvasDetailedCards: boolean;
   /** Floating side chat windows stay out of the way while a canvas pane is open. */
   hideSideChatWindowsWithCanvas: boolean;
   transcriptInlineImageOverrides: Record<string, boolean>;
@@ -211,6 +213,7 @@ type DroneHubUiState = {
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
+  setCanvasDetailedCards: (next: Updater<boolean>) => void;
   setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnContextRepoPath: (next: Updater<string>) => void;
@@ -383,6 +386,7 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
+  | 'canvasDetailedCards'
   | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
@@ -1013,6 +1017,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
+      canvasDetailedCards: false,
       hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
       spawnContextRepoPath: '',
@@ -1276,6 +1281,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next),
         })),
+      setCanvasDetailedCards: (next) =>
+        set((s) => ({ canvasDetailedCards: resolveNext(s.canvasDetailedCards, next) })),
       setHideSideChatWindowsWithCanvas: (next) =>
         set((s) => ({
           hideSideChatWindowsWithCanvas: resolveNext(s.hideSideChatWindowsWithCanvas, next),
@@ -1537,6 +1544,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
+        canvasDetailedCards: state.canvasDetailedCards,
         hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
@@ -1666,6 +1674,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),
+          canvasDetailedCards: normalizeBoolean(persisted.canvasDetailedCards ?? currentState.canvasDetailedCards),
           hideSideChatWindowsWithCanvas: normalizeBoolean(
             persisted.hideSideChatWindowsWithCanvas ?? currentState.hideSideChatWindowsWithCanvas,
           ),

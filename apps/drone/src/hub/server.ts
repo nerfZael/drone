@@ -7,6 +7,8 @@ import { readChatIdleStatus } from './chat-idle-status';
 import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
+import { registerChatStepsRoutes } from './routes/chat-steps-routes';
+import { startChatStepService } from './chat-steps/chat-step-service';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -5748,6 +5750,12 @@ async function startDroneHubApiServerWithLifecycle(
   registerSidebarRoutes(apiRouter, sidebarCommands);
 
   registerUsageRoutes(apiRouter);
+  registerChatStepsRoutes(apiRouter);
+  // Summarizes running agent chats into steps while step tracking is on; a new summary refreshes that chat's views.
+  startChatStepService({
+    onChange: (steps) => scheduleDroneChatEventRefresh(0, { droneId: steps.droneId, chatName: steps.chatName }),
+    log: (message) => hubLog('warn', 'chat steps', { message }),
+  });
   registerCatalogRoutes(apiRouter, {
     mcpToken,
     upsertDroneHubMcpServerPreset,

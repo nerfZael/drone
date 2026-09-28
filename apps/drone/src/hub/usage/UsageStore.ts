@@ -13,6 +13,15 @@ export type UsageFilter = {
   from?: string; to?: string; groupBy?: 'agent' | 'model' | 'provider' | 'chat' | 'repo' | 'purpose';
 };
 
+export type ChatActivity = {
+  droneId: string; chatName: string; estimatedCost: number; tokens: number; unpriced: number;
+  /** Of the cost, what summarizing its steps took. */
+  stepsCost: number;
+  /** When the chat's oldest running execution started, while one runs. */
+  runningSince: string | null;
+  lastEndedAt: string | null;
+};
+
 export class UsageStore {
   private readonly db: import('better-sqlite3').Database;
   readonly trackingSince: string;
@@ -156,6 +165,36 @@ export class UsageStore {
     }
     return { trackingSince: this.trackingSince, totals: query()[0], groups,
       daily: query('substr(e.started_at,1,10)').map((row) => ({ ...row, label: row.key })).sort((a,b) => a.key.localeCompare(b.key)) };
+  }
+
+  /**
+   * Per chat, for canvas cards: what it has cost, when its running work started, and when its last work ended.
+   * Chats are named by their current name (renames rebind them), so cards can look them up by drone and chat.
+   */
+  chatActivity(filter: { droneId?: string } = {}): ChatActivity[] {
+    const where = filter.droneId ? 'WHERE COALESCE(c.drone_id,e.drone_id)=?' : '';
+    return (this.db.prepare(`SELECT COALESCE(c.drone_id,e.drone_id) AS droneId, COALESCE(c.name,e.chat_name) AS chatName,
+      COALESCE(SUM(u.cost),0) AS estimatedCost, COALESCE(SUM(u.tokens),0) AS tokens, SUM(u.unpriced) AS unpriced,
+      COALESCE(SUM(CASE WHEN e.purpose='steps' THEN u.cost END),0) AS stepsCost,
+      MIN(CASE WHEN e.status='running' AND e.purpose<>'steps' THEN e.started_at END) AS runningSince,
+      MAX(CASE WHEN e.status NOT IN ('running','queued','recovering') AND e.purpose<>'steps' THEN e.updated_at END) AS lastEndedAt
+      FROM executions e LEFT JOIN chats c ON c.id=e.chat_id
+      LEFT JOIN (SELECT execution_id, SUM(estimated_cost) AS cost,
+        SUM(COALESCE(input,0)+COALESCE(output,0)+COALESCE(cache_read,0)+COALESCE(cache_write,0)) AS tokens,
+        COUNT(CASE WHEN estimated_cost IS NULL THEN 1 END) AS unpriced
+        FROM observations GROUP BY execution_id) u ON u.execution_id=e.id
+      ${where}
+      GROUP BY 1, 2 HAVING droneId IS NOT NULL AND chatName IS NOT NULL`).all(...(filter.droneId ? [filter.droneId] : [])) as any[])
+      .map((row) => ({ ...row, unpriced: row.unpriced ?? 0 }));
+  }
+
+  /** Chats with agent work running now, by their current names. */
+  runningChats(): Array<{ droneId: string; chatName: string; chatId: string | null; startedAt: string }> {
+    return this.db.prepare(`SELECT COALESCE(c.drone_id,e.drone_id) AS droneId, COALESCE(c.name,e.chat_name) AS chatName,
+      e.chat_id AS chatId, MIN(e.started_at) AS startedAt
+      FROM executions e LEFT JOIN chats c ON c.id=e.chat_id
+      WHERE e.status='running' AND e.purpose<>'steps'
+      GROUP BY 1, 2 HAVING droneId IS NOT NULL AND chatName IS NOT NULL`).all() as any[];
   }
 
   close(): void { this.db.close(); }
