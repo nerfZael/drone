@@ -327,10 +327,11 @@ test('Chats window broadcasts to selected rows with attachments and shortcuts wi
     await act(async () => { row('nested-chat').dispatchEvent(new dom.MouseEvent('click', { bubbles: true, ctrlKey: true })); await settle(); });
     expect(container.textContent).toContain('To default, nested-chat');
     // Like the agent chat, the model controls sit in the toolbar of the expanded composer.
-    expect(container.textContent).not.toContain('Model: Unchanged');
+    expect(container.querySelector('[data-selected-chats-model-overrides]')).toBeNull();
     await type('Hello both');
-    expect(container.textContent).toContain('Model: Unchanged');
     const modelButton = container.querySelector('[data-chat-composer-model-picker] > button')!;
+    // Both chats use the same model, so the one picker names it.
+    expect(modelButton.textContent).toBe('existing-model');
     await press(modelButton as unknown as Element, 'Enter');
     expect(dom.document.activeElement).not.toBe(input());
     await press(modelButton as unknown as Element, 'Tab');
@@ -356,11 +357,16 @@ test('Chats window broadcasts to selected rows with attachments and shortcuts wi
     expect(recordings).toBe(1);
     await press(row('workflow') as unknown as Element, 's');
     expect(sends.at(-1)).toMatchObject({ payload: { prompt: 'Voice broadcast' }, overrides: {} });
-    await act(async () => Simulate.change(container.querySelector('select[aria-label="Reasoning override for selected chats"]') as unknown as Element, { target: { value: 'high' } } as never));
+    const picker = () => container.querySelector('[data-chat-composer-model-picker] > button') as unknown as HTMLButtonElement;
+    await act(async () => picker().click());
+    const high = Array.from(container.querySelectorAll('[data-chat-composer-model-picker] [role="dialog"] button'))
+      .find((button) => button.textContent?.trim() === 'High') as unknown as HTMLButtonElement;
+    await act(async () => high.click());
+    expect(picker().textContent).toBe('existing-model (High)');
     await type('Explicit reasoning');
     await press(input() as unknown as Element, 'Enter');
     expect(sends.at(-1)?.overrides).toEqual({ reasoning: 'high' });
-    expect((container.querySelector('select') as unknown as HTMLSelectElement).value).toBe('__unchanged__');
+    expect(picker().textContent).toBe('existing-model');
     await act(async () => useChatsViewStore.getState().setView('grid'));
     await type('Grid broadcast');
     await press(input() as unknown as Element, 'Tab');

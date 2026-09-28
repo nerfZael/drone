@@ -52,6 +52,7 @@ function Dock({
   onCreateCanvasDroneFromDraft,
   chatNodeStateById = {},
   droneRepoById = {},
+  onRenameDrone,
 }: {
   children?: React.ReactNode;
   drone: DroneSummary;
@@ -64,6 +65,7 @@ function Dock({
   onCreateCanvasDroneFromDraft?: DockProps['onCreateCanvasDroneFromDraft'];
   chatNodeStateById?: DockProps['chatNodeStateById'];
   droneRepoById?: DockProps['droneRepoById'];
+  onRenameDrone?: DockProps['onRenameDrone'];
 }) {
   const noop = () => {};
   return (
@@ -81,6 +83,7 @@ function Dock({
         onCloneChat={onCloneChat}
         onDeleteChats={onDeleteChats}
         onRenameChat={onRenameChat}
+        onRenameDrone={onRenameDrone}
         onActivateChat={onActivateChat}
         onSendCanvasPrompt={onSendCanvasPrompt}
         onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
@@ -722,15 +725,22 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect(sends).toHaveLength(sendsBeforeStop);
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element));
     expect((input() as unknown as HTMLTextAreaElement).value).toBe('Recorded message');
-    expect(container.textContent).toContain('Model: Unchanged');
+    // One picker shows the model and reasoning the chat will use.
+    expect(container.querySelector('[data-chat-composer-model-picker] > button')?.textContent).toBe('Saved model (Low)');
+    expect(container.querySelector('select')).toBeNull();
     expect(configs).toEqual([]);
-    await act(async () => Simulate.change(container.querySelector('select[aria-label="Reasoning override for selected chats"]') as unknown as Element, { target: { value: 'high' } } as never));
     const modelTrigger = container.querySelector('[data-chat-composer-model-picker] > button')!;
+    await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
+    const dialogButton = (text: string) => Array.from(container.querySelectorAll('[data-chat-composer-model-picker] [role="dialog"] button'))
+      .find((button) => button.textContent?.trim() === text) as unknown as HTMLButtonElement;
+    await act(async () => dialogButton('High').click());
+    expect(modelTrigger.textContent).toBe('Saved model (High)');
     await type('Do not send from model controls');
     const beforeMenuKeys = sends.length;
     await key(modelTrigger as unknown as Element, 'Tab');
     expect(sends).toHaveLength(beforeMenuKeys);
     await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
+    await act(async () => dialogButton('Saved model').click());
     await key(container.querySelector('button[title="other-model"]') as unknown as Element, 's');
     await key(container.querySelector('button[title="other-model"]') as unknown as Element, 'Tab');
     expect(sends).toHaveLength(beforeMenuKeys);
@@ -739,7 +749,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await type('With overrides');
     await key(input() as unknown as Element, 'Enter');
     expect((sends.at(-1) as any).overrides).toEqual({ model: 'other-model', reasoning: 'high' });
-    expect(container.textContent).toContain('Model: Unchanged');
+    expect(modelTrigger.textContent).toBe('Saved model (Low)');
     // Global-board drafts use the same attachments and retain the spawn-count control.
     await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Global') as unknown as HTMLButtonElement).click());
     await act(async () => { Simulate.doubleClick(viewport() as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); await settle(); });
@@ -880,6 +890,10 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(card(droneCard).textContent).toContain('frontier');
     expect(card(droneCard).textContent).toContain('dvm/work');
     expect(card(chatCard).textContent).toBe('default');
+    // A selected drone card names the chat the composer sends to, then the drone.
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
+    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).toContain('Message default (Alpha)');
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
 
     // The global canvas draws a copy's line to its original, not to the drone.
     await act(async () => root.render(<Dock
@@ -890,6 +904,20 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     const edgeDashes = () => [...container.querySelectorAll('svg > path[stroke]')].map((path) => path.getAttribute('stroke-dasharray'));
     expect(edgeDashes()).toEqual(['2 5', '4 4']); // Drone to original, original to copy.
     await act(async () => useDroneCanvasStore.getState().removeNodes([alpha('default - Copy')]));
+
+    // Double-clicking a drone card renames the drone in place, like a chat card.
+    const droneRenames: string[] = [];
+    await act(async () => root.render(<Dock drone={drone} droneRepoById={{ alpha: 'frontier' }}
+      onRenameDrone={async (droneId, newName) => { droneRenames.push(`${droneId}:${newName}`); return { ok: true }; }} />));
+    await act(async () => Simulate.doubleClick(card(droneCard)));
+    const renameInput = card(droneCard).querySelector('input') as unknown as HTMLInputElement;
+    expect(renameInput.value).toBe('Alpha');
+    expect(card(droneCard).querySelector('[data-canvas-drone-runtime]')).not.toBeNull();
+    await act(async () => Simulate.change(renameInput, { target: { value: 'Beta' } } as never));
+    await act(async () => Simulate.keyDown(renameInput, { key: 'Enter' }));
+    expect(droneRenames).toEqual(['alpha:Beta']);
+    expect(card(droneCard).querySelector('input')).toBeNull();
+    expect(card(droneCard).textContent).toContain('Beta');
 
     // Without its drone's card, a chat names its own repository and branch.
     await act(async () => useDroneCanvasStore.getState().removeNodes([droneCard]));

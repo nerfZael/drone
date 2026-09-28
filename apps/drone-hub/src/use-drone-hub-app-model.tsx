@@ -1,5 +1,6 @@
 import { applyChatModelOverrides } from './droneHub/chat/selected-chat-model-overrides';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './droneHub/canvas/canvas-messaging';
+import { droneRenameErrorMessage } from './droneHub/app/drone-rename';
 import { useDesktopNotifications } from './droneHub/app/use-desktop-notifications';
 import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
@@ -4287,6 +4288,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       suggestAndRenameDraftDrone,
     ],
   );
+  const renameCanvasDrone = React.useCallback(
+    async (droneId: string, newName: string) => {
+      const result = await renameDroneTo(droneId, newName, { showAlert: false, source: 'canvas' });
+      return result.ok ? { ok: true } : { ok: false, error: droneRenameErrorMessage(result.error) };
+    },
+    [renameDroneTo],
+  );
   const renameCanvasChat = React.useCallback(
     async (
       droneIdRaw: string,
@@ -5640,6 +5648,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onSendCanvasPrompt={sendCanvasPrompt}
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
+          onRenameCanvasDrone={renameCanvasDrone}
           onDeleteCanvasChats={deleteCanvasChats}
           onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
@@ -5806,6 +5815,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentPortReachability,
       createCanvasDroneFromDraft,
       renameCanvasChat,
+      renameCanvasDrone,
       deleteCanvasChat,
       cloneDroneChat,
       cloneDroneWithoutSelection,
