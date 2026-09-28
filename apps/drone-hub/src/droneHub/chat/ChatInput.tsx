@@ -960,7 +960,17 @@ export function ChatInput({
     const pastedText = String(clipboardData.getData('text/plain') ?? '');
     const plainTextPaste = plainTextPasteRef.current;
     plainTextPasteRef.current = false;
-    // Pasted text arrives as an attachment; "Insert as text" on it, or Ctrl+Shift+V, puts it in the composer instead.
+    if (attachmentsOn && !attachmentControlsLocked && pastedText.trim()) {
+      const matchingAttachment = attachmentsRef.current.find(
+        (attachment) => attachment.kind === 'text' && attachment.text === pastedText,
+      );
+      if (matchingAttachment) {
+        removeAttachment(matchingAttachment.id);
+        // Let the editor paste at the current selection, preserving native undo.
+        return;
+      }
+    }
+    // Paste again, use "Insert as text", or Ctrl+Shift+V to put attached text in the composer.
     if (
       options.allowTextAttachment &&
       !plainTextPaste &&

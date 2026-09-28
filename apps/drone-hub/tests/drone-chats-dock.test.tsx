@@ -431,7 +431,7 @@ test('dragging Chats rows onto the composer references them in the next message'
   }
 });
 
-test('pasted text becomes a text attachment that can be inserted below the typed text', async () => {
+test('pasted text can be inserted manually or pasted again to replace its attachment', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true,
@@ -462,6 +462,27 @@ test('pasted text becomes a text attachment that can be inserted below the typed
     await act(async () => (insert as unknown as HTMLButtonElement).click());
     expect(input().value).toBe('Look at this:\nstack trace line 1\nline 2');
     expect(container.querySelector('[aria-label="Attachments"]')).toBeNull();
+
+    const repeatedText = '  repeated text\nwith whitespace  ';
+    expect(await paste(repeatedText)).toBe(true);
+    expect(await paste('unrelated attachment')).toBe(true);
+    expect(container.querySelectorAll('button[aria-label^="Insert pasted-text"]').length).toBe(2);
+    input().setSelectionRange(5, 7);
+    const before = input().value;
+    // React's simulated paste has no browser default; verify it is allowed, then
+    // emulate the browser inserting the clipboard text at the selected range.
+    expect(await paste(repeatedText)).toBe(false);
+    expect(input().selectionStart).toBe(5);
+    expect(input().selectionEnd).toBe(7);
+    expect(container.querySelectorAll('button[aria-label^="Insert pasted-text"]').length).toBe(1);
+    expect(container.querySelector('[aria-label="Attachments"]')?.textContent).toContain('unrelated attachment');
+    const after = before.slice(0, 5) + repeatedText + before.slice(7);
+    await act(async () => Simulate.change(input() as unknown as Element, { target: { value: after } } as never));
+    expect(input().value).toBe(after);
+    // The remaining text attachment also converts on a repeated paste.
+    expect(await paste('unrelated attachment')).toBe(false);
+    expect(container.querySelector('[aria-label="Attachments"]')).toBeNull();
+
     // Ctrl+Shift+V keeps the browser's own paste into the text.
     await act(async () => Simulate.keyDown(input() as unknown as Element, { key: 'V', ctrlKey: true, shiftKey: true }));
     expect(await paste('inline')).toBe(false);
