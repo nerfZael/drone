@@ -150,7 +150,7 @@ describe('ASAP event run presentation', () => {
     );
     expect(html.match(/aria-label="Show event details"/g)).toHaveLength(2);
     expect(html).toContain('Audit complete.');
-    expect(html).toContain('>ASAP</span>');
+    expect(html).toContain('>Added to this run · ASAP</span>');
     expect(html).not.toContain('Working for');
   });
 

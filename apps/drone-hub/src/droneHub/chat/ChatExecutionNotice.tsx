@@ -8,7 +8,8 @@ export function EarlierRequestWorkingNotice({ id, prompt }: { id: string; prompt
   return (
     <button
       type="button"
-      className="my-2 block w-full rounded border border-[var(--border-subtle)] px-3 py-2 text-left text-12 text-[var(--yellow)]"
+      aria-label={`Show active request: ${prompt}`}
+      className="my-2 block w-full rounded border border-[var(--border-subtle)] px-3 py-2 text-left text-12 text-[var(--muted)]"
       onClick={(event) => {
         const surface = event.currentTarget.closest('[data-chat-transcript-surface]') ?? event.currentTarget.parentElement?.parentElement;
         const target = Array.from(surface?.querySelectorAll('[data-pending-prompt-id]') ?? [])
@@ -16,7 +17,7 @@ export function EarlierRequestWorkingNotice({ id, prompt }: { id: string; prompt
         target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }}
     >
-      <span className="block">Still working on an earlier request · Show request</span>
+      <span className="block">Working on this request · Show request</span>
       <span className="mt-1 block truncate text-11 text-[var(--muted)]">{prompt}</span>
     </button>
   );

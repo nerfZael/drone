@@ -557,6 +557,9 @@ export type TranscriptItem = {
   turn: number;
   at: string;
   promptAt?: string;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   completedAt?: string;
   id?: string;
@@ -635,6 +638,9 @@ export type PendingPrompt = {
   agentPlan?: AgentPlan;
   approvals?: import('@drone/assistant-chat').CodexPendingApproval[];
   fileChanges?: AgentRunFileChanges;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   updatedAt?: string;
 };

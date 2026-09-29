@@ -185,6 +185,8 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     left.turn === right.turn &&
     sameOptionalText(left.at, right.at) &&
     sameOptionalText(left.promptAt, right.promptAt) &&
+    sameOptionalText(left.runId, right.runId) &&
+    sameOptionalText(left.runStartedAt, right.runStartedAt) &&
     sameOptionalText(left.startedAt, right.startedAt) &&
     sameOptionalText(left.completedAt, right.completedAt) &&
     sameOptionalText(left.id, right.id) &&

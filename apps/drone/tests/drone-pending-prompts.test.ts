@@ -438,9 +438,11 @@ describe('drone pending prompt store', () => {
 test('preserves daemon execution state when presenting pending prompts', () => {
   for (const executionState of ['queued', 'running'] as const) {
     const [prompt] = pendingPromptStore.pendingPromptsFromChatEntry({
-      pendingPrompts: [{ id: 'delivered', at: '2026-09-25T00:26:13Z', prompt: 'Fix the crash', state: 'sent', executionState }],
+      pendingPrompts: [{ id: 'delivered', at: '2026-09-25T00:26:13Z', prompt: 'Fix the crash', state: 'sent', executionState, runId: 'run-1', runStartedAt: '2026-09-25T00:26:00Z' }],
     });
     expect(prompt?.state).toBe('sent');
     expect(prompt?.executionState).toBe(executionState);
+    expect(prompt?.runId).toBe('run-1');
+    expect(prompt?.runStartedAt).toBe('2026-09-25T00:26:00Z');
   }
 });

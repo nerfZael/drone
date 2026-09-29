@@ -79,6 +79,29 @@ afterEach(async () => {
 });
 
 describe('canonical chat and transcript repository', () => {
+  test('shared run identity survives storage, summary reads and database reload', async () => {
+    const dataDir = tempDataDir('shared-run');
+    const runStartedAt = '2026-09-28T18:45:12Z';
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'Plan', chatEntry: legacyChat('Plan') });
+    for (const [id, userOnly] of [['original', true], ['answer', false]]) {
+      await upsertTranscriptTurnInStore({ droneId: 'drone-1', chatName: 'Plan', turn: {
+        id, at: userOnly ? '2026-09-28T18:45:11Z' : '2026-09-28T18:47:36Z',
+        prompt: id, ok: true, output: userOnly ? '' : 'Done', userOnly,
+        runId: 'original', runStartedAt, codexTurnId: 'provider-turn',
+        completedAt: '2026-09-28T18:54:39Z',
+      } });
+    }
+    await resetHubDatabaseForTests();
+    useDataDir(dataDir);
+    const result = readTranscriptTurnsFromStore({ droneId: 'drone-1', chatName: 'Plan', indexes: [0, 1], activityMode: 'summary' });
+    assert.equal(result.turns.length, 2);
+    for (const { turn } of result.turns) {
+      assert.equal(turn.runId, 'original');
+      assert.equal(turn.runStartedAt, runStartedAt);
+      assert.equal(turn.codexTurnId, 'provider-turn');
+    }
+  });
+
   test('backfills missing rows only and canonical metadata wins over stale registry state', async () => {
     tempDataDir('precedence');
     await importDroneChatsFromRegistry({
