@@ -117,6 +117,8 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     fetch: async () => new Response(JSON.stringify({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } })),
     Event: dom.Event,
     CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -754,6 +756,16 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     // Global-board drafts use the same attachments and retain the spawn-count control.
     await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Global') as unknown as HTMLButtonElement).click());
     await act(async () => { Simulate.doubleClick(viewport() as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); await settle(); });
+    // The keyboard stays on the canvas, so Q records into the new draft at once.
+    expect(dom.document.activeElement).toBe(viewport());
+    // The new drone is set up from the composer, before typing: its agent, repository and model beside the recipient line.
+    expect(container.querySelector('[data-canvas-draft-controls]')).not.toBeNull();
+    expect(container.querySelector('[data-selected-chats-composer-meta] [data-canvas-draft-model] [data-chat-composer-model-picker]')).not.toBeNull();
+    const recordingsBeforeDraft = recordings;
+    await key(viewport() as unknown as Element, 'q');
+    expect(recordings).toBe(recordingsBeforeDraft + 1);
+    await key(dom.document.activeElement as unknown as Element, 'q');
+    await act(async () => { await settle(); });
     await type('Create with notes');
     const draftFileInput = container.querySelector('input[type="file"]')!;
     Object.defineProperty(draftFileInput, 'files', { configurable: true, value: [new dom.File(['hello'], 'notes.txt', { type: 'text/plain' })] });
@@ -1026,6 +1038,55 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
   } finally {
     await act(async () => root.unmount());
     useDroneHubUiStore.getState().setCanvasDetailedCards(false);
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('a new draft chat on a drone canvas can change its agent from the composer', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const configs: unknown[] = [];
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/config')) configs.push(JSON.parse(String(init?.body)));
+      return Response.json({ ok: true, name: 'Alpha', chat: 'Untitled', agent: { kind: 'builtin', id: 'codex' }, models: [] });
+    },
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 15));
+  const drone = { ...makeDrone(['default', 'Untitled']), draftChats: { Untitled: true } } as unknown as DroneSummary;
+  try {
+    await act(async () => { root.render(<Dock drone={drone} />); await settle(); });
+    await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('Untitled')]); await settle(); });
+    await act(async () => { await settle(); });
+    const select = () => container.querySelector('[data-canvas-draft-chat-agent]');
+    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:codex');
+    await act(async () => (select()!.querySelector('button') as unknown as HTMLButtonElement).click());
+    const claude = Array.from(container.querySelectorAll('[role="option"], [role="listbox"] button, li button'))
+      .find((option) => option.textContent?.includes('Claude')) as unknown as HTMLElement;
+    await act(async () => { claude.click(); await settle(); });
+    expect(configs).toEqual([{ agent: { kind: 'builtin', id: 'claude' } }]);
+    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:claude');
+    // A chat that has had its first message offers no agent choice.
+    await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]); await settle(); });
+    expect(select()).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);

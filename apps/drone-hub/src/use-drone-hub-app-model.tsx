@@ -4124,7 +4124,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
           const resolvedChat = resolveChatNameForDrone(drone, chatName);
-          if (!(await waitForDraftChatCreation(drone.id, resolvedChat))) throw new Error('Chat creation failed.');
+          // A new draft chat (a double-click on a drone's canvas) is published by its first message, as from its own
+          // composer; otherwise leaving it would clean it up as abandoned.
+          const draftKey = droneChatQueueKey(drone.id, resolvedChat);
+          const tracked = newDraftChatsRef.current.get(draftKey);
+          if (tracked) tracked.submissionInFlight = true;
+          if (!(await waitForDraftChatCreation(drone.id, resolvedChat))) {
+            if (tracked) tracked.submissionInFlight = false;
+            throw new Error('Chat creation failed.');
+          }
+          if (tracked) {
+            try {
+              await requestJson<{ ok: true }>(
+                `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/publish`,
+                { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
+              );
+              newDraftChatsRef.current.delete(draftKey);
+            } catch (error) {
+              tracked.submissionInFlight = false;
+              tracked.preserveOnLeave = true;
+              throw error;
+            }
+          }
           await applyChatModelOverrides(requestJson, { droneId: drone.id, chatName: resolvedChat }, overrides);
           const data = await sendDroneChatPrompt(requestJson, {
             droneId: drone.id, chatName: resolvedChat, prompt,

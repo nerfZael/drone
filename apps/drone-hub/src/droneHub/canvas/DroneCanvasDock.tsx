@@ -44,6 +44,7 @@ import {
 } from './detailed-card-model';
 import { useCanvasChatActivity } from './use-canvas-chat-activity';
 import { ChatStepsControl } from './ChatStepsControl';
+import { DraftAgentAndRepo, DraftChatAgentSelect, DraftModelPicker } from './CanvasDraftControls';
 import { Dot, Pips, STATE_COLOR, Steps } from '../entity/EntityWork';
 import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
@@ -1361,6 +1362,14 @@ export function DroneCanvasDock({
     return formatMessageTargetLabel([...chatLabels, ...draftLabels]);
   }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds, selectedMessageTargets]);
   const controlsDisabled = messageSending;
+  const spawnReasoning = useDroneHubUiStore((s) => s.spawnReasoning);
+  // A new drone (a draft card) or a new chat on a drone's canvas is set up from the composer.
+  const selectedDraftChat = React.useMemo(() => {
+    if (!droneScope || selectedMessageTargets.length !== 1 || selectedDroneIds.length !== 1) return null;
+    const target = selectedMessageTargets[0];
+    const drone = droneById[target.droneId];
+    return drone?.draftChats?.[target.chatName] === true ? { ...target, repoPath: String(drone.repoPath ?? '').trim() } : null;
+  }, [droneById, droneScope, selectedDroneIds.length, selectedMessageTargets]);
   const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
   const normalizedSpawnModel = String(spawnModel ?? '');
   const normalizedCreateRepoPath = String(createRepoPath ?? '').trim();
@@ -1659,7 +1668,8 @@ export function DroneCanvasDock({
   );
 
   const createDraftAtWorldPoint = React.useCallback(
-    (anchorWorldX: number, anchorWorldY: number, options?: { avoidCollisions?: boolean }) => {
+    /** `focus: 'canvas'` keeps the keyboard on the canvas: Q records, S or Tab sends, Enter starts typing. */
+    (anchorWorldX: number, anchorWorldY: number, options?: { avoidCollisions?: boolean; focus?: 'canvas' | 'composer' }) => {
       const draftNodeId = createDraftNodeId();
       const placement = getDraftPlacement(anchorWorldX, anchorWorldY, options);
       upsertNodes([
@@ -1676,10 +1686,12 @@ export function DroneCanvasDock({
       setMessageDraft('');
       setMessageError(null);
       setMessageBarExpanded(true);
-      focusMessageInput();
+      if (options?.focus === 'canvas') focusViewport();
+      else focusMessageInput();
     },
     [
       focusMessageInput,
+      focusViewport,
       getDraftPlacement,
       normalizedDraftRepoLabel,
       setDraftPromptForNode,
@@ -2567,13 +2579,16 @@ export function DroneCanvasDock({
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const worldPoint = screenToStorePoint(event.clientX, event.clientY, rect, panX, panY, scale);
+      // The new draft is selected and the keyboard stays on the canvas: Q records into it, S or Tab sends,
+      // Enter starts typing.
       if (droneScope) {
         createChatAtWorldPoint(worldPoint.x, worldPoint.y);
+        focusViewport();
         return;
       }
-      createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false });
+      createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false, focus: 'canvas' });
     },
-    [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, inlineRenamingDroneId, getView],
+    [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, focusViewport, inlineRenamingDroneId, getView],
   );
 
   const onWheel = React.useCallback(
@@ -3398,6 +3413,23 @@ export function DroneCanvasDock({
             if (messageError) setMessageError(null);
           }}
           onSend={sendCanvasPrompt}
+          draftControls={selectedDraftNodeId ? {
+            // Above the input, so they can be set before typing or recording.
+            meta: (
+              <>
+                <DraftAgentAndRepo agentKey={normalizedSpawnAgentKey} agentEntries={spawnAgentMenuEntries} onAgentChange={onSpawnAgentKeyChange}
+                  repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries} onRepoChange={onCreateRepoPathChange} disabled={controlsDisabled} />
+                <DraftModelPicker agent={spawnAgentConfig} agentKey={normalizedSpawnAgentKey} model={normalizedSpawnModel} reasoning={spawnReasoning}
+                  onModelChange={onSpawnModelChange} onReasoningChange={(next) => useDroneHubUiStore.getState().setSpawnReasoning(next)} disabled={controlsDisabled} />
+              </>
+            ),
+            // The draft's model is picked above; no per-send override beside it.
+            trailing: <></>,
+          } : selectedDraftChat ? {
+            meta: <DraftChatAgentSelect droneId={selectedDraftChat.droneId} chatName={selectedDraftChat.chatName} disabled={controlsDisabled}
+              // The next new chat of a drone in this repository starts with this agent too.
+              onRemember={(key) => useDroneHubUiStore.getState().updateSpawnContextForRepo(selectedDraftChat.repoPath, { spawnAgentKey: key, spawnModel: '', spawnReasoning: '' })} />,
+          } : null}
           references={messageReferences}
           onReferencesChange={setMessageReferences}
           referenceDropActive={composerDropHover}
