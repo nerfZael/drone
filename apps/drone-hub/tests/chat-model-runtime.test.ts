@@ -148,6 +148,45 @@ describe('chat model runtime', () => {
     ]);
   });
 
+  test('lets Claude Code use its own effort until the chat picks one', () => {
+    const updates: Array<{ model?: string | null; reasoning?: string | null }> = [];
+    const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const build = (currentReasoning: string | null) => buildExternalAgentComposerControls({
+      hasChats: true,
+      modelControlEnabled: true,
+      currentAgentKey: 'builtin:claude',
+      models: [
+        { id: 'claude-opus-5', label: 'Opus 5', reasoningLevels: levels, defaultReasoningLevel: '' },
+        { id: 'claude-sonnet-5', label: 'Sonnet 5', reasoningLevels: levels, defaultReasoningLevel: '' },
+      ],
+      currentModel: 'claude-opus-5',
+      currentReasoning,
+      modelDisabled: false,
+      loading: false,
+      error: null,
+      stale: false,
+      transcripts: [],
+      onUpdate: (settings) => updates.push(settings),
+    })?.controls.find((control) => control.kind === 'model-picker');
+
+    const unset = build(null);
+    if (!unset || unset.kind !== 'model-picker') throw new Error('model picker missing');
+    expect(unset.showReasoning).toBe(true);
+    expect(unset.agentChoosesDefaultReasoning).toBe(true);
+    expect(unset.triggerLabel).toBe('Opus 5');
+    unset.onSelect({ provider: 'external', id: 'claude-sonnet-5', thinkingLevel: 'low' }, 'model');
+
+    const chosen = build('xhigh');
+    if (!chosen || chosen.kind !== 'model-picker') throw new Error('model picker missing');
+    chosen.onSelect({ provider: 'external', id: 'claude-sonnet-5', thinkingLevel: 'low' }, 'model');
+    chosen.onSelect({ provider: 'external', id: 'claude-opus-5', thinkingLevel: 'max' }, 'reasoning');
+    expect(updates).toEqual([
+      { model: 'claude-sonnet-5', reasoning: null },
+      { model: 'claude-sonnet-5', reasoning: 'xhigh' },
+      { reasoning: 'max' },
+    ]);
+  });
+
   test('does not invent reasoning when the catalog does not report it', () => {
     const updates: Array<{ model?: string | null; reasoning?: string | null }> = [];
     const config = buildExternalAgentComposerControls({

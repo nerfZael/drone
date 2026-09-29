@@ -8,7 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
-import { allocateUntitledChatName } from '@drone/assistant-chat';
+import { allocateUntitledChatName, chatAgentSupportsReasoning } from '@drone/assistant-chat';
 import {
   applySidebarMove,
   buildSidebarChatTree,
@@ -2376,8 +2376,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       if (args.approvalPolicy != null && !seedAgentIsCodex) {
         throw new Error('approvalPolicy is only available for Codex drones');
       }
-      if (args.reasoning != null && !seedAgentSupportsAccess) {
-        throw new Error('reasoning is only available for Codex and Blip drones');
+      if (args.reasoning != null && !chatAgentSupportsReasoning(seedAgent)) {
+        throw new Error('reasoning is only available for Codex, Claude, and Blip drones');
       }
       const requestedPermissionMode = args.agentPermissionMode ?? 'execute';
       const seedAgentPermissionMode = seedAgentSupportsAccess ? requestedPermissionMode : 'execute';
@@ -2678,8 +2678,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           'approvalPolicy is only available for Built-in and Codex chats; auto is Codex-only',
         );
       }
-      if (args.reasoning != null && !supportsAccess) {
-        throw new Error('reasoning is only available for Built-in, Codex, and Blip chats');
+      if (args.reasoning != null && !chatAgentSupportsReasoning(agent)) {
+        throw new Error('reasoning is only available for Built-in, Codex, Claude, and Blip chats');
       }
       if (args.provider != null && !isNative) {
         throw new Error(

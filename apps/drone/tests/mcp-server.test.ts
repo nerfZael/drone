@@ -1644,7 +1644,7 @@ describe('Drone Hub assistant MCP transport', () => {
         });
         expect(rejectedReasoning.isError).toBe(true);
         expect(JSON.stringify(rejectedReasoning.content)).toContain(
-          'reasoning is only available for Codex and Blip drones',
+          'reasoning is only available for Codex, Claude, and Blip drones',
         );
         const acceptedExecuteMode = await client.callTool({
           name: 'create_drone',

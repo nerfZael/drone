@@ -21,6 +21,7 @@ import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './drone
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
+  chatAgentSupportsReasoning,
   executeCompanionProposal,
   resolveCompanionChatName,
   type CompanionProposalChatOverrides,
@@ -1155,12 +1156,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return value || null;
   }, [spawnModel]);
   const spawnModelForSeed = spawnAgentConfig.kind !== 'custom' ? spawnModelValue : null;
-  const spawnReasoningForSeed =
-    spawnAgentConfig.kind === 'native' ||
-    (spawnAgentConfig.kind === 'builtin' &&
-      (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'))
-      ? String(spawnReasoning ?? '').trim() || null
-      : null;
+  const spawnReasoningForSeed = chatAgentSupportsReasoning(spawnAgentConfig)
+    ? String(spawnReasoning ?? '').trim() || null
+    : null;
   const spawnAgentReadOnlySupported =
     spawnAgentConfig.kind === 'native' ||
     (spawnAgentConfig.kind === 'builtin' &&

@@ -1,3 +1,4 @@
+import { chatAgentSupportsReasoning } from '@drone/assistant-chat';
 import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -432,17 +433,10 @@ function createDroneProvisioningServiceHandler(
           seedProvider = String((await resolveEffectiveLlmProvider()).provider ?? '').trim();
         }
         const seedReasoning = normalizeChatReasoning(body?.seedReasoning ?? body?.seed?.reasoning);
-        if (
-          seedReasoning &&
-          !(
-            seedAgent?.kind === 'native' ||
-            (seedAgent?.kind === 'builtin' &&
-              (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
-          )
-        ) {
+        if (seedReasoning && !chatAgentSupportsReasoning(seedAgent)) {
           json(res, 400, {
             ok: false,
-            error: 'reasoning selection is currently supported for Built-in, Codex, and Blip seed agents',
+            error: 'reasoning selection is currently supported for Built-in, Codex, Claude, and Blip seed agents',
           });
           return;
         }
@@ -1080,18 +1074,11 @@ function createDroneProvisioningServiceHandler(
               const seedReasoning = normalizeChatReasoning(
                 raw?.seedReasoning ?? raw?.seed?.reasoning,
               );
-              if (
-                seedReasoning &&
-                !(
-                  seedAgent?.kind === 'native' ||
-                  (seedAgent?.kind === 'builtin' &&
-                    (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
-                )
-              ) {
+              if (seedReasoning && !chatAgentSupportsReasoning(seedAgent)) {
                 rejected.push({
                   name,
                   error:
-                    'reasoning selection is currently supported for Built-in, Codex, and Blip seed agents',
+                    'reasoning selection is currently supported for Built-in, Codex, Claude, and Blip seed agents',
                   status: 400,
                 });
                 continue;

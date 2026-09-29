@@ -1,3 +1,4 @@
+import { chatAgentSupportsReasoning } from '@drone/assistant-chat';
 import type { ChatAgentConfig } from '../../domain';
 import type { DesktopNewDronePreferences } from './new-drone-preferences';
 
@@ -40,7 +41,7 @@ export function buildNewChatConfiguration(
   const supportsApprovalPolicy =
     agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
   const model = agent.kind === 'custom' ? '' : String(preferences.spawnModel ?? '').trim();
-  const reasoning = supportsAccessControls
+  const reasoning = chatAgentSupportsReasoning(agent)
     ? String(preferences.spawnReasoning ?? '').trim()
     : '';
   const agentPermissionMode = supportsAccessControls

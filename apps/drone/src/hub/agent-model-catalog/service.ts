@@ -1,4 +1,4 @@
-import { normalizeExternalModelCatalogModels } from '@drone/assistant-chat';
+import { CLAUDE_EFFORT_LEVELS, normalizeExternalModelCatalogModels } from '@drone/assistant-chat';
 
 import { agentModelCatalogAdapter, modelListCommands } from './adapters';
 import {
@@ -20,7 +20,8 @@ const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 5 * 60 * 1000;
 const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 // 6: Claude's list takes the newest model of each family from the host's CLI too.
-const CACHE_SCHEMA_VERSION = 6;
+// 7: Claude models list the effort levels Claude Code accepts.
+const CACHE_SCHEMA_VERSION = 7;
 const CODEX_SUCCESS_TTL_MS = 30 * 60 * 1000;
 const CODEX_LIVE_FINGERPRINT = 'host:codex-app-server';
 
@@ -232,7 +233,7 @@ export class AgentModelCatalogService {
         key,
         agentId: request.agentId,
         runtime: request.target.runtime,
-        models: probed.models,
+        models: request.agentId === 'claude' ? withClaudeEffortLevels(probed.models) : probed.models,
         discoveredAt,
         ...(probed.installationFingerprint
           ? { installationFingerprint: probed.installationFingerprint }
@@ -439,4 +440,16 @@ export class AgentModelCatalogService {
           : `No model discovery command is available for ${request.agentId}`,
     };
   }
+}
+
+/**
+ * Claude Code takes `--effort` for any model it runs. With no effort picked it
+ * uses the user's own setting, so these models have no default level.
+ */
+function withClaudeEffortLevels(models: AgentModelCatalogResult['models']): AgentModelCatalogResult['models'] {
+  return models.map((model) => ({
+    ...model,
+    reasoningLevels: [...CLAUDE_EFFORT_LEVELS],
+    defaultReasoningLevel: '',
+  }));
 }

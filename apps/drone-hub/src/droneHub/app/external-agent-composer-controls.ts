@@ -55,6 +55,11 @@ export function buildExternalAgentComposerControls(opts: {
     opts.models.find((model) => model.id === modelId)?.label || modelId;
   const displayedModelLabel = formatModelDisplayLabel(catalogModelLabel(displayedModel.label));
   const selectedOpenRouterModel = opts.currentAgentKey === 'builtin:codex' && opts.currentModel?.startsWith('openrouter:');
+  const selectedCatalogModel = opts.models.find((model) => model.id === displayedModel.label);
+  // Claude Code lists effort levels without a default: unset, it uses the user's own setting.
+  const agentChoosesDefaultReasoning = Boolean(
+    selectedCatalogModel?.reasoningLevels?.length && !selectedCatalogModel.defaultReasoningLevel,
+  );
   const reasoningControlEnabled = selectedOpenRouterModel
     ? Boolean(opts.models.find((model) => model.id === opts.currentModel)?.reasoningLevels?.length)
     : opts.currentAgentKey === 'native' || opts.currentAgentKey === 'builtin:codex' ||
@@ -105,6 +110,7 @@ export function buildExternalAgentComposerControls(opts: {
         currentProvider: 'external',
         currentModel: opts.currentModel ?? '',
         currentThinkingLevel: displayedReasoning ?? undefined,
+        agentChoosesDefaultReasoning,
         options: modelChoices,
         triggerLabel,
         title: displayedChatModelTitle(displayedModel, displayedReasoning) +
@@ -126,12 +132,16 @@ export function buildExternalAgentComposerControls(opts: {
           }
           const catalogModel = opts.models.find((model) => model.id === choice.id) ?? null;
           const hasCatalogReasoning = Boolean(catalogModel?.reasoningLevels?.length);
-          const nextReasoning =
-            catalogModel?.defaultReasoningLevel ||
-            (catalogModel?.reasoningLevels?.includes(displayedReasoning ?? '')
-              ? displayedReasoning
-              : catalogModel?.reasoningLevels?.[0]) ||
-            choice.thinkingLevel;
+          const keptReasoning = catalogModel?.reasoningLevels?.includes(displayedReasoning ?? '')
+            ? displayedReasoning
+            : null;
+          // A catalog model without a default lets the agent pick: keep the chat's level or leave it unset.
+          const nextReasoning = hasCatalogReasoning && !catalogModel?.defaultReasoningLevel
+            ? keptReasoning
+            : catalogModel?.defaultReasoningLevel ||
+              keptReasoning ||
+              catalogModel?.reasoningLevels?.[0] ||
+              choice.thinkingLevel;
           opts.onUpdate({
             model: choice.id,
             ...(hasCatalogReasoning

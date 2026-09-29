@@ -512,6 +512,7 @@ export function DronesScreen({
   const [chatApprovalPolicy, setChatApprovalPolicy] =
     React.useState<MobileDroneApprovalPolicy>('ask');
   const [chatModels, setChatModels] = React.useState<AssistantModelChoice[]>([]);
+  const [chatAgentChoosesReasoning, setChatAgentChoosesReasoning] = React.useState(false);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<any[]>([]);
@@ -675,6 +676,7 @@ export function DronesScreen({
     setChatAgentPermissionMode('execute');
     setChatApprovalPolicy('ask');
     setChatModels([]);
+    setChatAgentChoosesReasoning(false);
     setTurns([]);
     setNativeMessages(null);
     setNativeChatId('');
@@ -3122,11 +3124,13 @@ export function DronesScreen({
         return;
       const fallbackProvider =
         String(result?.agent?.id ?? result?.agent?.kind ?? chatModelProvider).trim() || 'drone';
-      const options: AssistantModelChoice[] = buildModelCatalogChoices(
-        normalizeMobileDroneChatModelCatalog(result, fallbackProvider),
-        fallbackProvider,
-      );
+      const catalog = normalizeMobileDroneChatModelCatalog(result, fallbackProvider);
+      const options: AssistantModelChoice[] = buildModelCatalogChoices(catalog, fallbackProvider);
       setChatModels(options);
+      // Claude Code lists effort levels without a default: unset, it uses the user's own setting.
+      setChatAgentChoosesReasoning(
+        catalog.some((model) => model.reasoningLevels.length > 0 && !model.defaultReasoningLevel),
+      );
       const configuredModel = String(result?.model ?? '').trim() || options[0]?.id || '';
       if (configuredModel) setChatModel(configuredModel);
       const configuredProvider = String(result?.provider ?? '').trim();
@@ -3172,6 +3176,8 @@ export function DronesScreen({
         provider: choice.provider,
         model: choice.id,
         thinkingLevel: choice.thinkingLevel,
+        // Drone agent chats keep their level in `reasoning`; a model change leaves it as is.
+        ...(!nativeChatId && selection === 'reasoning' ? { reasoning: choice.thinkingLevel ?? null } : {}),
       });
       if (
         targetIdRef.current !== destinationId ||
@@ -3182,7 +3188,9 @@ export function DronesScreen({
         return;
       setChatModelProvider(choice.provider);
       setChatModel(choice.id);
-      if (choice.thinkingLevel) setChatReasoning(choice.thinkingLevel);
+      if (choice.thinkingLevel && (nativeChatId || selection === 'reasoning')) {
+        setChatReasoning(choice.thinkingLevel);
+      }
       if (selection === 'reasoning') setModelOpen(false);
     } catch (nextError: any) {
       if (targetIdRef.current === destinationId && modelRequestVersion.current === requestVersion)
@@ -4035,6 +4043,7 @@ export function DronesScreen({
                         currentProvider={chatModelProvider}
                         currentModel={chatModel || latestModel || ''}
                         currentThinkingLevel={chatReasoning}
+                        agentChoosesDefaultReasoning={chatAgentChoosesReasoning}
                         options={chatModels}
                         busy={modelBusy}
                         onClose={() => setModelOpen(false)}

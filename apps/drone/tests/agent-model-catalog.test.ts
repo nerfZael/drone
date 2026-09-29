@@ -126,6 +126,11 @@ describe('agent model catalog', () => {
       'claude-opus-5',
       'claude-haiku-4-5',
     ]);
+    // Claude Code takes --effort for each model; unset, it uses the user's own setting.
+    for (const model of result.models) {
+      expect(model.reasoningLevels).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(model.defaultReasoningLevel).toBe('');
+    }
     expect(commands.slice(0, 3)).toEqual([
       'command -v claude >/dev/null 2>&1',
       'claude --help',

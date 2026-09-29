@@ -2950,12 +2950,15 @@ async function cliSupportsModelFlag(opts: {
   runtime: DroneRuntime;
   containerName?: string;
   cwd?: string | null;
+  /** Defaults to `model`; older CLIs lack newer flags such as Claude's `effort`. */
+  flag?: string;
 }): Promise<boolean> {
+  const flag = opts.flag ?? 'model';
   const keyBase =
     opts.runtime === 'host'
       ? String(opts.cwd ?? '').trim() || 'host'
       : String(opts.containerName ?? '').trim() || 'container';
-  const key = `${opts.runtime}:${keyBase}::${opts.bin}`;
+  const key = `${opts.runtime}:${keyBase}::${opts.bin}${flag === 'model' ? '' : `::${flag}`}`;
   const now = Date.now();
   const cached = cliModelFlagSupportCache.get(key);
   if (cached && now - cached.atMs < CLI_MODEL_FLAG_CACHE_TTL_MS) return cached.supported;
@@ -2969,7 +2972,7 @@ async function cliSupportsModelFlag(opts: {
           timeoutMs: defaultSeedBootstrapTimeoutMs(),
         });
   const text = stripAnsiFromCliOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
-  const supported = /\B--model\b/i.test(text) || /\B-m,\s*--model\b/i.test(text);
+  const supported = new RegExp(`\\B--${flag}\\b`, 'i').test(text);
   cliModelFlagSupportCache.set(key, { atMs: now, supported });
   return supported;
 }
