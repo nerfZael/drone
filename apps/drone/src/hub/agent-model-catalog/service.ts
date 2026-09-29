@@ -19,7 +19,8 @@ import type {
 const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 5 * 60 * 1000;
 const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-const CACHE_SCHEMA_VERSION = 5;
+// 6: Claude's list takes the newest model of each family from the host's CLI too.
+const CACHE_SCHEMA_VERSION = 6;
 const CODEX_SUCCESS_TTL_MS = 30 * 60 * 1000;
 const CODEX_LIVE_FINGERPRINT = 'host:codex-app-server';
 
@@ -412,11 +413,16 @@ export class AgentModelCatalogService {
         adapter.modelCacheCommand,
         timeoutMs,
       );
-      if (result.code === 0) {
-        const models =
-          request.agentId === 'claude'
-            ? parseClaudeEmbeddedModels(String(result.stdout ?? ''))
-            : parseCodexModelCache(String(result.stdout ?? ''));
+      if (request.agentId === 'claude') {
+        // One list serves host and container drones alike, and the catalog probe's Claude CLI can be older than the
+        // host's: take the newest model of each family either one knows. Claude Code passes the id to the API.
+        const host = await this.runtime.runHost(adapter.modelCacheCommand, timeoutMs).catch(() => null);
+        const models = parseClaudeEmbeddedModels(
+          [result.code === 0 ? result.stdout : '', host?.code === 0 ? host.stdout : ''].map((out) => String(out ?? '')).join('\n'),
+        );
+        if (models.length > 0) return { models, installationFingerprint };
+      } else if (result.code === 0) {
+        const models = parseCodexModelCache(String(result.stdout ?? ''));
         if (models.length > 0) return { models, installationFingerprint };
       }
     }
