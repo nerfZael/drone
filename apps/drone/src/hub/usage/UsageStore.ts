@@ -276,6 +276,17 @@ export class UsageStore {
       && typeof observation.reportedCost === 'number' ? observation.reportedCost : null;
   }
 
+  /**
+   * Claude Code reports a request's output only when its turn ends, so while it works each request has its input and
+   * cache use but no output. Priced with no output, a running turn's cost still grows (cache reads are most of it);
+   * when the turn ends, the cost Claude reports replaces these.
+   */
+  private static claudeRequestSoFar(execution: UsageExecution, observation: UsageObservation): UsageObservation {
+    return execution.agent === 'claude' && observation.provider === 'anthropic' && observation.scope === 'request' && observation.output === null
+      ? { ...observation, output: 0 }
+      : observation;
+  }
+
   /** A single Anthropic request says which of its cache writes were kept for an hour. */
   private static oneHourCacheWrites(observation: UsageObservation): number | null {
     if (observation.provider !== 'anthropic' || typeof observation.cacheWrite1h === 'number') return null;
@@ -301,7 +312,7 @@ export class UsageStore {
       const cacheWrite1h = UsageStore.oneHourCacheWrites(delta);
       if (cacheWrite1h !== null) observation = { ...delta, cacheWrite1h };
     }
-    const estimate = reported ?? estimateUsageCost(price, observation, observation.scope === 'request');
+    const estimate = reported ?? estimateUsageCost(price, UsageStore.claudeRequestSoFar(execution, observation), observation.scope === 'request');
     this.db.prepare(`INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(execution_id,id) DO UPDATE SET model=excluded.model,provider=excluded.provider,
       input=excluded.input,output=excluded.output,cache_read=excluded.cache_read,cache_write=excluded.cache_write,

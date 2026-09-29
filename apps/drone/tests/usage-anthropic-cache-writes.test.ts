@@ -36,3 +36,18 @@ test('Claude Opus 5.5 is priced, its 1-hour cache writes are told apart, and fin
     expect(build.reported).toBe(1);
   } finally { store.close(); }
 });
+
+test('a running Claude turn costs what its requests used so far, before Claude reports their output', () => {
+  const store = new UsageStore(':memory:');
+  try {
+    const at = new Date(Date.parse(store.trackingSince) + 60_000).toISOString();
+    // Claude Code's in-turn requests carry input and cache use, and no output yet.
+    store.record({ id: 'turn', chatId: 'c1', droneId: 'd1', chatName: 'work', agent: 'claude', startedAt: at, status: 'running' }, [
+      { id: 'msg_1', model: 'claude-opus-5-5', provider: 'anthropic', scope: 'request', complete: false,
+        input: 0, output: null, cacheRead: 1_000_000, cacheWrite: 0, reasoning: null, raw: {} },
+    ]);
+    const [row] = store.chatActivity({ droneId: 'd1' });
+    expect(row.estimatedCost).toBeCloseTo(0.2, 6);
+    expect(row.unpriced).toBe(0);
+  } finally { store.close(); }
+});
