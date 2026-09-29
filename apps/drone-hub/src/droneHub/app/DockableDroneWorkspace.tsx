@@ -625,8 +625,35 @@ function SideChatPanel({ params }: IDockviewPanelProps<{ chatName: string }>) {
   return chat ? ctx.renderSideChat?.(chat) : null;
 }
 
-function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey?: WorkspacePaneKey }>) {
+/**
+ * Whether the view an explorer drives (Editor or Changes) is on screen. While it is
+ * tabbed away, the explorer's selection is dimmed so it doesn't read as what is shown.
+ */
+function usePairedViewVisible(containerApi: DockviewApi, explorerId: string): boolean {
+  const tab: RightPanelTab = explorerId === CHANGES_EXPLORER_PANEL_ID ? 'changes' : 'editor';
+  const read = React.useCallback(
+    () => editorChangesPanels(containerApi).some((panel) => tabFromPanel(panel) === tab && panel.api.isVisible),
+    [containerApi, tab],
+  );
+  const [visible, setVisible] = React.useState(read);
+  React.useEffect(() => {
+    const update = () => setVisible(read());
+    update();
+    const disposables = [
+      containerApi.onDidLayoutChange(update),
+      containerApi.onDidActivePanelChange(update),
+      containerApi.onDidMaximizedGroupChange(update),
+    ];
+    return () => disposables.forEach((disposable) => disposable.dispose());
+  }, [containerApi, read]);
+  return visible;
+}
+
+function ToolPanel({ api, containerApi, params }: IDockviewPanelProps<{ tab?: unknown; paneKey?: WorkspacePaneKey }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
+  const isExplorer = EXPLORER_PANEL_IDS.includes(api.id);
+  const pairedViewVisible = usePairedViewVisible(containerApi, api.id);
+  const selectionMuted = isExplorer && !pairedViewVisible ? '1' : undefined;
   const tab = EXPLORER_PANEL_IDS.includes(api.id) ? tabFromPanelId(api.id) : normalizeRightPanelTab(params.tab) ?? tabFromPanelId(api.id);
   const paneKey = params.paneKey ?? 'single';
   const previewHostedHere = Boolean(tab && tab === ctx.previewTab);
@@ -640,7 +667,7 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
   if (!tab) return null;
 
   if (api.id === CHANGES_EXPLORER_PANEL_ID) {
-    return <div ref={ctx.setChangesExplorerHost} className="h-full min-h-0" aria-label="Changes Explorer">
+    return <div ref={ctx.setChangesExplorerHost} className="h-full min-h-0" aria-label="Changes Explorer" data-explorer-selection-muted={selectionMuted}>
       <div className="hidden only:block p-3 text-11 text-[var(--muted)]">Open Changes to browse its files.</div>
     </div>;
   }
@@ -650,6 +677,7 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
       flush
       surface="alternate"
       data-dockview-preview-host={previewHostedHere ? '1' : undefined}
+      data-explorer-selection-muted={selectionMuted}
       className="dh-utility-panel relative h-full"
     >
       <EditorPaneContext.Provider value={api.id === EXPLORER_PANEL_ID ? 'explorer' : 'editor'}>

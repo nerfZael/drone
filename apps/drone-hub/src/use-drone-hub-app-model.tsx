@@ -5822,6 +5822,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!isSelectedDrone) showDroneWorkspace(drone.id);
             requestRightPanelTab('prs');
           }}
+          onShowChanges={() => {
+            if (!isSelectedDrone) showDroneWorkspace(drone.id);
+            requestRightPanelTab('changes');
+          }}
         />
       );
     },

@@ -486,6 +486,8 @@ export type DroneChangesDockProps = {
   hubMessage?: string | null;
   onRevealFileInFiles: (repoRelativePath: string) => void;
   onOpenFileInEditor: (repoRelativePath: string) => void;
+  /** Brings the Changes view to the front when a file is picked in its separate explorer. */
+  onShowChanges?: () => void;
 };
 
 const MemoizedHistoricalChangesView = React.memo(AgentRunHistoricalChangesView);
@@ -500,6 +502,7 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
   });
   const onOpenFileInEditor = React.useCallback((path: string) => actionsRef.current.onOpenFileInEditor(path), []);
   const onRevealFileInFiles = React.useCallback((path: string) => actionsRef.current.onRevealFileInFiles(path), []);
+  const onShowChanges = React.useCallback(() => actionsRef.current.onShowChanges?.(), []);
   const onReviewBack = React.useCallback(() => actionsRef.current.onReviewBack?.(), []);
   const [historicalRun, setHistoricalRun] = React.useState<ChangesOpenAgentRunDetail | null>(() =>
     acceptHistoricalRunChanges ? consumeRequestedAgentRunChanges(droneId) : null,
@@ -536,6 +539,7 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
       {...props}
       onOpenFileInEditor={onOpenFileInEditor}
       onRevealFileInFiles={onRevealFileInFiles}
+      onShowChanges={onShowChanges}
       onReviewBack={props.onReviewBack ? onReviewBack : null}
     />
   );
@@ -556,6 +560,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   hubPhase,
   hubMessage,
   onOpenFileInEditor,
+  onShowChanges,
 }: DroneChangesDockProps) {
   const explorerHost = React.useContext(ChangesExplorerContext);
   const separateExplorer = explorerHost !== undefined;
@@ -2682,7 +2687,10 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
               onClick={() => {
                 setSelectedExplorerDirectoryKey(null);
                 setSelectedPath(entry.path);
-                if (separateExplorer) setViewMode('split');
+                if (separateExplorer) {
+                  setViewMode('split');
+                  onShowChanges?.();
+                }
                 if (dataMode === 'working-tree') setSplitKind(workingKind ?? defaultKindForEntry(entry));
               }}
               aria-selected={active}

@@ -42,6 +42,7 @@ test('the separate changes explorer selects the main diff, survives moving and r
   dom.document.body.append(main, explorer, movedExplorer);
   const root = createRoot(main as unknown as HTMLElement);
   const openedFiles: string[] = [];
+  let showChangesCount = 0;
   let editorCallbackVersion = 0;
   const render = (host: typeof explorer | null | undefined) => {
     const version = editorCallbackVersion;
@@ -50,7 +51,8 @@ test('the separate changes explorer selects the main diff, survives moving and r
         <ChangesExplorerContext.Provider value={host as unknown as HTMLElement | null | undefined}>
           <DroneChangesDock droneId={droneId} repoAttached repoPath="/work/repo" disabled={false}
             initialViewMode="stacked" persistViewPreferences={false}
-            onRevealFileInFiles={() => {}} onOpenFileInEditor={(path) => openedFiles.push(`${version}:${path}`)} />
+            onRevealFileInFiles={() => {}} onOpenFileInEditor={(path) => openedFiles.push(`${version}:${path}`)}
+            onShowChanges={() => { showChangesCount += 1; }} />
         </ChangesExplorerContext.Provider>
       </QueryClientProvider>,
     );
@@ -68,6 +70,8 @@ test('the separate changes explorer selects the main diff, survives moving and r
     expect(main.textContent).toContain('second.ts');
     expect(main.textContent).not.toContain('first.ts');
     expect(main.querySelector('[aria-label="Resize changes explorer"]')).toBeNull();
+    // Picking a file brings the Changes view forward, as the File Explorer does for the Editor.
+    expect(showChangesCount).toBe(1);
     expect(requests.some((url) => url.includes('second.ts'))).toBe(true);
 
     // Focus changes recreate workspace callbacks without changing the pane's data.

@@ -252,6 +252,7 @@ type RightPanelTabContentProps = {
   onOpenPullRequest: (paneKey: PaneKey, pullRequest: RepoPullRequestSummary) => void;
   onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
+  onShowChanges: () => void;
 };
 
 export function RightPanelTabContent(props: RightPanelTabContentProps) {
@@ -346,6 +347,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   onOpenPullRequest,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
+  onShowChanges,
   } = props;
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
@@ -536,6 +538,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               hubMessage={drone.hubMessage}
               onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
               onOpenFileInEditor={onOpenChangesFileInEditor}
+              onShowChanges={onShowChanges}
             />
           )}
         </PaneModule>

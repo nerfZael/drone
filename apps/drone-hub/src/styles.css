@@ -3713,6 +3713,22 @@ select:disabled optgroup {
   box-shadow: none;
 }
 
+/* The Editor or Changes view the explorer drives is tabbed away: keep the
+   selection readable but faint, so it doesn't look like what is on screen. */
+[data-explorer-selection-muted] .dh-changes-explorer-row.is-selected,
+[data-explorer-selection-muted] .dh-changes-explorer-row[aria-selected='true'] {
+  background: color-mix(in srgb, var(--utility-panel-selected, var(--selected)) 40%, transparent);
+}
+
+[data-explorer-selection-muted] .dh-file-explorer-selected:not(:hover) {
+  background-color: color-mix(in srgb, var(--sidebar-row-selected-bg) 40%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+[data-explorer-selection-muted] .dh-file-explorer-open:not(:hover) {
+  background-color: color-mix(in srgb, var(--surface-soft) 40%, transparent);
+}
+
 .dh-changes-dock .rdv-wrapper {
   overflow-x: auto;
 }
