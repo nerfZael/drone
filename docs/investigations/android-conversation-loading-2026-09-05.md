@@ -77,7 +77,7 @@ The Codex example, “Find Google Fitbit Air in Split” (`9c497aa8-fcda-4d31-9d
 - Ran existing mobile coordinator, refresh, and error tests: **8 passed, 23 assertions**. They verify independent reads and current behavior, but do not cover the event-invalidation starvation or reserved native startup handoff.
 - Inspected the Android screens directly. Did not submit a new drone, rerun the user's prompts, restart the hub, or install an APK. Startup reconstruction uses the original provisioning logs and source; a fresh end-to-end creation after fixes remains necessary.
 
-## Implemented repairs
+## Implemented repairs 
 
 - Native submission now wakes delivery for a queued reservation without broadcasting a false insertion. Atomic claims protect concurrent retries, and completed/sending/failed duplicates do not restart delivery. The submission logic is extracted into `native-prompt-submission.ts` and exercised against the real SQLite queue and assistant service.
 - Prepared native images and file references survive startup handoff. Preparation is durable and idempotent, preserves the original transcript message and attachment references, and cannot replace an already claimed delivery. A native worker waits for staged attachments before claiming them.

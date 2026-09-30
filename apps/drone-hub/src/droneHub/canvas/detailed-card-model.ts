@@ -83,11 +83,11 @@ export type DetailedCard = {
 export const DETAILED_CARD_WIDTH_PX = 440;
 const DETAILED_CARD_MIN_WIDTH_PX = 140;
 /** Padding and border around a detailed card's content. */
-const DETAILED_CARD_CHROME_PX = 26;
+const DETAILED_CARD_CHROME_PX = 22;
 
 /**
  * A detailed card as wide as its name (title text at 13px, beside its icons). Its dots, time and cost sit
- * above the card, so they don't widen it. `titleWidthPx` is the name's width at the compact card's 12.5px.
+ * under the card, so they don't widen it. `titleWidthPx` is the name's width at the compact card's 12.5px.
  */
 export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boolean; runtimeIcon: boolean }): number {
   const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateIcon ? 18 : 0) + (opts.runtimeIcon ? 20 : 0);

@@ -986,7 +986,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
     expect(card().textContent).not.toContain('Splitting the tokenizer');
     expect(card().querySelector('[title*="Splitting the tokenizer"]')).not.toBeNull();
-    // The dots, time and cost sit in a row above the card, not inside it.
+    // The dots, time and cost sit in a row under the card, not inside it.
     const stats = () => card().querySelector('[data-canvas-card-stats]');
     expect(stats()?.querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
     expect(card().querySelector('[data-canvas-detailed-card] [aria-label="1 done, 1 in progress, 1 next"]')).toBeNull();
@@ -1019,7 +1019,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => Simulate.mouseEnter(card()));
     expect(panel()?.textContent).toContain('Read the parser');
     expect(panel()?.textContent).toContain('Run tests');
-    // Its time and cost are above the card; the panel keeps to the steps, and lists the current step once.
+    // Its time and cost are under the card; the panel keeps to the steps, and lists the current step once.
     expect(panel()?.textContent).not.toContain('$0.42');
     expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
     await act(async () => Simulate.mouseLeave(card()));

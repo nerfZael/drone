@@ -301,6 +301,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
     renderNodeIndicator(indicatorState)
   );
   const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
+  const showCardStats = Boolean(detail && (detail.steps || detail.workingSince !== null || detail.cost));
   // The green frame says drone; the icon says where it runs.
   const runtimeIcon = droneNode ? (
     <span
@@ -331,7 +332,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       aria-pressed={selected}
       aria-busy={deleting || undefined}
       title={deleting ? 'Deleting…' : undefined}
-      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex flex-col overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
+      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
         selected || dragging || inlineEditing || assignmentHoverTarget
           ? 'border-[var(--accent)]'
           : detail.state === 'need'
@@ -357,7 +358,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
         top: 0,
         ...(detail
           ? {
-              padding: '0.4375rem 0.625rem 0.4375rem 0.875rem',
+              padding: '0.4375rem 0.625rem',
               boxShadow: isActiveSidebarChat ? '0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--work-shadow)' : undefined,
             }
           : { paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding)' : '0.625rem' }),
@@ -370,9 +371,6 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
     >
       {isActiveSidebarChat && !detail ? (
         <span className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-md bg-[var(--accent)] z-[2]" />
-      ) : null}
-      {detail ? (
-        <span className="pointer-events-none absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r z-[1]" style={{ background: detail.showState ? detailTone(detail) : 'var(--canvas-chat-owner-muted)' }} />
       ) : null}
       {/* A detailed card says all of this inside it. */}
       {indicator && !detail ? (
@@ -394,11 +392,11 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
           Draft
         </span>
       ) : null}
-      {detail && (detail.steps || detail.workingSince !== null || detail.cost) ? (
-        // Above the card: its dots on the left, and while it works, how long, then its cost on the right.
-        // At least as wide as the card, and wider when the dots need it.
+      {detail && showCardStats ? (
+        // Under the card, as above it is where a new reply is flagged: its dots on the left, and while it
+        // works, how long, then its cost on the right. At least as wide as the card, wider when the dots need it.
         <span
-          className="pointer-events-none absolute left-0 bottom-full mb-[3px] flex min-w-full items-center gap-2 whitespace-nowrap px-1 text-[var(--muted)]"
+          className="pointer-events-none absolute left-0 top-full mt-[3px] flex h-4 min-w-full items-center gap-2 whitespace-nowrap px-1 text-[var(--muted)]"
           data-canvas-card-stats
         >
           {detail.steps ? <Pips w={{ steps: detail.steps, state: WORKER_STATE_OF[detail.state] }} /> : null}
@@ -413,7 +411,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
         // One row centred under the card: at least as wide as the card, and wider when the two
         // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
-          className="pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap"
+          className={`pointer-events-none absolute left-1/2 top-full ${showCardStats ? 'mt-[22px]' : 'mt-[3px]'} flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap`}
         >
           {repoLabel ? (
             <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[260px]`} title={repoLabel}>
@@ -1132,7 +1130,7 @@ export function DroneCanvasDock({
     [chatNodeStateById],
   );
   const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(canvasDetailedCards, busyChatKey);
-  // A detailed card is as wide as its name needs; its dots, time and cost sit above it.
+  // A detailed card is as wide as its name needs; its dots, time and cost sit under it.
   const detailedWidthByNodeId = React.useMemo(() => {
     if (!canvasDetailedCards) return null;
     const out: Record<string, number> = {};
