@@ -7,6 +7,8 @@ import { readChatIdleStatus } from './chat-idle-status';
 import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
+import { registerChatStepsRoutes } from './routes/chat-steps-routes';
+import { startChatStepService } from './chat-steps/chat-step-service';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -42,7 +44,6 @@ import {
 import {
   loadRegistry,
   loadRegistryRawSnapshot,
-  loadRegistryCompatibilityBase,
   updateRegistry as updateHostRegistry,
 } from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
@@ -357,6 +358,7 @@ import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
 import { GlobalShortcutService } from './global-shortcut-service';
 import { LocalCheckoutService } from './local-checkout-service';
+import { readLocalCheckoutState, writeLocalCheckoutState } from './local-checkout-store';
 import {
   createResourceSubscriptionDeliveryAuthorizer,
   createCustomEventHistorySourceReader,
@@ -2948,12 +2950,15 @@ async function cliSupportsModelFlag(opts: {
   runtime: DroneRuntime;
   containerName?: string;
   cwd?: string | null;
+  /** Defaults to `model`; older CLIs lack newer flags such as Claude's `effort`. */
+  flag?: string;
 }): Promise<boolean> {
+  const flag = opts.flag ?? 'model';
   const keyBase =
     opts.runtime === 'host'
       ? String(opts.cwd ?? '').trim() || 'host'
       : String(opts.containerName ?? '').trim() || 'container';
-  const key = `${opts.runtime}:${keyBase}::${opts.bin}`;
+  const key = `${opts.runtime}:${keyBase}::${opts.bin}${flag === 'model' ? '' : `::${flag}`}`;
   const now = Date.now();
   const cached = cliModelFlagSupportCache.get(key);
   if (cached && now - cached.atMs < CLI_MODEL_FLAG_CACHE_TTL_MS) return cached.supported;
@@ -2967,7 +2972,7 @@ async function cliSupportsModelFlag(opts: {
           timeoutMs: defaultSeedBootstrapTimeoutMs(),
         });
   const text = stripAnsiFromCliOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
-  const supported = /\B--model\b/i.test(text) || /\B-m,\s*--model\b/i.test(text);
+  const supported = new RegExp(`\\B--${flag}\\b`, 'i').test(text);
   cliModelFlagSupportCache.set(key, { atMs: now, supported });
   return supported;
 }
@@ -5640,7 +5645,8 @@ async function startDroneHubApiServerWithLifecycle(
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
   registerFolderWorkspace({ id: COMPANION_HOME_TARGET_ID, name: 'Companion home', root: ensureCompanionHome });
-  registerEntityRoutes(apiRouter);
+  // The entity's sessions use the Companion's workspace service, each with its own selection.
+  registerEntityRoutes(apiRouter, { createWorkspaceService: store => new CompanionWorkspaceService(assistantService, deviceMesh, store) });
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();
@@ -5747,6 +5753,12 @@ async function startDroneHubApiServerWithLifecycle(
   registerSidebarRoutes(apiRouter, sidebarCommands);
 
   registerUsageRoutes(apiRouter);
+  registerChatStepsRoutes(apiRouter);
+  // Summarizes running agent chats into steps while step tracking is on; a new summary refreshes that chat's views.
+  startChatStepService({
+    onChange: (steps) => scheduleDroneChatEventRefresh(0, { droneId: steps.droneId, chatName: steps.chatName }),
+    log: (message) => hubLog('warn', 'chat steps', { message }),
+  });
   registerCatalogRoutes(apiRouter, {
     mcpToken,
     upsertDroneHubMcpServerPreset,
@@ -6008,10 +6020,12 @@ async function startDroneHubApiServerWithLifecycle(
   });
 
   const localCheckoutService = new LocalCheckoutService({
-    loadRegistry,
-    loadRegistryCompatibilityBase,
-    updateRegistry,
-    findDroneIdByRef,
+    readState: readLocalCheckoutState,
+    writeState: async (state) => {
+      await writeLocalCheckoutState(state);
+      hubChangeEvents.emitRegistryWrite();
+    },
+    resolveDroneRef: resolveCanonicalDroneOrPendingForReadRef,
     droneRuntime,
     droneRootPath,
     gitTopLevel,

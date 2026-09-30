@@ -42,6 +42,9 @@ export function buildCanvasRelationshipEdges({
     const source = renderedNodeBoundsById[droneNode.droneId] ?? fallbackNodeBoundsById[droneNode.droneId];
     if (!source) continue;
     for (const chatNode of chatNodesByDroneId[droneId] ?? []) {
+      // A copy hangs off the chat it came from; that chat's own line already leads to the drone.
+      const forkSourceNodeId = forkSourceNodeIdByNodeId[chatNode.droneId];
+      if (forkSourceNodeId && (renderedNodeBoundsById[forkSourceNodeId] ?? fallbackNodeBoundsById[forkSourceNodeId])) continue;
       const target = renderedNodeBoundsById[chatNode.droneId] ?? fallbackNodeBoundsById[chatNode.droneId];
       if (!target) continue;
       const { startX, startY, endX, endY } = resolveLineageEndpoint(source, target);

@@ -517,6 +517,28 @@ export function IconAutoMinimize({ className }: { className?: string }) {
   );
 }
 
+/** A window split into panes: the one layout every drone uses. */
+export function IconSharedLayout({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="2.25" width="13" height="11.5" rx="1.25" />
+      <line x1="6.5" y1="2.25" x2="6.5" y2="13.75" />
+      <line x1="6.5" y1="8" x2="14.5" y2="8" />
+    </svg>
+  );
+}
+
 export function IconClock({ className }: { className?: string }) {
   return (
     <svg

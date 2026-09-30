@@ -56,7 +56,7 @@ export function UserChatMessage({
 }) {
   const resolvedCopyText = [
     copyText ?? text,
-    ...followUps.map((followUp) => `ASAP:\n${followUp.copyText ?? followUp.text ?? ''}`),
+    ...followUps.map((followUp) => `Added to this run (ASAP):\n${followUp.copyText ?? followUp.text ?? ''}`),
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -91,7 +91,7 @@ export function UserChatMessage({
           <div key={followUp.key} data-user-message-follow-up="asap">
             <div className="my-3 flex items-center gap-2 text-caption font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]">
               <span className="h-px min-w-4 flex-1 bg-[var(--user-bubble-border)]" />
-              <span style={{ fontFamily: 'var(--display)' }}>ASAP</span>
+              <span style={{ fontFamily: 'var(--display)' }}>Added to this run · ASAP</span>
               <span className="h-px min-w-4 flex-1 bg-[var(--user-bubble-border)]" />
               {clockTime ? (
                 <time

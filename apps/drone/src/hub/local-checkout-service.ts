@@ -3,7 +3,6 @@ import path from 'node:path';
 import {
   isLocalAutoUpdates,
   LocalCheckoutError,
-  localCheckoutStateFromRegistry,
   normalizedGitSha,
   type LocalCheckoutSession,
   type LocalCheckoutState,
@@ -13,6 +12,7 @@ import {
   LocalCheckoutSnapshotService,
   type LocalCheckoutSnapshotDependencies,
 } from './local-checkout-snapshot-service';
+import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
 
 export {
   LocalCheckoutError,
@@ -23,10 +23,9 @@ export {
 } from './local-checkout-model';
 
 type LocalCheckoutServiceDependencies = LocalCheckoutSnapshotDependencies & {
-  loadRegistry: () => Promise<any>;
-  loadRegistryCompatibilityBase: () => Promise<any>;
-  updateRegistry: <T>(mutator: (registry: any) => T | Promise<T>) => Promise<T>;
-  findDroneIdByRef: (registry: any, ref: string) => { kind: string; id: string } | null;
+  readState: () => Promise<LocalCheckoutState>;
+  writeState: (state: LocalCheckoutState) => Promise<void>;
+  resolveDroneRef: (ref: string) => Promise<ResolvedOrPendingDrone | null>;
   droneRuntime: (drone: any) => 'host' | 'container';
   gitTopLevel: (repoPath: string) => Promise<string>;
   gitIsClean: (repoRoot: string) => Promise<boolean>;
@@ -420,27 +419,19 @@ export class LocalCheckoutService {
   }
 
   private async readState(): Promise<LocalCheckoutState> {
-    return localCheckoutStateFromRegistry(await this.deps.loadRegistryCompatibilityBase());
+    return await this.deps.readState();
   }
 
   private async writeState(state: LocalCheckoutState): Promise<void> {
-    await this.deps.updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.localCheckout = {
-        autoUpdates: state.autoUpdates,
-        session: state.session,
-        updatedAt: state.updatedAt,
-      };
-    });
+    await this.deps.writeState(state);
   }
 
   private async resolveDrone(ref: string): Promise<{ id: string; name: string; drone: any }> {
-    const registry = await this.deps.loadRegistry();
-    const found = this.deps.findDroneIdByRef(registry, String(ref ?? '').trim());
+    const found = await this.deps.resolveDroneRef(String(ref ?? '').trim());
     if (!found || found.kind !== 'real') {
       throw new LocalCheckoutError('drone_not_found', `Drone "${ref}" was not found.`, 404);
     }
-    const drone = registry?.drones?.[found.id];
+    const drone = found.drone;
     if (!drone) throw new LocalCheckoutError('drone_not_found', `Drone "${ref}" was not found.`, 404);
     if (this.deps.droneRuntime(drone) !== 'container') {
       throw new LocalCheckoutError('unsupported_runtime', 'Host-runtime drones already use the local repository.');

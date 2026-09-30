@@ -31,6 +31,22 @@ import {
   type ComposerReference,
 } from '../chat/composer-references';
 import { IconTune } from '../app/icons';
+import { DroneRuntimeIcon } from '../app/DroneRuntimeIndicator';
+import {
+  DETAILED_CARD_HEIGHT_PX,
+  DETAILED_CARD_SPREAD,
+  DETAILED_CARD_WIDTH_PX,
+  WORKER_STATE_OF,
+  detailedCardWidthPx,
+  combineDetailedCards,
+  deriveDetailedCard,
+  type DetailedCard,
+} from './detailed-card-model';
+import { useCanvasChatActivity } from './use-canvas-chat-activity';
+import { ChatStepsControl } from './ChatStepsControl';
+import { DraftAgentAndRepo, DraftChatAgentSelect, DraftModelPicker } from './CanvasDraftControls';
+import { Dot, Pips, STATE_COLOR, Steps } from '../entity/EntityWork';
+import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
   createCanvasChatNodeId,
   createCanvasDroneNodeId,
@@ -83,11 +99,13 @@ import {
 } from './relationship-edges';
 import {
   CHAT_NODE_HEIGHT_PX,
+  DRONE_NODE_CHROME_WIDTH_PX,
   NODE_HEIGHT_PX,
   NODE_MIN_WIDTH_PX,
   getNodeHeightPx,
   getChatLabelTextBoost,
   getNodeWidthPx,
+  nodeLabelWidthPx,
 } from './node-metrics';
 
 const DROP_STACK_SPACING_Y_PX = 48;
@@ -103,7 +121,9 @@ const NODE_LEGIBLE_SCALE = 0.85;
 const NODE_MAX_READABILITY_BOOST = 1.4;
 // Arrowheads shrink with the zoom like the nodes used to, but never below a visible size.
 const EDGE_MARKER_SCREEN_PX = 14;
-const EDGE_DOT_MARKER_SCREEN_PX = 12;
+const EDGE_PLUG_MARKER_SCREEN_PX = 10;
+// Every chat has one of these lines, so they stay quieter than lineage and copy lines.
+const CHAT_OWNER_EDGE_COLOR = 'color-mix(in srgb, var(--canvas-chat-owner-muted) 65%, transparent)';
 const EDGE_MARKER_MIN_SCREEN_PX = 6;
 const FIT_VIEWPORT_PADDING_PX = 48;
 const MIN_DRAFT_SPAWN_COUNT = 1;
@@ -191,6 +211,8 @@ type CanvasNodeActions = {
   onNodeMouseDown: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onNodeClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onNodeDoubleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** The pointer is over a card (an id) or left it (null): the steps panel follows it. */
+  hoverCard: (id: string | null) => void;
   setInlineRenameDraft: (value: string) => void;
   submitInlineRename: () => Promise<void>;
   cancelInlineRename: () => void;
@@ -199,6 +221,11 @@ type CanvasNodeActions = {
 
 type CanvasNodeCardProps = {
   node: { droneId: string; label: string; x: number; y: number };
+  /** Where the card is drawn: its stored position, spread apart for detailed cards. */
+  viewX: number;
+  viewY: number;
+  /** Set when detailed cards are on: state, what is going on, time and cost. */
+  detail: DetailedCard | null;
   draftNode: boolean;
   droneNode: boolean;
   canvasDroneId: string | null;
@@ -229,6 +256,9 @@ type CanvasNodeCardProps = {
 
 const CanvasNodeCard = React.memo(function CanvasNodeCard({
   node,
+  viewX,
+  viewY,
+  detail,
   draftNode,
   droneNode,
   canvasDroneId,
@@ -271,6 +301,16 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
     renderNodeIndicator(indicatorState)
   );
   const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
+  // The green frame says drone; the icon says where it runs.
+  const runtimeIcon = droneNode ? (
+    <span
+      className="flex h-3.5 w-3.5 flex-shrink-0 text-[var(--canvas-chat-owner)]"
+      data-canvas-drone-runtime={runtime === 'host' ? 'host' : 'container'}
+      title={runtime === 'host' ? 'Drone on the host' : 'Drone in a container'}
+    >
+      <DroneRuntimeIcon runtime={runtime === 'host' ? 'host' : 'container'} className="h-3.5 w-3.5" />
+    </span>
+  ) : null;
   return (
     <CardElement
       key={node.droneId}
@@ -286,10 +326,18 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       onMouseDown={(event) => actions.current.onNodeMouseDown(node.droneId, event)}
       onClick={(event) => actions.current.onNodeClick(node.droneId, event)}
       onDoubleClick={(event) => actions.current.onNodeDoubleClick(node.droneId, event)}
+      onMouseEnter={detail ? () => actions.current.hoverCard(node.droneId) : undefined}
+      onMouseLeave={detail ? () => actions.current.hoverCard(null) : undefined}
       aria-pressed={selected}
       aria-busy={deleting || undefined}
       title={deleting ? 'Deleting…' : undefined}
-      className={`group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex flex-col overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
+        selected || dragging || inlineEditing || assignmentHoverTarget
+          ? 'border-[var(--accent)]'
+          : detail.state === 'need'
+            ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
+            : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
+      } ${detail.state === 'done' && !detail.unread && !selected ? 'opacity-80 hover:opacity-100' : ''}` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
         dragging
           ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_14px_26px_var(--shadow-color)]'
           : assignmentHoverTarget
@@ -307,24 +355,33 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       style={{
         left: 0,
         top: 0,
-        paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding)' : '0.625rem',
+        ...(detail
+          ? {
+              padding: '0.4375rem 0.625rem 0.4375rem 0.875rem',
+              boxShadow: isActiveSidebarChat ? '0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--work-shadow)' : undefined,
+            }
+          : { paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding)' : '0.625rem' }),
         width: nodeWidth,
         height: nodeHeight,
-        transform: `translate3d(${node.x}px, ${node.y}px, 0) scale(var(--canvas-node-boost))`,
+        transform: `translate3d(${viewX}px, ${viewY}px, 0) scale(var(--canvas-node-boost))`,
         transformOrigin: '0 50%',
         willChange: dragging ? 'transform' : undefined,
       }}
     >
-      {isActiveSidebarChat ? (
+      {isActiveSidebarChat && !detail ? (
         <span className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-md bg-[var(--accent)] z-[2]" />
       ) : null}
-      {indicator ? (
+      {detail ? (
+        <span className="pointer-events-none absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r z-[1]" style={{ background: detail.showState ? detailTone(detail) : 'var(--canvas-chat-owner-muted)' }} />
+      ) : null}
+      {/* A detailed card says all of this inside it. */}
+      {indicator && !detail ? (
         <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">{indicator}</span>
       ) : null}
-      {unreadIndicator ? (
+      {unreadIndicator && !detail ? (
         <span className="pointer-events-none absolute left-0 bottom-full mb-1 z-[2]">{unreadIndicator}</span>
       ) : null}
-      {showCanvasLastMessagePreviews && lastAgentSnippet ? (
+      {showCanvasLastMessagePreviews && lastAgentSnippet && !detail ? (
         <span
           className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-10 leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
           title={lastAgentSnippet}
@@ -337,21 +394,27 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
           Draft
         </span>
       ) : null}
-      {repoLabel ? (
-        <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
-          {repoLabel}
-        </span>
-      ) : null}
-      {repoBranch ? (
+      {repoLabel || repoBranch ? (
+        // One row centred under the card: at least as wide as the card, and wider when the two
+        // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
-          className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
-          title={repoBranch}
+          className="pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap"
         >
-          {repoBranch}
+          {repoLabel ? (
+            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[260px]`} title={repoLabel}>
+              <span className="truncate">{repoLabel}</span>
+            </span>
+          ) : <span />}
+          {repoBranch ? (
+            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[180px]`} title={repoBranch}>
+              <span className="truncate">{repoBranch}</span>
+            </span>
+          ) : null}
         </span>
       ) : null}
       {/* The title fades while the chat is being deleted; the Deleting badge above says why. */}
-      <span className={`min-w-0 flex-1 transition-opacity ${deleting ? 'opacity-45' : ''}`}>
+      <span className={`min-w-0 flex-1 transition-opacity ${deleting ? 'opacity-45' : ''} ${inlineEditing && droneNode ? 'flex items-center gap-1.5' : ''}`}>
+        {inlineEditing && droneNode ? runtimeIcon : null}
         {inlineEditing ? (
           <input
             ref={inlineRenameInputRef}
@@ -415,13 +478,31 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
               {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} dropped into this chat
             </span>
           </span>
-        ) : (
-          <span className={`flex min-w-0 items-center ${droneNode ? 'gap-2' : ''}`}>
-            {droneNode ? (
-              <span className="flex-shrink-0 rounded-[4px] border border-[var(--canvas-chat-owner-muted)] bg-[var(--canvas-chat-owner-subtle)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--canvas-chat-owner)]">
-                Drone
+        ) : detail ? (
+          <span className="grid min-w-0 gap-[3px]" data-canvas-detailed-card={detail.state}>
+            <span className="flex min-w-0 items-center gap-1.5">
+              {runtimeIcon}
+              <span className="min-w-0 truncate text-[13px] font-semibold" title={`${primaryLabel}\n${detail.text}`}>{primaryLabel}</span>
+              {detail.showState ? (
+                // The sidebar's icon for the same state: a spinner while working, a green dot for a new reply.
+                <span className="ml-auto inline-flex flex-shrink-0" title={detail.unread ? `${detail.label} · new reply` : detail.label}
+                  data-canvas-card-state={detail.icon}>
+                  <SidebarItemStateIndicator state={detail.icon} unread={detail.unread} showReadyAnchor={detail.state === 'idle'} />
+                </span>
+              ) : null}
+            </span>
+            <span className="flex min-h-[14px] min-w-0 items-center gap-2 text-[var(--muted)]">
+              {detail.steps ? <Pips w={{ steps: detail.steps, state: WORKER_STATE_OF[detail.state] }} /> : null}
+              {/* Only while it works: how long since it stopped is in the steps panel. */}
+              <span className="ml-auto whitespace-nowrap font-mono text-[11px] tabular-nums" title={detail.workingSince !== null ? 'How long it has been working' : undefined}>
+                {detail.workingSince !== null ? detail.clock : null}
               </span>
-            ) : null}
+              <span className="flex-shrink-0 font-mono text-[11px] tabular-nums" title={detail.costTitle}>{detail.cost}</span>
+            </span>
+          </span>
+        ) : (
+          <span className={`flex min-w-0 items-center ${droneNode ? 'gap-1.5' : ''}`}>
+            {runtimeIcon}
             <span
               className={`min-w-0 flex-1 truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)] ${droneNode ? '' : 'text-center'}`}
               style={
@@ -434,17 +515,54 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
             >
               {primaryLabel}
             </span>
-            {droneNode && canvasDroneId ? (
-              <span className="flex-shrink-0 text-9 font-mono uppercase text-[var(--muted-dim)]">
-                {runtime === 'host' ? 'Host' : 'Container'}
-              </span>
-            ) : null}
           </span>
         )}
       </span>
     </CardElement>
   );
 });
+
+/** One card in full at the canvas's bottom left: every step, its last reply, time and cost. */
+export const CANVAS_STEPS_PANEL_WIDTH_PX = 320;
+
+function CanvasStepsPanel({ title, card, bottomPx }: { title: string; card: DetailedCard; bottomPx: number }) {
+  // The line under the steps is the last reply; while working it is the current step, already listed above.
+  const listed = card.steps ? [...card.steps.done, ...card.steps.doing, ...card.steps.next, card.steps.blocker].includes(card.text)
+    || card.text === `Blocked: ${card.steps.blocker}` : false;
+  return (
+    <div data-canvas-steps-panel="" aria-live="polite" style={{ bottom: bottomPx, width: `min(${CANVAS_STEPS_PANEL_WIDTH_PX}px, calc(100% - 1rem))` }}
+      className="dh-canvas-work work-card pointer-events-none absolute left-2 z-10 grid gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--panel)] py-2 pl-3.5 pr-2.5 text-[12px] text-[var(--fg)]">
+      <span className="absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r" style={{ background: detailTone(card) }} />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate text-[13px] font-semibold">{title}</span>
+        <span className="ml-auto inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap" style={{ color: detailTone(card) }}>
+          <Dot pulse={card.state === 'working'} />{card.label}
+        </span>
+      </div>
+      {card.steps ? <Steps w={{ steps: card.steps, state: WORKER_STATE_OF[card.state] }} /> : null}
+      {card.stepsStale ? <div className="text-[11px] text-[var(--muted)]">Summarized while it was working; it stopped before a final summary.</div> : null}
+      {card.text && !listed ? (
+        <div className={`line-clamp-4 break-words ${card.steps ? 'border-t border-[var(--border)] pt-1.5 text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}>{card.text}</div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The Entity's colour for the same state; working and thinking are one colour, as on its canvas. */
+function detailTone(detail: DetailedCard): string {
+  const state = WORKER_STATE_OF[detail.state];
+  return STATE_COLOR[state === 'think' ? 'act' : state];
+}
+
+const CANVAS_NODE_META_CHIP_CLASS =
+  'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]';
+
+/** "plan (Alpha)", "plan (Alpha), default (Beta)", or the first two and how many more. */
+function formatMessageTargetLabel(labels: string[]): string | null {
+  if (labels.length === 0) return null;
+  if (labels.length <= 2) return labels.join(', ');
+  return `${labels.slice(0, 2).join(', ')} +${labels.length - 2} more`;
+}
 
 function CanvasWorldLayer({ boardDroneId, children }: { boardDroneId: string | null; children: React.ReactNode }) {
   const { panX, panY, scale } = useDroneCanvasStore(
@@ -486,6 +604,8 @@ function CanvasWorldLayer({ boardDroneId, children }: { boardDroneId: string | n
     </>
   );
 }
+
+const NO_CARD_SPREAD = { x: 1, y: 1 } as const;
 
 function screenToWorldPoint(
   clientX: number,
@@ -672,6 +792,7 @@ export function DroneCanvasDock({
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameChat,
+  onRenameDrone,
   onDeleteChats,
   onCloneChat,
   onCloneDrone,
@@ -711,6 +832,7 @@ export function DroneCanvasDock({
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onRenameDrone?: (droneId: string, newName: string) => Promise<{ ok: boolean; error?: string | null }>;
   /** Deletes the chats together, behind one confirmation; a result per chat asked about. */
   onDeleteChats?: (
     targets: ReadonlyArray<{ droneId: string; chatName: string }>,
@@ -893,6 +1015,7 @@ export function DroneCanvasDock({
   const nodeDragRef = React.useRef<NodeDragState | null>(null);
   const panDragRef = React.useRef<PanDragState | null>(null);
   const marqueeDragRef = React.useRef<MarqueeDragState | null>(null);
+  const selectionAnchorRef = React.useRef<string | null>(null);
   const nodeElementByDroneIdRef = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const lastSyncedSidebarSelectionRef = React.useRef<string>('');
   const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -929,11 +1052,23 @@ export function DroneCanvasDock({
   const composerHasAttachmentsRef = React.useRef(false);
   const draftCreateInFlightRef = React.useRef<Set<string>>(new Set());
   const messageSending = messagePendingCount > 0;
+  // A drone renamed here shows its new name until the next summary reports it.
+  const [renamedDroneNameById, setRenamedDroneNameById] = React.useState<Record<string, string>>({});
   const effectiveDroneNameById = React.useMemo(
-    () => ({ ...optimisticDroneNameById, ...droneNameById }),
-    [droneNameById, optimisticDroneNameById],
+    () => ({ ...optimisticDroneNameById, ...droneNameById, ...renamedDroneNameById }),
+    [droneNameById, optimisticDroneNameById, renamedDroneNameById],
   );
 
+  const canvasDetailedCards = useDroneHubUiStore((s) => s.canvasDetailedCards);
+  // Detailed cards are drawn spread apart; positions are stored, placed and pasted in compact space.
+  const cardSpread = canvasDetailedCards ? DETAILED_CARD_SPREAD : NO_CARD_SPREAD;
+  const cardSpreadRef = React.useRef(cardSpread);
+  cardSpreadRef.current = cardSpread;
+  /** A point under the pointer, in the space positions are stored in. */
+  const screenToStorePoint = React.useCallback((...args: Parameters<typeof screenToWorldPoint>) => {
+    const point = screenToWorldPoint(...args);
+    return { x: point.x / cardSpreadRef.current.x, y: point.y / cardSpreadRef.current.y };
+  }, []);
   const nodes = React.useMemo(
     () => nodeOrder.map((droneId) => nodesByDroneId[droneId]).filter(Boolean),
     [nodeOrder, nodesByDroneId],
@@ -942,7 +1077,7 @@ export function DroneCanvasDock({
     const out: Record<string, number> = {};
     for (const node of nodes) {
       if (node.droneId === inlineRenamingDroneId) {
-        out[node.droneId] = getNodeWidthPx(inlineRenameDraft);
+        out[node.droneId] = getNodeWidthPx(inlineRenameDraft, parseCanvasDroneNodeId(node.droneId) ? DRONE_NODE_CHROME_WIDTH_PX : 0);
         continue;
       }
       if (isCanvasDraftNodeId(node.droneId)) {
@@ -952,7 +1087,7 @@ export function DroneCanvasDock({
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
       if (canvasDroneId) {
         const droneLabel = String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
-        out[node.droneId] = getNodeWidthPx(droneLabel, 'Drone');
+        out[node.droneId] = getNodeWidthPx(droneLabel, DRONE_NODE_CHROME_WIDTH_PX);
         continue;
       }
       const chatRef = parseCanvasChatNodeId(node.droneId);
@@ -983,10 +1118,51 @@ export function DroneCanvasDock({
     }
     return out;
   }, [nodeHeightByDroneId, nodeWidthByDroneId, nodes]);
+  // Where cards are drawn before the zoom boost: stored positions and compact sizes, or detailed cards spread apart.
+  // Detailed cards: cost and timing from the Hub, a clock that ticks while anything works.
+  const busyChatKey = React.useMemo(
+    () => Object.entries(chatNodeStateById).filter(([, state]) => state.busy).map(([nodeId]) => nodeId).sort().join('|'),
+    [chatNodeStateById],
+  );
+  const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(canvasDetailedCards, busyChatKey);
+  // A detailed card is as wide as its name or its footer needs. Its dots count as the card will show them:
+  // a stopped chat without a final summary shows only what it did.
+  const detailedWidthByNodeId = React.useMemo(() => {
+    if (!canvasDetailedCards) return null;
+    const out: Record<string, number> = {};
+    for (const node of nodes) {
+      const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      const steps = canvasDroneId ? null : chatStepsByNodeId[node.droneId];
+      const busy = Boolean(chatNodeStateById[node.droneId]?.busy);
+      const pips = !steps ? 0 : steps.final || busy
+        ? steps.done.length + steps.doing.length + steps.next.length
+        : steps.done.length;
+      const label = node.droneId === inlineRenamingDroneId
+        ? inlineRenameDraft
+        : canvasDroneId
+          ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
+          : parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label;
+      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { pips, stateIcon: true, runtimeIcon: Boolean(canvasDroneId) });
+    }
+    return out;
+  }, [canvasDetailedCards, chatNodeStateById, chatStepsByNodeId, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  const viewNodeBoundsById = React.useMemo(() => {
+    if (!detailedWidthByNodeId) return fallbackNodeBoundsById;
+    const out: Record<string, CanvasRect> = {};
+    for (const node of nodes) {
+      out[node.droneId] = {
+        x: node.x * DETAILED_CARD_SPREAD.x,
+        y: node.y * DETAILED_CARD_SPREAD.y,
+        width: detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX,
+        height: DETAILED_CARD_HEIGHT_PX,
+      };
+    }
+    return out;
+  }, [detailedWidthByNodeId, fallbackNodeBoundsById, nodes]);
   const renderedNodeBoundsById = React.useMemo(() => {
     const boost = Number(nodeReadabilityBoost.toFixed(3));
-    return Object.fromEntries(Object.entries(fallbackNodeBoundsById).map(([id, rect]) => [id, scaleCanvasRect(rect, boost)]));
-  }, [fallbackNodeBoundsById, nodeReadabilityBoost]);
+    return Object.fromEntries(Object.entries(viewNodeBoundsById).map(([id, rect]) => [id, scaleCanvasRect(rect, boost)]));
+  }, [viewNodeBoundsById, nodeReadabilityBoost]);
   const nodeBoundsRef = React.useRef(renderedNodeBoundsById);
   React.useLayoutEffect(() => { nodeBoundsRef.current = renderedNodeBoundsById; }, [renderedNodeBoundsById]);
   const droneNodeByDroneId = React.useMemo(() => {
@@ -1026,20 +1202,37 @@ export function DroneCanvasDock({
     }
     return out;
   }, [droneNodeByDroneId, nodes]);
+  // The global canvas has no board members: read each chat card's source from its drone's summary.
+  const edgeForkSourceNodeIdByNodeId = React.useMemo(() => {
+    if (droneScope) return forkSourceNodeIdByNodeId;
+    const out: Record<string, string> = {};
+    for (const [droneId, chatNodes] of Object.entries(chatNodesByDroneId)) {
+      const drone = droneById[droneId];
+      if (!drone) continue;
+      for (const node of chatNodes) {
+        const chatName = parseCanvasChatNodeId(node.droneId)?.chatName;
+        if (!chatName) continue;
+        const sourceChatName = drone.chatCloneSources?.[chatName]
+          ?? drone.sideChats?.find((sideChat) => sideChat.name === chatName)?.sourceChatName;
+        if (sourceChatName && sourceChatName !== chatName) out[node.droneId] = createCanvasChatNodeId(droneId, sourceChatName);
+      }
+    }
+    return out;
+  }, [chatNodesByDroneId, droneById, droneScope, forkSourceNodeIdByNodeId]);
   const relationshipEdges = React.useMemo(() => {
     return buildCanvasRelationshipEdges({
       preferredNodeByDroneId,
       droneNodeByDroneId,
       chatNodesByDroneId,
       renderedNodeBoundsById,
-      fallbackNodeBoundsById,
+      fallbackNodeBoundsById: viewNodeBoundsById,
       fleetParentIdByDroneId,
       fleetAssignedIdsByDroneId,
-      forkSourceNodeIdByNodeId,
+      forkSourceNodeIdByNodeId: edgeForkSourceNodeIdByNodeId,
     });
   }, [
-    forkSourceNodeIdByNodeId,
-    fallbackNodeBoundsById,
+    edgeForkSourceNodeIdByNodeId,
+    viewNodeBoundsById,
     chatNodesByDroneId,
     droneNodeByDroneId,
     fleetAssignedIdsByDroneId,
@@ -1048,6 +1241,101 @@ export function DroneCanvasDock({
     renderedNodeBoundsById,
   ]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
+  const busySeenAtRef = React.useRef<Record<string, number>>({});
+  const busySeenAt = React.useMemo(() => {
+    const busy = busyChatKey ? busyChatKey.split('|') : [];
+    const next: Record<string, number> = {};
+    for (const nodeId of busy) next[nodeId] = busySeenAtRef.current[nodeId] ?? Date.now();
+    busySeenAtRef.current = next;
+    return next;
+  }, [busyChatKey]);
+  const [cardNowMs, setCardNowMs] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!canvasDetailedCards) return;
+    setCardNowMs(Date.now());
+    const timer = setInterval(() => setCardNowMs(Date.now()), busyChatKey ? 1000 : 30_000);
+    return () => clearInterval(timer);
+  }, [busyChatKey, canvasDetailedCards]);
+  const [hoveredCardId, hoverCard] = React.useState<string | null>(null);
+  // The steps panel sits at the bottom left, above the message bar wherever the two would overlap.
+  const [stepsPanelBottomPx, setStepsPanelBottomPx] = React.useState(8);
+  React.useLayoutEffect(() => {
+    if (!canvasDetailedCards) return;
+    const viewport = viewportRef.current;
+    const bar = viewport?.querySelector<HTMLElement>('[data-canvas-message-bar]');
+    if (!viewport || !bar) return;
+    const place = () => {
+      const area = viewport.getBoundingClientRect();
+      const rect = bar.getBoundingClientRect();
+      const overlaps = !bar.hidden && rect.height > 0 && rect.left - area.left < 8 + CANVAS_STEPS_PANEL_WIDTH_PX + 8;
+      setStepsPanelBottomPx(overlaps ? Math.round(area.bottom - rect.top) + 8 : 8);
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(viewport);
+    observer?.observe(bar);
+    // Showing or hiding the bar changes no size: watch its hidden attribute too.
+    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(place);
+    mutations?.observe(bar, { attributes: true, attributeFilter: ['hidden'], subtree: true });
+    return () => { observer?.disconnect(); mutations?.disconnect(); };
+  }, [canvasDetailedCards]);
+  const detailCacheRef = React.useRef<Record<string, { key: string; card: DetailedCard }>>({});
+  const detailByNodeId = React.useMemo(() => {
+    if (!canvasDetailedCards) return null;
+    const chatInput = (droneId: string, chatName: string) => {
+      const nodeId = createCanvasChatNodeId(droneId, chatName);
+      const state = chatNodeStateById[nodeId];
+      const drone = droneById[droneId];
+      const activity = chatActivityByNodeId[nodeId] ?? null;
+      return {
+        activity,
+        card: deriveDetailedCard({
+          busy: Boolean(state?.busy),
+          unread: Boolean(state?.unreadAgentMessage),
+          approval: Boolean(drone?.approvalChats?.includes(chatName)),
+          queued: Boolean(drone?.queuedChats?.includes(chatName)),
+          statusOk: state?.statusOk ?? true,
+          statusError: state?.statusError ?? null,
+          hubPhase: state?.hubPhase ?? null,
+          hubMessage: state?.hubMessage ?? null,
+          lastAgentSnippet: state?.lastAgentSnippet ?? null,
+          activity,
+          steps: chatStepsByNodeId[nodeId] ?? null,
+          busySeenAt: busySeenAt[nodeId] ?? null,
+        }, cardNowMs),
+      };
+    };
+    const out: Record<string, DetailedCard> = {};
+    const cache = detailCacheRef.current;
+    const nextCache: typeof cache = {};
+    for (const node of nodes) {
+      let card: DetailedCard;
+      if (isCanvasDraftNodeId(node.droneId)) {
+        const prompt = String(draftPromptByNodeId[node.droneId] ?? '').replace(/\s+/g, ' ').trim();
+        card = { state: 'idle', icon: 'idle', label: 'draft', showState: true, unread: false, text: prompt || 'Write a message to start a drone', clock: '', workingSince: null, cost: '', costTitle: '', pips: null, stepsTitle: '', steps: null, stepsStale: false };
+      } else {
+        const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+        const chatRef = canvasDroneId ? null : parseCanvasChatNodeId(node.droneId);
+        if (canvasDroneId) {
+          const drone = droneById[canvasDroneId];
+          const chatNames = [...(drone?.chats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
+          const chats = (chatNames.length ? chatNames : ['default']).map((chatName) => chatInput(canvasDroneId, chatName));
+          // With its chats on the canvas, each says its own state; a one-chat drone or one shown alone says it here.
+          const showState = chatNames.length <= 1 || !chatNodesByDroneId[canvasDroneId]?.length;
+          card = { ...combineDetailedCards(chats.map((chat) => chat.card), chats.map((chat) => chat.activity), cardNowMs, chatNames.length), showState };
+        } else if (chatRef) {
+          card = chatInput(chatRef.droneId, chatRef.chatName).card;
+        } else continue;
+      }
+      // Same content, same object: a card re-renders only when what it shows changes.
+      const key = JSON.stringify(card);
+      const cached = cache[node.droneId];
+      nextCache[node.droneId] = cached && cached.key === key ? cached : { key, card };
+      out[node.droneId] = nextCache[node.droneId].card;
+    }
+    detailCacheRef.current = nextCache;
+    return out;
+  }, [busySeenAt, canvasDetailedCards, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, nodes]);
   const selectedDraftNodeId = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
     const id = String(selectedDroneIds[0] ?? '').trim();
@@ -1058,22 +1346,30 @@ export function DroneCanvasDock({
     ? String(draftPromptByNodeId[selectedDraftNodeId] ?? '')
     : '';
   const selectedMessageDraft = selectedDraftNodeId ? selectedDraftPrompt : messageDraft;
+  // A drone card sends to one of its chats: resolve it here so the composer names that chat.
+  const selectedMessageTargets = React.useMemo(
+    () => collectUniqueChatTargets(selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id)), droneById),
+    [droneById, selectedDroneIds],
+  );
   const selectedMessageLabel = React.useMemo(() => {
-    if (selectedDroneIds.length !== 1) return null;
-    const selectedNodeId = String(selectedDroneIds[0] ?? '').trim();
-    if (!selectedNodeId) return null;
-    if (isCanvasDraftNodeId(selectedNodeId)) {
-      return String(nodesByDroneId[selectedNodeId]?.label ?? '').trim() || 'Untitled';
-    }
-    const canvasDroneId = parseCanvasDroneNodeId(selectedNodeId);
-    if (canvasDroneId) {
-      return String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
-    }
-    const chatRef = parseCanvasChatNodeId(selectedNodeId);
-    if (!chatRef) return null;
-    return chatRef.chatName;
-  }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds]);
+    const draftLabels = selectedDroneIds
+      .filter(isCanvasDraftNodeId)
+      .map((id) => String(nodesByDroneId[id]?.label ?? '').trim() || 'Untitled');
+    const chatLabels = selectedMessageTargets.map((target) => {
+      const droneName = String(effectiveDroneNameById[target.droneId] ?? '').trim() || target.droneId;
+      return `${target.chatName} (${droneName})`;
+    });
+    return formatMessageTargetLabel([...chatLabels, ...draftLabels]);
+  }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds, selectedMessageTargets]);
   const controlsDisabled = messageSending;
+  const spawnReasoning = useDroneHubUiStore((s) => s.spawnReasoning);
+  // A new drone (a draft card) or a new chat on a drone's canvas is set up from the composer.
+  const selectedDraftChat = React.useMemo(() => {
+    if (!droneScope || selectedMessageTargets.length !== 1 || selectedDroneIds.length !== 1) return null;
+    const target = selectedMessageTargets[0];
+    const drone = droneById[target.droneId];
+    return drone?.draftChats?.[target.chatName] === true ? { ...target, repoPath: String(drone.repoPath ?? '').trim() } : null;
+  }, [droneById, droneScope, selectedDroneIds.length, selectedMessageTargets]);
   const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
   const normalizedSpawnModel = String(spawnModel ?? '');
   const normalizedCreateRepoPath = String(createRepoPath ?? '').trim();
@@ -1147,7 +1443,10 @@ export function DroneCanvasDock({
     (droneIdRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
-      if (!isCanvasDraftNodeId(droneId)) {
+      const canvasDroneId = parseCanvasDroneNodeId(droneId);
+      if (canvasDroneId) {
+        if (!onRenameDrone) return;
+      } else if (!isCanvasDraftNodeId(droneId)) {
         const chatRef = parseCanvasChatNodeId(droneId);
         if (!chatRef) return;
         if (chatRef.chatName === 'default') return;
@@ -1158,19 +1457,48 @@ export function DroneCanvasDock({
       inlineRenameSettledRef.current = false;
       setInlineRenameBusy(false);
       setInlineRenamingDroneId(droneId);
-      setInlineRenameDraft(String(node.label ?? droneId));
+      setInlineRenameDraft(canvasDroneId
+        ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
+        : String(node.label ?? droneId));
       setMessageError(null);
     },
-    [nodesByDroneId, setSelectedDroneIds],
+    [effectiveDroneNameById, nodesByDroneId, onRenameDrone, setSelectedDroneIds],
   );
 
   const submitInlineRename = React.useCallback(async () => {
     const droneId = String(inlineRenamingDroneId ?? '').trim();
     if (!droneId) return;
     const newName = String(inlineRenameDraft ?? '').trim();
-    const currentName = String(nodesByDroneId[droneId]?.label ?? '').trim();
+    const renamingDroneId = parseCanvasDroneNodeId(droneId);
+    const currentName = renamingDroneId
+      ? String(effectiveDroneNameById[renamingDroneId] ?? '').trim() || renamingDroneId
+      : String(nodesByDroneId[droneId]?.label ?? '').trim();
     if (!newName || newName === currentName) {
       cancelInlineRename();
+      return;
+    }
+    if (renamingDroneId) {
+      if (!onRenameDrone) {
+        cancelInlineRename();
+        return;
+      }
+      setInlineRenameBusy(true);
+      try {
+        const result = await onRenameDrone(renamingDroneId, newName);
+        if (result.ok) {
+          setRenamedDroneNameById((prev) => ({ ...prev, [renamingDroneId]: newName }));
+          cancelInlineRename();
+          return;
+        }
+        setMessageError(String(result.error ?? 'Rename failed.'));
+        // The field stays open for another try, and clicking away saves again.
+        inlineRenameSettledRef.current = false;
+      } catch (err: any) {
+        setMessageError(err?.message ?? String(err));
+        inlineRenameSettledRef.current = false;
+      } finally {
+        setInlineRenameBusy(false);
+      }
       return;
     }
     if (isCanvasDraftNodeId(droneId)) {
@@ -1225,10 +1553,12 @@ export function DroneCanvasDock({
     }
   }, [
     cancelInlineRename,
+    effectiveDroneNameById,
     inlineRenameDraft,
     inlineRenamingDroneId,
     nodesByDroneId,
     onRenameChat,
+    onRenameDrone,
     setMessageError,
     upsertNodes,
   ]);
@@ -1338,7 +1668,8 @@ export function DroneCanvasDock({
   );
 
   const createDraftAtWorldPoint = React.useCallback(
-    (anchorWorldX: number, anchorWorldY: number, options?: { avoidCollisions?: boolean }) => {
+    /** `focus: 'canvas'` keeps the keyboard on the canvas: Q records, S or Tab sends, Enter starts typing. */
+    (anchorWorldX: number, anchorWorldY: number, options?: { avoidCollisions?: boolean; focus?: 'canvas' | 'composer' }) => {
       const draftNodeId = createDraftNodeId();
       const placement = getDraftPlacement(anchorWorldX, anchorWorldY, options);
       upsertNodes([
@@ -1355,10 +1686,12 @@ export function DroneCanvasDock({
       setMessageDraft('');
       setMessageError(null);
       setMessageBarExpanded(true);
-      focusMessageInput();
+      if (options?.focus === 'canvas') focusViewport();
+      else focusMessageInput();
     },
     [
       focusMessageInput,
+      focusViewport,
       getDraftPlacement,
       normalizedDraftRepoLabel,
       setDraftPromptForNode,
@@ -1373,7 +1706,7 @@ export function DroneCanvasDock({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
-    const centerWorld = screenToWorldPoint(
+    const centerWorld = screenToStorePoint(
       rect.left + rect.width / 2,
       rect.top + rect.height / 2,
       rect,
@@ -1407,7 +1740,7 @@ export function DroneCanvasDock({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
-    const center = screenToWorldPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, panX, panY, scale);
+    const center = screenToStorePoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, panX, panY, scale);
     createChatAtWorldPoint(center.x, center.y);
   }, [createChatAtWorldPoint, createDraftNearViewportCenter, droneScope, getView]);
 
@@ -1432,7 +1765,7 @@ export function DroneCanvasDock({
       // Later arrivals land where the user is looking, not at the board origin.
       const rect = viewport.getBoundingClientRect();
       const view = getView();
-      const center = screenToWorldPoint(
+      const center = screenToStorePoint(
         rect.left + rect.width / 2,
         rect.top + rect.height / 2,
         rect,
@@ -1494,6 +1827,13 @@ export function DroneCanvasDock({
   }, [effectiveDroneNameById, nodes, upsertNodes]);
 
   React.useEffect(() => {
+    setRenamedDroneNameById((prev) => {
+      const settled = Object.keys(prev).filter((droneId) => String(droneNameById[droneId] ?? '').trim() === prev[droneId]);
+      if (settled.length === 0) return prev;
+      const next = { ...prev };
+      for (const droneId of settled) delete next[droneId];
+      return next;
+    });
     setOptimisticDroneNameById((prev) => {
       const next: Record<string, string> = {};
       let changed = false;
@@ -1560,6 +1900,18 @@ export function DroneCanvasDock({
     });
   }, [inlineRenamingDroneId]);
 
+  const activateCanvasNode = React.useCallback((nodeId: string) => {
+    if (isCanvasDraftNodeId(nodeId)) return;
+    const droneId = parseCanvasDroneNodeId(nodeId);
+    if (droneId) {
+      onActivateChat?.(droneId, 'default');
+      return;
+    }
+    const chat = parseCanvasChatNodeId(nodeId);
+    // Side chats included: selection opens their chat as the main chat.
+    if (chat) onActivateChat?.(chat.droneId, chat.chatName);
+  }, [onActivateChat]);
+
   React.useEffect(() => {
     const onWindowMouseMove = (event: MouseEvent) => {
       // The mouseup can be lost (released over a webview, outside the window, or swallowed by another handler),
@@ -1582,8 +1934,8 @@ export function DroneCanvasDock({
     const moves = createFrameBatch((event: MouseEvent) => {
       const nodeDrag = nodeDragRef.current;
       if (nodeDrag) {
-        const dx = (event.clientX - nodeDrag.startClientX) / nodeDrag.scale;
-        const dy = (event.clientY - nodeDrag.startClientY) / nodeDrag.scale;
+        const dx = (event.clientX - nodeDrag.startClientX) / nodeDrag.scale / cardSpreadRef.current.x;
+        const dy = (event.clientY - nodeDrag.startClientY) / nodeDrag.scale / cardSpreadRef.current.y;
         const overComposer = nodeDrag.moved && isOverMessageComposer(event.clientX, event.clientY);
         setComposerDropHover(overComposer);
         if (nodeDrag.moved && !overComposer) {
@@ -1595,17 +1947,21 @@ export function DroneCanvasDock({
             ),
           );
           if (draggedDroneIds.length > 0) {
-            const assignmentTarget = resolveCanvasAssignmentDropTarget(
-              nodeDrag.droneIds,
-              resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY),
-            );
+            const pointTarget = resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY);
+            const assignmentTarget = resolveCanvasAssignmentDropTarget(nodeDrag.droneIds, pointTarget);
             setAssignmentHoverNodeId(assignmentTarget.canvasNodeId);
             setAssignmentHoverTargetCount(assignmentTarget.targetDroneIds.length);
-            dispatchCanvasAssignmentPreview({
+            // Repositioning cards and hovering other canvas nodes are local to
+            // the canvas. Only advertise a chat drop when the pointer enters it.
+            dispatchCanvasAssignmentPreview(pointTarget?.kind === 'chat-pane' ? {
               droneIds: draggedDroneIds,
               overDroneId: assignmentTarget.ownerDroneId,
-            });
+            } : null);
           }
+        } else {
+          setAssignmentHoverNodeId(null);
+          setAssignmentHoverTargetCount(0);
+          dispatchCanvasAssignmentPreview(null);
         }
         moveNodes(
           nodeDrag.droneIds.map((droneId) => {
@@ -1723,6 +2079,16 @@ export function DroneCanvasDock({
       }
       marqueeDragRef.current = null;
       setSelectionBox(null);
+      if (marqueeDrag?.moved) {
+        // Read after moves.flush(): React may not have rendered the final
+        // rectangle yet. Include existing cards in an additive selection.
+        const selected = getView().selectedDroneIds;
+        if (selected.length === 1) {
+          selectionAnchorRef.current = selected[0];
+          setMessageBarExpanded(true);
+          activateCanvasNode(selected[0]);
+        }
+      }
     };
 
     const onWindowBlur = () => {
@@ -1755,7 +2121,7 @@ export function DroneCanvasDock({
       window.removeEventListener('mouseup', onWindowMouseUp, true);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
+  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
 
   const applyZoomAt = React.useCallback(
     (nextScaleRaw: number, anchorClientX: number, anchorClientY: number) => {
@@ -1776,14 +2142,14 @@ export function DroneCanvasDock({
   );
   const fitViewportToNodes = React.useCallback(() => {
     const viewport = viewportRef.current;
-    const bounds = Object.values(fallbackNodeBoundsById);
+    const bounds = Object.values(viewNodeBoundsById);
     if (!viewport || bounds.length === 0) {
       resetViewport();
       return;
     }
     const fit = fitViewportToBounds(bounds, viewport.clientWidth, viewport.clientHeight);
     if (fit) setViewport(fit.panX, fit.panY, fit.scale);
-  }, [fallbackNodeBoundsById, resetViewport, setViewport]);
+  }, [viewNodeBoundsById, resetViewport, setViewport]);
 
   const openMessageBar = React.useCallback(() => {
     if (selectedDroneIds.length === 0) return;
@@ -1801,7 +2167,7 @@ export function DroneCanvasDock({
     if (selectedDroneIds.length === 0) return false;
     const regularNodeIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
     const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
-    let regularTargets = collectUniqueChatTargets(regularNodeIds);
+    let regularTargets = collectUniqueChatTargets(regularNodeIds, droneById);
     // Keep regular-message sends single-flight to avoid accidental duplicate broadcasts.
     if (messageSending && draftNodeIds.length === 0) return false;
 
@@ -2036,6 +2402,7 @@ export function DroneCanvasDock({
     }
   }, [
     draftPromptByNodeId,
+    droneById,
     draftSpawnCount,
     draggingNodeId,
     focusViewport,
@@ -2061,7 +2428,6 @@ export function DroneCanvasDock({
     upsertNodes,
   ]);
 
-  const selectionAnchorRef = React.useRef<string | null>(null);
   const onNodeMouseDown = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
       if (inlineRenamingDroneId === droneId) {
@@ -2127,19 +2493,9 @@ export function DroneCanvasDock({
       }
       selectionAnchorRef.current = droneId;
       setSelectedDroneIds([droneId]);
-      if (!isCanvasDraftNodeId(droneId)) {
-        const canvasDroneId = parseCanvasDroneNodeId(droneId);
-        if (canvasDroneId) {
-          onActivateChat?.(canvasDroneId, 'default');
-          return;
-        }
-        const chatRef = parseCanvasChatNodeId(droneId);
-        if (!chatRef) return;
-        // Side chats included: a card opens its chat as the main chat.
-        onActivateChat?.(chatRef.droneId, chatRef.chatName);
-      }
+      activateCanvasNode(droneId);
     },
-    [focusViewportElement, nodeOrder, onActivateChat, selectedDroneIds, setSelectedDroneIds],
+    [activateCanvasNode, focusViewportElement, nodeOrder, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onNodeDoubleClick = React.useCallback(
@@ -2151,7 +2507,7 @@ export function DroneCanvasDock({
     [beginInlineRename],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
@@ -2222,14 +2578,17 @@ export function DroneCanvasDock({
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
-      const worldPoint = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
+      const worldPoint = screenToStorePoint(event.clientX, event.clientY, rect, panX, panY, scale);
+      // The new draft is selected and the keyboard stays on the canvas: Q records into it, S or Tab sends,
+      // Enter starts typing.
       if (droneScope) {
         createChatAtWorldPoint(worldPoint.x, worldPoint.y);
+        focusViewport();
         return;
       }
-      createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false });
+      createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false, focus: 'canvas' });
     },
-    [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, inlineRenamingDroneId, getView],
+    [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, focusViewport, inlineRenamingDroneId, getView],
   );
 
   const onWheel = React.useCallback(
@@ -2292,7 +2651,7 @@ export function DroneCanvasDock({
       if (!activeRect) return;
       const clientX = activeRect.left + activeRect.width / 2;
       const clientY = activeRect.top + activeRect.height / 2;
-      const origin = screenToWorldPoint(clientX, clientY, rect, panX, panY, scale);
+      const origin = screenToStorePoint(clientX, clientY, rect, panX, panY, scale);
       upsertNodes(
         ids.map((nodeId, idx) => {
           const chatRef = parseCanvasChatNodeId(nodeId);
@@ -2386,7 +2745,7 @@ export function DroneCanvasDock({
     if (viewport) {
       const rect = viewport.getBoundingClientRect();
       const cursor = at ?? cursorClientPointRef.current;
-      anchor = screenToWorldPoint(
+      anchor = screenToStorePoint(
         cursor?.x ?? rect.left + rect.width / 2,
         cursor?.y ?? rect.top + rect.height / 2,
         rect,
@@ -2683,6 +3042,14 @@ export function DroneCanvasDock({
               Last msgs
             </UiToolbarButton>
             <UiToolbarButton size="xsmall"
+              pressed={canvasDetailedCards}
+              onClick={() => useDroneHubUiStore.getState().setCanvasDetailedCards(!canvasDetailedCards)}
+              title="Show cards like the Entity's Work view: state, what each chat is doing, how long it has worked or idled, and what it has cost."
+            >
+              Detailed cards
+            </UiToolbarButton>
+            {canvasDetailedCards ? <ChatStepsControl /> : null}
+            <UiToolbarButton size="xsmall"
               pressed={!hideSideChatWindowsWithCanvas}
               onClick={() => setHideSideChatWindowsWithCanvas(!hideSideChatWindowsWithCanvas)}
               title="Keep floating side chat windows visible while the canvas is open. Off, they stay hidden until the canvas is closed."
@@ -2818,7 +3185,7 @@ export function DroneCanvasDock({
         tabIndex={0}
         data-shortcut-capture="true"
         data-drone-canvas-viewport="1"
-        className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
+        className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${canvasDetailedCards ? 'dh-canvas-work-ground' : ''} ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onKeyDown={onViewportKeyDown}
         onMouseDown={onCanvasMouseDown}
         onMouseMove={(event) => {
@@ -2869,14 +3236,14 @@ export function DroneCanvasDock({
                 <marker
                   id={chatOwnerMarkerId}
                   viewBox="0 0 10 10"
-                  refX="5"
+                  refX="9"
                   refY="5"
                   markerUnits="userSpaceOnUse"
-                  markerWidth={edgeMarkerWorldSize(EDGE_DOT_MARKER_SCREEN_PX)}
-                  markerHeight={edgeMarkerWorldSize(EDGE_DOT_MARKER_SCREEN_PX)}
+                  markerWidth={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
+                  markerHeight={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
                   orient="auto"
                 >
-                  <circle cx="5" cy="5" r="3" fill="var(--canvas-chat-owner)" />
+                  <path d="M 1 5 H 9 M 9 2.5 V 7.5" fill="none" stroke={CHAT_OWNER_EDGE_COLOR} strokeWidth="1.6" strokeLinecap="round" />
                 </marker>
               </defs>
               {relationshipEdges.map((edge) => (
@@ -2886,7 +3253,7 @@ export function DroneCanvasDock({
                   fill="none"
                   stroke={
                     edge.variant === 'chat-owner'
-                      ? 'var(--canvas-chat-owner-muted)'
+                      ? CHAT_OWNER_EDGE_COLOR
                       : edge.variant === 'assigned'
                         ? 'var(--canvas-assigned-muted)'
                         : 'var(--canvas-related-muted)'
@@ -2932,16 +3299,22 @@ export function DroneCanvasDock({
                 ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
                 : chatNodeStateById[node.droneId] ?? null;
             const deleting = Boolean(deletingChatNodeById[node.droneId]);
-            const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
-            const nodeHeight = nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
+            const detail = detailByNodeId?.[node.droneId] ?? null;
+            const nodeWidth = detail
+              ? detailedWidthByNodeId?.[node.droneId] ?? DETAILED_CARD_WIDTH_PX
+              : nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
+            const nodeHeight = detail ? DETAILED_CARD_HEIGHT_PX : nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
             // A drone board is one drone's chats: its repository and branch are the same on every card.
+            // A chat linked to its drone's card on this canvas shows neither: the drone card does.
+            const repoFromDroneCard = Boolean(chatRef && droneNodeByDroneId[chatRef.droneId]);
+            const showRepo = Boolean(nodeDroneId) && !droneScope && !repoFromDroneCard;
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : nodeDroneId && !droneScope
-                ? String(droneRepoById[nodeDroneId] ?? '').trim()
+              : showRepo
+                ? String(droneRepoById[nodeDroneId!] ?? '').trim()
                 : '';
-            const repoBranch = !draftNode && nodeDroneId && !droneScope
-              ? String(droneById[nodeDroneId]?.repoBranch ?? '').trim()
+            const repoBranch = !draftNode && showRepo
+              ? String(droneById[nodeDroneId!]?.repoBranch ?? '').trim()
               : '';
             const canvasDroneLabel = canvasDroneId
               ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
@@ -2954,6 +3327,9 @@ export function DroneCanvasDock({
             return <CanvasNodeCard
               key={node.droneId}
               node={node}
+              viewX={node.x * cardSpread.x}
+              viewY={node.y * cardSpread.y}
+              detail={detail}
               draftNode={draftNode}
               droneNode={droneNode}
               canvasDroneId={canvasDroneId}
@@ -2984,6 +3360,20 @@ export function DroneCanvasDock({
           })}
         </CanvasWorldLayer>
 
+        {(() => {
+          // The card under the pointer, or the one selected card: its steps in full, off the cards.
+          const focusId = hoveredCardId && detailByNodeId?.[hoveredCardId]
+            ? hoveredCardId
+            : selectedDroneIds.length === 1 ? selectedDroneIds[0] : null;
+          const focus = focusId ? detailByNodeId?.[focusId] : null;
+          if (!focusId || !focus) return null;
+          const focusDroneId = parseCanvasDroneNodeId(focusId);
+          const title = focusDroneId
+            ? String(effectiveDroneNameById[focusDroneId] ?? '').trim() || focusDroneId
+            : parseCanvasChatNodeId(focusId)?.chatName ?? nodesByDroneId[focusId]?.label ?? '';
+          return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
+        })()}
+
         {selectionBox ? (
           <div
             className="absolute pointer-events-none border border-dashed border-[var(--accent)] bg-[var(--accent-subtle)]"
@@ -2998,7 +3388,7 @@ export function DroneCanvasDock({
 
         <CanvasMessageBar
           selectionKey={`canvas:${boardDroneId ?? 'global'}:${selectedDraftNodeId ?? 'messages'}`}
-          targets={collectUniqueChatTargets(selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id)))}
+          targets={selectedMessageTargets}
           droneById={droneById}
           hasDrafts={selectedDroneIds.some(isCanvasDraftNodeId)}
           spawnAgentKey={normalizedSpawnAgentKey}
@@ -3023,6 +3413,23 @@ export function DroneCanvasDock({
             if (messageError) setMessageError(null);
           }}
           onSend={sendCanvasPrompt}
+          draftControls={selectedDraftNodeId ? {
+            // Above the input, so they can be set before typing or recording.
+            meta: (
+              <>
+                <DraftAgentAndRepo agentKey={normalizedSpawnAgentKey} agentEntries={spawnAgentMenuEntries} onAgentChange={onSpawnAgentKeyChange}
+                  repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries} onRepoChange={onCreateRepoPathChange} disabled={controlsDisabled} />
+                <DraftModelPicker agent={spawnAgentConfig} agentKey={normalizedSpawnAgentKey} model={normalizedSpawnModel} reasoning={spawnReasoning}
+                  onModelChange={onSpawnModelChange} onReasoningChange={(next) => useDroneHubUiStore.getState().setSpawnReasoning(next)} disabled={controlsDisabled} />
+              </>
+            ),
+            // The draft's model is picked above; no per-send override beside it.
+            trailing: <></>,
+          } : selectedDraftChat ? {
+            meta: <DraftChatAgentSelect droneId={selectedDraftChat.droneId} chatName={selectedDraftChat.chatName} disabled={controlsDisabled}
+              // The next new chat of a drone in this repository starts with this agent too.
+              onRemember={(key) => useDroneHubUiStore.getState().updateSpawnContextForRepo(selectedDraftChat.repoPath, { spawnAgentKey: key, spawnModel: '', spawnReasoning: '' })} />,
+          } : null}
           references={messageReferences}
           onReferencesChange={setMessageReferences}
           referenceDropActive={composerDropHover}

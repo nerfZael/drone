@@ -1,11 +1,16 @@
 import type { HubRouter } from '../hub-router';
 import { getUsageStore, type UsageFilter } from '../usage/UsageStore';
 import { refreshUsagePrices } from '../usage/refreshUsagePrices';
+import { applyBundledPrices } from '../usage/bundledPrices';
 import { readChatMetadataFromStore } from '../transcript-store';
 
 export function registerUsageRoutes(router: HubRouter): void {
   const store = getUsageStore();
-  if (!store.prices().length) void refreshUsagePrices(store).catch((error) => console.warn('Usage price catalog unavailable:', error.message));
+  // Long-context rates go on top of the catalog's, so a first start fetches the catalog before adding them.
+  if (!store.prices().length) {
+    void refreshUsagePrices(store).catch((error) => console.warn('Usage price catalog unavailable:', error.message))
+      .finally(() => applyBundledPrices(store));
+  } else applyBundledPrices(store);
 
   router.get('/api/usage', ({ url, json, fail }) => {
     const filter: UsageFilter = {};
@@ -24,6 +29,10 @@ export function registerUsageRoutes(router: HubRouter): void {
     if (!['agent', 'provider', 'model', 'chat', 'repo', 'purpose'].includes(group)) fail(400, 'Invalid usage grouping');
     filter.groupBy = group as UsageFilter['groupBy'];
     json(200, { ok: true, ...getUsageStore().analytics(filter) });
+  });
+  // Cost and timing per chat, for the canvas's detailed cards; one request for every card.
+  router.get('/api/usage/chats', ({ url, json }) => {
+    json(200, { ok: true, chats: getUsageStore().chatActivity({ droneId: url.searchParams.get('droneId') || undefined }) });
   });
   router.get('/api/drones/:droneId/chats/:chatName/usage', ({ params, json, fail }) => {
     const chat = readChatMetadataFromStore({ droneId: params.droneId, chatName: params.chatName }).chat;

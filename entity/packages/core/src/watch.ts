@@ -12,7 +12,7 @@ export type WatchAction =
   | { stop_output: { reason: string; scope?: StopScope; mode?: StopMode } }
   | { resume_output: Record<string, never> }
   | { wake: { reason: string } }
-  | { run_program: { name: string; code: string } };
+  | { run_program: { name: string; code: string; label?: string } };
 
 /** work: everything under the installing limb except that limb itself. subtree: including it. entity: everything. */
 export type StopScope = 'work' | 'subtree' | 'entity';
@@ -31,6 +31,8 @@ export type WatchCondition =
 
 export interface WatchSpec {
   name: string;
+  /** A few words saying what it does, for views with little room ("tests on quiet"). */
+  label?: string;
   on: WatchTrigger;
   when?: WatchCondition;
   do: WatchAction;
@@ -107,7 +109,7 @@ const actionSchema: Schema = {
       properties: {
         run_program: {
           type: 'object', additionalProperties: false, required: ['name', 'code'],
-          properties: { name: { type: 'string', maxLength: 80 }, code: { type: 'string', maxLength: 20_000 } },
+          properties: { name: { type: 'string', maxLength: 80 }, label: { type: 'string', maxLength: 40 }, code: { type: 'string', maxLength: 20_000 } },
         },
       },
     },
@@ -154,6 +156,7 @@ export const watchSchema: Schema = {
   type: 'object', additionalProperties: false, required: ['name', 'on', 'do'],
   properties: {
     name: { type: 'string', maxLength: 80, description: 'Short name shown in the inspector' },
+    label: { type: 'string', maxLength: 40, description: 'A few words saying what it does, e.g. "tests on quiet"' },
     on: triggerSchema,
     when: conditionSchema(2),
     do: actionSchema,

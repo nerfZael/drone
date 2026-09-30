@@ -13,6 +13,8 @@ import {
   type NumericTableSortDirection,
 } from './table-sort.js';
 
+const useLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
+
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 type TableMode = 'fit' | 'natural';
 type TableSortState = {
@@ -151,7 +153,7 @@ function useFitTableColumnWidths(children: React.ReactNode) {
   const [availableWidth, setAvailableWidth] = React.useState<number | null>(null);
   const metrics = React.useMemo(() => fitTableColumnMetrics(children), [children]);
 
-  React.useEffect(() => {
+  useLayoutEffect(() => {
     const node = wrapRef.current;
     if (!node) return;
 
@@ -1257,8 +1259,8 @@ export function MarkdownMessage({
   );
 
   React.useEffect(() => {
-    setTableModes({});
-    setTableSorts({});
+    setTableModes((current) => Object.keys(current).length ? {} : current);
+    setTableSorts((current) => Object.keys(current).length ? {} : current);
     setExpandedTable(null);
     setExpandedTableMode('fit');
   }, [normalizedText]);

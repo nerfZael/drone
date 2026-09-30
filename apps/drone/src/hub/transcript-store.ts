@@ -48,6 +48,9 @@ export type StoredTranscriptTurn = {
   silentCompletion?: boolean;
   error?: string;
   promptAt?: string;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   completedAt?: string;
   model?: string;
@@ -90,6 +93,9 @@ export type StoredPendingPrompt = {
   approvals?: unknown;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   updatedAt?: string;
 };
@@ -871,6 +877,9 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     at,
     ...(id ? { id } : {}),
     ...(typeof raw?.codexTurnId === 'string' && raw.codexTurnId.trim() ? { codexTurnId: raw.codexTurnId.trim() } : {}),
+    ...(typeof raw?.runId === 'string' && raw.runId.trim() ? { runId: raw.runId.trim() } : {}),
+    ...(typeof raw?.runStartedAt === 'string' && Number.isFinite(Date.parse(raw.runStartedAt))
+      ? { runStartedAt: raw.runStartedAt } : {}),
     ...(providerCheckpoint ? { providerCheckpoint } : {}),
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),

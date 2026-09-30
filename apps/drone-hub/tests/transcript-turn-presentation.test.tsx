@@ -96,7 +96,7 @@ describe('completed external transcript presentation', () => {
     );
 
     expect(html).toContain('data-user-message-follow-up="asap"');
-    expect(html).toContain('>ASAP</span>');
+    expect(html).toContain('>Added to this run · ASAP</span>');
     expect(html).toContain('Also inspect the mobile path.');
     expect(html.match(/max-w-\[min\(85%,var\(--chat-prose-max\)\)\]/g)).toHaveLength(1);
     expect(html).toContain('dateTime="2026-08-07T10:01:00.000Z"');

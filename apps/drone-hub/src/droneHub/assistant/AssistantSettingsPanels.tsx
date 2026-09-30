@@ -1,5 +1,5 @@
 import React from 'react';
-import { AssistantWorkspacePicker } from './AssistantWorkspacePicker';
+import { WorkspaceAccessPicker } from './WorkspaceAccessPicker';
 
 import { IconWrench } from '../app/icons';
 import { IconFolder } from '../icons';
@@ -209,10 +209,10 @@ export function AssistantWorkspacesPanel({
         <div className="text-10 tabular-nums text-[var(--muted-dim)]">{selectedCount} selected</div>
       </div>
       {threadId ? (
-        <AssistantWorkspacePicker
+        <WorkspaceAccessPicker
           key={threadId}
           requestJson={requestJson}
-          threadId={threadId}
+          endpoint={`/api/assistant/threads/${encodeURIComponent(threadId)}/workspaces`}
           disabled={disabled}
           onSelectionChange={setSelectedCount}
         />

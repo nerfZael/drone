@@ -1,6 +1,7 @@
 import { deletableChatNames } from '@drone/hub-model/sidebar';
 import { applyChatModelOverrides } from './droneHub/chat/selected-chat-model-overrides';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './droneHub/canvas/canvas-messaging';
+import { droneRenameErrorMessage } from './droneHub/app/drone-rename';
 import { useDesktopNotifications } from './droneHub/app/use-desktop-notifications';
 import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
@@ -11,6 +12,7 @@ import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
 import { recordUiAction } from './ui-diagnostics';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
+import { requestFileExplorerOpen } from './droneHub/files/file-explorer-navigation';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
@@ -20,6 +22,7 @@ import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './drone
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
+  chatAgentSupportsReasoning,
   executeCompanionProposal,
   resolveCompanionChatName,
   type CompanionProposalChatOverrides,
@@ -1154,12 +1157,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return value || null;
   }, [spawnModel]);
   const spawnModelForSeed = spawnAgentConfig.kind !== 'custom' ? spawnModelValue : null;
-  const spawnReasoningForSeed =
-    spawnAgentConfig.kind === 'native' ||
-    (spawnAgentConfig.kind === 'builtin' &&
-      (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'))
-      ? String(spawnReasoning ?? '').trim() || null
-      : null;
+  const spawnReasoningForSeed = chatAgentSupportsReasoning(spawnAgentConfig)
+    ? String(spawnReasoning ?? '').trim() || null
+    : null;
   const spawnAgentReadOnlySupported =
     spawnAgentConfig.kind === 'native' ||
     (spawnAgentConfig.kind === 'builtin' &&
@@ -3798,10 +3798,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = currentDrone?.id;
       if (!droneId) return;
       const diagnosticId = beginDesktopWorkspaceLoad('file-open', droneId, resolvedPath);
-      focusEditorPane();
       const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
+        focusEditorPane();
         const cached = openedEditorFileTabs.some((tab) => tab.path === resolvedPath);
         desktopWorkspaceLoads.mark(diagnosticId, 'openTabHit', cached ? 1 : 0);
         setPendingFileOpen(null);
@@ -3821,13 +3821,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         desktopWorkspaceLoads.mark(diagnosticId, 'pathResolved');
         setPendingFileOpen(null);
         if (directory) {
+          requestFileExplorerOpen(droneId);
           desktopWorkspaceLoads.mark(diagnosticId, 'directoryLink', 1);
           const root = normalizeWorkspaceLinkPath(defaultFsPathForCurrentDrone);
           setCurrentFsPath(root && resolvedPath !== root && (root === '/' || resolvedPath.startsWith(`${root}/`))
             ? root : workspaceLinkParent(resolvedPath));
-          setExplorerReveal({ path: resolvedPath, sequence: version });
+          setExplorerReveal({ path: resolvedPath, sequence: version, kind: 'directory' });
           desktopWorkspaceLoads.committed(diagnosticId);
         } else {
+          focusEditorPane();
           revealFileInExplorer(resolvedPath);
           openEditorFile({ ...next, path: resolvedPath, name, initialRead });
         }
@@ -4125,7 +4127,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
           const resolvedChat = resolveChatNameForDrone(drone, chatName);
-          if (!(await waitForDraftChatCreation(drone.id, resolvedChat))) throw new Error('Chat creation failed.');
+          // A new draft chat (a double-click on a drone's canvas) is published by its first message, as from its own
+          // composer; otherwise leaving it would clean it up as abandoned.
+          const draftKey = droneChatQueueKey(drone.id, resolvedChat);
+          const tracked = newDraftChatsRef.current.get(draftKey);
+          if (tracked) tracked.submissionInFlight = true;
+          if (!(await waitForDraftChatCreation(drone.id, resolvedChat))) {
+            if (tracked) tracked.submissionInFlight = false;
+            throw new Error('Chat creation failed.');
+          }
+          if (tracked) {
+            try {
+              await requestJson<{ ok: true }>(
+                `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/publish`,
+                { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
+              );
+              newDraftChatsRef.current.delete(draftKey);
+            } catch (error) {
+              tracked.submissionInFlight = false;
+              tracked.preserveOnLeave = true;
+              throw error;
+            }
+          }
           await applyChatModelOverrides(requestJson, { droneId: drone.id, chatName: resolvedChat }, overrides);
           const data = await sendDroneChatPrompt(requestJson, {
             droneId: drone.id, chatName: resolvedChat, prompt,
@@ -4288,6 +4311,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       requestJson,
       suggestAndRenameDraftDrone,
     ],
+  );
+  const renameCanvasDrone = React.useCallback(
+    async (droneId: string, newName: string) => {
+      const result = await renameDroneTo(droneId, newName, { showAlert: false, source: 'canvas' });
+      return result.ok ? { ok: true } : { ok: false, error: droneRenameErrorMessage(result.error) };
+    },
+    [renameDroneTo],
   );
   const renameCanvasChat = React.useCallback(
     async (
@@ -5635,6 +5665,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onSendCanvasPrompt={sendCanvasPrompt}
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
+          onRenameCanvasDrone={renameCanvasDrone}
           onDeleteCanvasChats={deleteCanvasChats}
           onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
@@ -5787,6 +5818,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!isSelectedDrone) showDroneWorkspace(drone.id);
             requestRightPanelTab('prs');
           }}
+          onShowChanges={() => {
+            if (!isSelectedDrone) showDroneWorkspace(drone.id);
+            requestRightPanelTab('changes');
+          }}
         />
       );
     },
@@ -5801,6 +5836,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentPortReachability,
       createCanvasDroneFromDraft,
       renameCanvasChat,
+      renameCanvasDrone,
       deleteCanvasChat,
       cloneDroneChat,
       cloneDroneWithoutSelection,

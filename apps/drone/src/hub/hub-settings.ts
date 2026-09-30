@@ -492,6 +492,7 @@ const SETTING_KEYS = {
   speech: 'speech',
   voiceInput: 'voice-input',
   userContext: 'user-context',
+  chatSteps: 'chat-steps',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -1256,6 +1257,42 @@ export async function updateStoredUserTimeZone(raw: unknown): Promise<UserContex
   if (current.timeZone === timeZone) return current;
   await putCanonicalSetting(SETTING_KEYS.userContext, { timeZone });
   return { timeZone };
+}
+
+/** Step tracking for agent chats: a cheap model summarizes each running turn into done / doing / next. */
+export type ChatStepsSettings = {
+  enabled: boolean;
+  /** "provider/model", as the Entity's model settings name models. */
+  model: string;
+  reasoning: string;
+};
+
+export const DEFAULT_CHAT_STEPS_SETTINGS: ChatStepsSettings = {
+  enabled: false,
+  model: 'openai-codex/gpt-6-luna',
+  reasoning: 'low',
+};
+
+export async function resolveChatStepsSettings(): Promise<ChatStepsSettings> {
+  const record = await getCanonicalSetting<Partial<ChatStepsSettings>>(SETTING_KEYS.chatSteps, () => null);
+  const value = record?.value ?? {};
+  const model = typeof value.model === 'string' && /^[^/\s]+\/\S+$/.test(value.model.trim()) ? value.model.trim() : DEFAULT_CHAT_STEPS_SETTINGS.model;
+  const reasoning = typeof value.reasoning === 'string' && value.reasoning.trim() ? value.reasoning.trim() : DEFAULT_CHAT_STEPS_SETTINGS.reasoning;
+  return { enabled: value.enabled === true, model, reasoning };
+}
+
+export async function updateChatStepsSettings(raw: unknown): Promise<ChatStepsSettings> {
+  const patch = raw && typeof raw === 'object' ? raw as Partial<ChatStepsSettings> : {};
+  const current = await resolveChatStepsSettings();
+  const next: ChatStepsSettings = {
+    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
+    model: typeof patch.model === 'string' ? patch.model.trim() : current.model,
+    reasoning: typeof patch.reasoning === 'string' ? patch.reasoning.trim() : current.reasoning,
+  };
+  if (!/^[^/\s]+\/\S+$/.test(next.model)) throw new Error('model must be "provider/model"');
+  if (!next.reasoning) throw new Error('reasoning is required');
+  await putCanonicalSetting(SETTING_KEYS.chatSteps, next);
+  return next;
 }
 
 export async function resolveUserContextSettingsResponse(): Promise<{

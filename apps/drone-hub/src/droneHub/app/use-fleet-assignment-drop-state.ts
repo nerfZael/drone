@@ -67,7 +67,7 @@ export function useFleetAssignmentDropState({
       const detail = normalizeCanvasAssignmentPreviewDetail(
         (event as CustomEvent<CanvasAssignmentPreviewDetail | null>).detail,
       );
-      setCanvasAssignmentPreview(detail);
+      setCanvasAssignmentPreview(detail?.overDroneId === currentDrone.id ? detail : null);
     };
     window.addEventListener(CANVAS_ASSIGNMENT_PREVIEW_EVENT, onCanvasAssignmentPreview as EventListener);
     window.addEventListener('mouseup', clearTransientDropState);

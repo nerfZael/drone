@@ -2,6 +2,116 @@ import { describe, expect, test } from 'bun:test';
 import { collectInlineAgentMedia } from '../src/droneHub/chat/inline-agent-media';
 
 describe('collectInlineAgentMedia', () => {
+  test('uses the folder after the filename when a later comparison folder is also mentioned', () => {
+    const text = "Round 6 is ready. The rocks are unchanged, and the ore no longer sits on the rock; it's part of the rock surface. " +
+      '`ore-r6-sheet.png` in `graphics-review/environment/ore/` shows front, rear and a close-up, and round 5 is in `round-5/`.';
+    const media = collectInlineAgentMedia(text, 'drone-1', '/work/repo');
+    expect(media.map(item => item.fileRef?.path)).toEqual([
+      '/work/repo/graphics-review/environment/ore/ore-r6-sheet.png',
+    ]);
+  });
+
+  test('an explicit following folder takes precedence over earlier directory context', () => {
+    const media = collectInlineAgentMedia(
+      'Old renders are in `before/`; `result.png` in `after/` is the new version.',
+      'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/after/result.png']);
+  });
+
+  test('following folders resolve bare filenames and markdown links without duplicate previews', () => {
+    for (const mention of ['result.png', '`result.png`', '[result](result.png)', '![result](result.png)']) {
+      const media = collectInlineAgentMedia(
+        `${mention} in the folder \`renders/\`. Previous images are in \`old/\`.`,
+        'host-drone', '/home/dev/project',
+      );
+      expect(media.map(item => item.fileRef?.path)).toEqual(['/home/dev/project/renders/result.png']);
+    }
+  });
+
+  test('a following folder cannot redirect a fully specified path', () => {
+    const media = collectInlineAgentMedia(
+      '`/tmp/result.png` in `renders/` and previous images in `old/`.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/tmp/result.png']);
+  });
+
+  test('does not treat an unrelated later sentence as the filename directory', () => {
+    const media = collectInlineAgentMedia(
+      '`result.png` is ready. Older images in `old/` and `older/` are for comparison.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/result.png']);
+  });
+
+  test('uses the image folder before the filename, not a later comparison folder', () => {
+    const text = 'I rebuilt the ore concepts. There are two now, A and B, in ' +
+      '`graphics-review/environment/ore/`: `ore-r2-side-by-side.png` shows both, and the ' +
+      'round-1 versions are in `round-1/` for comparison.';
+    const media = collectInlineAgentMedia(text, 'drone-1', '/work/repo');
+    expect(media.map(item => item.fileRef?.path)).toEqual([
+      '/work/repo/graphics-review/environment/ore/ore-r2-side-by-side.png',
+    ]);
+  });
+
+  test('resolves each paragraph independently, including repeated filenames', () => {
+    const media = collectInlineAgentMedia(
+      'Before in `before/`: `result.png`.\n\nAfter in `after/`: `result.png`.',
+      'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/before/result.png', '/work/repo/after/result.png']);
+  });
+
+  test('resolves image filenames against the explicit directory in the message', () => {
+    const media = collectInlineAgentMedia(
+      'The renders in `/work/repo/graphics-review/seedship-v3-concepts/` are updated ' +
+        '(`seedship-flying.png` from the back, `seedship-flying-bow.png` from the front).',
+      'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual([
+      '/work/repo/graphics-review/seedship-v3-concepts/seedship-flying.png',
+      '/work/repo/graphics-review/seedship-v3-concepts/seedship-flying-bow.png',
+    ]);
+  });
+
+  test('prefers an explicit file reference over duplicate short filename mentions', () => {
+    const media = collectInlineAgentMedia(
+      '`result.png` is ready. [Open result](graphics/result.png).', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/graphics/result.png']);
+  });
+
+  test('does not guess a directory when the message names several possible folders', () => {
+    const media = collectInlineAgentMedia(
+      'Compare `/work/repo/before/` and `/work/repo/after/`. `result.png`', 'drone-1', '/work/repo',
+    );
+    expect(media[0]?.fileRef?.path).toBe('/work/repo/result.png');
+  });
+
+  test('keeps explicitly located images distinct when they share a filename', () => {
+    const media = collectInlineAgentMedia(
+      'Compare `before/result.png` and `after/result.png`; `result.png` changed.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/before/result.png', '/work/repo/after/result.png']);
+  });
+
+  test('preserves absolute paths and resolves a host-relative output directory', () => {
+    const media = collectInlineAgentMedia(
+      'Output in `screenshots/`: `result.png`, `/tmp/other.png`, and `recording.webm`.',
+      'host-drone', '/home/dev/project',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual([
+      '/home/dev/project/screenshots/result.png', '/tmp/other.png', '/home/dev/project/screenshots/recording.webm',
+    ]);
+    expect(media[2]?.kind).toBe('video');
+  });
+
+  test('does not use URLs or parent traversal as a local output directory', () => {
+    const media = collectInlineAgentMedia(
+      'See `https://example.com/images/` and `../outside/`: `result.png`.', 'drone-1', '/work/repo',
+    );
+    expect(media.map(item => item.fileRef?.path)).toEqual(['/work/repo/result.png']);
+  });
+
   test('collects local image and video references from agent text', () => {
     const media = collectInlineAgentMedia(
       ['Screenshot:', 'test-logline.png', '', 'Video:', 'recordings/session.webm'].join('\n'),

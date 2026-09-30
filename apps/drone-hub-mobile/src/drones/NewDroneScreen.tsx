@@ -314,7 +314,8 @@ export function NewDroneScreen({
       return;
     }
     if (!selectedModel.reasoningLevels.includes(reasoning)) {
-      setReasoning(selectedModel.defaultReasoningLevel || selectedModel.reasoningLevels[0] || '');
+      // No catalog default (Claude Code): leave it unset so the agent uses its own setting.
+      setReasoning(selectedModel.defaultReasoningLevel);
     }
   }, [reasoning, selectedModel]);
 
@@ -693,6 +694,9 @@ export function NewDroneScreen({
                   currentProvider={modelProvider || agent}
                   currentModel={model}
                   currentThinkingLevel={reasoning}
+                  agentChoosesDefaultReasoning={Boolean(
+                    selectedModel?.reasoningLevels.length && !selectedModel.defaultReasoningLevel,
+                  )}
                   options={modelChoices}
                   busy={modelsLoading}
                   onClose={() => setModelPickerOpen(false)}

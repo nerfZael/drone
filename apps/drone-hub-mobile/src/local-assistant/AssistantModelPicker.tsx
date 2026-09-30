@@ -43,6 +43,7 @@ export function AssistantModelPicker({
   options,
   busy,
   showReasoning = true,
+  agentChoosesDefaultReasoning = false,
   onClose,
   onSelect,
 }: {
@@ -53,6 +54,8 @@ export function AssistantModelPicker({
   options: AssistantModelChoice[];
   busy?: boolean;
   showReasoning?: boolean;
+  /** With no level set, the agent uses its own, so no level shows as selected. */
+  agentChoosesDefaultReasoning?: boolean;
   onClose(): void;
   onSelect(choice: AssistantModelChoice, selection: 'model' | 'reasoning'): void;
 }) {
@@ -89,7 +92,7 @@ export function AssistantModelPicker({
         },
         ...options,
       ];
-  const selectedReasoning = currentThinkingLevel || 'low';
+  const selectedReasoning = currentThinkingLevel || (agentChoosesDefaultReasoning ? '' : 'low');
   const reasoningLevels = [
     ...new Set(
       choices
@@ -135,7 +138,10 @@ export function AssistantModelPicker({
         choice.thinkingLevel === selectedReasoning,
     );
     onSelect(
-      exact ?? { ...model, thinkingLevel: model.thinkingLevel ?? selectedReasoning },
+      exact ?? {
+        ...model,
+        thinkingLevel: selectedReasoning ? model.thinkingLevel ?? selectedReasoning : undefined,
+      },
       'model',
     );
     setModelsOpen(false);

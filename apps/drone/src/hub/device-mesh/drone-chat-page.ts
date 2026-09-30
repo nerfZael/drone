@@ -278,6 +278,8 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
     turn: turnNumber,
     at: String(turn?.at ?? ''),
     promptAt: String(turn?.promptAt ?? ''),
+    ...(turn?.runId ? { runId: turn.runId } : {}),
+    ...(turn?.runStartedAt ? { runStartedAt: turn.runStartedAt } : {}),
     startedAt: String(turn?.startedAt ?? ''),
     completedAt: String(turn?.completedAt ?? ''),
     prompt: prompt.value,

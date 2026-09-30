@@ -5,9 +5,12 @@ import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 import { DndContext } from '@dnd-kit/core';
-import { createCanvasChatNodeId } from '../src/droneHub/app/app-config';
+import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
+import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
+import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
 import { beginChatDeletion, markChatsDeleted, useChatDeletionStore } from '../src/droneHub/app/chat-deletion-store';
 import {
@@ -39,6 +42,7 @@ type DockProps = React.ComponentProps<typeof DroneCanvasDock>;
 type CloneChat = NonNullable<DockProps['onCloneChat']>;
 
 function Dock({
+  children,
   drone,
   onCreateChat,
   onCloneChat,
@@ -48,7 +52,10 @@ function Dock({
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   chatNodeStateById = {},
+  droneRepoById = {},
+  onRenameDrone,
 }: {
+  children?: React.ReactNode;
   drone: DroneSummary;
   onCreateChat?: (droneId: string) => Promise<boolean>;
   onCloneChat?: CloneChat;
@@ -58,15 +65,18 @@ function Dock({
   onSendCanvasPrompt?: DockProps['onSendCanvasPrompt'];
   onCreateCanvasDroneFromDraft?: DockProps['onCreateCanvasDroneFromDraft'];
   chatNodeStateById?: DockProps['chatNodeStateById'];
+  droneRepoById?: DockProps['droneRepoById'];
+  onRenameDrone?: DockProps['onRenameDrone'];
 }) {
   const noop = () => {};
   return (
     <ActiveComposerProvider><DndContext>
+      {children}
       <DroneCanvasDock
         boardDrone={drone}
         droneById={{ alpha: drone }}
         droneNameById={{ alpha: 'Alpha' }}
-        droneRepoById={{}}
+        droneRepoById={droneRepoById}
         fleetParentIdByDroneId={{}}
         fleetAssignedIdsByDroneId={{}}
         chatNodeStateById={chatNodeStateById}
@@ -74,6 +84,7 @@ function Dock({
         onCloneChat={onCloneChat}
         onDeleteChats={onDeleteChats}
         onRenameChat={onRenameChat}
+        onRenameDrone={onRenameDrone}
         onActivateChat={onActivateChat}
         onSendCanvasPrompt={onSendCanvasPrompt}
         onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
@@ -106,6 +117,8 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     fetch: async () => new Response(JSON.stringify({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } })),
     Event: dom.Event,
     CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -135,7 +148,7 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: 500, y: 400 });
     expect(side.x).toBeGreaterThan(500);
     expect(side.y).toBe(400);
-    expect(container.querySelectorAll('svg path[stroke]').length).toBe(1);
+    expect(container.querySelectorAll('svg > path[stroke]').length).toBe(1);
 
     // A sidebar clone gets the same treatment: beside its source, connected by a line.
     await act(async () =>
@@ -146,7 +159,7 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     const clone = board().nodesByDroneId[alpha('plan-copy')];
     expect(clone.x).toBe(side.x);
     expect(clone.y).toBeGreaterThan(side.y);
-    expect(container.querySelectorAll('svg path[stroke]').length).toBe(2);
+    expect(container.querySelectorAll('svg > path[stroke]').length).toBe(2);
 
     // A deleted chat disappears from view; Delete cannot hide a chat that exists.
     await act(async () => root.render(<Dock drone={makeDrone(['default'], [])} />));
@@ -248,6 +261,102 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     const globalButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Global')!;
     await act(async () => globalButton.click());
     expect(nodeIds()).toEqual([createCanvasChatNodeId('beta', 'default')]);
+
+    // A retained shared canvas keeps the global view and in-progress message
+    // while the selected drone changes underneath it.
+    const globalNode = createCanvasChatNodeId('beta', 'default');
+    await act(async () => {
+      getCanvasBoardActions(null).setSelectedDroneIds([globalNode]);
+      getCanvasBoardActions(null).setViewport(120, 80, 0.75);
+    });
+    const globalViewport = container.querySelector('[data-drone-canvas-viewport="1"]');
+    const globalInput = container.querySelector('[data-canvas-message-bar] textarea')!;
+    await act(async () => Simulate.change(globalInput as unknown as Element, { target: { value: 'Keep this global message' } } as never));
+    const beta = { ...makeDrone(['default', 'review']), id: 'beta', name: 'Beta' };
+    await act(async () => root.render(<Dock drone={beta} />));
+    expect(container.querySelector('[data-drone-canvas-viewport="1"]')).toBe(globalViewport);
+    expect(container.querySelector('[data-canvas-message-bar] textarea')).toBe(globalInput);
+    expect((globalInput as unknown as HTMLTextAreaElement).value).toBe('Keep this global message');
+    expect(nodeIds()).toEqual([globalNode]);
+    expect(selectCanvasBoard(useDroneCanvasStore.getState(), null)).toMatchObject({
+      panX: 120, panY: 80, scale: 0.75, selectedDroneIds: [globalNode],
+    });
+    // The drone tab still follows the newly selected drone without remounting.
+    await act(async () => useDroneCanvasStore.getState().setScope('drone'));
+    expect(nodeIds().sort()).toEqual(['default', 'review'].map((name) => createCanvasChatNodeId('beta', name)).sort());
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('global canvas drags only show agent chat drop actions while over that chat pane', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global' });
+  useDroneCanvasStore.getState().upsertNodes([
+    { droneId: alpha('default'), label: 'default', x: 0, y: 0 },
+    { droneId: createCanvasChatNodeId('beta', 'default'), label: 'Beta', x: 200, y: 0 },
+  ]);
+  function AgentPane({ id }: { id: string }) {
+    const drop = useFleetAssignmentDropState({ currentDrone: { id } as DroneSummary,
+      currentDroneLabel: id, openDroneErrorModal: () => {}, onRequestDropActions: () => ({ ok: true }) });
+    return <div ref={drop.setFleetDropNodeRef} data-test-agent={id} data-hint={drop.fleetDropHintVisible}
+      data-fleet-assignment-drop-zone="1" data-fleet-assignment-owner-id={id}>Agent conversation</div>;
+  }
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const move = async (type: string, x: number) => {
+    await act(async () => {
+      dom.dispatchEvent(new dom.MouseEvent(type, { clientX: x, clientY: 100, buttons: type === 'mouseup' ? 0 : 1 }));
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+  };
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])}>
+      <AgentPane id="beta" /><AgentPane id="gamma" />
+    </Dock>));
+    const card = container.querySelector(`[data-drone-id="${alpha('default')}"]`)!;
+    const betaCard = container.querySelector(`[data-drone-id="${createCanvasChatNodeId('beta', 'default')}"]`)!;
+    const viewport = container.querySelector('[data-drone-canvas-viewport]')!;
+    const betaPane = container.querySelector('[data-test-agent="beta"]')!;
+    const gammaPane = container.querySelector('[data-test-agent="gamma"]')!;
+    // happy-dom has no hit testing. Exercise real drag handling against each surface.
+    Object.defineProperty(dom.document, 'elementsFromPoint', { configurable: true,
+      value: (x: number) => [x < 200 ? viewport : x < 400 ? betaCard : x < 600 ? betaPane : gammaPane] });
+    await act(async () => Simulate.mouseDown(card as unknown as Element, { button: 0, clientX: 10, clientY: 10 }));
+    await move('mousemove', 100);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 300); // Another card owned by the same drone as the open agent chat.
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 500); // Explicitly entering that chat still permits a drop.
+    expect(betaPane.getAttribute('data-hint')).toBe('true');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mousemove', 700);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('true');
+    await move('mousemove', 100);
+    expect(betaPane.getAttribute('data-hint')).toBe('false');
+    expect(gammaPane.getAttribute('data-hint')).toBe('false');
+    await move('mouseup', 100);
+    expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')]!.x).not.toBe(0);
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
@@ -402,7 +511,7 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     };
     await act(async () => root.render(<Dock drone={drone} onRenameChat={onRenameChat} />));
     const planBeforeRename = { ...selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')] };
-    const edgeCount = () => container.querySelectorAll('svg path[stroke]').length;
+    const edgeCount = () => container.querySelectorAll('svg > path[stroke]').length;
     const edgesBeforeRename = edgeCount();
     const originalWidth = (card('plan') as unknown as HTMLElement).style.width;
     const originalTransform = (card('plan') as unknown as HTMLElement).style.transform;
@@ -411,8 +520,9 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     await act(async () => Simulate.change(input, { target: { value: 'A much longer name that should grow while typing' } } as never));
     expect(parseFloat((card('plan') as unknown as HTMLElement).style.width)).toBeGreaterThan(parseFloat(originalWidth));
     expect((card('plan') as unknown as HTMLElement).style.transform).toBe(originalTransform);
-    await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
+    await act(async () => Simulate.change(input, { target: { value: 'plan' } } as never));
     expect((card('plan') as unknown as HTMLElement).style.width).toBe(originalWidth);
+    await act(async () => Simulate.change(input, { target: { value: 'plan b' } } as never));
     const renamePositions: Array<{ x: number; y: number }> = [];
     const unsubscribe = useDroneCanvasStore.subscribe((state) => {
       const renamed = selectCanvasBoard(state, 'alpha').nodesByDroneId[alpha('plan b')];
@@ -618,15 +728,22 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect(sends).toHaveLength(sendsBeforeStop);
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element));
     expect((input() as unknown as HTMLTextAreaElement).value).toBe('Recorded message');
-    expect(container.textContent).toContain('Model: Unchanged');
+    // One picker shows the model and reasoning the chat will use.
+    expect(container.querySelector('[data-chat-composer-model-picker] > button')?.textContent).toBe('Saved model (Low)');
+    expect(container.querySelector('select')).toBeNull();
     expect(configs).toEqual([]);
-    await act(async () => Simulate.change(container.querySelector('select[aria-label="Reasoning override for selected chats"]') as unknown as Element, { target: { value: 'high' } } as never));
     const modelTrigger = container.querySelector('[data-chat-composer-model-picker] > button')!;
+    await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
+    const dialogButton = (text: string) => Array.from(container.querySelectorAll('[data-chat-composer-model-picker] [role="dialog"] button'))
+      .find((button) => button.textContent?.trim() === text) as unknown as HTMLButtonElement;
+    await act(async () => dialogButton('High').click());
+    expect(modelTrigger.textContent).toBe('Saved model (High)');
     await type('Do not send from model controls');
     const beforeMenuKeys = sends.length;
     await key(modelTrigger as unknown as Element, 'Tab');
     expect(sends).toHaveLength(beforeMenuKeys);
     await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
+    await act(async () => dialogButton('Saved model').click());
     await key(container.querySelector('button[title="other-model"]') as unknown as Element, 's');
     await key(container.querySelector('button[title="other-model"]') as unknown as Element, 'Tab');
     expect(sends).toHaveLength(beforeMenuKeys);
@@ -635,10 +752,20 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await type('With overrides');
     await key(input() as unknown as Element, 'Enter');
     expect((sends.at(-1) as any).overrides).toEqual({ model: 'other-model', reasoning: 'high' });
-    expect(container.textContent).toContain('Model: Unchanged');
+    expect(modelTrigger.textContent).toBe('Saved model (Low)');
     // Global-board drafts use the same attachments and retain the spawn-count control.
     await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Global') as unknown as HTMLButtonElement).click());
     await act(async () => { Simulate.doubleClick(viewport() as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); await settle(); });
+    // The keyboard stays on the canvas, so Q records into the new draft at once.
+    expect(dom.document.activeElement).toBe(viewport());
+    // The new drone is set up from the composer, before typing: its agent, repository and model beside the recipient line.
+    expect(container.querySelector('[data-canvas-draft-controls]')).not.toBeNull();
+    expect(container.querySelector('[data-selected-chats-composer-meta] [data-canvas-draft-model] [data-chat-composer-model-picker]')).not.toBeNull();
+    const recordingsBeforeDraft = recordings;
+    await key(viewport() as unknown as Element, 'q');
+    expect(recordings).toBe(recordingsBeforeDraft + 1);
+    await key(dom.document.activeElement as unknown as Element, 'q');
+    await act(async () => { await settle(); });
     await type('Create with notes');
     const draftFileInput = container.querySelector('input[type="file"]')!;
     Object.defineProperty(draftFileInput, 'files', { configurable: true, value: [new dom.File(['hello'], 'notes.txt', { type: 'text/plain' })] });
@@ -744,6 +871,325 @@ test('dragging a card onto the canvas composer references it in the message with
   }
 });
 
+
+test('a drone card shows its runtime as an icon, and chats linked to it leave repo and branch to it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: () => 0, cancelAnimationFrame: () => {}, IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
+  const droneCard = createCanvasDroneNodeId('alpha');
+  const chatCard = alpha('default');
+  useDroneCanvasStore.getState().upsertNodes([
+    { droneId: droneCard, label: 'Alpha', x: 100, y: 100 },
+    { droneId: chatCard, label: 'default', x: 100, y: 300 },
+  ]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const drone = { ...makeDrone(['default']), runtime: 'host', repoBranch: 'dvm/work' } as unknown as DroneSummary;
+  const card = (id: string) => container.querySelector(`[data-drone-id="${id}"]`) as unknown as HTMLElement;
+  try {
+    await act(async () => root.render(<Dock drone={drone} droneRepoById={{ alpha: 'frontier' }} />));
+    expect(card(droneCard).querySelector('[data-canvas-drone-runtime="host"]')).not.toBeNull();
+    expect(card(droneCard).textContent).not.toMatch(/Drone|Host|Container/);
+    expect(card(droneCard).textContent).toContain('frontier');
+    expect(card(droneCard).textContent).toContain('dvm/work');
+    expect(card(chatCard).textContent).toBe('default');
+    // A selected drone card names the chat the composer sends to, then the drone.
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
+    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).toContain('Message default (Alpha)');
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
+
+    // The global canvas draws a copy's line to its original, not to the drone.
+    await act(async () => root.render(<Dock
+      drone={{ ...drone, chats: ['default', 'default - Copy'], chatCloneSources: { 'default - Copy': 'default' } } as DroneSummary}
+      droneRepoById={{ alpha: 'frontier' }}
+    />));
+    await act(async () => useDroneCanvasStore.getState().upsertNodes([{ droneId: alpha('default - Copy'), label: 'default - Copy', x: 300, y: 300 }]));
+    const edgeDashes = () => [...container.querySelectorAll('svg > path[stroke]')].map((path) => path.getAttribute('stroke-dasharray'));
+    expect(edgeDashes()).toEqual(['2 5', '4 4']); // Drone to original, original to copy.
+    await act(async () => useDroneCanvasStore.getState().removeNodes([alpha('default - Copy')]));
+
+    // Double-clicking a drone card renames the drone in place, like a chat card.
+    const droneRenames: string[] = [];
+    await act(async () => root.render(<Dock drone={drone} droneRepoById={{ alpha: 'frontier' }}
+      onRenameDrone={async (droneId, newName) => { droneRenames.push(`${droneId}:${newName}`); return { ok: true }; }} />));
+    await act(async () => Simulate.doubleClick(card(droneCard)));
+    const renameInput = card(droneCard).querySelector('input') as unknown as HTMLInputElement;
+    expect(renameInput.value).toBe('Alpha');
+    expect(card(droneCard).querySelector('[data-canvas-drone-runtime]')).not.toBeNull();
+    await act(async () => Simulate.change(renameInput, { target: { value: 'Beta' } } as never));
+    await act(async () => Simulate.keyDown(renameInput, { key: 'Enter' }));
+    expect(droneRenames).toEqual(['alpha:Beta']);
+    expect(card(droneCard).querySelector('input')).toBeNull();
+    expect(card(droneCard).textContent).toContain('Beta');
+
+    // Without its drone's card, a chat names its own repository and branch.
+    await act(async () => useDroneCanvasStore.getState().removeNodes([droneCard]));
+    expect(card(chatCard).textContent).toContain('frontier');
+    expect(card(chatCard).textContent).toContain('dvm/work');
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('detailed cards show state, time and cost, and spread the stored arrangement without moving it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const runningSince = new Date(Date.now() - 65_000).toISOString();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async (input: string | URL | Request) => Response.json(String(input).includes('/api/usage/chats')
+      ? { ok: true, chats: [{ droneId: 'alpha', chatName: 'default', estimatedCost: 0.42, tokens: 1000, unpriced: 0, runningSince, lastEndedAt: null }] }
+      : String(input).includes('/api/chats/steps')
+        ? { ok: true, steps: [{ droneId: 'alpha', chatName: 'default', turnId: 't1', done: ['Read the parser'], doing: ['Splitting the tokenizer'], next: ['Run tests'], final: false, updatedAt: runningSince }] }
+        : String(input).includes('/api/settings/chat-steps')
+          ? { ok: true, settings: { enabled: true, model: 'openai-codex/gpt-6-luna', reasoning: 'low' } }
+          : { ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
+  const chatCard = alpha('default');
+  useDroneCanvasStore.getState().upsertNodes([{ droneId: chatCard, label: 'default', x: 100, y: 200 }]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const card = () => container.querySelector(`[data-drone-id="${chatCard}"]`) as unknown as HTMLElement;
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={{
+      [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: false, lastAgentSnippet: 'Refactoring the parser' },
+    }} />));
+    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
+    const toggle = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Detailed cards') as unknown as HTMLButtonElement;
+    await act(async () => { toggle.click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(card().querySelector('[data-canvas-detailed-card]')?.getAttribute('data-canvas-detailed-card')).toBe('working');
+    // Its steps say what it is doing now, and the dots count them.
+    // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
+    expect(card().textContent).not.toContain('Splitting the tokenizer');
+    expect(card().querySelector('[title*="Splitting the tokenizer"]')).not.toBeNull();
+    expect(card().querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
+    // Its state is the sidebar's icon at the top right, not a word.
+    expect(card().querySelector('[data-canvas-card-state="working"] svg, [data-canvas-card-state="working"] span')).not.toBeNull();
+    expect(card().textContent).not.toContain('working');
+    expect(container.textContent).toContain('Steps: gpt-6-luna · Low');
+    // Its panel opens on the page, not inside the canvas that would clip and cover it.
+    const stepsButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.startsWith('Steps')) as unknown as HTMLButtonElement;
+    await act(async () => { stepsButton.click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    const settingsPanel = dom.document.querySelector('[role="dialog"][aria-label="Chat step tracking"]');
+    expect(settingsPanel?.parentElement).toBe(dom.document.body);
+    expect(container.contains(settingsPanel as never)).toBe(false);
+    await act(async () => (dom.document.querySelector('.fixed.inset-0') as unknown as HTMLElement).click());
+    expect(dom.document.querySelector('[aria-label="Chat step tracking"][role="dialog"]')).toBeNull();
+    expect(card().textContent).toContain('$0.42');
+    expect(card().textContent).toContain('1m');
+    expect(card().style.transform).toContain('translate3d(225px, 250px, 0)');
+    // It looks like the Entity's cards and sits on their darker ground.
+    expect(card().classList.contains('dh-canvas-work')).toBe(true);
+    expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
+    // The card keeps one line; hovering it shows every step in a panel at the canvas's bottom left.
+    expect(card().textContent).not.toContain('Read the parser');
+    expect(card().style.height).toBe('50px');
+    // As wide as its short name and its footer need, not a fixed width.
+    expect(parseFloat(card().style.width)).toBeLessThan(200);
+    const panel = () => container.querySelector('[data-canvas-steps-panel]');
+    expect(panel()).toBeNull();
+    await act(async () => Simulate.mouseEnter(card()));
+    expect(panel()?.textContent).toContain('Read the parser');
+    expect(panel()?.textContent).toContain('Run tests');
+    // Its time and cost are on the card; the panel keeps to the steps, and lists the current step once.
+    expect(panel()?.textContent).not.toContain('$0.42');
+    expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
+    await act(async () => Simulate.mouseLeave(card()));
+    expect(panel()).toBeNull();
+    // So does selecting that one card.
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([chatCard]));
+    expect(panel()?.textContent).toContain('Read the parser');
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
+    // Dragging moves the stored position by the pointer's distance in compact space.
+    await act(async () => Simulate.mouseDown(card(), { button: 0, clientX: 300, clientY: 400 }));
+    await act(async () => {
+      dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 345, clientY: 425, buttons: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      dom.dispatchEvent(new dom.MouseEvent('mouseup', { clientX: 345, clientY: 425, buttons: 0 }));
+    });
+    expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toMatchObject({ x: 120, y: 220 });
+    await act(async () => useDroneHubUiStore.getState().setCanvasDetailedCards(false));
+    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
+    expect(card().style.transform).toContain('translate3d(120px, 220px, 0)');
+  } finally {
+    await act(async () => root.unmount());
+    useDroneHubUiStore.getState().setCanvasDetailedCards(false);
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('a new draft chat on a drone canvas can change its agent from the composer', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const configs: unknown[] = [];
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/config')) configs.push(JSON.parse(String(init?.body)));
+      return Response.json({ ok: true, name: 'Alpha', chat: 'Untitled', agent: { kind: 'builtin', id: 'codex' }, models: [] });
+    },
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 15));
+  const drone = { ...makeDrone(['default', 'Untitled']), draftChats: { Untitled: true } } as unknown as DroneSummary;
+  try {
+    await act(async () => { root.render(<Dock drone={drone} />); await settle(); });
+    await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('Untitled')]); await settle(); });
+    await act(async () => { await settle(); });
+    const select = () => container.querySelector('[data-canvas-draft-chat-agent]');
+    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:codex');
+    await act(async () => (select()!.querySelector('button') as unknown as HTMLButtonElement).click());
+    const claude = Array.from(container.querySelectorAll('[role="option"], [role="listbox"] button, li button'))
+      .find((option) => option.textContent?.includes('Claude')) as unknown as HTMLElement;
+    await act(async () => { claude.click(); await settle(); });
+    expect(configs).toEqual([{ agent: { kind: 'builtin', id: 'claude' } }]);
+    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:claude');
+    // A chat that has had its first message offers no agent choice.
+    await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]); await settle(); });
+    expect(select()).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('rectangle selection opens exactly one selected card only after release', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => { frames.set(++frameId, run); return frameId; },
+    cancelAnimationFrame: (id: number) => frames.delete(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
+  const droneCard = createCanvasDroneNodeId('alpha');
+  const chatCard = alpha('fork');
+  useDroneCanvasStore.getState().upsertNodes([
+    { droneId: droneCard, label: 'Alpha', x: 100, y: 100 },
+    { droneId: chatCard, label: 'fork', x: 500, y: 100 },
+  ]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const opened: string[] = [];
+  const pointer = (type: string, x: number, y: number) => dom.dispatchEvent(new dom.MouseEvent(type, {
+    clientX: x, clientY: y, buttons: type === 'mouseup' ? 0 : 1,
+  }));
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'fork'], [['fork', 'default']])}
+      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
+    const viewport = container.querySelector('[data-drone-canvas-viewport]') as unknown as HTMLElement;
+    viewport.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1000, 800) as unknown as DOMRect;
+    const start = async (x: number, ctrlKey = false) => {
+      await act(async () => Simulate.mouseDown(viewport, { button: 0, clientX: x, clientY: 90, ctrlKey }));
+    };
+    const release = async (x: number) => {
+      // The final move is still queued: mouseup must use the flushed selection.
+      await act(async () => { pointer('mousemove', x, 110); pointer('mouseup', x, 110); });
+    };
+    await start(90);
+    await release(110);
+    expect(opened).toEqual(['alpha:default']);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard]);
+    opened.length = 0;
+    await start(490);
+    await release(510);
+    expect(opened).toEqual(['alpha:fork']);
+    opened.length = 0;
+
+    await start(90);
+    await act(async () => {
+      pointer('mousemove', 110, 110);
+      for (const [id, run] of [...frames]) { frames.delete(id); run(0); }
+    });
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard]);
+    expect(opened).toEqual([]); // A transient single hit during a larger drag must not navigate.
+    await release(510);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard, chatCard]);
+    expect(opened).toEqual([]);
+
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
+    await start(490, true);
+    await release(510);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([droneCard, chatCard]);
+    expect(opened).toEqual([]); // Count the whole additive selection, not just new hits.
+    await start(900);
+    await release(920);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([]);
+    expect(opened).toEqual([]);
+    await start(90);
+    await act(async () => { pointer('mousemove', 110, 110); dom.dispatchEvent(new dom.Event('blur')); });
+    expect(opened).toEqual([]); // Cancelling a gesture must not open its selection.
+
+    await act(async () => useDroneCanvasStore.getState().setScope('drone'));
+    const actions = getCanvasBoardActions('alpha');
+    await act(async () => {
+      actions.setViewport({ panX: 0, panY: 0, scale: 1 });
+      actions.moveNodes([{ droneId: alpha('default'), x: 100, y: 100 }, { droneId: chatCard, x: 500, y: 100 }]);
+    });
+    await start(490);
+    await release(510);
+    expect(opened).toEqual(['alpha:fork']);
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
 
 test('canvas gestures avoid unrelated card renders and layout reads, and use the latest panned coordinates', async () => {
   const dom = new Window({ url: 'http://localhost' });
@@ -874,8 +1320,8 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     await act(async () => useDroneCanvasStore.getState().setPan(150, 250));
     await act(async () => Simulate.doubleClick(viewport, { button: 0, clientX: 600, clientY: 500 }));
     const draft = Object.values(useDroneCanvasStore.getState().nodesByDroneId)[0];
-    expect(draft.x).toBe(450 - 96 / 2);
-    expect(draft.y).toBe(250 - 54 / 2);
+    expect(draft.x).toBe(450 - getNodeWidthPx('Untitled') / 2);
+    expect(draft.y).toBe(250 - NODE_HEIGHT_PX / 2);
   } finally {
     unsubscribe();
     await act(async () => root.unmount());

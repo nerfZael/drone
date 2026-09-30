@@ -60,10 +60,11 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
   // Desktop portals have their own document, outside the Hub's key listener.
   const onDesktopKeyDown = (event: KeyboardEvent, scope: HTMLElement) => {
     const element = event.target as HTMLElement;
-    if (event.defaultPrevented || event.repeat || event.isComposing || !actions || !target || !element?.closest) return;
+    // Composer shortcuts work in any desktop window with a composer; the chat actions need a chat to act on.
+    if (event.defaultPrevented || event.repeat || event.isComposing || !element?.closest) return;
     if ((!scope.contains(element) && element !== scope.ownerDocument.body) || element.closest('[role="menu"], [data-shortcut-capture="true"]')) return;
     if (element.ownerDocument.querySelector('[role="dialog"][aria-modal="true"]')) return;
-    if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey &&
+    if (target && event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey &&
       composer?.sendRecordingInClonedChat()) {
       event.preventDefault();
       return;
@@ -76,8 +77,9 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
     const editable = Boolean(element.closest('input, textarea, select, [contenteditable="true"]'));
     if (editable && action !== 'toggleChatComposerEditorMode') return;
     if (event.key === 'Enter' && element.closest('button, a[href], [role="button"]')) return;
-    const localComposer = scope.querySelector<HTMLElement>('[data-active-composer-id]');
-    const composerId = localComposer?.dataset.activeComposerId;
+    // A window can hold several composers (the entity bench's chat and a worker's thread): the active one, else the first.
+    const localIds = [...scope.querySelectorAll<HTMLElement>('[data-active-composer-id]')].map(node => node.dataset.activeComposerId ?? '');
+    const composerId = localIds.find(id => id === composer?.activeComposerId) ?? localIds[0];
     if (composerId) {
       composer?.focusComposer(composerId);
       markCurrentChatComposerEditorModeTarget(composerId);
@@ -86,9 +88,10 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
     let handled = false;
     if (!action && event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
       handled = Boolean(localComposerReady && composer?.sendMessage('asap'));
-    } else if (action === 'createDroneChat') { actions.createChat(target); handled = true; }
-    else if (action === 'cloneDroneChat') { actions.cloneChat(target); handled = true; }
+    } else if (action === 'createDroneChat') { if (actions && target) { actions.createChat(target); handled = true; } }
+    else if (action === 'cloneDroneChat') { if (actions && target) { actions.cloneChat(target); handled = true; } }
     else if (action === 'createSideChat') {
+      if (!actions || !target) return;
       const fork = chatActionMenuItems(target, scope, actions, bindings).find(item => item.id === 'fork-side-chat');
       if (fork && !fork.disabled) { fork.onSelect(); handled = true; }
     } else if (action === 'focusPrimaryChatInput') {

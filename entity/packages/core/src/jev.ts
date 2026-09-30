@@ -1,4 +1,4 @@
-import type { Levels } from './channel.js';
+import type { ModelUsage } from './mind.js';
 import type { EventLog } from './log.js';
 import type { EntityEvent } from './types.js';
 
@@ -10,7 +10,8 @@ export interface EvalQuestion {
 
 /** Backs `judge` and `sense`: Jev, or a small fast LLM in the same role. */
 export interface Evaluator {
-  evaluate(questions: EvalQuestion[], state: string, signal: AbortSignal): Promise<Record<string, number>>;
+  /** The probability of "yes" per question id; with `usage`, what the call cost, counted in the session's totals. */
+  evaluate(questions: EvalQuestion[], state: string, signal: AbortSignal): Promise<Record<string, number> | { answers: Record<string, number>; usage?: ModelUsage }>;
 }
 
 export interface JevOptions {
@@ -54,7 +55,6 @@ export class JevService {
   constructor(
     private readonly evaluator: Evaluator | undefined,
     private readonly log: EventLog,
-    private readonly levels: Levels,
     private readonly renderState: () => string,
     private readonly health: (message: string) => void,
     options: JevOptions = {},
@@ -93,11 +93,14 @@ export class JevService {
     return info;
   }
 
-  release(owner: string): void {
+  /** Drops an owner's senses. Returns the levels of senses nobody asks any more, for the caller to clear through the log. */
+  release(owner: string): string[] {
+    const dropped: string[] = [];
     for (const [key, info] of this.senses) {
       info.owners = info.owners.filter(o => o !== owner);
-      if (!info.owners.length) { this.senses.delete(key); this.levels.clear(info.level); }
+      if (!info.owners.length) { this.senses.delete(key); dropped.push(info.level); }
     }
+    return dropped;
   }
 
   list(): SenseInfo[] { return [...this.senses.values()]; }
@@ -141,7 +144,6 @@ export class JevService {
         if (typeof p !== 'number') continue;
         info.value = p;
         info.askedAt = now;
-        this.levels.set(info.level, p, 'jev');
       }
       this.log.append('sensed', 'system', { answers: Object.fromEntries(infos.filter(i => typeof answers[i.id] === 'number').map(i => [i.level, answers[i.id]])) });
     }
@@ -181,7 +183,11 @@ export class JevService {
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs);
     const started = performance.now();
     try {
-      return await this.evaluator.evaluate(questions, this.renderState(), controller.signal);
+      const result = await this.evaluator.evaluate(questions, this.renderState(), controller.signal);
+      if (!('answers' in result && result.answers && typeof result.answers === 'object')) return result as Record<string, number>;
+      const { answers, usage } = result as { answers: Record<string, number>; usage?: ModelUsage };
+      if (usage) this.log.append('usage', 'system', { kind: 'senses', ...usage });
+      return answers;
     } catch (error) {
       if (!this.closed) {
         const message = controller.signal.aborted ? `timed out after ${this.opts.timeoutMs} ms` : error instanceof Error ? error.message : String(error);

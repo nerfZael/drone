@@ -9,6 +9,7 @@ import {
   chatAttachmentPreviewLabel,
   completedTurnIds,
   hasBlockingPendingPrompt,
+  isClaudeEffortLevel,
   isSendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 import { resolvePromptChatName } from './prompt-chat-identity';
@@ -1074,6 +1075,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude' })
           : false;
         const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
+        // Unset, Claude Code uses the user's own effort setting.
+        const chatEffort = isClaudeEffortLevel(chatReasoning) ? chatReasoning : null;
+        const supportsEffort = chatEffort
+          ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude', flag: 'effort' })
+          : false;
+        const effortArg = chatEffort && supportsEffort ? ` --effort ${bashQuote(chatEffort)}` : '';
         const checkpointArg = forkMessageId ? ` --resume-session-at=${bashQuote(forkMessageId)}` : '';
         const sessionArg =
           sessionLaunch.mode === 'fork'
@@ -1095,9 +1102,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           // Older daemons retain one-shot delivery until upgraded. The stream
           // wrapper sets this flag only when it owns Claude's stdin.
           'if [ "${DRONE_CLAUDE_STREAM:-}" = "1" ]; then',
-          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${sessionArg}`,
+          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${effortArg}${sessionArg}`,
           'else',
-          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${effortArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
           'fi',
         ].join('\n');
         await enqueueTranscriptPrompt({
@@ -1110,7 +1117,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           claudeStream: {
             sessionKey: `claude:${droneId}:${String(chat.id)}`,
-            compatibilityKey: JSON.stringify([cwd, chatModel ?? null]),
+            compatibilityKey: JSON.stringify([cwd, chatModel ?? null, effortArg ? chatEffort : null]),
             prompt: promptWithHistory,
           },
           deliveryMode: opts.deliveryMode,

@@ -1,4 +1,6 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { ChangesExplorerContext } from './changes-explorer-context';
 import type {
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
@@ -147,6 +149,7 @@ export function AgentRunHistoricalChangesView({
   initialSelection: AgentRunChangesSelection;
   onClose: () => void;
 }) {
+  const explorerHost = React.useContext(ChangesExplorerContext);
   const lineChanges = agentRunLineChangeBreakdown(fileChanges.counts);
   const [selection, setSelection] = React.useState(initialSelection);
   const [workspaceMetadata, setWorkspaceMetadata] = React.useState(() =>
@@ -262,6 +265,80 @@ export function AgentRunHistoricalChangesView({
       : undefined;
   const currentError = selectedDiff?.state.status === 'error' ? selectedDiff.state : null;
 
+  const explorer = (
+    <aside className={`flex min-h-0 shrink-0 flex-col overflow-hidden bg-[var(--chat-background)] ${explorerHost === undefined ? 'w-[min(260px,36%)] min-w-[190px] border-l border-[var(--border-subtle)]' : 'h-full w-full'}`}>
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2">
+        <span className="dh-changes-toolbar-label">Files</span>
+        <span className="font-mono text-8 tabular-nums text-[var(--muted-dim)]">
+          {fileChanges.counts.changed}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
+        {fileChanges.workspaces.map((workspace) => {
+          const metadata = workspaceMetadata[workspace.targetId];
+          const entries = metadata?.entries ?? agentRunWorkspacePreviewEntries(workspace);
+          return (
+            <div key={workspace.targetId} className="mb-2 last:mb-0">
+              {fileChanges.workspaces.length > 1 ||
+              workspace.targetId.startsWith('artifacts:') ? (
+                <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                  <span className="truncate">{workspace.label}</span>
+                  <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
+                </div>
+              ) : null}
+              <AgentRunChangedFilesTree
+                entries={entries}
+                expandedDirectories={expandedByWorkspace[workspace.targetId] ?? {}}
+                defaultDirectoriesExpanded={false}
+                initialVisibleRows={200}
+                selectedPath={
+                  selectedWorkspace?.targetId === workspace.targetId
+                    ? selectedEntry?.path
+                    : null
+                }
+                appearance="panel"
+                density="compact"
+                onToggleDirectory={(directoryPath) =>
+                  setExpandedByWorkspace((current) => ({
+                    ...current,
+                    [workspace.targetId]: {
+                      ...(current[workspace.targetId] ?? {}),
+                      [directoryPath]: !(current[workspace.targetId]?.[directoryPath] ?? false),
+                    },
+                  }))
+                }
+                onSelectFile={(entry) =>
+                  setSelection({ workspaceTargetId: workspace.targetId, path: entry.path })
+                }
+              />
+              {metadata?.status === 'loading' ? (
+                <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
+                  Loading complete file list…
+                </div>
+              ) : null}
+              {metadata?.status === 'error' ? (
+                <div className="flex items-center justify-between gap-2 px-2 py-2 text-9 text-[var(--red)]">
+                  <span className="min-w-0 truncate">{metadata.message}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 font-[var(--weight-semibold)] hover:underline"
+                    onClick={() => setMetadataRetryNonce((value) => value + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : null}
+              {metadata?.status === 'loaded' && metadata.metadataTruncated ? (
+                <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
+                  Stored list limited to 5,000 files.
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
   return (
     <div
       data-editor-zoom-surface="historical-changes"
@@ -370,78 +447,7 @@ export function AgentRunHistoricalChangesView({
           )}
         </main>
 
-        <aside className="flex min-h-0 w-[min(260px,36%)] min-w-[190px] shrink-0 flex-col overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--chat-background)]">
-          <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2">
-            <span className="dh-changes-toolbar-label">Files</span>
-            <span className="font-mono text-8 tabular-nums text-[var(--muted-dim)]">
-              {fileChanges.counts.changed}
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
-            {fileChanges.workspaces.map((workspace) => {
-              const metadata = workspaceMetadata[workspace.targetId];
-              const entries = metadata?.entries ?? agentRunWorkspacePreviewEntries(workspace);
-              return (
-                <div key={workspace.targetId} className="mb-2 last:mb-0">
-                  {fileChanges.workspaces.length > 1 ||
-                  workspace.targetId.startsWith('artifacts:') ? (
-                    <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-                      <span className="truncate">{workspace.label}</span>
-                      <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
-                    </div>
-                  ) : null}
-                  <AgentRunChangedFilesTree
-                    entries={entries}
-                    expandedDirectories={expandedByWorkspace[workspace.targetId] ?? {}}
-                    defaultDirectoriesExpanded={false}
-                    initialVisibleRows={200}
-                    selectedPath={
-                      selectedWorkspace?.targetId === workspace.targetId
-                        ? selectedEntry?.path
-                        : null
-                    }
-                    appearance="panel"
-                    density="compact"
-                    onToggleDirectory={(directoryPath) =>
-                      setExpandedByWorkspace((current) => ({
-                        ...current,
-                        [workspace.targetId]: {
-                          ...(current[workspace.targetId] ?? {}),
-                          [directoryPath]: !(current[workspace.targetId]?.[directoryPath] ?? false),
-                        },
-                      }))
-                    }
-                    onSelectFile={(entry) =>
-                      setSelection({ workspaceTargetId: workspace.targetId, path: entry.path })
-                    }
-                  />
-                  {metadata?.status === 'loading' ? (
-                    <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
-                      Loading complete file list…
-                    </div>
-                  ) : null}
-                  {metadata?.status === 'error' ? (
-                    <div className="flex items-center justify-between gap-2 px-2 py-2 text-9 text-[var(--red)]">
-                      <span className="min-w-0 truncate">{metadata.message}</span>
-                      <button
-                        type="button"
-                        className="shrink-0 font-[var(--weight-semibold)] hover:underline"
-                        onClick={() => setMetadataRetryNonce((value) => value + 1)}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  ) : null}
-                  {metadata?.status === 'loaded' && metadata.metadataTruncated ? (
-                    <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
-                      Stored list limited to 5,000 files.
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </aside>
+        {explorerHost === undefined ? explorer : explorerHost ? createPortal(explorer, explorerHost) : null}
       </div>
     </div>
   );

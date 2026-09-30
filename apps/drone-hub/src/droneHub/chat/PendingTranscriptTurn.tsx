@@ -97,7 +97,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : null;
   const isStopped = isFailed && isStoppedRunError(item.error);
   const activity = normalizeAgentRunActivity(item.activity);
-  const runStartedAt = item.startedAt ?? null;
+  const runStartedAt = item.runStartedAt ?? item.startedAt ?? null;
   const submittedAtMs = Date.parse(String(item.at ?? ''));
   const runStartedAtMs = Date.parse(String(runStartedAt ?? ''));
   const preRunDurationMs =
@@ -140,14 +140,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               ? 'Queued, waiting to create a fresh chat'
               : item.deliveryMode === 'asap'
                 ? 'ASAP, waiting for the next safe delivery point'
-                : 'Queued, waiting to start'
+                : 'Queued, waiting for its turn'
           }
           title={
             actionPresentation
               ? 'Creates a fresh chat after earlier messages finish'
               : item.deliveryMode === 'asap'
                 ? 'Will run before queued follow-ups'
-                : 'Waiting to start'
+                : 'Starts after earlier work finishes'
           }
           className="inline-flex items-center gap-1.5 text-10 font-[var(--weight-semibold)] text-[var(--user-muted)]"
         >

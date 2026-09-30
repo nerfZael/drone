@@ -1,62 +1,103 @@
 # Parallel conversation
 
-Every message the user sends gets a capable worker immediately. Nothing waits for earlier work to finish, nothing gets interrupted by a steering message, and every answer is a real reply in the chat. Workers know about each other through the shared log, so they don't trip over each other.
+This is the entity's only conversation mode. Every message that needs real work gets a capable worker immediately. Nothing waits for earlier work to finish, nothing gets interrupted by a steering message, and every answer is a real reply in the chat. Workers know about each other through the shared log, so they don't trip over each other.
 
-This replaces today's manual workaround with single agents: cloning a conversation to give it a side task.
+It replaces a manual workaround with single agents: cloning a conversation to give it a side task. It used to sit next to a single mode in which the head did everything and relayed task results. Parallel conversation had all of single mode's tools, so the two were merged on 2026-09-25; single mode's behaviour is now just the router choosing to act itself.
 
 ## How a message is handled
 
-The front limb (the voice when `voiceModel` is set, otherwise the head) routes each message in one quick decision:
+The front limb (the voice when one is configured, otherwise the head) routes each message, or a burst of messages, in one quick decision:
 
 | The message is... | Action | Tool |
 |---|---|---|
-| A new, independent task | Start a fresh worker right away. Its context is the message plus a digest of what the other workers are doing. | `dispatch` |
+| A question it can answer from state or general knowledge | Answer it, and do nothing else | `say` |
+| Something that takes seconds: a key press, or ongoing behaviour ("repeat after me", "stop when I press 5") | Do it directly. Ongoing behaviour stays with the head, because a worker's watches and programs end with it; the voice hands it over with `handoff` | keypad effects, `set_watch`, `run_program` |
+| A new, independent task | Start a fresh worker right away, with the request and the context it needs | `dispatch` |
+| Many independent items of one kind ("one worker per issue") | Start a batch: one worker per item under a title | `dispatch_many` |
 | Building on a worker's context ("do the same for signup") | Fork that worker: clone its conversation at its current point | `fork` |
-| A refinement of work in progress ("keep the old API") | Steer that worker only; the others are not touched | `steer` |
-| A question about the work ("how's the fix going?") | Answer from state, with no worker disturbed | `say` |
-| Something that depends on another task ("then write the docs for it") | Dispatch with a gate: the worker starts when the other one finishes | `dispatch` with `after` |
+| A refinement of work in progress ("keep the old API") | Steer that worker only, with the user's own words; it hears it with its next tool result | `steer` |
+| More work for a worker once it's done ("then add tests") | Queue it: the worker continues in the same conversation when it finishes (or is revived if it already has) | `steer` with `when: "after"` |
+| Something that needs another worker's result first | Dispatch with a gate: the worker starts when the other one finishes | `dispatch` with `after` |
 
-Three general rules keep routing clean. They came from the first live session.
+Workers run on the task model (gpt-6-sol by default); the router may pick the head model for small requests.
 
-- **One decision per message.** Whatever the router can fully answer itself (conversation, acknowledgements, questions about the work) it answers, and it never also dispatches for the same message; a worker would only repeat it.
-- **New messages can change existing work.** Before starting anything, the router checks what running workers are doing. A message that replaces or cancels a worker's work stops or redirects that worker as part of the same decision, instead of starting a second worker next to it.
-- **Let the user finish.** The front limb does not act while the user is still typing: the action waits until the draft has been quiet for 1 s (at most 6 s). It also never acts while a user message it has not read is waiting; a newer run handles both. A burst like "actually", then "let's convert to python", becomes one decision.
+## Routing rules
 
-When the router is unsure, the cheap mistake is a fresh worker with a note like "may relate to worker 3". The user can always redirect: "fork from #2", "send this to the login worker", "stop #3".
+These came from live sessions, and each is a general rule, not a fix for one scenario.
 
-Workers run on the task model (gpt-6-sol by default). The router may choose the head model for small requests to save budget.
+- **One decision per message.** Whatever the router can fully answer itself it answers, and it never also dispatches for the same message; a worker would only repeat it.
+- **New messages can change existing work.** Before starting anything, the router checks what running workers are doing. A message that replaces or cancels a worker's work stops or redirects that worker in the same decision.
+- **Seconds, not minutes.** The front limb only does things that take seconds: talking, the keypad, watches, programs. Reading or changing files, running commands and research are real work, even when they look small. Actions that belong to a piece of work (pressing a key as each step is done) go to that work's worker, in its task.
+- **A question can be a request.** "Can you...?", "should we...?", "all three in parallel?" ask for action; answering "yes" is not doing it.
+- **No promise without the action.** A reply that says work is happening comes with the tool call that makes it true, in the same decision.
+- **The user's words about splitting work win**, and keep applying: "in parallel", "separately" mean separate workers; "in the same worker", "after that" mean steer or queue.
+- **Let the user finish.** The front limb does not act while the user is still typing: the action waits until the draft has been quiet for 1 s (at most 6 s), and a user message it has not read supersedes it. A burst like "actually", then "let's convert to python", becomes one decision.
+
+When the router is unsure, the cheap mistake is a fresh worker with a note like "may relate to the login worker".
+
+## When routing is a guess
+
+Routing is the entity's hardest call, so wrong guesses are cheap to fix. On the Work canvas, a message that started no worker of its own offers **Own worker** on hover, and **Fork of X** when it was steered into a worker X (`reroute`). A new worker starts for the message, and a steered worker is told to leave that part to it. The buttons stay available while the message is one of the three most recent, or less than a minute old, and inside an opened fold after that.
+
+**The routing eval** measures routing against the real front model. `entity/evals/routing-cases.ts` holds cases, each a short conversation and the decision it should get; `bun apps/drone/scripts/entity-routing-eval.ts [--repeat N] [--voice <model>] [--only <text>]` plays them with stand-in workers that just stay busy, review off and the draft sense off, and prints what the front limb did for each failure. Add a case whenever a live session routes badly; fix the general rule, never the case. Results are in [plan.md](plan.md#results).
+
+## Batches and the queue
+
+- **The queue.** At most `maxTasks` workers (6) run at once; new ones wait as `queued` (up to 500) and start oldest first as others finish. A worker gated with `after` is `waiting` until the other one finishes and doesn't take a slot; then it starts, or queues if no slot is free. A queued or waiting worker can be steered (it gets the message when it starts) or stopped before it starts.
+- **Batches.** `dispatch_many({ title, items })` starts one worker per item in one tool call and logs `group_started`. More items for a batch that exists ("make it 6") join it with `dispatch_many({ batch, items })`, logged as `group_extended`: it keeps one progress line ("5 of 6 done"), and a batch that had ended runs again and reports again when it ends. The router sees each worker's batch id in its state. The chat gets one progress line for the batch ("Fix arithmetic functions: 5 of 8 done, 3 running."), updated in place as workers start and finish. Batch workers reply in their own thread (`say` defaults to `thread: true` for them) and pass `thread: false` only for a question the user must answer. When the last worker ends, the front limb is woken with the results and may add one summary.
 
 ## Real replies
 
-Workers speak in the chat themselves. Each reply is tagged with the worker and the message it answers (`reply_to`), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes also reports its result as a reply.
+Workers speak for themselves. Each reply is tagged with the worker and the message it answers (`reply_to`, filled in automatically), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes says its result, then calls `finish_task` with a one-line summary.
+
+**Keeping the chat short.** The chat is for decisions and outcomes, whatever the model's speed. What makes a message hard to read is density as much as length, so both are limited (`chatLimits` in the config): a message is at most 800 characters from the front limb, 1,200 from a worker in the main chat and 2,000 in its own thread; no block of prose is longer than 300 characters (list items and code are not prose); chat has no headings or tables; and a wake sends at most two messages. The prompts ask for chat written for scanning: short paragraphs, a list whenever an answer has several parts, code formatting for names. Longer text goes into an artifact: a file in the worker's home folder, under `.entity/artifacts/<session>/` in the Hub. Most often a Markdown report, but any file the work produces (an HTML page, a script, an image). It is linked from the message (`say` with `files`, checked to exist) and shown as a link that opens it in Files. A message over the limit is refused with what to do instead; after two refusals in a wake the runtime does it: a worker's full text is saved as a file and linked with its first sentence, anything else is cut at the limit. Under each user message, a line from the log says what was done with it ("→ started Sprites", "→ sent to E2E tests"), so routing never depends on the model saying so.
+
+**Nothing gets lost, nothing floods.** Open questions (from the entity, or a worker, in the chat or in its own thread) collect above the composer under "Needs you": answer with an option or a short reply, jump to the question, or dismiss it. The entity's question counts as answered by the user's next message; a worker's by a message to that worker, which picks up a finished worker's kept conversation. A worker's question counts only if it asked with `ask` or it was the last thing it said. Worker messages that arrive together (within 10 s, nothing from the user between) show as one digest: a line per worker with its first line and files, each expanding in place. Questions are never folded into a digest. Both are read from the log in the bench; the log itself is unchanged.
+
+**One piece of work, once.** Starting a worker with exactly the task an active worker already has is refused (two limbs acting on one message, such as the voice and the head reviewing it), and no limb repeats in the chat what another already said there. Batch items may share a task on purpose and are not checked.
+
+**No quiet downgrades.** When work cannot be done as asked because access is missing (building in a workspace that is read-only or not granted), the front limb says so and offers the ways forward as options ("Grant write access", "Use my home folder", "Just plan it") instead of dispatching a smaller version or writing the limitation into a worker's task; a worker that hits the same wall asks. Only access counts: an empty workspace or details nobody knows yet are the worker's to find out.
+
+**Questions with options.** A question with a few likely answers offers them as options (`say` or `ask` with `options`, up to six, the recommended one marked), shown in the chat as answers to click. Several questions go in one message (`questions`, up to twenty, each with its own options): they show as one card with the recommended answers preselected and room to type another, and one button sends all the answers as a single reply (the picks are kept with it). Questions are not reviewed: they ask rather than answer. A click on the front limb's question sends a message in reply to it; a click on a worker's question goes straight to that worker (a steer marked as the answer). The front limb asks this way when new work could go either way, into a running worker or to a separate one in parallel ("can you implement A?", then "can you also implement B?"), instead of guessing; unrelated work is dispatched without asking.
+
+A worker that cannot go on without the user calls `ask`. The question is posted in the chat (as `say` with `question: true`, in the main chat even for a batch worker) and the worker's turn ends. It waits instead of finishing: it holds its slot, the heartbeat and Resume leave it alone, and the Work canvas shows it as asking you. Your answer, sent to it directly or routed to it by the front limb as a steer, wakes it with its conversation intact. The front limb and head see such a worker in state as waiting for your answer, with its question, and route a reply that answers it to that worker first.
+
+## Second looks
+
+Fast answers are reviewed by a stronger model, and the runtime decides what gets reviewed, not the fast model.
+
+- **What:** every answer of the front limb. Batch progress lines, thread replies and corrections themselves are not reviewed.
+- **When:** once the front limb has been quiet for 3 s, all its unreviewed answers in one pass.
+- **Who:** `review: 'separate'` is a reviewer limb on the head's model, so the head stays free; `'head'` has the head review a separate voice's answers (with no voice there is nothing to review); `'off'` turns it off, the default everywhere since 2026-09-27. Review and the voice are experimental: in live sessions, two or three limbs acting on one message produced refusals corrected after the fact, duplicate workers and restated results, while one head deciding alone scored best on the routing eval (see [plan.md](plan.md#results)).
+- **How:** the reviewer calls `amend` per message: confirm, correct (the original is struck through in the chat and the correction posted below it), or expand. It judges each message as of when it was said (the wake says how long ago): a status claim that was true then is right, even if work has moved on. If it sees one of its own corrections was wrong, it withdraws it (`amend` with `withdraw`): the correction is struck through and marked withdrawn, and the original stands again. Answers it doesn't amend count as confirmed. A review run that crashes is marked "not checked", never confirmed; one aborted by Pause is reviewed again after Resume. The chat shows "checking…" while a review is pending, then ✓, "corrected below" or "not checked".
+- A corrected message is marked as wrong in every limb's state, so no one reads it as fact. The reviewer checks promises against state too ("three workers are running" when one is), and hands work to the head when a correction needs it. With review on, the front limb doesn't dispatch workers just to verify its answers.
 
 ## Awareness
 
-- **Shared state.** Every worker's projection lists the other workers, their tasks and status, their claims, and shared discoveries.
-- **Mid-run updates.** A busy worker gets updates attached to its next tool result: a steer from the user, a discovery from a sibling, a new claim on something it is touching. So it hears about changes within seconds, without being stopped.
-- **Claims.** A worker claims the files or areas it is working on (`claim`), and writing a file claims it automatically. Writing to a path claimed by another worker is rejected with who holds it and why, so conflicts surface at the moment of the write.
+- **Shared state.** Every worker sees the other workers, their tasks and status, their claims, and shared discoveries.
+- **Mid-run updates.** A busy worker gets updates attached to its next tool result: a steer, a sibling's discovery, a new claim. So it hears about changes within seconds, without being stopped.
+- **Claims.** A worker claims the files or areas it is working on (`claim`), and writing a file claims it automatically. Writing to a path another worker holds is rejected with who holds it, so conflicts surface at the moment of the write, and logged as `write_refused`, so the worker shows as blocked by the holder until its next successful call.
 - **Discoveries.** `share(text)` broadcasts a finding ("the bug is in token refresh, not the form") to every worker.
-- **Orchestration.** The head is woken on overlap signals (a rejected write on a claimed path, a gate waiting too long) to reconcile: merge duplicates, put dependent work in order, cancel redundant work.
+- **Orchestration.** A refused write on a claimed path wakes the head to reconcile: steer one worker, put their work in order, or cancel duplicates.
 
 ## Workspace
 
-Workers need a workspace to actually write code. The workspace channel gives them tools confined to one folder:
+Workers need a workspace to actually write code. In the Hub, a session's workspaces are the ones the user grants it with the workspace picker (the bench's **Workspaces** button), the same picker and service the Companion uses: repositories, folders and drones on this device, and folders other devices share. Each grants Read, Write and Run (commands) on its own, and one is the default. The entity also always has its home folder (`entity-home`, read and write, never commands), which is the default until the user picks one.
+
+The tools are blip's workspace tools, and every call names a `target` workspace or goes to the default:
 
 | Tool | Risk class | Notes |
 |---|---|---|
-| `list_files`, `read_file`, `search` | read-only | Never blocked |
-| `write_file`, `edit_file` | `limb` | Claims the file for the writer; rejected if another worker holds it |
-| `run` | `limb`, **off unless enabled** | Shell command in the workspace with a timeout. Disabled by default because it runs LLM-written commands on the host |
+| `list_files`, `read_file`, `search_files`, `get_working_tree_status` | read-only | Never blocked |
+| `write_file`, `apply_patch`, `move_path`, `delete_file`, `create_directory`, `delete_directory` | `limb` | Need Write. Claim each file as `<target>:<path>` for the writer; rejected if another worker holds it |
+| `bash` | `limb` | Needs Run. A shell command in the workspace; it can change files and reach whatever the workspace can |
 
-Paths are resolved inside the workspace root, and `.git` is never written. In this first slice, all workers share one workspace, and claims keep them apart. Per-worker worktrees and an integration branch come with [coding.md](coding.md).
+Access is checked on every call against the current selection, so a change takes effect at once. The selection is part of the session: it is saved in the recording's config (a resumed session keeps it) and logged as a `workspaces_changed` host event, so the limbs' state and a replay show what was granted when. Access is per session for now, not per worker.
 
-## Budget
+Paths are resolved inside the workspace, and `.git` is never written. All workers share the granted workspaces, and claims keep them apart. That holds for a handful of workers; big batches need per-worker worktrees and a merge step, designed in [coding.md](coding.md). A host without a workspace service (the core's own tests and demo) uses the core's `workspaceChannel({ root })`: file tools and an opt-in `run` confined to one folder.
 
-Parallel strong workers cost more. The per-session caps apply, the inspector shows each worker's runs, and the router picks the model per message. Worker conversations are kept after they finish (so they can be forked or asked follow-ups) and dropped on reset, or when too many are kept.
+## Cost
 
-## First demo
+Parallel strong workers cost more. The queue caps how many run at once, the router picks the model per request, and the Work canvas shows each worker's cost. Finished workers keep their conversation (the 12 most recent) so they can be forked or asked follow-ups; failed and stopped workers drop theirs, and Reset drops all.
 
-1. Send "fix the flaky test in X", then 10 s later "also add a changelog entry", then "how's the test fix going?".
-2. Two workers start. The third message is answered by the router from state.
-3. Each worker replies in its own thread.
-4. Send "do the changelog like the last release did". This forks the changelog worker.
+Costs are in USD at list prices, for subscription (Codex) models too, so you can see what the work is worth. The Hub prices every model call from its usage price table: the models.dev catalog, plus manual prices, plus long-context rates it ships for the models that have them (gpt-6-sol and gpt-6-luna above 272k input tokens, for both `openai` and `openai-codex`). Each call is priced on its own, with input, cache reads, cache writes and output (reasoning included) at their own rates, and a call whose whole input is over the threshold at the long-context rates. The entity keeps these totals per limb and for the session, including a worker's final turn and runs that crash or are paused; work summaries and senses (Jev) count too and are shown apart. A call whose model has no known price is counted as unpriced, never as $0.

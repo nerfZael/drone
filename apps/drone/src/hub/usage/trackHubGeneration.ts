@@ -3,11 +3,15 @@ import { getUsageStore } from './UsageStore';
 import { getUsageJournal } from './UsageJournal';
 import type { UsageObservation } from '@drone/assistant-chat';
 
+/** Who a Hub request works for: a chat's step summaries count toward that chat, under their own purpose. */
+export type HubGenerationAttribution = { purpose: string; chatId?: string; droneId?: string; chatName?: string };
+
 /** Covers Hub helper requests such as generated drone names, including failed responses with usage. */
-export async function trackHubGeneration<T>(provider: string, model: string, generate: () => Promise<T>, native = false): Promise<T> {
+export async function trackHubGeneration<T>(provider: string, model: string, generate: () => Promise<T>, native = false,
+  attribution?: HubGenerationAttribution): Promise<T> {
   const store = getUsageStore();
   const execution = { id: `hub:${crypto.randomUUID()}`, agent: 'native', purpose: 'auxiliary',
-    startedAt: new Date().toISOString(), status: 'running' };
+    startedAt: new Date().toISOString(), status: 'running', ...attribution };
   const journal = getUsageJournal();
   journal.append({ execution, observations: [], replace: true });
   try { journal.drain(store); } catch { /* The request intent is durable for restart recovery. */ }

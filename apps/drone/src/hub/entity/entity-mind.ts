@@ -1,4 +1,7 @@
-import type { Mind, MindRunInput, MindRunResult } from '@entity/core';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Mind, MindRunInput, MindRunResult, ModelUsage } from '@entity/core';
+import type { TokenCounts } from '@drone/assistant-chat';
 import type { AssistantMessage, Context, Message, Model } from '@mariozechner/pi-ai';
 import { resolveBlipProviderApiKey } from '../hub-settings';
 import { trackHubGeneration } from '../usage/trackHubGeneration';
@@ -8,25 +11,78 @@ type PiAi = typeof import('@mariozechner/pi-ai');
 let piAi: Promise<PiAi> | null = null;
 const loadPiAi = () => (piAi ??= importEsm('@mariozechner/pi-ai') as Promise<PiAi>);
 
-export type ReasoningLevel = 'minimal' | 'low' | 'medium' | 'high';
+export type ReasoningLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+/** Where worker conversations are kept beyond memory, so a restored session can continue them. Append-only per key. */
+export interface ConversationStore {
+  load(key: string): Message[] | undefined;
+  append(key: string, messages: Message[]): void;
+  remove(key: string): void;
+}
+
+/** One JSON Lines file per worker conversation (`<key>.jsonl`), next to a session's recording. */
+export function fileConversationStore(dir: string): ConversationStore {
+  const file = (key: string) => path.join(dir, `${key.replace(/[^\w.-]/g, '_')}.jsonl`);
+  return {
+    load(key) {
+      try { return fs.readFileSync(file(key), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as Message); }
+      catch { return undefined; }
+    },
+    append(key, messages) {
+      if (!messages.length) return;
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(file(key), messages.map(m => `${JSON.stringify(m)}\n`).join(''));
+    },
+    remove(key) { fs.rmSync(file(key), { force: true }); },
+  };
+}
 
 /**
- * Runs entity LLM limbs with pi-ai directly: one fresh context per reactive wake, and an
- * in-memory conversation per task limb until the runtime calls forget(). Tool calls commit
- * as soon as they stream in, not at the end of the turn.
+ * Runs entity LLM limbs with pi-ai directly: one fresh context per reactive wake, and a
+ * conversation per task limb until the runtime calls forget(). Conversations live in memory
+ * and, with a store, on disk too. Tool calls commit as soon as they stream in, not at the end of the turn.
  */
+/** Whether pi-ai can run a "provider/model" id: the entity's minds only run models it knows. */
+export async function isRunnableModel(id: string): Promise<boolean> {
+  const [provider, ...rest] = id.split('/');
+  if (!provider || !rest.length) return false;
+  try { return !!(await loadPiAi()).getModel(provider as never, rest.join('/') as never); } catch { return false; }
+}
+
 export class PiAiMind implements Mind {
   private readonly sessions = new Map<string, Message[]>();
 
-  constructor(private readonly reasoning: ReasoningLevel = 'medium') {}
+  /**
+   * `price` gives each model call's cost in USD at list price (null when the model has no known price); without it,
+   * pi-ai's own flat rates are used.
+   */
+  constructor(
+    /** How hard the model thinks: one level for every call, or chosen per call (the Hub picks it per part of the entity). */
+    private readonly reasoning: ReasoningLevel | ((input: MindRunInput) => ReasoningLevel) = 'medium',
+    private readonly store?: ConversationStore,
+    private readonly price?: (provider: string, model: string, counts: TokenCounts) => number | null,
+  ) {}
 
-  forget(sessionKey: string): void { this.sessions.delete(sessionKey); }
+  forget(sessionKey: string): void {
+    this.sessions.delete(sessionKey);
+    this.store?.remove(sessionKey);
+  }
 
   fork(fromKey: string, toKey: string): boolean {
-    const history = this.sessions.get(fromKey);
+    const history = this.history(fromKey);
     if (!history) return false;
     this.sessions.set(toKey, [...history]);
+    this.store?.append(toKey, history);
     return true;
+  }
+
+  /** A kept conversation: from memory, or from the store after a restart. */
+  private history(key: string): Message[] | undefined {
+    const known = this.sessions.get(key);
+    if (known) return known;
+    const loaded = this.store?.load(key);
+    if (loaded) this.sessions.set(key, loaded);
+    return loaded;
   }
 
   async run(input: MindRunInput): Promise<MindRunResult> {
@@ -38,50 +94,78 @@ export class PiAiMind implements Mind {
     const apiKey = await resolveBlipProviderApiKey(providerId);
     if (!apiKey) throw new Error(`No credentials for ${providerId}. Sign in or add a key in Settings.`);
 
-    const history = input.sessionKey ? (this.sessions.get(input.sessionKey) ?? []) : [];
-    const messages: Message[] = [...history, { role: 'user', content: input.prompt, timestamp: Date.now() }];
+    const reasoning = typeof this.reasoning === 'function' ? this.reasoning(input) : this.reasoning;
+    const history = input.sessionKey ? (this.history(input.sessionKey) ?? []) : [];
+    const prompt: Message = { role: 'user', content: input.prompt, timestamp: Date.now() };
+    const messages: Message[] = [...history, prompt];
     const context: Context = {
       systemPrompt: input.system,
       messages,
       tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as never })),
     };
-    const usage = { input: 0, output: 0, cacheRead: 0 };
+    // Kept from the start and appended step by step, so a run that is aborted (Pause) or crashes keeps the
+    // steps it completed: their effects already happened. A step is appended whole (the model's tool calls
+    // with their results), so the history never holds a call without its result.
+    const key = input.sessionKey;
+    if (key) { this.sessions.set(key, context.messages); this.store?.append(key, [prompt]); }
+    const usage: Required<Omit<ModelUsage, 'cost'>> & { cost: number | null } = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
     let text = '';
 
-    for (let step = 0; step < input.maxSteps; step++) {
-      if (input.signal.aborted) throw new Error('aborted');
-      const results: Message[] = [];
-      const pendingCalls: Promise<void>[] = [];
-      const message: AssistantMessage = await trackHubGeneration(providerId, modelId, async () => {
-        const stream = streamSimple(model, context, {
-          apiKey, signal: input.signal, maxTokens: 8192,
-          sessionId: input.sessionKey ?? `entity:${input.limbId}`,
-          ...(model.reasoning ? { reasoning: this.reasoning } : {}),
-        });
-        for await (const event of stream) {
-          if (event.type === 'toolcall_end') {
-            const call = event.toolCall;
-            const index = results.length;
-            results.push(undefined as never);
-            pendingCalls.push(input.callTool(call.name, (call.arguments ?? {}) as Record<string, unknown>).then(output => {
-              results[index] = { role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{ type: 'text', text: output }], isError: output.startsWith('error'), timestamp: Date.now() };
-            }));
+    // Stays true if the loop ends by using every turn while the model is still calling tools.
+    let ranOut = true;
+    try {
+      for (let step = 0; step < input.maxSteps; step++) {
+        if (input.signal.aborted) throw new Error('aborted');
+        const results: Message[] = [];
+        const pendingCalls: Promise<void>[] = [];
+        const message: AssistantMessage = await trackHubGeneration(providerId, modelId, async () => {
+          const stream = streamSimple(model, context, {
+            apiKey, signal: input.signal, maxTokens: 8192,
+            sessionId: input.sessionKey ?? `entity:${input.limbId}`,
+            ...(model.reasoning && reasoning !== 'off' ? { reasoning } : {}),
+          });
+          for await (const event of stream) {
+            if (event.type === 'toolcall_end') {
+              const call = event.toolCall;
+              const index = results.length;
+              results.push(undefined as never);
+              pendingCalls.push(input.callTool(call.name, (call.arguments ?? {}) as Record<string, unknown>).then(output => {
+                results[index] = { role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{ type: 'text', text: output }], isError: output.startsWith('error'), timestamp: Date.now() };
+              }));
+            }
+            if (event.type === 'error') throw new Error(event.error.errorMessage ?? 'model stream failed');
           }
-          if (event.type === 'error') throw new Error(event.error.errorMessage ?? 'model stream failed');
-        }
-        await Promise.all(pendingCalls);
-        return stream.result();
-      }, true);
-      usage.input += message.usage?.input ?? 0;
-      usage.output += message.usage?.output ?? 0;
-      usage.cacheRead += message.usage?.cacheRead ?? 0;
-      context.messages.push(message);
-      const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
-      if (said) text = said;
-      if (!results.length) break;
-      context.messages.push(...results);
+          await Promise.all(pendingCalls);
+          return stream.result();
+        }, true);
+        const call = this.count(usage, providerId, modelId, message);
+        if (call) input.spent?.(call);
+        context.messages.push(message, ...results);
+        if (key && this.sessions.get(key) === context.messages) this.store?.append(key, [message, ...results]);
+        const said = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
+        if (said) text = said;
+        // The limb ended its turn with a tool (finish_task, ask): stop here rather than ask the model for more.
+        if (!results.length || input.ended?.()) { ranOut = false; break; }
+      }
+    } catch (error) {
+      // What the completed steps used is spent either way, so it goes with the error.
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { usage });
     }
-    if (input.sessionKey) this.sessions.set(input.sessionKey, context.messages);
-    return { text, usage };
+    return { text, usage, stopReason: ranOut ? 'max_steps' : 'done' };
+  }
+
+  /** Adds one model call to a run's usage; each call is priced on its own, since long-context rates depend on its size. */
+  /** Adds one call to the run's total and returns that call's own usage. */
+  private count(usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number | null }, provider: string, model: string, message: AssistantMessage): ModelUsage | null {
+    const used = message.usage;
+    if (!used) return null;
+    const counts: TokenCounts = { input: used.input ?? 0, output: used.output ?? 0, cacheRead: used.cacheRead ?? 0, cacheWrite: used.cacheWrite ?? 0, reasoning: null };
+    usage.input += counts.input!;
+    usage.output += counts.output!;
+    usage.cacheRead += counts.cacheRead!;
+    usage.cacheWrite += counts.cacheWrite!;
+    const cost = this.price ? this.price(provider, model, counts) : used.cost?.total ?? null;
+    usage.cost = usage.cost === null || cost === null ? null : usage.cost + cost;
+    return { input: counts.input!, output: counts.output!, cacheRead: counts.cacheRead!, cacheWrite: counts.cacheWrite!, cost };
   }
 }

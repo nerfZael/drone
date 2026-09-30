@@ -195,7 +195,7 @@ export function workspaceChannel(options: WorkspaceChannelOptions): Channel<Work
     effects,
     render(world, { ago }) {
       return {
-        stable: { root: world.root, commands: world.commands },
+        stable: { root: world.root, access: world.commands ? 'read, write, run commands' : 'read, write' },
         volatile: world.writes.length ? { recent_writes: world.writes.slice(-10).map(w => `${w.by} wrote ${w.path} (${ago(w.t)})`) } : undefined,
       };
     },

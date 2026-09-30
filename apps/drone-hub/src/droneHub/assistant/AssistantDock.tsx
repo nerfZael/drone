@@ -35,6 +35,7 @@ import { chatInputDraftKeyForDroneChat } from '../app/helpers';
 import { usePendingPromptInterruption } from '../app/use-pending-prompt-interruption';
 import {
   markChatLoadContentCommitted,
+  markChatLoadCacheHit,
   markChatLoadPrimaryResolved,
 } from '../app/chat-load-telemetry';
 import { clientTimeZone } from '../app/client-time-zone';
@@ -54,6 +55,7 @@ import {
 import { IconChevron, IconDrone, IconFile, IconFolder } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
+import { deleteNativeChatSnapshot, readNativeChatSnapshot, writeNativeChatSnapshot } from './native-chat-cache';
 import { latestActivityHasVisibleAssistantText } from './assistant-streaming-state';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import {
@@ -292,7 +294,11 @@ export type AssistantMessageFeatures = {
   onOpenLink: (href: string) => boolean;
 };
 
-export function AssistantDock({
+export function AssistantDock(props: React.ComponentProps<typeof NativeAssistantDock>) {
+  return <NativeAssistantDock key={JSON.stringify([props.nativeChat.droneId, props.nativeChat.chatName])} {...props} />;
+}
+
+function NativeAssistantDock({
   autoFocus = false,
   focusTargetId = 'assistant-chat',
   nativeChat,
@@ -336,11 +342,12 @@ export function AssistantDock({
   const setApprovalRequiredByChatNodeId = useDroneHubRuntimeStore(
     (state) => state.setApprovalRequiredByChatNodeId,
   );
-  const [snapshot, setSnapshot] = React.useState<AssistantSnapshot | null>(null);
+  const [initialSnapshot] = React.useState(() => readNativeChatSnapshot(nativeDroneId, nativeChatName));
+  const [snapshot, setSnapshot] = React.useState<AssistantSnapshot | null>(initialSnapshot);
   const [bootstrapHistory, setBootstrapHistory] = React.useState<
     AssistantBootstrapSnapshot['initialHistory'] | null
-  >(null);
-  const [loading, setLoading] = React.useState(true);
+  >(initialSnapshot?.initialHistory ?? null);
+  const [loading, setLoading] = React.useState(!initialSnapshot);
   const [error, setError] = React.useState<string | null>(null);
   const [referencedDrones, setReferencedDrones] = React.useState<AssistantDroneReference[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
@@ -500,9 +507,15 @@ export function AssistantDock({
   React.useEffect(() => {
     if (hasHistory) onHistoryChange?.(true);
   }, [hasHistory, onHistoryChange]);
+  const lastHistoryRefreshRef = React.useRef<{ threadId: string; updatedAt: string | undefined; bootstrap: typeof bootstrapHistory } | null>(null);
   React.useEffect(() => {
-    if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
-  }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
+    const previous = lastHistoryRefreshRef.current;
+    lastHistoryRefreshRef.current = { threadId: activeThreadId, updatedAt: activeThread?.updatedAt, bootstrap: bootstrapHistory };
+    // The session hook handles the initial history; a bootstrap response already
+    // includes it. Only metadata-only updates need an additional history read.
+    if (!activeThreadId || previous?.threadId !== activeThreadId || previous.bootstrap !== bootstrapHistory) return;
+    if (previous.updatedAt !== activeThread?.updatedAt) void blipSession.refreshHistory({ quiet: true });
+  }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory, bootstrapHistory]);
   const activeAccessScope: AssistantAccessScope | null =
     activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
@@ -600,6 +613,7 @@ export function AssistantDock({
     scrollToBottom: scrollAssistantToBottom,
   } = usePinnedTranscriptScroll({
     contextKey: `${nativeDroneId}:${nativeChatName}:${activeThreadId}`,
+    initialPosition: 'bottom',
     contentVersion: transcriptContentVersion,
     enabled: !filesOpen,
   });
@@ -727,7 +741,7 @@ export function AssistantDock({
   );
 
   const refresh = React.useCallback(
-    async (options: { silent?: boolean; includeHistory?: boolean } = {}) => {
+    async (options: { silent?: boolean; includeHistory?: boolean; signal?: AbortSignal } = {}) => {
       if (!options.silent) {
         setLoading(true);
         setError(null);
@@ -738,7 +752,7 @@ export function AssistantDock({
           `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(nativeChatName)}/native${
             options.includeHistory ? '?includeHistory=1' : ''
           }`,
-          { method: 'POST' },
+          { method: 'POST', signal: options.signal },
         );
         if (snapshotRequestSeqRef.current !== requestSeq) return;
         const nativeChatId = String(next.nativeChatId ?? next.chatId ?? '').trim();
@@ -761,7 +775,13 @@ export function AssistantDock({
           );
         }
       } catch (err: any) {
-        if (!options.silent) setError(err?.message ?? String(err));
+        if (options.signal?.aborted || snapshotRequestSeqRef.current !== requestSeq) return;
+        if (err?.status === 404 || err?.status === 403) {
+          deleteNativeChatSnapshot(nativeDroneId, nativeChatName);
+          setSnapshot(null);
+          setBootstrapHistory(null);
+        }
+        if (!options.silent || options.includeHistory) setError(err?.message ?? String(err));
         if (options.includeHistory) {
           markChatLoadPrimaryResolved(
             { droneId: nativeDroneId, chatName: nativeChatName },
@@ -918,11 +938,24 @@ export function AssistantDock({
   }, [loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
 
   React.useEffect(() => {
-    activeThreadIdRef.current = '';
-    setSnapshot(null);
-    setBootstrapHistory(null);
-    void refresh({ includeHistory: true });
+    const controller = new AbortController();
+    const cached = readNativeChatSnapshot(nativeDroneId, nativeChatName);
+    if (cached) markChatLoadCacheHit(
+      { droneId: nativeDroneId, chatName: nativeChatName }, 'native', cached.initialHistory?.entries.length ?? 0,
+    );
+    activeThreadIdRef.current = cached?.threads[0]?.id ?? '';
+    setSnapshot(cached);
+    setBootstrapHistory(cached?.initialHistory ?? null);
+    void refresh({ includeHistory: true, silent: Boolean(cached), signal: controller.signal });
+    return () => {
+      snapshotRequestSeqRef.current += 1;
+      controller.abort();
+    };
   }, [nativeChatName, nativeDroneId, refresh]);
+
+  React.useEffect(() => {
+    if (snapshot) writeNativeChatSnapshot(nativeDroneId, nativeChatName, snapshot);
+  }, [nativeChatName, nativeDroneId, snapshot]);
 
   React.useEffect(() => {
     if (loading || (!snapshot && !error)) return;

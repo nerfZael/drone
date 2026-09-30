@@ -1,5 +1,7 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { isEntityActor as isEntity, replayRuntime, snapshotLimbs } from '@entity/core/state';
+import { seconds } from './bench-format';
 import { requestJson } from '../http';
 
 /**
@@ -8,19 +10,17 @@ import { requestJson } from '../http';
  */
 
 export type SessionMeta = {
-  id: string; status: 'live' | 'ended' | 'interrupted'; startedAt: string; endedAt?: string; endReason?: string;
+  id: string; status: 'live' | 'ended' | 'interrupted' | 'suspended'; startedAt: string; endedAt?: string; endReason?: string;
   config: Record<string, unknown>; events: number; frames: number; firstMessage?: string;
 };
 type SnapshotFrame = { seq: number; t: number; patch: Partial<EntitySnapshot> };
 type Recording = { meta: SessionMeta; events: EntityEvent[]; frames: SnapshotFrame[] };
 
 /** Frequent low-level events that "skip noise" steps over. */
-const NOISE = new Set(['draft_changed', 'sensed', 'program_log', 'run_finished', 'entity_draft', 'timer']);
+const NOISE = new Set(['draft_changed', 'sensed', 'program_log', 'run_finished', 'entity_draft', 'timer', 'watch_fired', 'health']);
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
 /** Longest wait between two events during playback: idle stretches are compressed. */
 const MAX_GAP_MS = 1500;
-const seconds = (t: number) => `${(t / 1000).toFixed(2)}s`;
-const isEntity = (by: string) => by !== 'user' && by !== 'host' && by !== 'system';
 
 /** Snapshots at every frame, built once: each is the previous one with that frame's changed sections. */
 function buildStates(frames: SnapshotFrame[]): EntitySnapshot[] {
@@ -116,14 +116,26 @@ export function useEntityReplay() {
     setPlaying(!playing);
   }, [playing, index, events.length]);
 
+  /** Recordings whose log carries its setup rebuild the runtime state from the log; older ones read it from frames. */
+  const fromLog = React.useMemo(() => events.some((e) => e.type === 'session_started' && e.data.setup), [events]);
+
   /** The bench at the current position: events so far and the snapshot after the current event. */
   const view = React.useMemo(() => {
     if (!recording || !states.length) return null;
     const event = events[index];
     const frame = event ? Math.max(0, lastAtOrBefore(recording.frames, event.seq, (f) => f.seq)) : 0;
-    const snapshot = { ...states[frame], t: event?.t ?? 0 } as EntitySnapshot;
-    return { events: events.slice(0, index + 1), snapshot, event };
-  }, [recording, states, events, index]);
+    const shown = events.slice(0, index + 1);
+    let snapshot = { ...states[frame], t: event?.t ?? 0 } as EntitySnapshot;
+    if (fromLog) {
+      // Frames carry the channels' world, levels and senses; limbs, stops, notes, health and usage are the log's.
+      const runtime = replayRuntime(shown, events.find((e) => e.type === 'session_started')?.data.setup as never);
+      snapshot = {
+        ...snapshot, limbs: snapshotLimbs(runtime), stops: runtime.stops, self: { notes: runtime.notes }, health: runtime.health,
+        usage: runtime.usage, usageBy: runtime.usageBy,
+      };
+    }
+    return { events: shown, snapshot, event };
+  }, [recording, states, events, index, fromLog]);
 
   return {
     recording, index, playing, speed, skipNoise, sessions, dir, error, view,
@@ -232,7 +244,7 @@ export function EntityTimeline({ replay, liveSessionId, liveLastSeq }: { replay:
 function sessionLabel(s: SessionMeta): string {
   const started = new Date(s.startedAt);
   const when = `${started.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${started.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
-  const status = s.status === 'live' ? ' · live' : s.status === 'interrupted' ? ' · interrupted' : '';
+  const status = s.status === 'live' ? ' · live' : s.status === 'interrupted' ? ' · interrupted' : s.status === 'suspended' ? ' · suspended' : '';
   return `${when} · ${s.events} ev${status}${s.firstMessage ? ` · ${s.firstMessage.slice(0, 40)}` : ''}`;
 }
 

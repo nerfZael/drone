@@ -1,3 +1,4 @@
+import { chatAgentSupportsReasoning } from '@drone/assistant-chat';
 import React from 'react';
 import type {
   AgentApprovalPolicy,
@@ -508,7 +509,7 @@ export function useDroneCreationActions({
           ? String(opts?.seedProvider ?? '').trim() || null
           : null;
       const seedReasoning =
-        !createWithoutChat && supportsAccessControls ? requestedReasoning || null : null;
+        !createWithoutChat && chatAgentSupportsReasoning(seedAgent) ? requestedReasoning || null : null;
       let createdDrone = false;
       let postCreateError: string | null = null;
       const optimisticDraftName =

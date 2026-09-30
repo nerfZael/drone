@@ -66,6 +66,8 @@ describe('device mesh drone chat pages', () => {
     const [turn] = boundedDroneChatPage([
       {
         id: 'steering-input',
+        runId: 'original',
+        runStartedAt: '2026-09-28T18:45:12Z',
         prompt: 'Also check mobile.',
         output: '',
         userOnly: true,
@@ -75,6 +77,8 @@ describe('device mesh drone chat pages', () => {
 
     expect(turn).toMatchObject({
       id: 'steering-input',
+      runId: 'original',
+      runStartedAt: '2026-09-28T18:45:12Z',
       userOnly: true,
       deliveryMode: 'asap',
     });

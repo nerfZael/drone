@@ -4,8 +4,10 @@ import {
   DRONE_CHAT_DND_MIME,
   DRONE_DND_MIME,
   createCanvasChatNodeId,
+  createCanvasDroneNodeId,
 } from '../src/droneHub/app/app-config';
 import {
+  collectUniqueChatTargets,
   expandDroneIdsToChatNodeIds,
   resolveDraggedCanvasChatNodeIds,
 } from '../src/droneHub/canvas/chat-node-utils';
@@ -69,4 +71,12 @@ describe('canvas drag payload helpers', () => {
 
 test('default chat deletion is enabled when other chats exist', () => {
   expect(getChatNodeActionFlags({ droneId: 'd', chatName: 'default' }, { d: 2 }).deleteDisabled).toBe(false);
+});
+
+test('a drone card targets its default chat, or its first chat when it has none', () => {
+  const droneCard = createCanvasDroneNodeId('alpha');
+  expect(collectUniqueChatTargets([droneCard], { alpha: { chats: ['plan', 'default'] } })).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
+  expect(collectUniqueChatTargets([droneCard], { alpha: { chats: ['plan', 'review'] } })).toEqual([{ droneId: 'alpha', chatName: 'plan' }]);
+  // With no chats listed, the hub creates the default chat on first send.
+  expect(collectUniqueChatTargets([droneCard])).toEqual([{ droneId: 'alpha', chatName: 'default' }]);
 });

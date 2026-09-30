@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { codexPromptOwnsResponse } from '../src/hub/codex-prompt-run';
+import { codexPromptOwnsResponse, codexPromptRunMetadata } from '../src/hub/codex-prompt-run';
 
 describe('codex prompt runs', () => {
   test('assigns a shared run response to its latest steering message', () => {
@@ -24,4 +24,12 @@ describe('codex prompt runs', () => {
       true,
     );
   });
+});
+
+
+test('shared run timing comes from the run, not the time the steering message joined', () => {
+  expect(codexPromptRunMetadata({ startedAt: '2026-09-28T18:47:37Z', codexAppServer: {
+    run: { id: 'original', startedAt: '2026-09-28T18:45:12Z' },
+  } })).toEqual({ runId: 'original', runStartedAt: '2026-09-28T18:45:12Z' });
+  expect(codexPromptRunMetadata({ id: 'queued', startedAt: '2026-09-28T18:47:37Z' })).toEqual({});
 });

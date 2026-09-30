@@ -47,7 +47,7 @@ export function focusChatWindow(
     scope = findScope() ?? null;
     if (!scope) return;
     scope.tabIndex = -1;
-    scope.focus();
+    scope.focus({ preventScroll: true });
     cancel();
   };
   const observer = new MutationObserver(() => {

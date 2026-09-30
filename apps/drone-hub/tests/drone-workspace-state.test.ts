@@ -52,6 +52,7 @@ const {
   sizeWorkspaceOpenedFromChat,
   ensureWorkspaceToolPanel,
   migrateEditorChangesPanels,
+  migrateWorkspaceExplorerPanels,
   refreshWorkspacePanelTitles,
   restoreRequiredWorkspacePanels,
   syncEmptyWorkspaceSlots,
@@ -99,8 +100,8 @@ describe('per-drone workspace state', () => {
     const workspaceTools = readAppSource('app/use-workspace-tools.ts');
 
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
-    expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
-    expect(selectedWorkspace).toContain('key={currentDrone.id}');
+    expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout, sharedLayout)');
+    expect(selectedWorkspace).toContain("key={`${sharedWorkspaceLayout ? 'shared' : 'drone'}:${currentDrone.id}`}");
     expect(workspaceTools).toContain('visibleToolTabsByDrone');
     expect(workspaceTools).toContain('[droneId]: tabs');
     expect(selectedWorkspace).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');
@@ -235,7 +236,7 @@ describe('per-drone workspace state', () => {
       width: 1800,
       groups,
       get panels() {
-        return groups.flatMap((group) => group.panels.map((panel) => ({ id: panel.id, api: { group } })));
+        return groups.flatMap((group) => group.panels.map((panel) => ({ id: panel.id, api: { group, getParameters: () => ({ tab: panel.id.split(':')[1] }) } })));
       },
       getPanel: (id: string) => {
         const group = groups.find((entry) => entry.panels.some((panel) => panel.id === id));
@@ -273,7 +274,7 @@ describe('per-drone workspace state', () => {
     // After the editor group is removed Dockview hands its space to the
     // explorer, so the live width is already inflated when rebalancing runs.
     const { api, calls } = sizingWorkspace([['agent-chat'], ['file-explorer']], [600, 1200]);
-    rebalanceGridGroupWidths(api, { explorerWidth: 240 });
+    rebalanceGridGroupWidths(api, { explorerWidths: { 'file-explorer': 240 } });
     expect(calls).toEqual([
       { ids: ['agent-chat'], width: 1560 },
       { ids: ['file-explorer'], width: 240 },
@@ -293,6 +294,32 @@ describe('per-drone workspace state', () => {
     ]);
   });
 
+  test('preserves both explorer widths while rebalancing editor and changes', () => {
+    const { api, calls } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer'], ['tool:changes'], ['changes-explorer']],
+      [400, 450, 220, 450, 280],
+    );
+    rebalanceGridGroupWidths(api, { explorerWidths: { 'file-explorer': 220, 'changes-explorer': 280 } });
+    expect(calls).toEqual([
+      { ids: ['agent-chat'], width: 433 },
+      { ids: ['tool:editor'], width: 433 },
+      { ids: ['tool:changes'], width: 433 },
+      { ids: ['file-explorer'], width: 220 },
+      { ids: ['changes-explorer'], width: 280 },
+    ]);
+  });
+
+  test('reopening the changes explorer takes space from Changes while preserving Editor', () => {
+    writeWorkspaceExplorerWidth(240);
+    const { api, calls, groups } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer'], ['tool:changes'], ['changes-explorer']],
+      [400, 500, 220, 440, 240],
+    );
+    const previous = new Map([[groups[0], 400], [groups[1], 500], [groups[2], 220], [groups[3], 680]]) as any;
+    fitAddedGridGroups(api, previous);
+    expect(calls.map((call) => call.width)).toEqual([400, 500, 220, 440, 240]);
+  });
+
   test('an explorer tab sharing a group with a tool does not narrow that tool', () => {
     const { api, calls } = sizingWorkspace(
       [['agent-chat'], ['tool:editor', 'file-explorer']], [900, 900],
@@ -301,18 +328,17 @@ describe('per-drone workspace state', () => {
     expect(calls.map((call) => call.width)).toEqual([900, 900]);
   });
 
-  test('switching Changes to Editor takes the explorer width from that pane only', () => {
+  test('reopening the editor explorer takes width from its own pane only', () => {
     writeWorkspaceExplorerWidth(240);
     // Dockview has already squeezed the explorer in; the pre-open widths were 500 / 1300.
-    // The Editor reuses the Changes panel, so it keeps the tool:changes id.
     const { api, calls, groups } = sizingWorkspace(
-      [['agent-chat'], ['tool:changes'], ['file-explorer']], [500, 900, 400],
+      [['agent-chat'], ['tool:editor'], ['file-explorer']], [500, 900, 400],
     );
     const previous = new Map([[groups[0], 500], [groups[1], 1300]]) as any;
     fitAddedGridGroups(api, previous);
     expect(calls.slice(0, 3)).toEqual([
       { ids: ['agent-chat'], width: 500 },
-      { ids: ['tool:changes'], width: 1060 },
+      { ids: ['tool:editor'], width: 1060 },
       { ids: ['file-explorer'], width: 240 },
     ]);
   });
@@ -334,7 +360,7 @@ describe('per-drone workspace state', () => {
     ]);
   });
 
-  test('opens editor and explorer as separate panels and reuses their positions', () => {
+  function toolWorkspace() {
     const added: any[] = [];
     const panels: any[] = [{ id: 'agent-chat' }];
     const api = {
@@ -345,66 +371,62 @@ describe('per-drone workspace state', () => {
       addPanel: (options: any) => {
         added.push(options);
         let params = options.params;
-        panels.push({ id: options.id, api: {
+        const panel = { id: options.id, title: options.title, api: {
           getParameters: () => params,
-          updateParameters: (next: any) => { params = { ...params, ...next }; },
-          setTitle: () => {}, setConstraints: () => {}, setActive: () => {},
-        } });
+          updateParameters: (next: any) => { params = next; },
+          setTitle: (title: string) => { panel.title = title; },
+          setConstraints: () => {}, setActive: () => {},
+        } };
+        panels.push(panel);
       },
     };
+    return { api, added, panels };
+  }
+
+  test('opens editor, changes, and both explorers independently and reuses each panel', () => {
+    const { api, added, panels } = toolWorkspace();
     expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(true);
-    expect(added.map((panel) => panel.id)).toEqual(['tool:editor', 'file-explorer']);
+    expect(ensureWorkspaceToolPanel(api as any, 'changes', 'single')).toBe(true);
+    expect(added.map((panel) => panel.id)).toEqual(['tool:editor', 'file-explorer', 'tool:changes', 'changes-explorer']);
     expect(added[1].position).toEqual({ direction: 'right', referencePanel: 'tool:editor' });
+    expect(added[3].position).toEqual({ direction: 'right', referencePanel: 'tool:changes' });
+    const originals = [...panels];
     expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(false);
-    expect(added).toHaveLength(2);
-    panels.splice(panels.findIndex((panel) => panel.id === 'file-explorer'), 1);
-    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(true);
-    expect(added[2].id).toBe('file-explorer');
+    expect(ensureWorkspaceToolPanel(api as any, 'changes', 'single')).toBe(false);
+    expect(panels).toEqual(originals);
+    expect(api.getPanel('file-explorer').api.getParameters().tab).toBe('editor');
+    expect(api.getPanel('tool:editor').api.getParameters().tab).toBe('editor');
+    expect(api.getPanel('changes-explorer').api.getParameters().tab).toBe('changes');
+    expect(api.getPanel('tool:changes').api.getParameters().tab).toBe('changes');
+
+    panels.splice(panels.findIndex((panel) => panel.id === 'changes-explorer'), 1);
+    migrateWorkspaceExplorerPanels(api as any);
+    expect(api.getPanel('changes-explorer')).toBeUndefined();
+    expect(ensureWorkspaceToolPanel(api as any, 'changes', 'single')).toBe(true);
+    expect(added.at(-1).id).toBe('changes-explorer');
+    expect(api.getPanel('file-explorer')).toBe(originals[2]);
   });
 
-  test('switches Editor and Changes inside the same Dockview panel', () => {
-    let params = { tab: 'editor', paneKey: 'bottom' };
-    let title = 'Editor';
-    let minimumWidth = 0;
-    let active = false;
-    const panel = {
-      id: 'tool:editor',
-      api: {
-        getParameters: () => params,
-        updateParameters: (next: typeof params) => {
-          params = next;
-        },
-        setTitle: (next: string) => {
-          title = next;
-        },
-        setConstraints: (next: { minimumWidth?: number }) => {
-          minimumWidth = next.minimumWidth ?? 0;
-        },
-        setActive: () => {
-          active = true;
-        },
-      },
-    };
-    const addedPanels: unknown[] = [];
-    const api = {
-      panels: [panel],
-      getPanel: () => undefined,
-      addPanel: (next: unknown) => addedPanels.push(next),
-    };
-
-    const added = ensureWorkspaceToolPanel(
-      api as unknown as Parameters<typeof ensureWorkspaceToolPanel>[0],
-      'changes',
-      'single',
-    );
-
-    expect(added).toBe(false);
-    expect(addedPanels).toHaveLength(0);
-    expect(params.tab).toBe('changes');
-    expect(params.paneKey).toBe('bottom');
-    expect(title).toBe('Changes');
-    expect(minimumWidth).toBe(480);
-    expect(active).toBe(true);
+  test('upgrades a saved shared changes pane without replacing it when Editor opens', () => {
+    const { api, panels } = toolWorkspace();
+    api.addPanel({ id: 'tool:editor', params: { tab: 'changes', paneKey: 'bottom', splitChanges: true } });
+    api.addPanel({ id: 'file-explorer', params: { tab: 'changes', paneKey: 'bottom' } });
+    const changes = api.getPanel('tool:editor');
+    migrateEditorChangesPanels(api as any);
+    migrateWorkspaceExplorerPanels(api as any);
+    expect(api.getPanel('file-explorer').api.getParameters().tab).toBe('editor');
+    expect(api.getPanel('changes-explorer').api.getParameters().tab).toBe('changes');
+    expect(changes.api.getParameters().splitChangesExplorer).toBe(true);
+    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(true);
+    expect(api.getPanel('tool:editor')).toBe(changes);
+    expect(changes.api.getParameters().tab).toBe('changes');
+    expect(api.getPanel('tool:editor:2').api.getParameters().tab).toBe('editor');
+    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(false);
+    expect(ensureWorkspaceToolPanel(api as any, 'changes', 'single')).toBe(false);
+    const originals = [...panels];
+    migrateEditorChangesPanels(api as any);
+    migrateWorkspaceExplorerPanels(api as any);
+    expect(panels).toEqual(originals);
   });
 
   test('keeps a restored Editor or Changes pane independent of another drone active tab', () => {
@@ -564,7 +586,7 @@ describe('per-drone workspace state', () => {
     expect(removalHandler).toContain('const timer = window.setTimeout(() => {');
     expect(removalHandler).toContain('if (api.getPanel(panelId)) return;');
     expect(removalHandler.indexOf('if (api.getPanel(panelId)) return;')).toBeLessThan(
-      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove, { explorerWidth });'),
+      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove, { explorerWidths });'),
     );
   });
 

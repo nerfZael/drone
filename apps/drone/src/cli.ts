@@ -48,6 +48,7 @@ import {
   waitForDetachedHubState,
 } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
+import { proxyDroneHubEventStream } from './hub/event-stream-proxy';
 import {
   createDroneRuntime,
   importContainerDroneRuntime,
@@ -794,6 +795,11 @@ async function startStaticDroneHubUiServer(opts: {
         if (String(req.method ?? 'GET').toUpperCase() === 'OPTIONS') {
           res.statusCode = 204;
           res.end();
+          return;
+        }
+        // Event streams go over a plain socket (see proxyDroneHubEventStream); everything else through fetch.
+        if (String(req.method ?? 'GET').toUpperCase() === 'GET' && String(req.headers.accept ?? '').includes('text/event-stream')) {
+          proxyDroneHubEventStream({ req, res, apiHost: opts.apiHost, apiPort: opts.apiPort, apiToken: opts.apiToken });
           return;
         }
         await proxyDroneHubApiRequest({

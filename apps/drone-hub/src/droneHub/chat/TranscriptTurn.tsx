@@ -221,7 +221,7 @@ export const TranscriptTurn = React.memo(
       [cleanedAgentMessage, droneHomePath, droneId],
     );
     const promptIso = item.promptAt || item.at;
-    const runStartedIso = item.startedAt || promptIso;
+    const runStartedIso = item.runStartedAt || item.startedAt || promptIso;
     const agentIso = item.completedAt || item.at;
     const submittedAtMs = Date.parse(String(promptIso ?? ''));
     const explicitRunStartedAtMs = Date.parse(String(item.startedAt ?? ''));
@@ -529,6 +529,8 @@ export const TranscriptTurn = React.memo(
   },
   (a, b) =>
     a.executionOrderNote === b.executionOrderNote &&
+    a.item.runId === b.item.runId &&
+    a.item.runStartedAt === b.item.runStartedAt &&
     a.item.startedAt === b.item.startedAt &&
     a.item.completedAt === b.item.completedAt &&
     a.item.id === b.item.id &&

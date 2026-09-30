@@ -126,12 +126,48 @@ describe('agent model catalog', () => {
       'claude-opus-5',
       'claude-haiku-4-5',
     ]);
+    // Claude Code takes --effort for each model; unset, it uses the user's own setting.
+    for (const model of result.models) {
+      expect(model.reasoningLevels).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(model.defaultReasoningLevel).toBe('');
+    }
     expect(commands.slice(0, 3)).toEqual([
       'command -v claude >/dev/null 2>&1',
       'claude --help',
       'claude --version',
     ]);
     expect(commands[3]).toContain('grep -aoE');
+  });
+
+  test('Claude takes the newest model of each family from the host CLI when the catalog probe has an older one', async () => {
+    const container = [
+      'id:"claude-opus-5",family:"opus",display_name:"Opus 5"',
+      'id:"claude-sonnet-5",family:"sonnet",display_name:"Sonnet 5"',
+    ].join('\n');
+    const host = [
+      'id:"claude-opus-5-5",family:"opus",display_name:"Opus 5.5"',
+      'id:"claude-opus-5",family:"opus",display_name:"Opus 5"',
+      'id:"claude-sonnet-5",family:"sonnet",display_name:"Sonnet 5"',
+    ].join('\n');
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer(_containerName, command) {
+        if (command.startsWith('command -v')) return { code: 0 };
+        if (command === 'claude --help') return { code: 0, stdout: '' };
+        if (command === 'claude --version') return { code: 0, stdout: '2.1.263' };
+        if (command.includes('grep -aoE')) return { code: 0, stdout: container };
+        throw new Error(`Unexpected command: ${command}`);
+      },
+      async runHost(command) {
+        return command.includes('grep -aoE') ? { code: 0, stdout: host } : { code: 1 };
+      },
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+    const result = await new AgentModelCatalogService(runtime).get({
+      agentId: 'claude',
+      target: { runtime: 'container', containerName: 'probe' },
+    });
+    expect(result.models.map((model) => model.id)).toEqual(['claude-sonnet-5', 'claude-opus-5-5']);
   });
 
   test('uses an updated Codex cache even while the Drone Hub catalog is still fresh', async () => {

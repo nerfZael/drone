@@ -6,7 +6,7 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { for (const c of cleanups.splice(0)) c(); });
 function setup(...args: Parameters<typeof makeEntity>) {
   const h = makeEntity(...args);
-  cleanups.push(() => h.entity.close());
+  cleanups.push(() => { h.expectReplayable(); h.entity.close(); });
   return h;
 }
 
@@ -100,30 +100,31 @@ test('output stops are scoped: "work" leaves the voice free, "subtree" blocks it
   expect(h.of('program_cancelled')).toHaveLength(1);
 });
 
-test('task limbs: spawned by the head, cannot speak, wake the head when done, and keep their session key', async () => {
+test('workers: dispatched by the head, reply to the user themselves, do not wake the head when done, and keep their session', async () => {
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'think hard') await call('spawn', { task: 'plan something', name: 'planner' });
+    if (input.role === 'head' && lastUserMessage(input) === 'think hard') await call('dispatch', { task: 'plan something', name: 'planner' });
     if (input.role === 'task') {
       expect(input.sessionKey).toBe(input.limbId);
-      expect(input.tools.some(t => t.name === 'say')).toBe(false);
-      expect(await call('say', { text: 'hi' })).toContain('only the voice speaks');
-      await call('report', { text: 'halfway' });
-      await call('finish_task', { result: 'the plan' });
+      expect(input.tools.some(t => t.name === 'spawn' || t.name === 'report')).toBe(false);
+      expect(await call('say', { text: 'the plan' })).toBe('sent');
+      await call('finish_task', { result: 'planned' });
     }
-    if (input.role === 'head' && input.prompt.includes('"woken_because":"task task-')) await call('say', { text: 'done: the plan' });
   });
   h.entity.start();
   h.entity.input('chat_message', { text: 'think hard' });
-  await until(() => h.said().includes('done: the plan'));
-  expect(h.of('task_done')[0].data).toMatchObject({ status: 'done', result: 'the plan' });
-  expect(h.mind.forgotten).toEqual(['task-3']);
+  await until(() => h.of('task_done').length === 1);
+  expect(h.said()).toEqual(['the plan']);
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'done', result: 'planned' });
+  await sleep(30);
+  expect(h.mind.runs.filter(r => r.role === 'head')).toHaveLength(2); // session start and the message, not the finish
+  expect(h.mind.forgotten).toEqual([]);
 });
 
 test('cancel asks a task to wrap up, then kills it after the grace period', async () => {
   let taskResult = '';
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('spawn', { task: 'long work' });
-    if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'task-3' });
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop') taskResult = await call('cancel', { id: 'worker-3' });
     if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
   });
   h.entity.start();
@@ -135,9 +136,42 @@ test('cancel asks a task to wrap up, then kills it after the grace period', asyn
   expect(h.of('task_done')[0].data.status).toBe('killed');
 });
 
+test('cancel lets a worker say where it got to and finish; it ends as cancelled', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop') await call('cancel', { id: 'worker-3' });
+    if (input.role === 'task') {
+      let result = '';
+      while (!result.startsWith('cancel requested')) { result = await call('press', { keys: '1' }); await sleep(5); }
+      results.push(result, await call('say', { text: 'stopped after step 3' }), await call('finish_task', { result: 'partial' }));
+    }
+  }, { config: { cancelGraceMs: 2000 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'start' });
+  await until(() => h.of('limb_spawned').length === 1);
+  h.entity.input('chat_message', { text: 'stop' });
+  await until(() => h.of('task_done').length === 1);
+  expect(results.slice(1)).toEqual(['sent', 'task finished']);
+  expect(h.of('task_done')[0].data).toMatchObject({ status: 'cancelled', result: 'partial' });
+});
+
+test('the heartbeat wakes the head only while workers are active, not for its own standing watches', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'mirror' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('set_watch', { watch: { name: 'mirror', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+    }
+  }, { config: { headHeartbeatMs: 20 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'mirror' });
+  await until(() => h.of('watch_installed').length === 1);
+  await sleep(100);
+  expect(h.of('run_started').filter(e => e.data.reason === 'heartbeat')).toHaveLength(0);
+});
+
 test('a crashing task limb is restarted up to the cap, then fails upward', async () => {
   const h = setup(async (input, call) => {
-    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('spawn', { task: 'crash' });
+    if (input.role === 'head' && lastUserMessage(input) === 'go') await call('dispatch', { task: 'crash' });
     if (input.role === 'task') throw new Error('model outage');
   }, { config: { restartMax: 2 } });
   h.entity.start();
@@ -283,11 +317,63 @@ test('an older head run can no longer act once a newer run exists, except to lea
   expect(results[1]).toBe('noted');
 });
 
+test('a stop halts the work in flight; a program the head starts afterwards runs, one a watch starts afterwards does not', async () => {
+  const results: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) !== 'go') return;
+    await call('run_program', { name: 'old', code: 'while (true) { await press("1"); await wait(10); }' });
+    await call('set_watch', { watch: { name: 'relauncher', on: { event: 'key_down', key: '7' }, do: { run_program: { name: 'from watch', code: 'await press("7")' } } } });
+    results.push(await call('stop_output', { reason: 'replacing the program' }));
+    results.push(await call('run_program', { name: 'new', code: 'await press("2")' }));
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => results.length === 2);
+  await until(() => h.entityKeys('key_down').some(e => e.data.key === '2'));
+  h.entity.input('key_down', { key: '7' });
+  await sleep(50);
+  expect(h.of('program_cancelled').map(e => e.data.name)).toEqual(['old']);
+  expect(h.entityKeys('key_down').some(e => e.data.key === '7')).toBe(false);
+});
+
+test('program events are strict: a wrong field fails the program at once, naming the real fields', async () => {
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'go') await call('run_program', { name: 'guess', code: 'const e = await nextEvent({ type: "key_down" }, 5000); if (e.event.data.key === "1") await say("one");' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  h.entity.input('key_down', { key: '1' });
+  await until(() => h.of('program_failed').length === 1);
+  expect(String(h.of('program_failed')[0].data.reason)).toContain('event has no field "event"; it has seq, t, at, type, by, data');
+  expect(h.said()).toEqual([]);
+});
+
+test('optional fields in event.data stay loose, and a program can wake its author at most once a second', async () => {
+  const reasons: string[] = [];
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'go' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('run_program', { name: 'decoder', code: 'const e = await nextEvent({ type: "key_down" }, 5000); const gap = e.data.gap_ms ?? 0; log(wake("user pressed " + e.data.key + " after " + gap)); log(wake("again"));' });
+    }
+    const time = input.prompt.slice(input.prompt.lastIndexOf('\nTIME\n') + 6);
+    const reason = String(JSON.parse(time).woken_because);
+    if (reason.startsWith('program')) reasons.push(reason);
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'go' });
+  await until(() => h.of('program_started').length === 1);
+  h.entity.input('key_down', { key: '7' });
+  await until(() => h.of('program_finished').length === 1 && reasons.some(r => r.includes('user pressed')));
+  expect(h.of('program_log').map(e => e.data.message)).toEqual(['woken', 'rate limited: at most one wake per second']);
+  expect(h.of('program_woke')).toHaveLength(1);
+  expect(reasons[0]).toContain('user pressed 7 after 0');
+});
+
 test('freeze pauses a task limb and a program at their next action, and resume continues them with nothing lost', async () => {
   const h = setup(async (input, call) => {
     if (input.role === 'head' && lastUserMessage(input) === 'go') {
-      // Spawn first: the freeze wakes the head, and a newer run supersedes this one.
-      await call('spawn', { task: 'press 4 then 5' });
+      // Dispatch first: the freeze wakes the head, and a newer run supersedes this one.
+      await call('dispatch', { task: 'press 4 then 5' });
       await call('set_watch', { watch: { name: 'freeze on 9', on: { level: 'key.9.held' }, do: { stop_output: { reason: 'user holds 9', mode: 'freeze' } } } });
       await call('set_watch', { watch: { name: 'resume on release', on: { event: 'key_up', key: '9' }, do: { resume_output: {} } } });
       await call('run_program', { name: 'steps', code: 'for (const k of ["1","2","3"]) { await press(k); await wait(30); }' });
@@ -416,4 +502,150 @@ test('the front limb never acts while a user message it has not read is waiting'
   await until(() => results.length === 2);
   expect(results[0]).toStartWith('superseded');
   expect(h.said()).toEqual(['reply to both']);
+});
+
+test('permissions come from one table per role: a limb is offered its tools, and anything else is refused', async () => {
+  const results: Record<string, string> = {};
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'hi') {
+      await call('say', { text: 'hello' });
+      results.headFinish = await call('finish_task', { result: 'x' });
+    }
+    if (input.limbId === 'reviewer') {
+      results.reviewerTools = input.tools.map(t => t.name).sort().join(',');
+      results.reviewerSay = await call('say', { text: 'sneaky' });
+      await call('amend', { seq: h.of('chat_message').find(e => e.data.text === 'hello')!.seq, verdict: 'confirm' });
+    }
+  }, { config: { review: 'separate', reviewQuietMs: 20, codeLimbs: false } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.of('message_reviewed').length === 1);
+  expect(results.headFinish).toContain('you cannot use "finish_task"');
+  expect(results.reviewerTools).toBe('amend,handoff,note,read_chat');
+  expect(results.reviewerSay).toContain('you cannot use "say"');
+  const head = h.mind.runs.find(r => r.role === 'head')!;
+  expect(head.tools.some(t => t.name === 'set_watch' || t.name === 'kill')).toBe(false); // code limbs off; kill is cancel with now
+  expect(head.system).not.toContain('set_watch installs a watch');
+  expect(h.mind.runs.find(r => r.limbId === 'reviewer')!.system).not.toContain('set_watch');
+});
+
+test('cancel with now stops a worker at once, dropping partial work', async () => {
+  const h = setup(async (input, call) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'start') await call('dispatch', { task: 'long work' });
+    if (input.role === 'head' && lastUserMessage(input) === 'stop now') await call('cancel', { id: 'worker-3', now: true });
+    if (input.role === 'task') { while (!input.signal.aborted) await sleep(5); }
+  }, { config: { cancelGraceMs: 5000 } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'start' });
+  await until(() => h.of('limb_spawned').length === 1);
+  h.entity.input('chat_message', { text: 'stop now' });
+  await until(() => h.of('task_done').length === 1);
+  expect(h.of('task_done')[0].data.status).toBe('killed');
+  expect(h.of('cancel_requested')).toHaveLength(0);
+});
+
+test('sensed levels come from the log; a sense asked only in a condition is dropped with its watch', async () => {
+  const evaluator = { async evaluate(questions: { id: string }[]) { return Object.fromEntries(questions.map(q => [q.id, 0.8])); } };
+  const h = setup(async (input, call) => {
+    if (lastUserMessage(input) === 'watch') {
+      await call('set_watch', { watch: { name: 'confused keys', on: { event: 'key_down' }, when: { sense: 'is the user confused?', above: 0.5 }, do: { effect: 'press', args: { keys: '0' } } } });
+    }
+    if (lastUserMessage(input) === 'drop it') await call('cancel', { id: h.of('watch_installed', b => b === 'head').at(-1)!.data.id as string });
+  }, { evaluator, jev: { senseIntervalMs: 5 }, config: { draftAttention: false } });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'watch' });
+  await until(() => h.entity.levels.get('sense.is_the_user_confused') !== undefined);
+  expect(h.entity.levels.get('sense.is_the_user_confused')).toMatchObject({ value: 0.8, by: 'jev' });
+  h.entity.input('chat_message', { text: 'drop it' });
+  await until(() => h.of('senses_dropped').length === 1);
+  expect(h.of('senses_dropped')[0].data.levels).toEqual(['sense.is_the_user_confused']);
+  expect(h.entity.levels.get('sense.is_the_user_confused')).toBeUndefined();
+});
+
+test('restore: a session rebuilt from its log comes back paused, closes what cannot survive, and carries on after resume', async () => {
+  const script = async (input: Parameters<Parameters<typeof makeEntity>[0]>[0], call: (name: string, args?: Record<string, unknown>) => Promise<string>) => {
+    if (input.role === 'head' && lastUserMessage(input) === 'set up' && input.prompt.includes('"woken_because":"user message"')) {
+      await call('dispatch', { task: 'long work', name: 'long' });
+      await call('dispatch', { task: 'next work', name: 'next' });
+      await call('set_watch', { watch: { name: 'mirror', on: { event: 'key_down' }, do: { effect: 'press', args: { keys: '$key' } } } });
+      await call('run_program', { name: 'ticker', code: 'for (;;) await wait(1000);' });
+      await call('set_timer', { after_ms: 150, label: 'check in' });
+      await call('note', { text: 'the user likes short answers' });
+    }
+    if (input.role === 'task') await new Promise<void>(r => input.signal.addEventListener('abort', () => r()));
+  };
+  const a = setup(script, { config: { maxTasks: 1 } });
+  a.entity.start();
+  a.entity.input('chat_message', { text: 'set up' });
+  await until(() => a.of('note').length === 1 && a.of('program_started').length === 1);
+  const events = [...a.events()];
+  a.entity.close();
+
+  const b = setup(script, { config: { maxTasks: 1 } });
+  b.entity.restore(events);
+  expect(b.entity.status).toBe('paused');
+  expect(b.of('session_restored')).toHaveLength(1);
+  expect(b.of('program_failed')[0].data.reason).toContain('Hub restarted');
+  const limbs = b.entity.snapshot().limbs;
+  expect(limbs.find(l => l.name === 'long')).toMatchObject({ status: 'running', runs: [] });
+  expect(limbs.find(l => l.name === 'next')).toMatchObject({ status: 'queued' });
+  expect(b.entity.snapshot().self.notes).toEqual(['the user likes short answers']);
+  const workerRuns = () => b.mind.runs.filter(r => r.role === 'task').length;
+  b.entity.resume();
+  await until(() => workerRuns() === 1); // the running worker picks up again; the queued one still waits
+  b.entity.input('key_down', { key: '5' });
+  await until(() => b.entityKeys('key_down').length === 1); // the watch was armed again
+  await until(() => b.of('timer').length === 1, 3000); // and the timer, with the time it had left
+  expect(b.mind.runs.some(r => r.role === 'head' && r.prompt.includes('"woken_because":"timer \\"check in\\""'))).toBe(true);
+});
+
+test('a crashed head run is retried for what woke it, so a user message is not lost to a provider error', async () => {
+  let failures = 1;
+  const h = setup(async (input, call) => {
+    if (input.role !== 'head' || lastUserMessage(input) !== 'hi' || !input.prompt.includes('user message')) return;
+    if (failures-- > 0) throw new Error('WebSocket closed 1011');
+    await call('say', { text: 'hello!' });
+  });
+  h.entity.start();
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => h.said().includes('hello!'));
+  expect(h.of('limb_failed')[0].data).toMatchObject({ error: 'WebSocket closed 1011', retry: true });
+  expect(h.of('run_started').at(-1)!.data.reason).toContain('retry after a crash (WebSocket closed 1011): user message');
+});
+
+test('prompts: a section can be replaced, placeholders are filled, and edits apply from the next wake', async () => {
+  const { PROMPT_SECTIONS } = await import('../src/prompts.js');
+  expect(new Set(PROMPT_SECTIONS.map(s => s.id)).size).toBe(PROMPT_SECTIONS.length);
+  const systems: string[] = [];
+  let overrides: Record<string, string> = { head_front: 'You are the head. Custom.' };
+  const h = setup(async input => { if (input.role === 'head') systems.push(input.system); }, { prompts: () => overrides });
+  h.entity.start();
+  await until(() => systems.length === 1);
+  expect(systems[0]).toContain('You are the head. Custom.');
+  expect(systems[0]).not.toContain('You are the head and the front of the entity.');
+  // The routing section fills its placeholders from the current setup.
+  expect(systems[0]).not.toContain('{{');
+  overrides = { router_checking_reviewed: 'CHECKED BY REVIEWER', router_checking_unreviewed: 'CHECK IT YOURSELF' };
+  h.entity.input('chat_message', { text: 'hi' });
+  await until(() => systems.length === 2);
+  expect(systems[1]).toMatch(/CHECKED BY REVIEWER|CHECK IT YOURSELF/);
+  expect(systems[1]).toContain('You are the head and the front of the entity.'); // back to the default once the override is gone
+});
+
+test('resume: a message sent while paused is handled by the front limb as a user message, and the head stays out of it', async () => {
+  const runs: { role: string; reason: string }[] = [];
+  const h = setup(async input => { runs.push({ role: input.role, reason: input.prompt.match(/"woken_because":"([^"]*)"/)?.[1] ?? '' }); }, { models: { head: 'test/head', task: 'test/task', voice: 'test/voice' } });
+  h.entity.start();
+  await until(() => runs.length >= 1);
+  await sleep(20);
+  h.entity.pause();
+  h.entity.input('chat_message', { text: 'copy the readme' });
+  await sleep(30);
+  const before = runs.length;
+  h.entity.resume();
+  await until(() => runs.length > before);
+  await sleep(30);
+  const after = runs.slice(before);
+  expect(after[0]).toMatchObject({ role: 'voice', reason: 'user message' });
+  expect(after.some(r => r.role === 'head')).toBe(false);
 });

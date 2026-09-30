@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { normalizeCompanionShortcutDurations, type CompanionShortcutDurations } from '../companion/companion-shortcut';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { createPersistenceBatch } from './batched-persistence';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppView, DraftChatState, DroneErrorModalState } from './app-types';
 import {
@@ -87,6 +88,8 @@ type DroneHubUiState = {
   chatHeaderRepoPath: string;
   sidebarReposCollapsed: boolean;
   sidebarAutoMinimize: boolean;
+  /** One workspace layout for every drone instead of one per drone. */
+  sharedWorkspaceLayout: boolean;
   showRecentDronesOnly: boolean;
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
@@ -130,6 +133,8 @@ type DroneHubUiState = {
   headerOverflowOpen: boolean;
   outputView: OutputView;
   showCanvasLastMessagePreviews: boolean;
+  /** Canvas cards like the Entity's Work cards: status, what it is doing, how long, and cost. */
+  canvasDetailedCards: boolean;
   /** Floating side chat windows stay out of the way while a canvas pane is open. */
   hideSideChatWindowsWithCanvas: boolean;
   transcriptInlineImageOverrides: Record<string, boolean>;
@@ -163,6 +168,7 @@ type DroneHubUiState = {
   setChatHeaderRepoPath: (next: Updater<string>) => void;
   setSidebarReposCollapsed: (next: Updater<boolean>) => void;
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
+  setSharedWorkspaceLayout: (next: Updater<boolean>) => void;
   setShowRecentDronesOnly: (next: Updater<boolean>) => void;
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
@@ -207,6 +213,7 @@ type DroneHubUiState = {
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
+  setCanvasDetailedCards: (next: Updater<boolean>) => void;
   setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnContextRepoPath: (next: Updater<string>) => void;
@@ -346,6 +353,7 @@ type DroneHubUiPersistedState = Pick<
   | 'chatHeaderRepoPath'
   | 'sidebarReposCollapsed'
   | 'sidebarAutoMinimize'
+  | 'sharedWorkspaceLayout'
   | 'showRecentDronesOnly'
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
@@ -378,6 +386,7 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
+  | 'canvasDetailedCards'
   | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
@@ -951,6 +960,9 @@ function schedulePersistChatInputDrafts(value: Record<string, string>): void {
 
 const initialChatInputDrafts = readPersistedChatInputDrafts();
 
+const uiPersistence = createPersistenceBatch(createJSONStorage<Partial<DroneHubUiPersistedState>>(() => localStorage));
+export const batchDroneHubUiUpdates = uiPersistence.batch;
+
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
@@ -961,6 +973,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       chatHeaderRepoPath: '',
       sidebarReposCollapsed: false,
       sidebarAutoMinimize: false,
+      sharedWorkspaceLayout: false,
       showRecentDronesOnly: false,
       sidebarGroupingMode: 'groups',
       sidebarDensityMode: 'default',
@@ -1004,6 +1017,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
+      canvasDetailedCards: false,
       hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
       spawnContextRepoPath: '',
@@ -1055,6 +1069,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
       setSidebarAutoMinimize: (next) =>
         set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
+      setSharedWorkspaceLayout: (next) =>
+        set((s) => ({ sharedWorkspaceLayout: resolveNext(s.sharedWorkspaceLayout, next) })),
       setShowRecentDronesOnly: (next) =>
         set((s) => ({ showRecentDronesOnly: resolveNext(s.showRecentDronesOnly, next) })),
       setSidebarGroupingMode: (next) =>
@@ -1265,6 +1281,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next),
         })),
+      setCanvasDetailedCards: (next) =>
+        set((s) => ({ canvasDetailedCards: resolveNext(s.canvasDetailedCards, next) })),
       setHideSideChatWindowsWithCanvas: (next) =>
         set((s) => ({
           hideSideChatWindowsWithCanvas: resolveNext(s.hideSideChatWindowsWithCanvas, next),
@@ -1482,7 +1500,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     {
       name: profileStorageKey('droneHub.ui'),
       version: 21,
-      storage: createJSONStorage(() => localStorage),
+      storage: uiPersistence.storage,
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
@@ -1493,6 +1511,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         chatHeaderRepoPath: state.chatHeaderRepoPath,
         sidebarReposCollapsed: state.sidebarReposCollapsed,
         sidebarAutoMinimize: state.sidebarAutoMinimize,
+        sharedWorkspaceLayout: state.sharedWorkspaceLayout,
         showRecentDronesOnly: state.showRecentDronesOnly,
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
@@ -1525,6 +1544,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
+        canvasDetailedCards: state.canvasDetailedCards,
         hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
@@ -1573,6 +1593,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarAutoMinimize: normalizeBoolean(
             persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize,
           ),
+          sharedWorkspaceLayout: persisted.sharedWorkspaceLayout === true,
           showRecentDronesOnly: normalizeBoolean(
             persisted.showRecentDronesOnly ?? currentState.showRecentDronesOnly,
           ),
@@ -1653,6 +1674,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),
+          canvasDetailedCards: normalizeBoolean(persisted.canvasDetailedCards ?? currentState.canvasDetailedCards),
           hideSideChatWindowsWithCanvas: normalizeBoolean(
             persisted.hideSideChatWindowsWithCanvas ?? currentState.hideSideChatWindowsWithCanvas,
           ),
@@ -1805,6 +1827,7 @@ export function useDroneSidebarUiState() {
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
+      sharedWorkspaceLayout: s.sharedWorkspaceLayout,
       showRecentDronesOnly: s.showRecentDronesOnly,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
@@ -1828,6 +1851,7 @@ export function useDroneSidebarUiState() {
       setAppView: s.setAppView,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
+      setSharedWorkspaceLayout: s.setSharedWorkspaceLayout,
       setShowRecentDronesOnly: s.setShowRecentDronesOnly,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
@@ -1864,6 +1888,7 @@ export function useSelectedDroneWorkspaceUiState() {
       outputView: s.outputView,
       selectedChat: s.selectedChat,
       terminalEmulator: s.terminalEmulator,
+      sharedWorkspaceLayout: s.sharedWorkspaceLayout,
       setSidebarCollapsed: s.setSidebarCollapsed,
       setAgentMenuOpen: s.setAgentMenuOpen,
       setTerminalMenuOpen: s.setTerminalMenuOpen,

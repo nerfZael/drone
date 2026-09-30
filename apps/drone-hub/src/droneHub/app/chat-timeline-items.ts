@@ -1,4 +1,4 @@
-import { agentRunActivityHasResponse, type ChatQuestionRequest } from '@drone/assistant-chat';
+import { agentRunActivityHasResponse, pendingPromptIsWaiting, type ChatQuestionRequest } from '@drone/assistant-chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { parseIsoMs } from './selected-drone-workspace-utils';
 
@@ -95,7 +95,7 @@ export function buildChatTimelineItems(
 function isActivePending(item: ChatTimelineItem): boolean {
   return (
     item.kind === 'pending' &&
-    item.item.state !== 'queued' &&
+    !pendingPromptIsWaiting(item.item) &&
     item.item.state !== 'failed' &&
     !item.item.action
   );
@@ -107,7 +107,7 @@ function isAsapFollowUpCandidate(candidate: ChatTimelineItem): boolean {
   }
   return (
     candidate.item.deliveryMode === 'asap' &&
-    candidate.item.state !== 'queued' &&
+    !pendingPromptIsWaiting(candidate.item) &&
     candidate.item.state !== 'failed' &&
     !candidate.item.action
   );
@@ -115,6 +115,7 @@ function isAsapFollowUpCandidate(candidate: ChatTimelineItem): boolean {
 
 function isSameTurnAsapFollowUp(candidate: ChatTimelineItem, primary: ChatTimelineItem): boolean {
   if (!isAsapFollowUpCandidate(candidate)) return false;
+  if (candidate.item.runId || primary.item.runId) return false;
   if (isActivePending(primary)) return true;
   if (primary.kind !== 'turn' || primary.item.userOnly === true) return false;
 
@@ -164,14 +165,55 @@ export function groupedPendingPresentationItem(group: ChatTimelineGroup): Pendin
   };
 }
 
-/**
- * Keep same-turn steering as one conversational turn. An ASAP prompt that is
- * still queued, failed, or produced its own assistant response remains a
- * standalone item so its state and controls are never hidden.
- */
+/** Keep confirmed run membership stable across streaming, completion and reloads. */
+function sharedRunGroup(members: readonly ChatTimelineItem[]): ChatTimelineGroup {
+  const original = members[0]!;
+  const response = [...members].reverse().find((entry) => entry.kind === 'turn' && !entry.item.userOnly)
+    ?? members.find((entry) => entry.kind === 'pending' && entry.item.state === 'failed')
+    ?? members.find((entry) => entry.kind === 'pending')
+    ?? original;
+  // Keep response identity for activity loading, checkpoints and actions, but anchor
+  // the conversation to its original request. Raw message records remain untouched.
+  const item = {
+    ...response.item,
+    at: original.item.at,
+    promptAt: original.kind === 'turn' ? original.item.promptAt ?? original.item.at : original.item.at,
+    prompt: original.item.prompt,
+    attachments: original.item.attachments,
+    deliveryMode: original.item.deliveryMode,
+    startedAt: response.item.runStartedAt ?? original.item.runStartedAt ?? original.item.startedAt,
+  };
+  return {
+    primary: { ...response, item } as ChatTimelineItem,
+    followUps: members.slice(1),
+  };
+}
+
+function confirmedRunId(entry: ChatTimelineItem): string | undefined {
+  if (entry.kind === 'pending' && (pendingPromptIsWaiting(entry.item) || entry.item.action)) return;
+  return entry.item.runId;
+}
+
 export function groupChatTimelineItems(items: readonly ChatTimelineItem[]): ChatTimelineGroup[] {
-  const groups: ChatTimelineGroup[] = [];
+  const runs = new Map<string, ChatTimelineItem[]>();
   for (const item of items) {
+    const runId = confirmedRunId(item);
+    if (runId) {
+      const members = runs.get(runId) ?? [];
+      members.push(item);
+      runs.set(runId, members);
+    }
+  }
+  const groups: ChatTimelineGroup[] = [];
+  const emittedRuns = new Set<string>();
+  for (const item of items) {
+    const runId = confirmedRunId(item);
+    if (runId) {
+      if (!emittedRuns.has(runId)) groups.push(sharedRunGroup(runs.get(runId)!));
+      emittedRuns.add(runId);
+      continue;
+    }
+    // Compatibility for history written before shared run identity was persisted.
     let owner: ChatTimelineGroup | undefined;
     if (isAsapFollowUpCandidate(item)) {
       for (let index = groups.length - 1; index >= 0; index -= 1) {
@@ -180,11 +222,8 @@ export function groupChatTimelineItems(items: readonly ChatTimelineItem[]): Chat
         break;
       }
     }
-    if (owner) {
-      owner.followUps.push(item);
-      continue;
-    }
-    groups.push({ primary: item, followUps: [] });
+    if (owner) owner.followUps.push(item);
+    else groups.push({ primary: item, followUps: [] });
   }
   return groups;
 }

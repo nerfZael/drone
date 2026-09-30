@@ -144,6 +144,7 @@ type RightPanelTabContentProps = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onRenameCanvasDrone: (droneId: string, newName: string) => Promise<{ ok: boolean; error?: string | null }>;
   onDeleteCanvasChats: (
     targets: ReadonlyArray<{ droneId: string; chatName: string }>,
   ) => Promise<Array<{ droneId: string; chatName: string; ok: boolean; deletedDrone?: boolean; error?: string | null }>>;
@@ -251,6 +252,7 @@ type RightPanelTabContentProps = {
   onOpenPullRequest: (paneKey: PaneKey, pullRequest: RepoPullRequestSummary) => void;
   onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
+  onShowChanges: () => void;
 };
 
 export function RightPanelTabContent(props: RightPanelTabContentProps) {
@@ -272,6 +274,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameCanvasChat,
+  onRenameCanvasDrone,
   onDeleteCanvasChats,
   onCloneCanvasDrone,
   onCloneCanvasChat,
@@ -344,6 +347,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   onOpenPullRequest,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
+  onShowChanges,
   } = props;
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
@@ -392,6 +396,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               onSendCanvasPrompt={onSendCanvasPrompt}
               onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
               onRenameChat={onRenameCanvasChat}
+              onRenameDrone={onRenameCanvasDrone}
               onDeleteChats={onDeleteCanvasChats}
               onCloneChat={onCloneCanvasChat}
               onCloneDrone={onCloneCanvasDrone}
@@ -533,6 +538,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               hubMessage={drone.hubMessage}
               onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
               onOpenFileInEditor={onOpenChangesFileInEditor}
+              onShowChanges={onShowChanges}
             />
           )}
         </PaneModule>

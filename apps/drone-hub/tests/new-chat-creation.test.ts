@@ -74,7 +74,6 @@ describe('new chat creation defaults', () => {
       agent: { kind: 'builtin', id: 'cursor' },
       model: 'gpt-5.6',
       agentPermissionMode: 'execute',
-      approvalPolicy: 'ask',
     });
 
     expect(
@@ -85,8 +84,30 @@ describe('new chat creation defaults', () => {
     ).toEqual({
       agent: { kind: 'custom', id: 'custom', label: 'Custom', command: 'custom-agent' },
       agentPermissionMode: 'execute',
-      approvalPolicy: 'ask',
     });
+  });
+
+  test('omits approval policies from Claude and Blip configuration requests', () => {
+    for (const id of ['claude', 'blip'] as const) {
+      for (const spawnApprovalPolicy of ['ask', 'auto', 'none'] as const) {
+        const configuration = buildNewChatConfiguration(
+          { ...preferences, spawnApprovalPolicy },
+          () => ({ kind: 'builtin', id }),
+        );
+        expect(JSON.parse(JSON.stringify(configuration))).not.toHaveProperty('approvalPolicy');
+        expect(configuration.agent).toEqual({ kind: 'builtin', id });
+      }
+    }
+  });
+
+  test('keeps supported approval policies and normalizes native auto approval', () => {
+    for (const spawnApprovalPolicy of ['ask', 'auto', 'none'] as const) {
+      expect(buildNewChatConfiguration({ ...preferences, spawnApprovalPolicy }, resolveAgent).approvalPolicy)
+        .toBe(spawnApprovalPolicy);
+      expect(buildNewChatConfiguration(
+        { ...preferences, spawnAgentKey: 'native', spawnApprovalPolicy }, resolveAgent,
+      ).approvalPolicy).toBe(spawnApprovalPolicy === 'auto' ? 'ask' : spawnApprovalPolicy);
+    }
   });
 
   test('uses one immediate draft flow for the shortcut and drone context menu', () => {

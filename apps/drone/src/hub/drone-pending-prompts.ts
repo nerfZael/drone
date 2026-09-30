@@ -61,6 +61,9 @@ export type PendingPrompt = {
   approvals?: CodexPendingApproval[];
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   updatedAt?: string;
 };
@@ -213,6 +216,9 @@ export function createDronePendingPromptStore(deps: {
           ...((p as any)?.fileChanges && typeof (p as any).fileChanges === 'object'
             ? { fileChanges: (p as any).fileChanges as AgentRunFileChanges }
             : {}),
+          ...(typeof p?.runId === 'string' && p.runId.trim() ? { runId: p.runId.trim() } : {}),
+          ...(typeof p?.runStartedAt === 'string' && Number.isFinite(Date.parse(p.runStartedAt))
+            ? { runStartedAt: p.runStartedAt } : {}),
           startedAt:
             typeof p?.startedAt === 'string' && Number.isFinite(Date.parse(p.startedAt))
               ? p.startedAt
@@ -637,6 +643,8 @@ export function createDronePendingPromptStore(deps: {
         | 'fileChanges'
         | 'action'
         | 'queueInterruption'
+        | 'runId'
+        | 'runStartedAt'
         | 'startedAt'
         | 'executionState'
         | 'updatedAt'

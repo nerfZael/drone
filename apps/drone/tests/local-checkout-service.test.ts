@@ -3,6 +3,7 @@ import {
   LocalCheckoutError,
   LocalCheckoutService,
 } from '../src/hub/local-checkout-service';
+import { localCheckoutStateFromRegistry } from '../src/hub/local-checkout-model';
 
 const RETURN_SHA = '1'.repeat(40);
 const A_HEAD = '2'.repeat(40);
@@ -50,7 +51,7 @@ function createHarness() {
     '/repo': RETURN_SHA,
     '/repo-c': C_RETURN_SHA,
   };
-  let registryReads = 0;
+  let droneReads = 0;
   let timestamp = 0;
   let delayNextCapture: Promise<void> | null = null;
   let mergeBaseCode = 1;
@@ -92,17 +93,18 @@ function createHarness() {
   };
 
   const service = new LocalCheckoutService({
-    loadRegistry: async () => { registryReads += 1; return registry; },
-    loadRegistryCompatibilityBase: async () => registry,
-    updateRegistry: async (mutator: (value: any) => any) => {
+    readState: async () => localCheckoutStateFromRegistry(registry),
+    writeState: async (state) => {
       if (failNextRegistryWrite) {
         failNextRegistryWrite = false;
         throw new Error('registry write failed');
       }
-      return await mutator(registry);
+      registry.settings.localCheckout = state;
     },
-    findDroneIdByRef: (_value: any, ref: string) =>
-      registry.drones[ref] ? { kind: 'real', id: ref } : null,
+    resolveDroneRef: async (ref) => {
+      droneReads += 1;
+      return registry.drones[ref] ? { kind: 'real', id: ref, drone: registry.drones[ref] } : null;
+    },
     droneRuntime: () => 'container',
     droneRootPath: () => '/tmp/drone-local-checkout-tests',
     gitTopLevel: async (repoPath: string) => repoPath,
@@ -187,7 +189,7 @@ function createHarness() {
     service,
     registry,
     checkouts,
-    registryReads: () => registryReads,
+    droneReads: () => droneReads,
     hostHead: (repoRoot = '/repo') => hostHeads[repoRoot],
     setHostHead: (sha: string) => {
       hostHeads['/repo'] = sha;
@@ -214,12 +216,12 @@ describe('LocalCheckoutService', () => {
   test('status polling reads checkout settings without hydrating chats', async () => {
     const harness = createHarness();
     await harness.service.getView();
-    expect(harness.registryReads()).toBe(0);
+    expect(harness.droneReads()).toBe(0);
     await harness.service.useLocally('a');
-    const before = harness.registryReads();
+    const before = harness.droneReads();
     const view = await harness.service.getView();
     expect(view.session?.droneId).toBe('a');
-    expect(harness.registryReads()).toBe(before);
+    expect(harness.droneReads()).toBe(before);
   });
 
   test('switches the active drone in place and returns to the original branch', async () => {

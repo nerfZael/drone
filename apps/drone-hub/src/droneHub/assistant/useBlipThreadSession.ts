@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { writeNativeChatHistory } from './native-chat-cache';
 import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import type {
   BlipContextUsage,
@@ -90,6 +91,7 @@ export function useBlipThreadSession({
   const runEpochRef = React.useRef(0);
   const seenEventKeysRef = React.useRef<string[]>([]);
   const latestHistoryRequestRef = React.useRef(0);
+  const sessionRef = React.useRef<{ threadId: string; enabled: boolean; historyRefreshed: boolean } | null>(null);
   const onNativeChangeRef = React.useRef(onNativeChange);
   threadIdRef.current = threadId;
   onNativeChangeRef.current = onNativeChange;
@@ -103,6 +105,7 @@ export function useBlipThreadSession({
       try {
         const page = await requestHistory(threadId, { limit: ASSISTANT_HISTORY_PAGE_SIZE });
         if (threadIdRef.current !== threadId) return;
+        if (sessionRef.current) sessionRef.current.historyRefreshed = true;
         setEntries((current) => mergeEntries(current, page.entries));
         setRunError((current) =>
           assistantTranscriptHasErrorMessage(
@@ -154,6 +157,24 @@ export function useBlipThreadSession({
   const refreshHistory = historyRefreshCoordinator.refresh;
 
   React.useEffect(() => {
+    const session = sessionRef.current;
+    if (session?.threadId === threadId && session.enabled === enabled) {
+      // Reopening a cached chat races its bootstrap request with live history.
+      // A late bootstrap must not erase newer rows or reset the live run state.
+      if (bootstrapHistory) {
+        const { historyRefreshed } = session;
+        setEntries((current) => historyRefreshed
+          ? mergeEntries(bootstrapHistory.entries, current)
+          : mergeEntries(current, bootstrapHistory.entries));
+        if (!historyRefreshed) {
+          setBeforeCursor(bootstrapHistory.page.beforeCursor);
+          setHasOlder(bootstrapHistory.page.hasOlder);
+          setContextUsage(bootstrapHistory.contextUsage ?? null);
+        }
+      }
+      return;
+    }
+    sessionRef.current = { threadId, enabled, historyRefreshed: false };
     setEntries(bootstrapHistory?.entries ?? []);
     setEntriesThreadId(threadId);
     setBeforeCursor(bootstrapHistory?.page.beforeCursor ?? null);
@@ -191,6 +212,7 @@ export function useBlipThreadSession({
         limit: ASSISTANT_HISTORY_PAGE_SIZE,
       });
       if (threadIdRef.current !== threadId) return;
+      if (sessionRef.current) sessionRef.current.historyRefreshed = true;
       setEntries((current) => mergeEntries(current, page.entries));
       setEntriesThreadId(threadId);
       setBeforeCursor(page.page.beforeCursor);
@@ -361,9 +383,16 @@ export function useBlipThreadSession({
         : (bootstrapHistory?.entries ?? []),
     [bootstrapHistory?.entries, entries, entriesThreadId, threadId],
   );
+  const historyMessagesRef = React.useRef(new WeakMap<BlipHistoryEntry, ReturnType<typeof messageFromHistoryEntry>>());
   const messages = React.useMemo(
     () => [
-      ...visibleEntries.map(messageFromHistoryEntry),
+      ...visibleEntries.map((entry) => {
+        const cached = historyMessagesRef.current.get(entry);
+        if (cached) return cached;
+        const message = messageFromHistoryEntry(entry);
+        historyMessagesRef.current.set(entry, message);
+        return message;
+      }),
       ...(runtimeThreadId === threadId ? Object.values(toolProgress) : []),
     ],
     [runtimeThreadId, threadId, toolProgress, visibleEntries],
@@ -372,6 +401,18 @@ export function useBlipThreadSession({
     !enabled || !threadId || entriesThreadId === threadId || Boolean(bootstrapHistory);
   const activeContextUsage =
     entriesThreadId === threadId ? contextUsage : (bootstrapHistory?.contextUsage ?? null);
+
+  React.useEffect(() => {
+    if (!threadId || !historyReady || entriesThreadId !== threadId) return;
+    writeNativeChatHistory({
+      version: 1,
+      threadId,
+      sessionId: bootstrapHistory?.sessionId ?? null,
+      entries,
+      contextUsage: activeContextUsage ?? undefined,
+      page: { limit: ASSISTANT_HISTORY_PAGE_SIZE, beforeCursor: activeBeforeCursor, hasOlder: activeHasOlder },
+    });
+  }, [activeBeforeCursor, activeContextUsage, activeHasOlder, bootstrapHistory?.sessionId, entries, entriesThreadId, historyReady, threadId]);
 
   return {
     messages,

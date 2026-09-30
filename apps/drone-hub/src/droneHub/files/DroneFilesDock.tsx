@@ -1311,9 +1311,9 @@ export function DroneFilesDock({
               onContextMenu={(event) => openEntryContextMenu(entry, event)}
               className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                 selected
-                  ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  ? 'dh-file-explorer-selected bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   : active
-                    ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    ? 'dh-file-explorer-open bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                     : 'text-[var(--explorer-row-fg,var(--fg-secondary))] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
               }`}
               style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}

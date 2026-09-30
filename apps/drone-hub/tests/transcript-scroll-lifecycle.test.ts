@@ -20,7 +20,7 @@ class ScrollSurface extends EventTarget {
 // Run the real hook with independently controlled animation frames, resize
 // notifications, and scroll events. Browser scroll events need not be delivered
 // immediately after a programmatic scrollTop assignment.
-function scrollHarness() {
+function scrollHarness(initialPosition: 'restore' | 'bottom' = 'restore') {
   let cursor = 0;
   let dirty = false;
   let nextFrame = 0;
@@ -99,7 +99,7 @@ function scrollHarness() {
     },
   );
   let hook: any;
-  let props = { contextKey: 'drone:chat-a', contentVersion: 0, enabled: true };
+  let props = { contextKey: 'drone:chat-a', contentVersion: 0, enabled: true, initialPosition };
   const render = (nextProps = props) => {
     props = nextProps;
     for (let pass = 0; pass < 10; pass++) {
@@ -125,12 +125,154 @@ function scrollHarness() {
     },
     resize: () => [...observers].forEach((callback) => callback()),
     changeChat: (contextKey: string) => render({ ...props, contextKey }),
+    setEnabled: (enabled: boolean) => render({ ...props, enabled }),
     updateContent: () => render({ ...props, contentVersion: props.contentVersion + 1 }),
     hook: () => hook,
   };
 }
 
 describe('desktop transcript scroll lifecycle', () => {
+  test('returning from a hidden dock restores a reading position instead of saving its zero layout', () => {
+    const h = scrollHarness('bottom');
+    h.surface.scrollTop = 300;
+    h.surface.scrollEvent();
+    h.surface.clientHeight = 0;
+    h.surface.scrollHeight = 0;
+    h.surface.scrollTop = 0;
+    h.resize();
+    h.surface.clientHeight = 500;
+    h.surface.scrollHeight = 1_200;
+    h.surface.scrollEvent(); // May run before ResizeObserver on reattachment.
+    h.resize();
+    expect(h.surface.scrollTop).toBe(300);
+  });
+
+  test('hidden scroll events do not turn a reader into a bottom follower', () => {
+    const h = scrollHarness('bottom');
+    h.surface.scrollTop = 300;
+    h.surface.scrollEvent();
+    h.surface.clientHeight = 0;
+    h.surface.scrollHeight = 0;
+    h.surface.scrollTop = 0;
+    h.surface.scrollEvent();
+    h.updateContent();
+    h.surface.clientHeight = 500;
+    h.surface.scrollHeight = 1_600;
+    h.resize();
+    h.surface.scrollEvent();
+    expect(h.surface.scrollTop).toBe(300);
+  });
+
+  test('a bottom follower returns to the latest content after its dock was hidden', () => {
+    const h = scrollHarness('bottom');
+    h.surface.clientHeight = 0;
+    h.surface.scrollHeight = 0;
+    h.surface.scrollTop = 0;
+    h.resize();
+    h.updateContent();
+    h.surface.scrollEvent();
+    h.surface.clientHeight = 500;
+    h.surface.scrollHeight = 1_600;
+    h.surface.scrollEvent();
+    h.resize();
+    expect(h.surface.scrollTop).toBe(1_100);
+  });
+
+  test('selecting another chat while hidden opens that chat at the bottom on reveal', () => {
+    const h = scrollHarness('bottom');
+    h.surface.scrollTop = 300;
+    h.surface.scrollEvent();
+    h.surface.clientHeight = 0;
+    h.surface.scrollHeight = 0;
+    h.surface.scrollTop = 0;
+    h.resize();
+    h.changeChat('drone:chat-b');
+    h.surface.clientHeight = 500;
+    h.surface.scrollHeight = 2_000;
+    h.resize();
+    expect(h.surface.scrollTop).toBe(1_500);
+  });
+
+  test('positions the selected chat before its first paint, without waiting for a frame', () => {
+    const h = scrollHarness('bottom');
+    expect(h.surface.scrollTop).toBe(700);
+    h.surface.scrollHeight = 2_000;
+    h.surface.scrollTop = 0;
+    h.changeChat('drone:chat-b');
+    expect(h.surface.scrollTop).toBe(1_500);
+  });
+
+  test('settles content and viewport resizing before paint instead of one frame later', () => {
+    const h = scrollHarness('bottom');
+    h.frame();
+    h.surface.scrollHeight += 200;
+    h.updateContent();
+    expect(h.surface.scrollTop).toBe(900);
+    h.surface.clientHeight -= 80;
+    h.resize();
+    expect(h.surface.scrollTop).toBe(980);
+    h.surface.scrollTop = 100;
+    h.surface.scrollEvent();
+    h.surface.scrollHeight += 200;
+    h.resize();
+    expect(h.surface.scrollTop).toBe(100);
+  });
+
+  test('selected chats open at the bottom even after previously reading at the top', () => {
+    const h = scrollHarness('bottom');
+    h.frame();
+    h.surface.scrollTop = 0;
+    h.surface.scrollEvent();
+    h.changeChat('drone:chat-b');
+    h.frame();
+    h.surface.scrollTop = 200;
+    h.surface.scrollEvent();
+    h.changeChat('drone:chat-a');
+    h.frame();
+    expect(h.surface.scrollTop).toBe(700);
+    h.surface.scrollHeight += 400;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(1_100);
+    // Once selected, the reader can still scroll up without being pulled down.
+    h.surface.scrollTop = 100;
+    h.surface.scrollEvent();
+    h.surface.scrollHeight += 300;
+    h.updateContent();
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(100);
+  });
+
+  test('same-chat view changes retain the reading position under the bottom-on-selection policy', () => {
+    const h = scrollHarness('bottom');
+    h.frame();
+    h.surface.scrollTop = 200;
+    h.surface.scrollEvent();
+    h.setEnabled(false);
+    h.setEnabled(true);
+    h.frame();
+    expect(h.surface.scrollTop).toBe(200);
+  });
+
+  test('rapid A to B to A switches follow the final chat as delayed content arrives', () => {
+    const h = scrollHarness('bottom');
+    h.frame();
+    h.surface.scrollTop = 0;
+    h.surface.scrollEvent();
+    h.changeChat('drone:chat-b');
+    h.changeChat('drone:chat-a');
+    h.surface.scrollHeight = 500;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(0);
+    h.surface.scrollHeight = 1_800;
+    h.updateContent();
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(1_300);
+  });
+
   test('follows content loaded before the initial automatic scroll event is delivered', () => {
     const h = scrollHarness();
     h.frame();
@@ -185,6 +327,24 @@ describe('desktop transcript scroll lifecycle', () => {
     h.changeChat('drone:chat-a');
     h.frame();
     expect(h.surface.scrollTop).toBe(1_100);
+  });
+
+  test('does not save the incoming chat DOM as the outgoing chat reading position', () => {
+    const h = scrollHarness();
+    h.frame();
+    h.surface.scrollTop = 300;
+    h.surface.scrollEvent();
+    // React replaces the messages in the reused scroll element before running
+    // the old layout-effect cleanup. B is longer and starts at the top.
+    h.surface.scrollHeight = 2_000;
+    h.surface.scrollTop = 0;
+    h.changeChat('drone:chat-b');
+    h.frame();
+    h.surface.scrollHeight = 1_200;
+    h.surface.scrollTop = 0;
+    h.changeChat('drone:chat-a');
+    h.frame();
+    expect(h.surface.scrollTop).toBe(300);
   });
 
   test('allows scrolling up even while a response is growing', () => {

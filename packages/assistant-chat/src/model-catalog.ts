@@ -111,9 +111,11 @@ export function modelCatalogReasoning(value: unknown): Pick<
   if (requestedDefault && !seen.has(requestedDefault)) {
     reasoningLevels.push(requestedDefault);
   }
+  // An explicitly empty default means the agent picks its own level (Claude Code).
+  const noDefault = model?.defaultReasoningLevel === '' && reasoningLevels.length > 0;
   return {
     reasoningLevels,
-    defaultReasoningLevel: requestedDefault || reasoningLevels[0] || '',
+    defaultReasoningLevel: requestedDefault || (noDefault ? '' : reasoningLevels[0] || ''),
   };
 }
 
@@ -334,4 +336,23 @@ function record(value: unknown): Record<string, any> | null {
 
 function text(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+/**
+ * The `--effort` levels Claude Code accepts. Without one it uses the user's own
+ * setting, so a Claude chat has no catalog default.
+ */
+export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export function isClaudeEffortLevel(value: unknown): value is (typeof CLAUDE_EFFORT_LEVELS)[number] {
+  return (CLAUDE_EFFORT_LEVELS as readonly string[]).includes(String(value ?? ''));
+}
+
+/** Agents whose chats take a reasoning (effort) setting. */
+export function chatAgentSupportsReasoning(
+  agent: { kind?: string | null; id?: string | null } | null | undefined,
+): boolean {
+  if (agent?.kind === 'native') return true;
+  return agent?.kind === 'builtin' &&
+    (agent.id === 'codex' || agent.id === 'blip' || agent.id === 'claude');
 }

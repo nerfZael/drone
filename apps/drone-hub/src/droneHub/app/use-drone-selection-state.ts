@@ -12,6 +12,7 @@ import {
 } from './drone-selection-helpers';
 import type { DroneSummary } from '../types';
 import { beginChatLoadNavigation } from './chat-load-telemetry';
+import { batchDroneHubUiUpdates } from './use-drone-hub-ui-store';
 
 const PENDING_SELECTED_CHAT_GRACE_MS = 5_000;
 
@@ -165,7 +166,7 @@ export function useDroneSelectionState({
   }, [droneById, dronesReady, selectedChat, selectedDrone]);
 
   const selectDroneCard = React.useCallback(
-    (droneIdRaw: string, opts?: DroneSelectionClickOptions) => {
+    (droneIdRaw: string, opts?: DroneSelectionClickOptions) => batchDroneHubUiUpdates(() => {
       const id = String(droneIdRaw ?? '').trim();
       if (!id) return;
       const nextChat = resolveChatForDrone(id);
@@ -213,7 +214,7 @@ export function useDroneSelectionState({
         setSelectedChat(resolveChatForDrone(next.activeDroneId));
         scrollChatToBottom();
       }
-    },
+    }),
     [
       orderedDroneIds,
       draftChat,
@@ -239,7 +240,7 @@ export function useDroneSelectionState({
   );
 
   const selectDroneChat = React.useCallback(
-    (droneIdRaw: string, chatNameRaw: string) => {
+    (droneIdRaw: string, chatNameRaw: string) => batchDroneHubUiUpdates(() => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       const chatName = String(chatNameRaw ?? '').trim() || 'default';
@@ -261,7 +262,7 @@ export function useDroneSelectionState({
       } finally {
         explicitChatSelectionRef.current = false;
       }
-    },
+    }),
     [draftChat, homeOpen, selectDroneCard, selectedChat, selectedDrone, setSelectedChat],
   );
 

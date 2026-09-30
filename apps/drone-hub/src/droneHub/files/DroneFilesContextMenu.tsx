@@ -86,11 +86,13 @@ export function DroneFilesContextMenu({
     const closeFromKeyboard = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    window.addEventListener('pointerdown', closeFromPointer);
-    window.addEventListener('keydown', closeFromKeyboard);
+    // The window the menu is in: a desktop tool window has its own, which the Hub window never hears clicks from.
+    const view = menuRef.current?.ownerDocument.defaultView ?? window;
+    view.addEventListener('pointerdown', closeFromPointer);
+    view.addEventListener('keydown', closeFromKeyboard);
     return () => {
-      window.removeEventListener('pointerdown', closeFromPointer);
-      window.removeEventListener('keydown', closeFromKeyboard);
+      view.removeEventListener('pointerdown', closeFromPointer);
+      view.removeEventListener('keydown', closeFromKeyboard);
     };
   }, [onClose]);
 

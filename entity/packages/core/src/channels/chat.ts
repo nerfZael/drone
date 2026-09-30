@@ -1,7 +1,36 @@
 import type { Channel } from '../channel.js';
+import type { Schema } from '../types.js';
 import { isEntityActor } from '../log.js';
 
-export interface ChatMessage { seq: number; by: string; text: string; t: number; replyTo?: number }
+/** An answer the user can click. */
+export interface ChatOption { label: string; recommended?: boolean }
+
+/** Up to six clickable answers, the recommended one marked; anything else is dropped. */
+export function cleanOptions(value: unknown): ChatOption[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const options = value
+    .map(o => ({ label: String((o as ChatOption)?.label ?? '').trim().slice(0, 120), recommended: (o as ChatOption)?.recommended === true }))
+    .filter(o => o.label)
+    .slice(0, 6)
+    .map(o => (o.recommended ? o : { label: o.label }));
+  return options.length ? options : undefined;
+}
+
+/** One of several questions asked together, each with its own answers to click. */
+export interface ChatQuestion { question: string; options?: ChatOption[] }
+
+/** Up to twenty questions, each cleaned like options; empty ones are dropped. */
+export function cleanQuestions(value: unknown): ChatQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const questions = value
+    .map(q => ({ question: String((q as ChatQuestion)?.question ?? '').trim().slice(0, 500), options: cleanOptions((q as ChatQuestion)?.options) }))
+    .filter(q => q.question)
+    .slice(0, 20)
+    .map(q => (q.options ? q : { question: q.question }));
+  return questions.length ? questions : undefined;
+}
+
+export interface ChatMessage { seq: number; by: string; text: string; t: number; options?: ChatOption[]; questions?: ChatQuestion[]; files?: string[]; replyTo?: number; corrects?: number; expands?: number; correctedBy?: number; withdrawn?: boolean }
 
 export interface ChatWorld {
   messages: ChatMessage[];
@@ -14,20 +43,55 @@ export interface ChatWorld {
 export interface ChatChannelOptions {
   /** Messages kept in state and rendered into every context. */
   recent?: number;
+  /**
+   * Checks files a message links (paths relative to the home folder): null when they all exist, otherwise what is
+   * wrong. Without it, links are not checked.
+   */
+  checkFiles?(paths: string[]): string | null;
 }
 
+/** The answers a question offers to click. */
+const OPTIONS: Schema = { type: 'array', maxItems: 6, description: 'Answers the user can click instead of typing, for a question with a few likely answers. Mark the one you recommend.', items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } };
+
 /** Chat: messages from both sides, the user's live draft, and the entity's own draft. */
-export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld> {
-  const recent = options.recent ?? 12;
+export function chatChannel(options_: ChatChannelOptions = {}): Channel<ChatWorld> {
+  const recent = options_.recent ?? 12;
   return {
     name: 'chat',
     describe: 'A chat with the user. You see their unsent draft as they type (marked unsent). Only `say` sends a message.',
     inputs: ['chat_message', 'draft_changed'],
     init: () => ({ messages: [], draft: null, entityDraft: null }),
     reduce(world, event, { levels, now }) {
-      if (event.type === 'chat_message') {
+      // A corrected answer stays in the history, marked, so no one reads it as settled fact.
+      if (event.type === 'message_reviewed' && event.data.verdict === 'corrected') {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.correctedBy = Number(event.data.by);
+      }
+      // A correction the reviewer withdrew no longer counts, and the message it corrected stands again.
+      if (event.type === 'message_reviewed' && event.data.verdict === 'withdrawn') {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.withdrawn = true;
+      }
+      if (event.type === 'message_reviewed' && event.data.restored) {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.correctedBy = undefined;
+      }
+      if (event.type === 'chat_message_updated') {
+        const message = world.messages.find(m => m.seq === event.data.seq);
+        if (message) message.text = String(event.data.text ?? '');
+      }
+      // Thread replies (workers in a batch) are shown in the worker's own thread, not in the chat.
+      if (event.type === 'chat_message' && !event.data.thread) {
         const text = String(event.data.text ?? '');
-        world.messages.push({ seq: event.seq, by: event.by, text, t: event.t, ...(typeof event.data.reply_to === 'number' ? { replyTo: event.data.reply_to } : {}) });
+        world.messages.push({
+          seq: event.seq, by: event.by, text, t: event.t,
+          ...(Array.isArray(event.data.options) ? { options: event.data.options as ChatOption[] } : {}),
+          ...(Array.isArray(event.data.files) ? { files: event.data.files as string[] } : {}),
+          ...(Array.isArray(event.data.questions) ? { questions: event.data.questions as ChatQuestion[] } : {}),
+          ...(typeof event.data.reply_to === 'number' ? { replyTo: event.data.reply_to } : {}),
+          ...(typeof event.data.corrects === 'number' ? { corrects: event.data.corrects } : {}),
+          ...(typeof event.data.expands === 'number' ? { expands: event.data.expands } : {}),
+        });
         if (world.messages.length > recent) world.messages.splice(0, world.messages.length - recent);
         if (event.by === 'user') { world.draft = null; levels.clear('user.typing'); }
         else if (isEntityActor(event.by)) world.entityDraft = null;
@@ -46,8 +110,31 @@ export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld
     effects: [
       {
         name: 'say', description: 'Send a chat message to the user.', risk: 'limb', voice: true, shorthand: 'text',
-        parameters: { type: 'object', properties: { text: { type: 'string', maxLength: 4000 }, reply_to: { type: 'integer', minimum: 1, description: 'The message seq this answers (threads)' } }, required: ['text'], additionalProperties: false },
-        apply(args: { text: string; reply_to?: number }, ctx) { ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}) }); return 'sent'; },
+        parameters: {
+          type: 'object', required: ['text'], additionalProperties: false,
+          properties: {
+            text: { type: 'string', maxLength: 4000 },
+            reply_to: { type: 'integer', minimum: 1, description: 'The message seq this answers (threads)' },
+            thread: { type: 'boolean', description: 'Post only in your own thread, not in the main chat. Workers in a batch do this by default; pass false only for a question the user must answer.' },
+            question: { type: 'boolean', description: 'This asks the user something you need answered before you can go on. A worker then waits for the answer instead of finishing.' },
+            questions: {
+              type: 'array', maxItems: 20,
+              description: 'Several questions asked together, each with its own answers to click (the recommended one marked). The user answers them all at once. Use it instead of listing questions in the text, which then just introduces them.',
+              items: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 500 }, options: OPTIONS } },
+            },
+            files: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 }, description: 'Files in your home folder this message links, relative to it (a write-up, a spec). Shown as links the user can open.' },
+            options: OPTIONS,
+          },
+        },
+        apply(args: { text: string; reply_to?: number; thread?: boolean; question?: boolean; options?: ChatOption[]; questions?: ChatQuestion[]; files?: string[] }, ctx) {
+          const options = cleanOptions(args.options);
+          const questions = cleanQuestions(args.questions);
+          const files = [...new Set((args.files ?? []).map(f => String(f).trim().replace(/^\.?\/+/, '')).filter(Boolean))];
+          const problem = files.length ? options_.checkFiles?.(files) : null;
+          if (problem) return `error: ${problem}. Nothing was sent; write the file first, or fix the path.`;
+          ctx.emit('chat_message', { text: args.text, ...(args.reply_to !== undefined ? { reply_to: args.reply_to } : {}), ...(args.thread ? { thread: true } : {}), ...(args.question ? { question: true } : {}), ...(options ? { options } : {}), ...(questions ? { questions } : {}), ...(files.length ? { files } : {}) });
+          return args.thread ? 'posted in your thread' : 'sent';
+        },
       },
       {
         name: 'set_draft', description: 'Show text as your visible, unsent draft (the user sees you typing). Empty text clears it.', risk: 'limb', voice: true, shorthand: 'text',
@@ -67,7 +154,7 @@ export function chatChannel(options: ChatChannelOptions = {}): Channel<ChatWorld
     render(world, { ago }) {
       return {
         volatile: {
-          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}: ${m.text} (${ago(m.t)})`),
+          messages: world.messages.map(m => `#${m.seq} ${m.by}${m.replyTo ? ` (re #${m.replyTo})` : ''}${m.corrects ? ` (correction of #${m.corrects})` : ''}${m.expands ? ` (adds to #${m.expands})` : ''}: ${m.correctedBy ? `[WRONG, corrected by #${m.correctedBy}] ` : ''}${m.withdrawn ? '[WITHDRAWN: this correction was itself wrong] ' : ''}${m.text}${m.options ? ` [options: ${m.options.map(o => `${o.label}${o.recommended ? ' (recommended)' : ''}`).join(' | ')}]` : ''}${m.questions ? ` [questions: ${m.questions.map((q, i) => `${i + 1}) ${q.question}${q.options ? ` (options: ${q.options.map(o => `${o.label}${o.recommended ? ' (recommended)' : ''}`).join(' | ')})` : ''}`).join(' ')}]` : ''}${m.files ? ` [files: ${m.files.join(', ')}]` : ''} (${ago(m.t)})`),
           user_draft_unsent: world.draft ? { text: world.draft.text, typing_for: ago(world.draft.startedAt).replace(' ago', ''), last_key: ago(world.draft.lastKeyAt) } : null,
           your_draft: world.entityDraft?.text ?? null,
         },

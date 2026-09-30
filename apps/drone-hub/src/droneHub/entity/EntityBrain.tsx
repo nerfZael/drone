@@ -1,5 +1,10 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { isEntityActor as isEntity } from '@entity/core/state';
+import { KEYS } from './bench-format';
+import { deriveWork, Dot, STATE_COLOR, Steps, type WorkItem } from './EntityWork';
+import { CardStatus, statusText, tone, WorkerDrawer, type OnWorker } from './EntityWorkCanvas';
+import { LimbLog, LimbPanel, SaidThread } from './EntityLimbPanel';
 
 /**
  * The entity brain: a live, fit-to-pane map of the entity. Top to bottom it runs from the user,
@@ -20,7 +25,6 @@ const COMPACT_H = 26;
 const HOP_MS = 400;
 const MAX_FIRING_BATCH = 24;
 const CHANNELS = ['chat', 'keypad', 'workspace'] as const;
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const CHANNEL_OF: Record<string, (typeof CHANNELS)[number]> = {
   chat_message: 'chat', draft_changed: 'chat', entity_draft: 'chat',
   key_down: 'keypad', key_up: 'keypad',
@@ -33,7 +37,6 @@ const TONE_COLOR: Record<Tone, string> = {
   sense: 'var(--cyan, #39c5cf)',
 };
 const ENDED = new Set(['done', 'failed', 'cancelled', 'killed']);
-const isEntity = (by: string) => by !== 'user' && by !== 'host' && by !== 'system';
 const lastOf = <T,>(list: readonly T[], test: (item: T) => boolean = () => true): T | undefined => { for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) return list[i]; return undefined; };
 const clip = (text: unknown, n: number) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const channelId = (name: string) => `ch:${name}`;
@@ -41,7 +44,11 @@ const senseName = (level: string) => level.replace(/^sense\./, '');
 const seconds = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
 
 /** `live` false (replay): the clock stops at the snapshot's time instead of running on. */
-export function EntityBrain({ events, snapshot, live = true }: { events: EntityEvent[]; snapshot: EntitySnapshot; live?: boolean }) {
+export function EntityBrain({ events, snapshot, live = true, onWorker, onOpenFile }: {
+  events: EntityEvent[]; snapshot: EntitySnapshot; live?: boolean;
+  /** Messages and stops for a worker opened here, as on the Work canvas. */
+  onWorker?: OnWorker; onOpenFile?(path: string): void;
+}) {
   const container = React.useRef<HTMLDivElement | null>(null);
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   const [selected, setSelected] = React.useState<string | null>(null);
@@ -63,6 +70,8 @@ export function EntityBrain({ events, snapshot, live = true }: { events: EntityE
   const allPulses = usePulses(events, snapshot, limbs);
   const clock = useEntityClock(snapshot, live);
   const recent = React.useMemo(() => recentActivity(events), [events]);
+  // Workers look and open as they do on the Work canvas.
+  const work = React.useMemo(() => new Map(deriveWork(snapshot, events).workers.map(w => [w.id, w])), [snapshot, events]);
   const layout = React.useMemo(() => layoutBrain(size.w, size.h, snapshot), [size.w, size.h, snapshot]);
   const edges = React.useMemo(() => structuralEdges(snapshot, layout.rects), [snapshot, layout.rects]);
   React.useEffect(() => { if (selected && !layout.rects.has(selected)) setSelected(null); }, [layout.rects, selected]);
@@ -78,16 +87,13 @@ export function EntityBrain({ events, snapshot, live = true }: { events: EntityE
   const labels = placeLabels(pulses.filter((p) => p.label).slice(-8), layout.rects);
 
   return (
-    <section className="relative flex min-h-0 flex-col overflow-hidden bg-[var(--panel)]" aria-label="Entity brain">
+    <section className="entity-work-canvas relative flex min-h-0 flex-col overflow-hidden" aria-label="Entity brain">
       <BrainStrip snapshot={snapshot} />
-      <div ref={container} className="relative min-h-0 flex-1 overflow-hidden" data-entity-brain="" onClick={() => setSelected(null)}>
+      <div ref={container} className="relative min-h-0 flex-1 overflow-hidden" data-entity-brain="" onClick={() => setSelected(null)}
+        // The Work canvas's ground: a darker field with a faint dot grid. The brain fits the pane, so nothing pans or zooms.
+        style={{ background: 'var(--work-ground)', backgroundImage: 'radial-gradient(rgba(231, 233, 239, 0.07) 1.1px, transparent 1.3px)', backgroundSize: '18px 18px' }}>
         {size.w > 0 ? (
           <>
-            {layout.bands.map((band) => (
-              <div key={band.title} className="pointer-events-none absolute left-2.5 text-[9px] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ top: band.y - 13 }}>
-                {band.title}{band.hidden ? ` · +${band.hidden} ended` : ''}
-              </div>
-            ))}
             <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} aria-hidden>
               {edges.map((edge) => {
                 const a = layout.rects.get(edge.from); const b = layout.rects.get(edge.to);
@@ -103,7 +109,7 @@ export function EntityBrain({ events, snapshot, live = true }: { events: EntityE
             </svg>
             {[...layout.rects.entries()].map(([id, rect]) => (
               <div key={id} className="absolute z-10 transition-[left,top,width,height] duration-300 ease-out" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-                <BrainNode id={id} compact={layout.compact.has(id)} snapshot={snapshot} limb={limbs.get(id)} recent={recent} hot={hot.get(id)} events={events}
+                <BrainNode id={id} compact={layout.compact.has(id)} snapshot={snapshot} limb={limbs.get(id)} work={work.get(id)} recent={recent} hot={hot.get(id)} events={events}
                   clock={clock} selected={selected === id} onSelect={() => setSelected((current) => (current === id ? null : id))} />
               </div>
             ))}
@@ -119,7 +125,11 @@ export function EntityBrain({ events, snapshot, live = true }: { events: EntityE
                 {pulse.label}
               </div>
             ))}
-            {selected ? <NodeDetails id={selected} snapshot={snapshot} limb={limbs.get(selected)} events={events} clock={clock} onClose={() => setSelected(null)} /> : null}
+            {selected ? (work.get(selected) ? (
+              <WorkerDrawer w={work.get(selected)!} events={events} snapshot={snapshot} t={clock()} live={live && !!onWorker} onWorker={onWorker ?? (() => undefined)} onOpenFile={onOpenFile} onClose={() => setSelected(null)} />
+            ) : (
+              <NodePanel id={selected} snapshot={snapshot} limb={limbs.get(selected)} events={events} now={clock()} onOpenFile={onOpenFile} onClose={() => setSelected(null)} />
+            )) : null}
           </>
         ) : null}
       </div>
@@ -142,7 +152,7 @@ function BrainStrip({ snapshot }: { snapshot: EntitySnapshot }) {
           output stopped ({stop.owner}): {clip(stop.reason, 40)}
         </span>
       ))}
-      <span className="ml-auto text-[var(--muted-dim)]">click a node for details</span>
+      <span className="ml-auto text-[var(--muted)]">click a card to open it</span>
     </div>
   );
 }
@@ -183,35 +193,42 @@ function Firing({ points, color }: { points: [Point, Point, Point, Point]; color
   );
 }
 
-function BrainNode({ id, compact, snapshot, limb, recent, hot, events, clock, selected, onSelect }: {
-  id: string; compact: boolean; snapshot: EntitySnapshot; limb?: Limb; recent: Map<string, string>; hot?: Tone; events: EntityEvent[];
+function BrainNode({ id, compact, snapshot, limb, work, recent, hot, events, clock, selected, onSelect }: {
+  id: string; compact: boolean; snapshot: EntitySnapshot; limb?: Limb; work?: WorkItem; recent: Map<string, string>; hot?: Tone; events: EntityEvent[];
   clock: () => number; selected: boolean; onSelect(): void;
 }) {
   const busy = !!limb?.runs.length;
   const ended = limb ? ENDED.has(limb.status) : false;
   const failed = limb?.status === 'failed' || limb?.status === 'killed';
   const stopped = limb ? snapshot.stops.some((s) => s.owner === limb.id) : false;
-  const border = failed || stopped ? 'var(--red)' : hot ? TONE_COLOR[hot] : selected || busy ? 'var(--accent)' : 'var(--border-subtle)';
-  const glow = hot ? `0 0 0 1px ${TONE_COLOR[hot]}, 0 0 14px -2px ${TONE_COLOR[hot]}` : selected ? '0 0 0 1px var(--accent)' : busy ? 'var(--glow-accent)' : undefined;
   const content = nodeContent(id, compact, snapshot, limb, recent, events, clock);
+  // Cards as on the Work canvas: a status stripe on the left, the name and a calm status, then what it is doing.
+  const stripe = work ? tone(work) : failed || stopped ? STATE_COLOR.stop : busy ? STATE_COLOR.act : content.live ? STATE_COLOR.done : 'var(--border)';
+  const border = selected ? 'var(--accent)' : hot ? TONE_COLOR[hot] : failed || stopped ? STATE_COLOR.stop : 'var(--border)';
+  const glow = hot ? `0 0 0 1px ${TONE_COLOR[hot]}, 0 0 14px -2px ${TONE_COLOR[hot]}` : undefined;
   return (
     <button type="button" data-brain-node={id} aria-pressed={selected}
-      className={`flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-[var(--panel-alt)] px-2 py-1 text-left text-[11px] leading-[1.35] transition-[border-color,box-shadow,opacity] duration-200 animate-card-enter hover:bg-[var(--panel-raised)] ${busy ? 'animate-border-glow' : ''}`}
-      style={{ borderColor: border, opacity: ended && !selected ? 0.5 : 1, boxShadow: glow }}
+      className="work-card relative flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-[9px] border bg-[var(--panel)] py-1 pl-3 pr-2 text-left text-[12px] leading-[1.35] transition-[border-color,box-shadow,opacity] duration-200 animate-card-enter hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]"
+      style={{ borderColor: border, opacity: ended && !selected ? 0.6 : 1, ...(glow ? { boxShadow: glow } : {}) }}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}>
+      <span className="absolute -left-px bottom-1.5 top-1.5 w-[3px] rounded-r" style={{ background: stripe }} />
       <div className="flex w-full min-w-0 items-center gap-1.5">
-        <StatusDot state={failed ? 'failed' : busy ? 'busy' : ended ? 'ended' : content.live ? 'live' : 'idle'} />
-        <span className="min-w-[3em] shrink-0 truncate font-medium text-[var(--fg)]" style={{ maxWidth: '62%' }}>{content.name}</span>
-        {content.badge ? <span className="ml-auto min-w-0 truncate text-[10px] text-[var(--muted)]">{content.badge}</span> : null}
+        <span className="min-w-[3em] shrink-0 truncate font-semibold text-[var(--fg)]" style={{ maxWidth: '58%' }}>{work ? work.name : content.name}</span>
+        <span className="ml-auto min-w-0 truncate">
+          {work ? <CardStatus w={work} t={clock()} /> : content.badge || busy ? (
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px]" style={{ color: busy ? STATE_COLOR.act : 'var(--muted)' }}>
+              {busy ? <Dot pulse /> : null}{content.badge}
+            </span>
+          ) : null}
+        </span>
       </div>
-      {!compact ? <div className="min-h-0 w-full flex-1 overflow-hidden text-[var(--muted)]">{content.body}</div> : null}
+      {!compact ? (
+        <div className="min-h-0 w-full flex-1 overflow-hidden text-[var(--fg-secondary,var(--fg))]">
+          {work ? (work.steps ? <Steps w={work} limit={3} /> : <div className="line-clamp-3">{statusText(work, wid => snapshot.limbs.find(l => l.id === wid)?.name ?? wid)}</div>) : content.body}
+        </div>
+      ) : null}
     </button>
   );
-}
-
-function StatusDot({ state }: { state: 'busy' | 'live' | 'idle' | 'ended' | 'failed' }) {
-  const color = state === 'busy' ? 'var(--accent)' : state === 'live' ? 'var(--green, #3fb950)' : state === 'failed' ? 'var(--red)' : 'var(--muted-dim)';
-  return <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${state === 'busy' ? 'animate-pulse-dot' : ''}`} style={{ background: color }} />;
 }
 
 type ChatWorld = { draft?: { text: string } | null; entityDraft?: { by: string; text: string } | null; messages?: { by: string; text: string }[] };
@@ -303,7 +320,7 @@ function nodeContent(id: string, compact: boolean, snapshot: EntitySnapshot, lim
   const status = oldest !== null ? `thinking ${seconds(clock() - oldest)}${limb.runs.length > 1 ? ` ×${limb.runs.length}` : ''}` : limb.status;
   const reasons = limb.runs.map((r) => r.reason).filter(Boolean);
   return {
-    name: limb.role === 'task' ? limb.name : limb.role === 'voice' ? 'Voice' : 'Head',
+    name: limb.role === 'task' ? limb.name : limb.role === 'voice' ? 'Voice' : limb.role === 'reviewer' ? 'Reviewer' : 'Head',
     badge: compact ? status : [model, status].filter(Boolean).join(' · '),
     body: (
       <>
@@ -327,51 +344,18 @@ function SenseBar({ value }: { value?: number }) {
   );
 }
 
-/** Everything about one node, over the bottom of the brain: config, runs, and its recent events. */
-function NodeDetails({ id, snapshot, limb, events, clock, onClose }: {
-  id: string; snapshot: EntitySnapshot; limb?: Limb; events: EntityEvent[]; clock: () => number; onClose(): void;
+/** The side panel for a part of the entity that is not a worker: what it said (head, voice, reviewer, you) and its log. */
+function NodePanel({ id, snapshot, limb, events, now, onOpenFile, onClose }: {
+  id: string; snapshot: EntitySnapshot; limb?: Limb; events: EntityEvent[]; now: number; onOpenFile?(path: string): void; onClose(): void;
 }) {
   const channel = id.startsWith('ch:') ? id.slice(3) : null;
-  const related = events.filter((e) =>
-    id === 'you' ? e.by === 'user'
-      : channel ? CHANNEL_OF[e.type] === channel && e.type !== 'draft_changed'
-      : id === 'jev' ? e.type === 'judged' || e.type === 'jev_unavailable'
-      : e.by === id || e.data.id === id || e.data.limb === id,
-  ).slice(-14).reverse();
-  const title = limb ? `${limb.name} · ${limb.id}` : id === 'jev' ? 'Senses' : id === 'you' ? 'You' : channel ? channel[0].toUpperCase() + channel.slice(1) : id;
-  const rows: [string, React.ReactNode][] = limb ? [
-    ['kind', `${limb.kind} · ${limb.role}${limb.model ? ` · ${limb.model}` : ''}`],
-    ['status', limb.status],
-    ...(limb.parent ? [['parent', limb.parent] as [string, React.ReactNode]] : []),
-    ...limb.runs.map((r): [string, React.ReactNode] => [`run ${r.id}`, `${seconds(clock() - r.startedAt)} · ${r.reason}`]),
-    ...(limb.task ? [['task', limb.task] as [string, React.ReactNode]] : []),
-    ...(limb.result ? [['result', limb.result] as [string, React.ReactNode]] : []),
-    ...(limb.watch ? [['watch', <pre key="w" className="whitespace-pre-wrap">{JSON.stringify(limb.watch, null, 1)}</pre>] as [string, React.ReactNode]] : []),
-    ...(limb.code ? [['code', <pre key="c" className="whitespace-pre-wrap">{limb.code}</pre>] as [string, React.ReactNode]] : []),
-    ...(limb.fires ? [['fired', `${limb.fires}×`] as [string, React.ReactNode]] : []),
-  ] : id === 'jev' ? snapshot.senses.map((s): [string, React.ReactNode] => [
-    senseName(s.level),
-    <span key={s.id} className="flex items-center gap-1.5"><SenseBar value={s.value} /><span className="min-w-0">{s.question} <span className="text-[var(--muted-dim)]">· {s.owners.join(', ')}</span></span></span>,
-  ]) : [];
+  const title = limb ? (limb.role === 'voice' ? 'Voice' : limb.role === 'reviewer' ? 'Reviewer' : limb.role === 'head' ? 'Head' : limb.name) : id === 'jev' ? 'Senses' : id === 'you' ? 'You' : channel ? channel[0].toUpperCase() + channel.slice(1) : id;
+  const talks = id === 'you' || (limb?.kind === 'llm');
   return (
-    <div className="absolute inset-x-2 bottom-2 z-30 flex max-h-[48%] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] shadow-lg animate-slide-up"
-      role="dialog" aria-label={`${title} details`} onClick={(e) => e.stopPropagation()}>
-      <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5 text-[12px]">
-        <span className="font-medium text-[var(--fg)]">{title}</span>
-        <button type="button" className="ml-auto rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]" onClick={onClose} aria-label="Close details">✕</button>
-      </div>
-      <div className="min-h-0 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-[1.45]">
-        {rows.map(([key, value], i) => (
-          <div key={`${key}-${i}`} className="flex gap-2"><span className="w-16 shrink-0 truncate text-[var(--muted-dim)]">{key}</span><span className="min-w-0 flex-1 break-words text-[var(--fg-secondary)]">{value}</span></div>
-        ))}
-        <div className={`${rows.length ? 'mt-2' : ''} mb-0.5 font-sans text-[var(--muted-dim)]`}>{related.length ? 'Recent events' : 'No events yet'}</div>
-        {related.map((e) => (
-          <div key={e.seq} className="truncate text-[var(--muted)]">
-            <span className="text-[var(--muted-dim)]">{seconds(e.t)}</span> {e.by} <span className="text-[var(--accent)]">{e.type}</span> {JSON.stringify(e.data).slice(0, 200)}
-          </div>
-        ))}
-      </div>
-    </div>
+    <LimbPanel title={title} titleHint={limb?.id} onClose={onClose}
+      status={limb ? <span className="text-[12px] text-[var(--muted)]">{limb.runs.length ? 'thinking' : limb.status}</span> : undefined}
+      thread={talks ? <SaidThread id={id === 'you' ? 'user' : id} events={events} snapshot={snapshot} onOpenFile={onOpenFile} /> : undefined}
+      log={<LimbLog id={id} snapshot={snapshot} limb={limb} events={events} now={now} />} />
   );
 }
 
@@ -523,7 +507,7 @@ function layoutBrain(width: number, height: number, snapshot: EntitySnapshot): {
   if (!width || !height) return { rects, compact, bands };
   const code = snapshot.limbs.filter((l) => l.kind === 'code');
   const tasks = snapshot.limbs.filter((l) => l.role === 'task');
-  const mind = ['voice', 'head'].flatMap((role) => snapshot.limbs.filter((l) => l.role === role));
+  const mind = ['voice', 'head', 'reviewer'].flatMap((role) => snapshot.limbs.filter((l) => l.role === role));
   const specs: BandSpec[] = [
     { title: 'You', items: [{ id: 'you', h: 40 }], minW: 110, maxW: 170 },
     { title: 'Body', minW: 130, maxW: 240, items: [

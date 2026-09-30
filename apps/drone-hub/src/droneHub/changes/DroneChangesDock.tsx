@@ -1,4 +1,6 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { ChangesExplorerContext } from './changes-explorer-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import {
@@ -484,13 +486,28 @@ export type DroneChangesDockProps = {
   hubMessage?: string | null;
   onRevealFileInFiles: (repoRelativePath: string) => void;
   onOpenFileInEditor: (repoRelativePath: string) => void;
+  /** Brings the Changes view to the front when a file is picked in its separate explorer. */
+  onShowChanges?: () => void;
 };
+
+const MemoizedHistoricalChangesView = React.memo(AgentRunHistoricalChangesView);
 
 export function DroneChangesDock(props: DroneChangesDockProps) {
   const { acceptHistoricalRunChanges = false, droneId } = props;
+  // Workspace focus updates recreate action callbacks. Keep the heavy view's
+  // props stable while invoking the handlers from the latest committed render.
+  const actionsRef = React.useRef(props);
+  React.useLayoutEffect(() => {
+    actionsRef.current = props;
+  });
+  const onOpenFileInEditor = React.useCallback((path: string) => actionsRef.current.onOpenFileInEditor(path), []);
+  const onRevealFileInFiles = React.useCallback((path: string) => actionsRef.current.onRevealFileInFiles(path), []);
+  const onShowChanges = React.useCallback(() => actionsRef.current.onShowChanges?.(), []);
+  const onReviewBack = React.useCallback(() => actionsRef.current.onReviewBack?.(), []);
   const [historicalRun, setHistoricalRun] = React.useState<ChangesOpenAgentRunDetail | null>(() =>
     acceptHistoricalRunChanges ? consumeRequestedAgentRunChanges(droneId) : null,
   );
+  const closeHistoricalRun = React.useCallback(() => setHistoricalRun(null), []);
 
   React.useEffect(() => {
     if (!acceptHistoricalRunChanges) return;
@@ -504,7 +521,7 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
 
   if (historicalRun) {
     return (
-      <AgentRunHistoricalChangesView
+      <MemoizedHistoricalChangesView
         key={[
           historicalRun.fileChanges.capturedAt,
           historicalRun.initialSelection.workspaceTargetId,
@@ -512,15 +529,23 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
         ].join(':')}
         fileChanges={historicalRun.fileChanges}
         initialSelection={historicalRun.initialSelection}
-        onClose={() => setHistoricalRun(null)}
+        onClose={closeHistoricalRun}
       />
     );
   }
 
-  return <LiveDroneChangesDock {...props} />;
+  return (
+    <LiveDroneChangesDock
+      {...props}
+      onOpenFileInEditor={onOpenFileInEditor}
+      onRevealFileInFiles={onRevealFileInFiles}
+      onShowChanges={onShowChanges}
+      onReviewBack={props.onReviewBack ? onReviewBack : null}
+    />
+  );
 }
 
-function LiveDroneChangesDock({
+const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   droneId,
   repoAttached,
   repoPath,
@@ -535,7 +560,10 @@ function LiveDroneChangesDock({
   hubPhase,
   hubMessage,
   onOpenFileInEditor,
+  onShowChanges,
 }: DroneChangesDockProps) {
+  const explorerHost = React.useContext(ChangesExplorerContext);
+  const separateExplorer = explorerHost !== undefined;
   const confirm = useAppConfirmDialog();
   const workspaceSnapshotRef = React.useRef<ChangesWorkspaceUiSnapshot | null>(
     changesWorkspaceUiByDrone.get(droneId) ?? null,
@@ -1111,7 +1139,7 @@ function LiveDroneChangesDock({
   }, [commitExplorerTree, commitFileSelectedPath]);
 
   const recomputeExplorerWidth = React.useCallback(() => {
-    if (viewMode !== 'split') return;
+    if (separateExplorer || viewMode !== 'split') return;
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
     setSplitLayoutWidthPx((current) =>
@@ -1129,6 +1157,7 @@ function LiveDroneChangesDock({
     explorerManualWidthPx,
     explorerResizing,
     explorerWidthOptions,
+    separateExplorer,
     viewMode,
   ]);
 
@@ -1294,7 +1323,7 @@ function LiveDroneChangesDock({
   }, [recomputeExplorerWidth]);
 
   React.useEffect(() => {
-    if (viewMode !== 'split') return;
+    if (separateExplorer || viewMode !== 'split') return;
     const splitEl = splitLayoutRef.current;
     if (!splitEl) return;
 
@@ -1324,7 +1353,7 @@ function LiveDroneChangesDock({
       if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [recomputeExplorerWidth, viewMode]);
+  }, [recomputeExplorerWidth, separateExplorer, viewMode]);
 
   React.useEffect(() => {
     if (viewMode === 'split') return;
@@ -2658,6 +2687,10 @@ function LiveDroneChangesDock({
               onClick={() => {
                 setSelectedExplorerDirectoryKey(null);
                 setSelectedPath(entry.path);
+                if (separateExplorer) {
+                  setViewMode('split');
+                  onShowChanges?.();
+                }
                 if (dataMode === 'working-tree') setSplitKind(workingKind ?? defaultKindForEntry(entry));
               }}
               aria-selected={active}
@@ -2799,6 +2832,7 @@ function LiveDroneChangesDock({
               onClick={() => {
                 setSelectedCommitDirectoryPath(null);
                 setCommitFileSelectedPath(entry.path);
+                if (separateExplorer) setViewMode('split');
               }}
               aria-selected={active}
               className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden text-left font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
@@ -2931,6 +2965,98 @@ function LiveDroneChangesDock({
     </>
   ) : null;
 
+  const explorerHeader = (
+    <WorkspaceExplorerHeader
+      zoom={explorerZoom}
+      onDecreaseZoom={decreaseExplorerZoom}
+      onIncreaseZoom={increaseExplorerZoom}
+      onResetZoom={resetExplorerZoom}
+    />
+  );
+  const showChangesExplorer =
+    primaryView === 'changes' && repoAttached && !disabled && !showingInitialLoad && !listError && entries.length > 0 &&
+    (separateExplorer ? Boolean(explorerHost) : viewMode === 'split' && !showingPullRequestOverview);
+  const explorerContents = showChangesExplorer ? (
+    <>
+      {explorerHeader}
+      <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
+        {workingTreeActionError ? (
+          <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-10 text-[var(--red)]">
+            {workingTreeActionError}
+          </div>
+        ) : null}
+        {dataMode === 'working-tree' ? (
+          <>
+            {stagedEntries.length > 0 ? (
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setStagedSectionOpen((open) => !open)}
+                  aria-expanded={stagedSectionOpen}
+                  className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                >
+                  <IconChevron down={stagedSectionOpen} size={11} />
+                  <span className="min-w-0 flex-1 truncate">Staged Changes</span>
+                  <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
+                </button>
+                {stagedSectionOpen ? (
+                  <div className="w-full">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
+                ) : null}
+              </section>
+            ) : null}
+            {unstagedEntries.length > 0 ? (
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setUnstagedSectionOpen((open) => !open)}
+                  aria-expanded={unstagedSectionOpen}
+                  className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                >
+                  <IconChevron down={unstagedSectionOpen} size={11} />
+                  <span className="min-w-0 flex-1 truncate">Changes</span>
+                  <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
+                </button>
+                {unstagedSectionOpen ? (
+                  <div className="w-full">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
+                ) : null}
+              </section>
+            ) : null}
+          </>
+        ) : (
+          <div className="w-full">{renderExplorer(explorerTree, 0)}</div>
+        )}
+      </div>
+    </>
+  ) : null;
+  const detachedExplorerContents = !explorerHost ? null : !repoAttached ? (
+    <UiPaneState kind="unavailable" title="Repository unavailable" />
+  ) : disabled || showingInitialLoad ? (
+    <UiCenteredLoadingState message={disabled ? 'Waiting for repository…' : initialLoadingLabel} />
+  ) : primaryView === 'commits' ? (
+    commitListError || activeCommitDetailsError ? (
+      <UiPaneState kind="error" title="Could not load commit files" description={commitListError || activeCommitDetailsError} />
+    ) : activeCommitDetailsLoading ? (
+      <UiCenteredLoadingState message="Loading commit files…" />
+    ) : !selectedCommit ? (
+      <UiPaneState kind="empty" title="Select a commit to browse its files." />
+    ) : (
+      <>
+        {explorerHeader}
+        <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">{renderCommitExplorer(commitExplorerTree, 0)}</div>
+      </>
+    )
+  ) : listError ? (
+    <UiPaneState kind="error" title="Could not load changes" description={listError} />
+  ) : entries.length === 0 ? (
+    <UiPaneState kind="empty" title={emptyChangesTitle} description={emptyChangesDescription} action={emptyChangesAction} />
+  ) : explorerContents;
+  const detachedExplorer = explorerHost ? createPortal(
+    <div className="dh-utility-panel-inset flex h-full min-h-0 flex-col overflow-hidden" data-changes-explorer="detached">
+      {detachedExplorerContents}
+    </div>,
+    explorerHost,
+  ) : null;
+
   if (showingInitialLoad) {
     return (
       <UiPanel
@@ -2956,6 +3082,7 @@ function LiveDroneChangesDock({
           </div>
         ) : null}
         <UiCenteredLoadingState message={initialLoadingLabel} />
+        {detachedExplorer}
       </UiPanel>
     );
   }
@@ -2969,6 +3096,7 @@ function LiveDroneChangesDock({
       surface="alternate"
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(editorZoomLevel) }}
     >
+      {detachedExplorer}
       {!reviewOverride && !showingPullRequestOverview ? (
         <UiPanelToolbar
           aria-label="Changes controls"
@@ -3227,6 +3355,7 @@ function LiveDroneChangesDock({
             loadCommitDiff={loadCommitDiff}
             diffViewType={diffViewType}
             viewMode={viewMode}
+            separateExplorer={separateExplorer}
             commitExplorerTree={commitExplorerTree}
             renderCommitExplorer={renderCommitExplorer}
             renderFileQuickActions={renderFileQuickActions}
@@ -3469,89 +3598,39 @@ function LiveDroneChangesDock({
             )}
           </div>
 
-          <UiResizeHandle
-            orientation="vertical"
-            value={explorerWidthPx}
-            min={explorerResizeBounds.minWidthPx}
-            max={explorerResizeBounds.maxWidthPx}
-            step={10}
-            label="Resize changes explorer"
-            reversed
-            onValueChange={setExplorerWidthPx}
-            onValueCommit={(nextWidth) =>
-              setExplorerManualWidthPx(Math.floor(nextWidth))
-            }
-            onResizingChange={setExplorerResizing}
-            onReset={resetExplorerWidthPreference}
-            className="dh-changes-split-resize-handle"
-          />
-
-          <div
-            className={`dh-utility-panel-inset shrink-0 overflow-hidden flex flex-col ${
-              explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
-            }`}
-            style={{
-              width: `${explorerWidthPx}px`,
-              minWidth: `${explorerWidthPx}px`,
-              maxWidth: `${explorerWidthPx}px`,
-            }}
-          >
-            <WorkspaceExplorerHeader
-              zoom={explorerZoom}
-              onDecreaseZoom={decreaseExplorerZoom}
-              onIncreaseZoom={increaseExplorerZoom}
-              onResetZoom={resetExplorerZoom}
+          {!separateExplorer ? <>
+            <UiResizeHandle
+              orientation="vertical"
+              value={explorerWidthPx}
+              min={explorerResizeBounds.minWidthPx}
+              max={explorerResizeBounds.maxWidthPx}
+              step={10}
+              label="Resize changes explorer"
+              reversed
+              onValueChange={setExplorerWidthPx}
+              onValueCommit={(nextWidth) =>
+                setExplorerManualWidthPx(Math.floor(nextWidth))
+              }
+              onResizingChange={setExplorerResizing}
+              onReset={resetExplorerWidthPreference}
+              className="dh-changes-split-resize-handle"
             />
-            <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
-              {workingTreeActionError ? (
-                <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-10 text-[var(--red)]">
-                  {workingTreeActionError}
-                </div>
-              ) : null}
-              {dataMode === 'working-tree' ? (
-                <>
-                  {stagedEntries.length > 0 ? (
-                    <section>
-                      <button
-                        type="button"
-                        onClick={() => setStagedSectionOpen((open) => !open)}
-                        aria-expanded={stagedSectionOpen}
-                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-                      >
-                        <IconChevron down={stagedSectionOpen} size={11} />
-                        <span className="min-w-0 flex-1 truncate">Staged Changes</span>
-                        <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
-                      </button>
-                      {stagedSectionOpen ? (
-                        <div className="w-full">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
-                      ) : null}
-                    </section>
-                  ) : null}
-                  {unstagedEntries.length > 0 ? (
-                    <section>
-                      <button
-                        type="button"
-                        onClick={() => setUnstagedSectionOpen((open) => !open)}
-                        aria-expanded={unstagedSectionOpen}
-                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-                      >
-                        <IconChevron down={unstagedSectionOpen} size={11} />
-                        <span className="min-w-0 flex-1 truncate">Changes</span>
-                        <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
-                      </button>
-                      {unstagedSectionOpen ? (
-                        <div className="w-full">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
-                      ) : null}
-                    </section>
-                  ) : null}
-                </>
-              ) : (
-                <div className="w-full">{renderExplorer(explorerTree, 0)}</div>
-              )}
+
+            <div
+              className={`dh-utility-panel-inset shrink-0 overflow-hidden flex flex-col ${
+                explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
+              }`}
+              style={{
+                width: `${explorerWidthPx}px`,
+                minWidth: `${explorerWidthPx}px`,
+                maxWidth: `${explorerWidthPx}px`,
+              }}
+            >
+              {explorerContents}
             </div>
-          </div>
+          </> : null}
         </div>
       )}
     </UiPanel>
   );
-}
+});

@@ -1297,7 +1297,7 @@ export function OpenedDroneFilePanel({
                 targetNavigationSeq={fileNavigationSeq}
               />
             ) : openedFileShowsHtmlPreview ? (
-              <IsolatedHtmlPreview key={heldHtmlPreview.renderSeq} source={heldHtmlPreview.source} fileName={fileName} />
+              <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={heldHtmlPreview.source} fileName={fileName} />
             ) : openedFileEditorVisible ? (
               <AppShortcutBoundary
                 data-editor-zoom-surface="file-editor"

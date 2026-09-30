@@ -15,6 +15,8 @@ export type ChatComposerModelPickerConfig = {
   currentProvider: string;
   currentModel: string;
   currentThinkingLevel?: string;
+  /** With no level set, the agent uses its own, so no level shows as selected. */
+  agentChoosesDefaultReasoning?: boolean;
   options: ChatComposerModelChoice[];
   disabled?: boolean;
   showReasoning?: boolean;
@@ -77,6 +79,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     currentProvider,
     currentModel,
     currentThinkingLevel,
+    agentChoosesDefaultReasoning = false,
     options,
     disabled = false,
     showReasoning = true,
@@ -115,9 +118,10 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
   const selectedProvider = selectedModel?.provider || currentProvider;
   const selectedModelId = selectedModel?.id ?? currentModel;
   const modelListOpen = modelsOpen || (requireExplicitModelSelection && !selectedModelId);
-  const selectedReasoning =
-    currentThinkingLevel || selectedModel?.thinkingLevel ||
-    (requireExplicitModelSelection ? '' : 'low');
+  const selectedReasoning = agentChoosesDefaultReasoning
+    ? currentThinkingLevel || ''
+    : currentThinkingLevel || selectedModel?.thinkingLevel ||
+      (requireExplicitModelSelection ? '' : 'low');
   const currentName =
     selectedModel?.name || selectedModelId ||
     (requireExplicitModelSelection ? 'Choose model' : 'Auto');

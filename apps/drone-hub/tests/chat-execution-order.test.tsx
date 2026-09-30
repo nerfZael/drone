@@ -26,8 +26,9 @@ test('explains priority execution without reordering messages and locates the ea
   expect(result.activeEarlier).toEqual({ id: 'fps', prompt: 'Investigate FPS' });
   expect(groups.map((group) => group.primary.item.id)).toEqual(['fps', 'crash']);
   const html = renderToStaticMarkup(<EarlierRequestWorkingNotice {...result.activeEarlier!} />);
-  expect(html).toContain('Still working on an earlier request');
+  expect(html).toContain('Working on this request');
   expect(html).toContain('Investigate FPS');
+  expect(html).not.toContain('var(--yellow)');
 });
 
 test('does not claim queued work is currently running or invent an inversion in normal order', () => {

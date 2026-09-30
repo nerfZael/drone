@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildModelCatalogChoices,
+  chatAgentSupportsReasoning,
   formatModelDisplayLabel,
   formatReasoningLabel,
   groupProviderModelOptions,
@@ -205,5 +206,22 @@ describe('model catalog', () => {
   test('formats model and reasoning labels without platform dependencies', () => {
     expect(formatModelDisplayLabel('gpt-5.6-sol (custom)')).toBe('GPT-5.6 Sol');
     expect(formatReasoningLabel('XHIGH')).toBe('X-high');
+  });
+
+  test('keeps an explicitly empty default so the agent picks its own level', () => {
+    const [claude, codex] = normalizeExternalModelCatalog({ models: [
+      { id: 'claude-opus-5', reasoningLevels: ['low', 'high'], defaultReasoningLevel: '' },
+      { id: 'gpt-6-luna', reasoningLevels: ['low', 'high'] },
+    ] });
+    expect(claude?.defaultReasoningLevel).toBe('');
+    expect(codex?.defaultReasoningLevel).toBe('low');
+  });
+
+  test('knows which agents take a reasoning level', () => {
+    expect(chatAgentSupportsReasoning({ kind: 'builtin', id: 'claude' })).toBe(true);
+    expect(chatAgentSupportsReasoning({ kind: 'builtin', id: 'codex' })).toBe(true);
+    expect(chatAgentSupportsReasoning({ kind: 'native' })).toBe(true);
+    expect(chatAgentSupportsReasoning({ kind: 'builtin', id: 'cursor' })).toBe(false);
+    expect(chatAgentSupportsReasoning(null)).toBe(false);
   });
 });

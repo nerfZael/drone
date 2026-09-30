@@ -48,6 +48,11 @@ type SelectedChatsComposerProps = {
   onReferencesChange: (next: ComposerReference[]) => void;
   /** Set while the host drags its own cards over the composer. */
   referenceDropActive?: boolean;
+  /**
+   * For a new drone or chat: its agent and repository beside the recipient line (`meta`), and its model picker in the
+   * toolbar in place of the per-send model override (`trailing`).
+   */
+  draftControls?: { meta?: React.ReactNode; trailing?: React.ReactNode } | null;
 };
 
 export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
@@ -134,7 +139,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
-        ? 'absolute bottom-2 left-1/2 z-20 w-[min(34rem,calc(100%-1rem))] -translate-x-1/2'
+        ? 'absolute bottom-2 left-1/2 z-20 w-[min(26rem,calc(100%-1rem))] -translate-x-1/2'
         : 'flex-shrink-0 px-2 pb-2 pt-1'}
       onMouseDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -170,13 +175,14 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
             return sent;
           }} referenceTiles={referenceTiles} referenceDropActive={dropActive} composerTrailingControls={
             // In the toolbar, where the agent chat keeps its model picker.
-            <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
+            props.draftControls?.trailing ?? <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
               draftAgentKey={props.hasDrafts ? props.spawnAgentKey : undefined}
               value={overrides} onChange={setOverrides} disabled={props.sending || props.selectedCount === 0} />
           } composerTopAction={
             // One line of context above the composer, like the agent chat's runtime/branch row.
             <div data-selected-chats-composer-meta="true" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-11 text-[var(--muted)]">
               <span className="min-w-0 flex-1 truncate" title={targetLabel}>{props.selectedCount ? `To ${targetLabel}` : 'Select chats to message'}</span>
+              {props.draftControls?.meta ?? null}
               {props.spawnCountEnabled ? <label className="flex flex-shrink-0 items-center gap-1">Spawn
                 <input aria-label="Number of drones" value={props.spawnCount ?? '1'} inputMode="numeric" pattern="[0-9]*"
                   onChange={(event) => props.onSpawnCountChange?.(event.target.value)} onBlur={props.onSpawnCountBlur}

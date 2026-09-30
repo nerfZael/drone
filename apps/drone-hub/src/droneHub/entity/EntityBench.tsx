@@ -1,29 +1,37 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { isEntityActor as isEntity } from '@entity/core/state';
+import { KEYS, seconds } from './bench-format';
 import { UiButton } from '../../ui/components/Button';
 import { EntityBrain } from './EntityBrain';
+import { EntityWork } from './EntityWork';
 import { EntityTimeline, useEntityReplay, useReplayKeys } from './EntityTimeline';
 import { useEntitySession, type EntityConfig } from './use-entity-session';
 import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
+import { EntityModelsControl } from './EntityModels';
+import { ChatPane } from './EntityChat';
+import { EntityPromptsPanel } from './EntityPrompts';
+import { WorkspaceAccessPicker } from '../assistant/WorkspaceAccessPicker';
+import { requestJson } from '../http';
 
 // The explorer and editor are heavy; load them the first time the Files view opens.
 const FolderWorkspaceFiles = React.lazy(() => import('../files/FolderWorkspaceFiles').then(m => ({ default: m.FolderWorkspaceFiles })));
-/** The Hub serves the entity workspace through the drone file routes under this id (see folder-workspaces.ts). */
+/** The Hub serves the entity's home folder through the drone file routes under this id (see folder-workspaces.ts). */
 const ENTITY_WORKSPACE_ID = 'entity-workspace';
-type BenchView = 'brain' | 'inspector' | 'files';
-
-const MODELS = ['openai-codex/gpt-6-luna', 'openai-codex/gpt-6-sol', 'cerebras/qwen-3.8-27b'];
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
-const isEntity = (by: string) => by !== 'user' && by !== 'host' && by !== 'system';
-const seconds = (t: number) => `${(t / 1000).toFixed(2)}s`;
+type BenchView = 'brain' | 'work' | 'inspector' | 'files';
 
 /** The entity test bench: chat, keypad and inspector over the Hub's live entity session. */
 export function EntityBench() {
   const session = useEntitySession(true);
   const [view, setView] = React.useState<BenchView>('brain');
+  const [keypad, setKeypad] = useKeypadShown();
+  const [editingPrompts, setEditingPrompts] = React.useState(false);
   const [target, setTarget] = React.useState<(FolderWorkspaceTarget & { sequence: number }) | null>(null);
   const openFile = React.useCallback((path: string) => { setTarget(t => ({ path, sequence: (t?.sequence ?? 0) + 1 })); setView('files'); }, []);
   const replay = useEntityReplay();
+  // The chat and the Work canvas highlight each other, and a worker's reply in the chat opens it on the canvas.
+  const [openWorker, setOpenWorker] = React.useState<{ id: string; n: number } | null>(null);
+  const showWorker = React.useCallback((id: string) => { setView('work'); setOpenWorker(o => ({ id, n: (o?.n ?? 0) + 1 })); }, []);
   useReplayKeys(replay);
   const { state } = session;
   if (!state) {
@@ -37,24 +45,25 @@ export function EntityBench() {
   const locked = !!replaying || state.snapshot.status === 'idle';
   const brain = view === 'brain';
   return (
-    <div className="flex h-full min-h-0 flex-col text-[13px]" data-entity-bench="">
+    <div className="relative flex h-full min-h-0 flex-col text-[13px]" data-entity-bench="">
+      {editingPrompts ? <EntityPromptsPanel onClose={() => setEditingPrompts(false)} /> : null}
       <BenchHeader snapshot={state.snapshot} config={config} connected={session.connected} error={session.error}
-        onControl={session.control} onConfigure={session.configure} view={view} onView={setView} />
+        onControl={session.control} onConfigure={session.configure} view={view} onView={setView} keypad={keypad} onKeypad={setKeypad} onPrompts={() => setEditingPrompts(true)} />
       {view === 'files' ? (
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,0.8fr)_minmax(420px,2fr)] gap-px bg-[var(--border)]">
-          <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input} />
-          <div className="min-h-0 bg-[var(--panel)]">
-            <React.Suspense fallback={<div className="p-3 text-[var(--muted)]">Loading files…</div>}>
-              {/* Keyed by folder: changing the workspace setting starts a fresh explorer. */}
-              <FolderWorkspaceFiles key={config.workspace} workspaceId={ENTITY_WORKSPACE_ID} name="Entity workspace" target={target} className="h-full" />
-            </React.Suspense>
-          </div>
+          <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input} onWorker={session.worker} onOpenFile={openFile} onOpenWorker={showWorker} sessionId={state.sessionId} />
+          <FilesPane config={config} target={target} />
         </div>
       ) : (
-        <div className={`grid min-h-0 flex-1 gap-px bg-[var(--border)] ${brain ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]'}`}>
-          <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input} />
-          <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} />
-          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} /> : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
+        <div className={`grid min-h-0 flex-1 gap-px bg-[var(--border)] ${keypad
+          ? (brain || view === 'work' ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]')
+          : (brain || view === 'work' ? 'grid-cols-[minmax(260px,0.9fr)_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1fr)_minmax(300px,1.2fr)]')}`}>
+          <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input}
+            onWorker={session.worker} onOpenWorker={showWorker} onOpenFile={openFile} sessionId={state.sessionId} />
+          {keypad ? <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} /> : null}
+          {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} onOpenFile={openFile} />
+            : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} open={openWorker} onReroute={session.reroute} onOpenFile={openFile} />
+            : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>
       )}
       <EntityTimeline replay={replay} liveSessionId={state.sessionId} liveLastSeq={state.events[state.events.length - 1]?.seq ?? 0} />
@@ -62,10 +71,61 @@ export function EntityBench() {
   );
 }
 
-function BenchHeader({ snapshot, config, connected, error, onControl, onConfigure, view, onView }: {
+/**
+ * The files of a workspace the entity uses: the default one to start with (its home when none is granted), or any
+ * other granted workspace on this device, or the home folder.
+ */
+function FilesPane({ config, target }: { config: EntityConfig; target: (FolderWorkspaceTarget & { sequence: number }) | null }) {
+  const access = config.workspaceAccess;
+  const [chosen, setChosen] = React.useState<string | null>(() => (target ? 'home' : null));
+  // A file opened from the Inspector is in the home folder.
+  React.useEffect(() => { if (target) setChosen('home'); }, [target]);
+  const shown = chosen && (chosen === 'home' || access?.targets.some(t => t.id === chosen)) ? chosen : access?.defaultTargetId ?? 'home';
+  const [opened, setOpened] = React.useState<{ id: string; workspaceId: string; name: string } | { id: string; error: string } | null>(null);
+  React.useEffect(() => {
+    if (shown === 'home') { setOpened(null); return; }
+    let alive = true;
+    requestJson<{ workspaceId: string; name: string }>(`/api/entity/files-target?target=${encodeURIComponent(shown)}`)
+      .then(r => { if (alive) setOpened({ id: shown, workspaceId: r.workspaceId, name: r.name }); })
+      .catch(e => { if (alive) setOpened({ id: shown, error: String(e?.message ?? e) }); });
+    return () => { alive = false; };
+  }, [shown]);
+  const current = shown === 'home' ? { workspaceId: ENTITY_WORKSPACE_ID, name: 'Entity home' } : opened?.id === shown && 'workspaceId' in opened ? opened : null;
+  const failed = shown !== 'home' && opened?.id === shown && 'error' in opened ? opened.error : null;
+  return (
+    <div className="flex min-h-0 flex-col bg-[var(--panel)]">
+      {access?.targets.length ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-2 py-1 text-[var(--muted)]">
+          <select aria-label="Workspace to browse" value={shown} onChange={e => setChosen(e.target.value)}
+            className="min-w-0 max-w-[40ch] rounded bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]">
+            {access.targets.map(t => <option key={t.id} value={t.id}>{t.name}{t.id === access.defaultTargetId ? ' (default)' : ''}</option>)}
+            <option value="home">Entity home{access.defaultTargetId ? '' : ' (default)'}</option>
+          </select>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1">
+        {failed ? <div className="p-3 text-[var(--muted)]">{failed}</div> : current ? (
+          <React.Suspense fallback={<div className="p-3 text-[var(--muted)]">Loading files…</div>}>
+            {/* Keyed by workspace and home folder: switching starts a fresh explorer. */}
+            <FolderWorkspaceFiles key={`${current.workspaceId}:${config.workspace}`} workspaceId={current.workspaceId} name={current.name}
+              target={shown === 'home' ? target : null} className="h-full" />
+          </React.Suspense>
+        ) : <div className="p-3 text-[var(--muted)]">Loading files…</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Whether the keypad pane is shown: off by default, remembered on this device. */
+function useKeypadShown(): [boolean, (shown: boolean) => void] {
+  const [shown, setShown] = React.useState(() => { try { return localStorage.getItem('entity-bench-keypad') === '1'; } catch { return false; } });
+  return [shown, (next: boolean) => { setShown(next); try { localStorage.setItem('entity-bench-keypad', next ? '1' : '0'); } catch { /* per-device convenience only */ } }];
+}
+
+function BenchHeader({ snapshot, config, connected, error, onControl, onConfigure, view, onView, keypad, onKeypad, onPrompts }: {
   snapshot: EntitySnapshot; config: EntityConfig; connected: boolean; error: string;
   onControl(action: 'start' | 'pause' | 'resume' | 'reset'): void; onConfigure(update: Partial<EntityConfig>): void;
-  view: BenchView; onView(view: BenchView): void;
+  view: BenchView; onView(view: BenchView): void; keypad: boolean; onKeypad(shown: boolean): void; onPrompts(): void;
 }) {
   const idle = snapshot.status === 'idle';
   const statusColor = snapshot.status === 'running' ? 'var(--green, #3fb950)' : snapshot.status === 'paused' ? 'var(--yellow, #d29922)' : 'var(--muted)';
@@ -83,17 +143,26 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
         {!idle ? <UiButton size="small" variant="danger" onClick={() => onControl('reset')}>Reset</UiButton> : null}
       </div>
       <div className="flex rounded border border-[var(--border)] p-px" role="tablist" aria-label="Right pane">
-        {(['brain', 'inspector', 'files'] as const).map((id) => (
+        {(['brain', 'work', 'inspector', 'files'] as const).map((id) => (
           <button key={id} type="button" role="tab" aria-selected={view === id}
             className={`rounded-sm px-2 py-0.5 capitalize ${view === id ? 'bg-[var(--hover)] text-[var(--fg)]' : 'text-[var(--muted)]'}`}
             onClick={() => onView(id)}>{id}</button>
         ))}
       </div>
+      <button type="button" aria-pressed={keypad} onClick={() => onKeypad(!keypad)} title="Show the keypad beside the chat"
+        className={`rounded border border-[var(--border)] px-2 py-0.5 ${keypad ? 'bg-[var(--hover)] text-[var(--fg)]' : 'text-[var(--muted)]'}`}>Keypad</button>
       <div className="ml-auto flex flex-wrap items-center gap-2 text-[var(--muted)]">
-        <ModelSelect label="Voice" value={config.voiceModel} disabled={!idle} onChange={(voiceModel) => onConfigure({ voiceModel })} allowNone
-          title="A fast model that answers first and hands off to the head. Off: the head is the voice." />
-        <ModelSelect label="Head" value={config.headModel} disabled={!idle} onChange={(headModel) => onConfigure({ headModel })} />
-        <ModelSelect label="Tasks" value={config.taskModel} disabled={!idle} onChange={(taskModel) => onConfigure({ taskModel })} />
+        <EntityModelsControl models={config.models} idle={idle} onChange={(models) => onConfigure({ models })} />
+        <UiButton size="small" variant="secondary" onClick={onPrompts} title="Read and edit every prompt the entity sends">Prompts</UiButton>
+        <label className="flex items-center gap-1" title="Experimental: second looks at the head's answers, by a separate reviewer or by the head itself. Wrong answers are struck through and corrected below. Off by default: one head deciding alone is more coherent.">
+          Review
+          <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.review ?? 'off'} disabled={!idle}
+            onChange={(e) => onConfigure({ review: e.target.value as EntityConfig['review'] })}>
+            <option value="off">off</option>
+            <option value="separate">reviewer (experimental)</option>
+            <option value="head">head (experimental)</option>
+          </select>
+        </label>
         <label className="flex items-center gap-1" title="What backs judge() and sense(). Jev is billed per call through the AI Gateway; qwen is a small fast LLM on Cerebras.">
           Senses
           <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.evaluator} disabled={!idle}
@@ -113,106 +182,35 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
 
 function SettingsRow({ config, idle, onConfigure }: { config: EntityConfig; idle: boolean; onConfigure(update: Partial<EntityConfig>): void }) {
   const [workspace, setWorkspace] = React.useState(config.workspace);
+  const [picking, setPicking] = React.useState(false);
   React.useEffect(() => setWorkspace(config.workspace), [config.workspace]);
+  const granted = config.workspaceAccess?.targets.length ?? 0;
   return (
-    <div className="flex w-full flex-wrap items-center gap-3 text-[var(--muted)]" title={idle ? undefined : 'Reset the session to change settings'}>
-      <label className="flex items-center gap-1" title="Parallel: every message gets its own capable worker at once; workers reply in threads.">
-        Mode
-        <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={config.parallel ? 'parallel' : 'single'} disabled={!idle}
-          onChange={(e) => onConfigure({ parallel: e.target.value === 'parallel' })}>
-          <option value="single">single</option>
-          <option value="parallel">parallel conversation</option>
-        </select>
-      </label>
-      <label className="flex min-w-0 flex-1 items-center gap-1" title="Folder the workspace tools are confined to. Empty: a scratch folder in the Hub's data directory.">
-        Workspace
+    <div className="relative flex w-full flex-wrap items-center gap-3 text-[var(--muted)]">
+      <label className="flex min-w-0 flex-1 items-center gap-1" title={idle ? "The entity's own folder, always readable and writable. Empty: a scratch folder in the Hub's data directory." : 'Reset the session to change the home folder'}>
+        Home
         <input className="min-w-[200px] flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--fg)]"
-          placeholder="scratch folder (absolute path to use a repo)" value={workspace} disabled={!idle}
+          placeholder="scratch folder (absolute path to use another)" value={workspace} disabled={!idle}
           onChange={(e) => setWorkspace(e.target.value)}
           onBlur={() => { if (workspace !== config.workspace) onConfigure({ workspace }); }}
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
       </label>
-      <label className="flex items-center gap-1" title="Let workers run shell commands (tests, builds) in the workspace. These are LLM-written commands running on this machine.">
-        <input type="checkbox" checked={config.allowCommands} disabled={!idle} onChange={(e) => onConfigure({ allowCommands: e.target.checked })} />
-        Allow commands
-      </label>
+      {/* Access can change mid-session: the change is logged, and the next turn sees it. */}
+      <UiButton size="small" variant="secondary" aria-expanded={picking} onClick={() => setPicking(p => !p)}
+        title="Repositories, folders and drones this session may read, write or run commands in">
+        Workspaces{granted ? ` (${granted})` : ''}
+      </UiButton>
+      {picking ? (
+        <>
+          <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setPicking(false)} />
+          <div role="dialog" aria-label="Entity workspaces" onKeyDown={(e) => { if (e.key === 'Escape') setPicking(false); }}
+            className="absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] pt-2 shadow-[0_18px_55px_var(--shadow-color)]">
+            <WorkspaceAccessPicker requestJson={requestJson} endpoint="/api/entity/workspaces" initialAccess={config.workspaceAccess}
+              home={{ name: 'Entity home', note: config.workspace || "Scratch folder in the Hub's data directory" }} />
+          </div>
+        </>
+      ) : null}
     </div>
-  );
-}
-
-function ModelSelect({ label, value, disabled, onChange, allowNone, title }: {
-  label: string; value: string; disabled: boolean; onChange(value: string): void; allowNone?: boolean; title?: string;
-}) {
-  return (
-    <label className="flex items-center gap-1" title={disabled ? 'Reset the session to change models' : title}>
-      {label}
-      <select className="rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[var(--fg)]" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {allowNone ? <option value="">off (head)</option> : null}
-        {MODELS.map((model) => <option key={model} value={model}>{model.split('/')[1]}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function ChatPane({ events, snapshot, disabled, replaying, onInput }: {
-  events: EntityEvent[]; snapshot: EntitySnapshot; disabled: boolean; replaying?: boolean; onInput(type: string, data: Record<string, unknown>): void;
-}) {
-  const [text, setText] = React.useState('');
-  const draftTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bottom = React.useRef<HTMLDivElement | null>(null);
-  const messages = events.filter((e) => e.type === 'chat_message');
-  const chat = snapshot.world.chat as { entityDraft?: { text: string } | null } | undefined;
-  React.useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [messages.length, chat?.entityDraft?.text]);
-  const sendDraft = (value: string) => {
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => onInput('draft_changed', { text: value }), 120);
-  };
-  const send = () => {
-    const value = text.trim();
-    if (!value) return;
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    onInput('chat_message', { text: value });
-    setText('');
-  };
-  return (
-    <section className="flex min-h-0 flex-col bg-[var(--panel)]" aria-label="Chat">
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
-        {messages.length === 0 ? <div className="text-[var(--muted)]">{disabled ? 'Press Start to wake the entity.' : 'Say something, or press keys.'}</div> : null}
-        {messages.map((m) => {
-          const mine = m.by === 'user';
-          const replyTo = typeof m.data.reply_to === 'number' ? messages.find((x) => x.seq === m.data.reply_to) : undefined;
-          const worker = snapshot.limbs.find((l) => l.id === m.by);
-          const label = !mine && m.by !== 'head' ? (worker && worker.role === 'task' ? `${worker.name} · ${m.by}` : m.by) : null;
-          return (
-            <div key={m.seq} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 ${mine ? 'bg-[var(--accent-subtle,var(--hover))]' : 'bg-[var(--panel-alt)]'}`}
-                title={`#${m.seq} ${m.by} at ${seconds(m.t)}`}>
-                {label || replyTo ? (
-                  <div className="mb-0.5 text-[11px] text-[var(--muted)]">
-                    {label}{replyTo ? `${label ? ' · ' : ''}↳ “${String(replyTo.data.text).slice(0, 48)}${String(replyTo.data.text).length > 48 ? '…' : ''}”` : ''}
-                  </div>
-                ) : null}
-                {String(m.data.text)}
-              </div>
-            </div>
-          );
-        })}
-        {chat?.entityDraft?.text ? (
-          <div className="flex justify-start"><div className="max-w-[85%] rounded-lg border border-dashed border-[var(--border)] px-2.5 py-1.5 italic text-[var(--muted)]">{chat.entityDraft.text}</div></div>
-        ) : null}
-        <div ref={bottom} />
-      </div>
-      <div className="border-t border-[var(--border)] p-2">
-        <textarea
-          className="h-16 w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-alt)] p-2 text-[var(--fg)] outline-none"
-          placeholder={replaying ? 'Replaying: go Live to talk to the entity' : disabled ? 'Start the session first' : 'Type… the entity sees your draft as you type (Enter sends)'}
-          disabled={disabled}
-          value={text}
-          onChange={(e) => { setText(e.target.value); sendDraft(e.target.value); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-        />
-      </div>
-    </section>
   );
 }
 
@@ -317,7 +315,7 @@ function LimbsView({ snapshot }: { snapshot: EntitySnapshot }) {
   return <div>{render(undefined, 0)}</div>;
 }
 
-const NOISE = new Set(['draft_changed', 'sensed', 'run_finished', 'program_log']);
+const NOISE = new Set(['draft_changed', 'sensed', 'run_finished', 'program_log', 'watch_fired', 'health']);
 
 function EventsView({ events, onOpenFile }: { events: EntityEvent[]; onOpenFile(path: string): void }) {
   const [all, setAll] = React.useState(false);

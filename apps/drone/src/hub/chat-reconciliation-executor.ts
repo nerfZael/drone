@@ -1,6 +1,6 @@
 import { recordExternalUsage } from './usage/recordExternalUsage';
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
-import { codexPromptOwnsResponse } from './codex-prompt-run';
+import { codexPromptOwnsResponse, codexPromptRunMetadata } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 import { completePendingChatFork } from './chat-fork';
@@ -355,6 +355,12 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       recordExternalUsage({ job, droneId, chatId: String(entry.id), chatName, repo: d.repoPath, model: pendingModel });
+      const runMetadata = codexPromptRunMetadata(job);
+      if (runMetadata.runId && (p.runId !== runMetadata.runId || p.runStartedAt !== runMetadata.runStartedAt)) {
+        Object.assign(p, runMetadata);
+        pendingList[i] = p;
+        changed = true;
+      }
       const appServerThreadId = String(job?.codexAppServer?.threadId ?? '').trim();
       if (jobKind === 'codex' && applyBuiltinSessionId(entry, 'codex', appServerThreadId)) {
         changed = true;
@@ -522,6 +528,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ok: true,
             output: '',
             userOnly: true,
+            ...runMetadata,
+            ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
             ...((p as any).deliveryMode === 'asap' ? { deliveryMode: 'asap' } : {}),
           });
           transcriptIds.add(id);
@@ -571,6 +579,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           }
           // Record transcript turn (success).
           turns.push({
+            ...runMetadata,
             ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
             at: promptAt,
             promptAt,
@@ -814,6 +823,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               changed = true;
             }
             turns.push({
+              ...runMetadata,
               ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
               at: promptAt,
               promptAt,
@@ -1109,6 +1119,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             fileChangesBaseline: pending.fileChangesBaseline,
             fileChanges: pending.fileChanges,
             activity: pending.activity,
+            runId: pending.runId,
+            runStartedAt: pending.runStartedAt,
             startedAt: pending.startedAt,
             executionState: pending.executionState,
             updatedAt: pending.updatedAt,

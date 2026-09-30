@@ -2,11 +2,25 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildIsolatedHtmlPreviewDocument,
   HTML_PREVIEW_CONTENT_SECURITY_POLICY,
+  HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY,
   HTML_PREVIEW_IFRAME_SANDBOX,
   HTML_PREVIEW_PERMISSIONS_POLICY,
 } from '../src/droneHub/files/html-preview-security';
 
 describe('isolated HTML preview', () => {
+  test('external resources require opt-in and retain embedding and navigation restrictions', () => {
+    const source = '<script src="https://example.com/app.js"></script>';
+    expect(buildIsolatedHtmlPreviewDocument(source)).toContain(HTML_PREVIEW_CONTENT_SECURITY_POLICY);
+    const enabled = buildIsolatedHtmlPreviewDocument(source, true);
+    expect(enabled).toContain(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY);
+    expect(enabled.indexOf(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY)).toBeLessThan(enabled.indexOf(source));
+    expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' 'unsafe-eval' http: https:");
+    expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain('connect-src http: https: ws: wss:');
+    for (const directive of ['frame-src', 'object-src', 'worker-src', 'base-uri', 'form-action', 'navigate-to']) {
+      expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain(`${directive} 'none'`);
+    }
+  });
+
   test('allows scripts without granting origin, navigation, form, or popup capabilities', () => {
     expect(HTML_PREVIEW_IFRAME_SANDBOX).toBe('allow-scripts');
     expect(HTML_PREVIEW_IFRAME_SANDBOX).not.toContain('allow-same-origin');

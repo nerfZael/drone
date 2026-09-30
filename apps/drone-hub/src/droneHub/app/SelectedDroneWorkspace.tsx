@@ -689,6 +689,7 @@ export function SelectedDroneWorkspace({
     outputView,
     selectedChat,
     terminalEmulator,
+    sharedWorkspaceLayout,
     setSidebarCollapsed,
     setTerminalMenuOpen,
     setHeaderOverflowOpen,
@@ -779,6 +780,7 @@ export function SelectedDroneWorkspace({
     updatePinned: updateTranscriptPinned,
   } = usePinnedTranscriptScroll({
     contextKey: `${currentDrone.id}:${activeChatName}`,
+    initialPosition: 'bottom',
     contentVersion: externalTranscriptTimeline,
     enabled:
       currentDrone.hubPhase === 'error' ||
@@ -2437,7 +2439,9 @@ export function SelectedDroneWorkspace({
             promoteNewChatActionErrorById={promoteNewChatActionErrorById}
           />
         )}
-        key={currentDrone.id}
+        // The shared dock survives selection changes; only drone-scoped content changes.
+        key={sharedWorkspaceLayout ? 'shared' : `drone:${currentDrone.id}`}
+        sharedLayout={sharedWorkspaceLayout}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
         activeToolTab={rightPanelTab}

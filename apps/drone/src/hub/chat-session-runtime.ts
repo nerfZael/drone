@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { AgentRunFileChanges } from '@blip/protocol';
-import { normalizeAgentSkillUses } from '@drone/assistant-chat';
+import { chatAgentSupportsReasoning, normalizeAgentSkillUses } from '@drone/assistant-chat';
 import { normalizeMcpChatAccessScope } from './mcp-chat-access';
 import { settleAgentRunActivity } from './builtin-agent-activity';
 
@@ -1678,13 +1678,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         if (opts.setReasoning) {
           const reasoning = normalizeChatReasoning(opts.reasoning);
           if (reasoning) {
-            if (
-              effectiveAgent.kind !== 'native' &&
-              (effectiveAgent.kind !== 'builtin' ||
-                (effectiveAgent.id !== 'codex' && effectiveAgent.id !== 'blip'))
-            ) {
+            if (!chatAgentSupportsReasoning(effectiveAgent)) {
               const error: Error & { statusCode?: number } = new Error(
-                'reasoning is only supported for Built-in, Codex, and Blip chats',
+                'reasoning is only supported for Built-in, Codex, Claude, and Blip chats',
               );
               error.statusCode = 400;
               throw error;

@@ -1,9 +1,17 @@
-import type { Evaluator } from '@entity/core';
+import type { Evaluator, ModelUsage } from '@entity/core';
 import type { ReflexQuestion } from '@drone/reflex';
 import type { Model } from '@mariozechner/pi-ai';
 import { resolveBlipProviderApiKey } from '../hub-settings';
 import { evaluateReflexQuestions } from '../reflex/reflex-evaluate';
 import { trackHubGeneration } from '../usage/trackHubGeneration';
+import { priceModelCall } from '../usage/priceModelCall';
+
+/** A pi-ai call's usage for the entity's totals, priced from the Hub's price table. */
+export function modelCallUsage(provider: string, model: string, used: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined): ModelUsage | undefined {
+  if (!used) return undefined;
+  const counts = { input: used.input ?? 0, output: used.output ?? 0, cacheRead: used.cacheRead ?? 0, cacheWrite: used.cacheWrite ?? 0 };
+  return { ...counts, cost: priceModelCall(provider, model, { ...counts, reasoning: null }) };
+}
 
 export type EvaluatorKind = 'off' | 'jev' | 'qwen';
 
@@ -17,10 +25,12 @@ export function createJevEvaluator(): Evaluator {
         instructions: `${q.question}\nAnswer about the conversation and state below. Unsent draft text is what the user is typing now and has not sent.`,
       } satisfies ReflexQuestion]));
       const result = await evaluateReflexQuestions({ state, questions: reflexQuestions });
-      return Object.fromEntries(questions.map(q => {
+      const answers = Object.fromEntries(questions.map(q => {
         const answer = result.answers[q.id];
         return [q.id, answer && answer.type === 'boolean' ? answer.probability : NaN];
       }).filter(([, p]) => Number.isFinite(p as number)));
+      const counts = { input: result.usage.input ?? 0, output: result.usage.output ?? 0, cacheRead: 0, cacheWrite: 0 };
+      return { answers, usage: { ...counts, cost: priceModelCall('ai-gateway', result.model, { ...counts, reasoning: null }) } };
     },
   };
 }
@@ -53,9 +63,10 @@ export function createLlmEvaluator(modelRef = 'cerebras/qwen-3.8-27b'): Evaluato
       const text = message.content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('');
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = JSON.parse(json || '{}') as Record<string, unknown>;
-      return Object.fromEntries(questions
+      const answers = Object.fromEntries(questions
         .map(q => [q.id, Number(parsed[q.id])] as const)
         .filter(([, p]) => Number.isFinite(p) && p >= 0 && p <= 1));
+      return { answers, usage: modelCallUsage(providerId, modelId, message.usage) };
     },
   };
 }

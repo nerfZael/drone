@@ -147,14 +147,25 @@ export function buildChatCountByDroneId(sidebarOrderedChatNodeIds: string[]): Re
   return counts;
 }
 
-export function collectUniqueChatTargets(nodeIds: string[]): CanvasChatRef[] {
+/** The chat a message to a drone card goes to: its default chat, or its first chat when it has no default. */
+export function droneMessageChatName(chats: readonly string[] | null | undefined): string {
+  if (!chats?.length || chats.includes('default')) return 'default';
+  return chats[0];
+}
+
+export function collectUniqueChatTargets(
+  nodeIds: string[],
+  chatsByDroneId: Record<string, { chats?: readonly string[] } | undefined> = {},
+): CanvasChatRef[] {
   const out: CanvasChatRef[] = [];
   for (const rawId of nodeIds) {
     const nodeId = String(rawId ?? '').trim();
     if (!nodeId) continue;
     const ref = parseCanvasChatNodeId(nodeId);
     const canvasDroneId = parseCanvasDroneNodeId(nodeId);
-    const target = ref ?? (canvasDroneId ? { droneId: canvasDroneId, chatName: 'default' } : null);
+    const target = ref ?? (canvasDroneId
+      ? { droneId: canvasDroneId, chatName: droneMessageChatName(chatsByDroneId[canvasDroneId]?.chats) }
+      : null);
     if (!target) continue;
     if (out.some((x) => x.droneId === target.droneId && x.chatName === target.chatName)) continue;
     out.push(target);

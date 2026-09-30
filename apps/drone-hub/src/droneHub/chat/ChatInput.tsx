@@ -1,5 +1,6 @@
 import { AttachmentViewerDialog, portalContainerOf, type ViewedAttachment } from '../media/AttachmentViewerDialog';
 import React from 'react';
+import { browserMicrophoneOwnerLabel } from './browser-microphone-coordinator';
 import {
   CHAT_ATTACHMENT_POLICY,
   validateChatAttachments,
@@ -65,6 +66,7 @@ import {
 } from './chat-composer-editor-mode-shortcut';
 import { ChatVoiceSendCoordinator } from './chat-voice-send-coordinator';
 
+const useLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
 
@@ -208,6 +210,10 @@ export type ChatInputProps = {
   autoFocus?: boolean;
   focusTargetId?: string;
   modeHint?: string;
+  /** The empty composer's hint; "Ask the agent" by default. */
+  placeholder?: string;
+  /** Why the composer is disabled, shown where its controls would otherwise just grey out. */
+  disabledReason?: string;
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
@@ -265,6 +271,8 @@ export function ChatInput({
   autoFocus,
   focusTargetId,
   modeHint = '',
+  placeholder = 'Ask the agent',
+  disabledReason,
   attachmentsEnabled,
   attachmentMode = 'images',
   composerContext,
@@ -388,6 +396,7 @@ export function ChatInput({
   React.useEffect(() => {
     return activeComposer.registerComposer({
       id: activeComposerTargetId,
+      ownerDocument: () => composerRootRef.current?.ownerDocument ?? null,
       requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
       isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
@@ -593,7 +602,7 @@ export function ChatInput({
     return () => cancelAnimationFrame(id);
   }, [autoFocus, editorMode, resetKey]);
 
-  React.useEffect(() => {
+  useLayoutEffect(() => {
     resizeTextarea();
   }, [draft, resetKey, resizeTextarea]);
 
@@ -620,6 +629,19 @@ export function ChatInput({
   );
   const voiceRecordButtonDisabled =
     composerLocked || voiceActionInFlight || continuousVoiceActive || microphoneOwnedElsewhere;
+  // Why recording cannot start right now, for the button's tooltip and the shortcut.
+  const microphoneOwner = continuousDictation?.microphoneOwner ?? null;
+  const voiceRecordDisabledReason = composerLocked
+    ? disabledReason ?? 'Messages cannot be sent here right now.'
+    : voiceActionInFlight
+      ? 'Finishing the last voice message…'
+      : continuousVoiceActive
+        ? 'Continuous voice steering is on.'
+        : microphoneOwnedElsewhere && microphoneOwner
+          ? microphoneOwner === 'voice-message'
+            ? 'Another chat is recording a voice message.'
+            : `${browserMicrophoneOwnerLabel(microphoneOwner)} is using the microphone.`
+          : null;
   const continuousVoiceButtonDisabled =
     !continuousVoiceEnabled ||
     composerLocked ||
@@ -938,7 +960,17 @@ export function ChatInput({
     const pastedText = String(clipboardData.getData('text/plain') ?? '');
     const plainTextPaste = plainTextPasteRef.current;
     plainTextPasteRef.current = false;
-    // Pasted text arrives as an attachment; "Insert as text" on it, or Ctrl+Shift+V, puts it in the composer instead.
+    if (attachmentsOn && !attachmentControlsLocked && pastedText.trim()) {
+      const matchingAttachment = attachmentsRef.current.find(
+        (attachment) => attachment.kind === 'text' && attachment.text === pastedText,
+      );
+      if (matchingAttachment) {
+        removeAttachment(matchingAttachment.id);
+        // Let the editor paste at the current selection, preserving native undo.
+        return;
+      }
+    }
+    // Paste again, use "Insert as text", or Ctrl+Shift+V to put attached text in the composer.
     if (
       options.allowTextAttachment &&
       !plainTextPaste &&
@@ -1083,6 +1115,11 @@ export function ChatInput({
   }
 
   function toggleVoiceRecordingFromShortcut(): boolean {
+    if (voiceRecordingStatus === 'idle' && voiceRecordDisabledReason) {
+      // Say why instead of doing nothing.
+      setAttachmentError(voiceRecordDisabledReason);
+      return true;
+    }
     if (composerLocked || continuousVoiceActive || microphoneOwnedElsewhere) return false;
     if (voiceRecordingStatus === 'idle') {
       readComposerSelection();
@@ -1596,7 +1633,7 @@ export function ChatInput({
                 sendNow({ trigger: 'keyboard', deliveryMode: shortcutAction });
               }}
               rows={1}
-              placeholder="Ask the agent"
+              placeholder={placeholder}
               className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
@@ -1629,7 +1666,7 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Record voice message"
+                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1913,7 +1950,7 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Record voice message"
+                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

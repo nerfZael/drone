@@ -69,6 +69,9 @@ export type PromptQueueItem = {
   approvals?: unknown;
   fileChangesBaseline?: unknown;
   fileChanges?: unknown;
+  /** Identity and start of the shared run, including accepted ASAP messages. */
+  runId?: string;
+  runStartedAt?: string;
   startedAt?: string;
   updatedAt?: string;
 };
