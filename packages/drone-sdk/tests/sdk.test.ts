@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createDroneSDK } from '../src';
+import { createDroneSDK, NotFoundError } from '../src';
 import { hubTransport } from '../src/hub';
 import { createMockTransport } from '../src/testing';
 
@@ -586,4 +586,47 @@ describe('drone-sdk core', () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+});
+
+test('omitted SDK chat targets follow a survivor after deleting default', async () => {
+  const sdk = createDroneSDK({ transport: createMockTransport({ responder: ({ chatName, prompt }) => `${chatName}:${prompt}` }) });
+  const drone = await sdk.drones.create('default-deletion');
+  const implicitChat = drone.chat();
+  await drone.chat('review').ensure();
+  await drone.chat('default').delete();
+  await implicitChat.ensure();
+  const run = await implicitChat.send('hello');
+  expect(run.chatName).toBe('review');
+  expect(await run.lastMessageText()).toBe('review:hello');
+  expect((await implicitChat.messages.list()).map((item) => item.content)).toContain('hello');
+  expect((await drone.chats.list()).map((chat) => chat.name)).toEqual(['review']);
+  const batch = await implicitChat.queue('one').queue('two').dispatch();
+  expect(batch.chatName).toBe('review');
+});
+
+
+test('implicit send retries chat discovery while a new drone is becoming visible', async () => {
+  const transport = createMockTransport();
+  const list = transport.listChats.bind(transport);
+  let attempts = 0;
+  transport.listChats = async (...args) => {
+    if (++attempts === 1) throw new NotFoundError('unknown drone: starting');
+    return await list(...args);
+  };
+  const drone = await createDroneSDK({ transport }).drones.create('starting');
+  const run = await drone.chat().send('hello');
+  expect(run.chatName).toBe('default');
+  expect(attempts).toBe(2);
+});
+
+
+test('a broadcast with no chat name resolves each drone independently', async () => {
+  const sdk = createDroneSDK({ transport: createMockTransport() });
+  const first = await sdk.drones.create('broadcast-first');
+  const second = await sdk.drones.create('broadcast-second');
+  await first.chat('review').ensure();
+  await first.chat('default').delete();
+  const runs = await sdk.broadcast.drones([first, second]).chat().send('hello');
+  expect(runs.map((run) => run.chatName)).toEqual(['review', 'default']);
+  expect((await first.chats.list()).map((chat) => chat.name)).toEqual(['review']);
 });

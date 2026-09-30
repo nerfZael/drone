@@ -1,3 +1,5 @@
+import { droneChatNames } from '../drone-chat-names';
+import { preferredChatName } from '../preferred-chat';
 import { normalizeRequestDiagnostic } from '@drone/hub-model';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from '../groq-transcription';
 import {
@@ -492,13 +494,12 @@ export function registerOperationalRoutes(
         json(400, { ok: false, error: 'target drone is required' });
         return;
       }
-      const chatName =
-        String(rawTarget?.chatName ?? rawTarget?.chat ?? 'default').trim() || 'default';
       const resolved = await resolveDroneOrPendingForReadRef(droneRef);
       if (!resolved) {
         json(404, { ok: false, error: `unknown drone: ${droneRef}` });
         return;
       }
+      const chatName = preferredChatName(droneChatNames(resolved.id, resolved.drone?.chats), rawTarget?.chatName ?? rawTarget?.chat);
       const key = `${resolved.id}\u0000${chatName}`;
       if (seenTargets.has(key)) continue;
       seenTargets.add(key);

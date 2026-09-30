@@ -1,3 +1,5 @@
+import { droneChatNames } from './drone-chat-names';
+import { preferredChatName } from './preferred-chat';
 import { terminalStartupTiming } from './terminal-startup-timing';
 import crypto from 'node:crypto';
 import os from 'node:os';
@@ -106,7 +108,7 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
           .trim()
           .toLowerCase();
         const mode: HubWebTerminalMode = modeRaw === 'agent' ? 'agent' : 'shell';
-        const chatName = normalizeChatName(u.searchParams.get('chat') ?? 'default');
+        const chatName = normalizeChatName(preferredChatName(droneChatNames(droneId, d?.chats), u.searchParams.get('chat')));
         const requestedSessionName = String(u.searchParams.get('session') ?? '').trim();
         const createNewShell = u.searchParams.get('create') === '1';
         const cwd = normalizeDroneUiCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
@@ -728,7 +730,7 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
           String((drone as any)?.containerName ?? (drone as any)?.name ?? droneId).trim() ||
           droneId;
 
-        const chatName = String(u.searchParams.get('chat') ?? 'default').trim() || 'default';
+        const chatName = preferredChatName(droneChatNames(droneId, drone?.chats), u.searchParams.get('chat'));
         if (mode === 'agent') {
           await ensureChatEntry({ droneId, chatName });
         }

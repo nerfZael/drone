@@ -190,7 +190,7 @@ export function createMockTransport(options: MockTransportOptions = {}): DroneTr
 
     async removeChat(idOrName: string, chatName: string): Promise<void> {
       const drone = getDroneOrThrow(idOrName);
-      if (chatName === 'default') throw new Error('cannot delete default chat');
+      if (chatName === 'default' && drone.chats.size <= 1) throw new Error('cannot delete the last default chat');
       if (!drone.chats.has(chatName)) throw new Error(`unknown chat: ${chatName}`);
       drone.chats.delete(chatName);
     },

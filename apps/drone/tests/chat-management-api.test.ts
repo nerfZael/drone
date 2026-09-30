@@ -203,7 +203,7 @@ describeSocketSuite('chat management api', () => {
       const read = await client.callTool({ name: 'read_chat', arguments: { drone: droneId, chat: 'Untitled 2' } });
       expect(read.isError).not.toBe(true);
       expect(read.structuredContent).toMatchObject({
-        draft: true, turns: [], pendingCount: 1, pendingTruncated: false,
+        draft: true, historyKind: 'messages', messages: [], pendingCount: 1, pendingTruncated: false,
         pending: [{ id: (sent.structuredContent as any).runId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
       });
     } finally {
@@ -692,7 +692,7 @@ describeSocketSuite('chat management api', () => {
     });
   });
 
-  test('renames and deletes chats with default protections', async () => {
+  test('deletes default when another chat remains and protects a sole default', async () => {
     const droneId = 'drone-chat-rename-delete';
     await seedDrone(droneId);
 
@@ -727,8 +727,10 @@ describeSocketSuite('chat management api', () => {
         method: 'DELETE',
       },
     );
-    expect(deleteDefault.r.status).toBe(400);
-    expect(String(deleteDefault.data?.error ?? '')).toContain('default');
+    expect(deleteDefault.r.status).toBe(200);
+    expect(deleteDefault.data?.chats).toEqual(['qa']);
+    const missingDefault = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(missingDefault.r.status).toBe(404);
 
     const deleted = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/qa`, {
       method: 'DELETE',
@@ -740,6 +742,40 @@ describeSocketSuite('chat management api', () => {
     expect(listed.r.status).toBe(200);
     expect((listed.data?.chats ?? []).includes('default')).toBe(true);
     expect((listed.data?.chats ?? []).includes('qa')).toBe(false);
+    const lastDefault = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`, { method: 'DELETE' });
+    expect(lastDefault.r.status).toBe(400);
+  });
+
+  test('MCP omitted targets use a surviving chat after default is archived', async () => {
+    const droneId = 'drone-default-archive-fallback';
+    await seedDrone(droneId);
+    await apiFetch(`/api/drones/${droneId}/chats`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review', draft: true }),
+    });
+    const archived = await apiFetch(`/api/drones/${droneId}/chats/default/archive`, { method: 'POST' });
+    expect(archived.r.status).toBe(200);
+    expect(archived.data.chats).toEqual(['review']);
+    const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+    const previousToken = process.env.DRONE_TOKEN;
+    process.env.DRONE_HUB_BASE_URL = baseUrl;
+    process.env.DRONE_TOKEN = token;
+    const client = await createInProcessDroneHubMcpClient({ correlationId: 'default-fallback' });
+    try {
+      const sent = await client.callTool({ name: 'send_message', arguments: { drone: droneId, message: 'Use surviving chat' } });
+      expect(sent.isError).not.toBe(true);
+      const read = await client.callTool({ name: 'read_chat', arguments: { drone: droneId } });
+      expect(read.isError).not.toBe(true);
+      expect(read.structuredContent).toMatchObject({ chat: 'review', pendingCount: 1 });
+      const listed = await apiFetch(`/api/drones/${droneId}/chats`);
+      expect(listed.data.chats).toEqual(['review']);
+    } finally {
+      await client.close();
+      if (previousBaseUrl === undefined) delete process.env.DRONE_HUB_BASE_URL;
+      else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+      if (previousToken === undefined) delete process.env.DRONE_TOKEN;
+      else process.env.DRONE_TOKEN = previousToken;
+    }
   });
 
   test('stores and returns per-chat agent permission mode for supported agents', async () => {

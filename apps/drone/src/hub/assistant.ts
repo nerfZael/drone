@@ -1,3 +1,4 @@
+import { preferredChatName } from './preferred-chat';
 import { chatReadSnapshotFromRegistry, summarizeChatActivity } from './chat-read/helpers/chat-read-model';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -403,11 +404,6 @@ function normalizeFetchContentLivecrawl(
   return value === 'never' || value === 'fallback' || value === 'preferred' || value === 'always'
     ? value
     : undefined;
-}
-
-function normalizeChatNameForAssistant(raw: unknown): string {
-  const value = String(raw ?? '').trim();
-  return value || 'default';
 }
 
 function messageResponseSizeBytes(value: unknown): number {
@@ -3246,7 +3242,7 @@ export class HubAssistantService {
             resolved: {
               droneId,
               droneName: drone?.name ?? droneId,
-              chatName: normalizeChatNameForAssistant(ctx?.args?.chatName),
+              chatName: preferredChatName(drone?.chats ?? [], ctx?.args?.chatName),
               message: cleanOptionalString(ctx?.args?.message ?? ctx?.args?.prompt),
             },
           };

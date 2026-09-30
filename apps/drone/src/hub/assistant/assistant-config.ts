@@ -367,7 +367,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'delete_chat',
     label: 'Delete chat',
     category: 'actions',
-    description: 'Delete or archive a non-default chat.',
+    description: 'Delete or archive a chat when another chat remains.',
   },
   {
     name: 'create_chat_group',

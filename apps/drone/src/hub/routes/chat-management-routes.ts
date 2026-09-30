@@ -1,3 +1,4 @@
+import { droneChatNames } from '../drone-chat-names';
 import crypto from 'node:crypto';
 import { chatCatalogMetadata } from '../chat-catalog';
 
@@ -514,10 +515,6 @@ export function createChatManagementRouteHandler(
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
-        if (chatName === 'default') {
-          json(res, 400, { ok: false, error: 'cannot archive default chat' });
-          return;
-        }
 
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
@@ -525,6 +522,11 @@ export function createChatManagementRouteHandler(
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
         const deleteSettings = await resolveEffectiveDeleteActionSettings();
         const archiveRetention = deleteSettings.archiveRetention;
+        const chats = droneChatNames(droneId, resolved.drone?.chats);
+        if (chatName === 'default' && chats.includes(chatName) && chats.length <= 1) {
+          json(res, 400, { ok: false, error: 'cannot archive the last default chat' });
+          return;
+        }
 
         try {
           await stopSingleDroneChatActivity({
@@ -571,15 +573,16 @@ export function createChatManagementRouteHandler(
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
-        if (chatName === 'default') {
-          json(res, 400, { ok: false, error: 'cannot delete default chat' });
-          return;
-        }
 
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const chats = droneChatNames(droneId, resolved.drone?.chats);
+        if (chatName === 'default' && chats.includes(chatName) && chats.length <= 1) {
+          json(res, 400, { ok: false, error: 'cannot delete the last default chat' });
+          return;
+        }
         const deleteSettings = await resolveEffectiveDeleteActionSettings();
 
         try {
@@ -652,7 +655,7 @@ export function createChatManagementRouteHandler(
           const msg = e?.message ?? String(e);
           const code = /unknown drone|unknown chat/i.test(msg)
             ? 404
-            : /cannot delete|missing /i.test(msg)
+            : /cannot delete|cannot archive|missing /i.test(msg)
               ? 400
               : 500;
           json(res, code, { ok: false, error: msg });

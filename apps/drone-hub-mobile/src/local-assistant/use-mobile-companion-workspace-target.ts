@@ -402,14 +402,18 @@ export function useMobileCompanionWorkspaceTarget({
             chatName: operation.chatName,
             newName: operation.newName,
           }),
-        sendMessage: async (operation) =>
-          await requestDroneControl('chat.prompt', {
+        sendMessage: async (operation) => {
+          const listed = operation.chatName ? null : await requestDroneControl<{ chats: string[] }>('chats.list', { droneId: operation.droneId });
+          const names: string[] = listed?.chats ?? [];
+          const chatName = operation.chatName ?? (names.includes('default') ? 'default' : [...names].sort()[0] ?? 'default');
+          return await requestDroneControl('chat.prompt', {
             droneId: operation.droneId,
-            chatName: operation.chatName ?? 'default',
+            chatName,
             prompt: operation.message,
             deliveryMode: operation.delivery ?? 'queue',
             submittedAt: new Date().toISOString(),
-          }),
+          });
+        },
       });
       onProposalApplied?.();
       return execution;

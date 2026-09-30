@@ -1,3 +1,4 @@
+import { deletableChatNames } from '@drone/hub-model/sidebar';
 import { applyChatModelOverrides } from './droneHub/chat/selected-chat-model-overrides';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './droneHub/canvas/canvas-messaging';
 import { droneRenameErrorMessage } from './droneHub/app/drone-rename';
@@ -3463,6 +3464,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             };
           },
           sendMessage: async (operation) => {
+            const listed = operation.chatName ? null : await requestJson<{ chats: string[] }>(
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats`,
+            );
+            const chatName = operation.chatName ?? (listed?.chats.includes('default') ? 'default' : [...(listed?.chats ?? [])].sort()[0] ?? 'default');
             const attachments = await readCompanionProposalAttachments(operation.attachmentPaths);
             const userTimeZone = clientTimeZone();
             const response = await requestJson<{
@@ -3470,7 +3475,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               promptId: string;
               pendingState?: string;
             }>(
-              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName ?? 'default')}/prompt`,
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(chatName)}/prompt`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -3486,7 +3491,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             );
             return {
               droneId: operation.droneId,
-              chatName: operation.chatName ?? 'default',
+              chatName,
               promptId: response.promptId,
               status: response.pendingState ?? 'queued',
             };
@@ -5446,23 +5451,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const kept: Array<(typeof deletable)[number]> = [];
       for (const target of deletable) {
         // A side chat is not one of the drone's chats, so it never stands in for the drone.
-        if (target.chatName === 'default' && target.chats.length > 0) {
-          if (deletable.length === 1) {
-            results.push({
-              droneId: target.droneId,
-              chatName: target.chatName,
-              ok: false,
-              error: 'Default chat cannot be deleted while other chats exist.',
-            });
-          }
-          continue;
-        }
+        if (target.chats.length > 0 && !deletableChatNames(
+          target.chats,
+          deletable.filter((item) => item.droneId === target.droneId).map((item) => item.chatName),
+        ).includes(target.chatName)) continue;
         kept.push(target);
       }
       if (kept.length === 0) return results;
 
       if (opts?.confirmed !== true) {
-        const defaultChatKept = kept.length < deletable.length;
+        const defaultChatKept = deletable.some((target) => target.chatName === 'default' && !kept.includes(target));
         const question = buildCanvasChatDeleteConfirmation({
           targets: kept,
           droneLabelById: (droneId) => {
@@ -5488,7 +5486,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const endChatDeletion = beginChatDeletion(kept);
       for (const { droneId, chatName, chats } of kept) {
         try {
-          await requestJson<{ ok: true; deletedChat: string }>(
+          const deletion = await requestJson<{ ok: true; deletedChat: string; chats: string[] }>(
             `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
             { method: 'DELETE' },
           );
@@ -5508,7 +5506,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             return next;
           });
           if (selectedDrone === droneId && selectedChat === chatName) {
-            const remaining = chats.filter((chat) => chat !== chatName);
+            const remaining = deletion.chats ?? chats.filter((chat) => chat !== chatName);
             const fallbackChat = remaining.includes('default')
               ? 'default'
               : (remaining[0] ?? 'default');

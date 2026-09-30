@@ -19,6 +19,22 @@ export type LocalDroneRecord = {
   draftChatPrompts?: Record<string, LocalDroneDraftPrompt[]>;
 };
 
+/** Remove the conversation and every draft queue owned by it. */
+export function removeLocalDroneChat(drone: LocalDroneRecord, chatName: string): LocalDroneRecord {
+  if (!drone.chats[chatName]) throw new Error(`Unknown chat: ${chatName}`);
+  if (Object.keys(drone.chats).length <= 1) throw new Error('The last chat cannot be deleted.');
+  const withoutChat = <T>(entries: Record<string, T>) =>
+    Object.fromEntries(Object.entries(entries).filter(([name]) => name !== chatName));
+  const next = {
+    ...drone,
+    chats: withoutChat(drone.chats),
+    draftChats: withoutChat(drone.draftChats ?? {}),
+    draftChatPrompts: withoutChat(drone.draftChatPrompts ?? {}),
+  };
+  if (chatName === 'default') delete next.draftPrompts;
+  return next;
+}
+
 export function localDroneDraftChatMap(drone: LocalDroneRecord): Record<string, true> {
   if (drone.draft !== true) return drone.draftChats ?? {};
   return Object.fromEntries(Object.keys(drone.chats).map((chatName) => [chatName, true]));

@@ -818,10 +818,10 @@ describe('canonical chat and transcript repository', () => {
       renameChatInStore({ droneId: 'drone-1', chatName: 'default', newChatName: 'renamed-default' }),
       /cannot rename default chat/,
     );
-    await assert.rejects(
-      deleteActiveChatFromStore({ droneId: 'drone-1', chatName: 'default' }),
-      /cannot delete default chat/,
-    );
+    const deletedDefault = await deleteActiveChatFromStore({ droneId: 'drone-1', chatName: 'default' });
+    assert.deepEqual(deletedDefault.chats, ['review']);
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat, null);
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat.model, 'model-a');
 
     await assert.rejects(
       createChatInStore({
@@ -834,6 +834,20 @@ describe('canonical chat and transcript repository', () => {
       /intentional create failure/,
     );
     assert.deepEqual(listChatsFromStore({ droneId: 'drone-2' }).chats, []);
+  });
+
+  test('keeps a sole default chat and archives it when another chat survives', async () => {
+    tempDataDir('default-deletion');
+    await upsertChatInStore({ droneId: 'd', chatName: 'default', chatEntry: legacyChat('original') });
+    await assert.rejects(deleteActiveChatFromStore({ droneId: 'd', chatName: 'default' }), /last default chat/);
+    const archive = { droneId: 'd', chatName: 'default', archivedAt: '2026-01-01T00:00:00.000Z', deleteAt: '2027-01-01T00:00:00.000Z', archiveRetention: '1y' };
+    await assert.rejects(archiveChatInStore(archive), /last default chat/);
+    await upsertChatInStore({ droneId: 'd', chatName: 'review', chatEntry: legacyChat('survivor') });
+    const result = await archiveChatInStore(archive);
+    assert.equal(result.archived, true);
+    assert.deepEqual(result.chats, ['review']);
+    assert.equal(result.archivedChat.chat.title, 'original');
+    assert.equal(readChatFromStore({ droneId: 'd', chatName: 'default' }).chat, null);
   });
 
   test('rename and delete commands coordinate prompt rows outside chat transactions', async () => {

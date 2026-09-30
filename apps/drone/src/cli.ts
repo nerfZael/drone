@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { preferredChatName } from './hub/preferred-chat';
 import { Command } from 'commander';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -2684,7 +2685,7 @@ program
   )
   .argument('<name>', 'Drone/container name')
   .argument('[prompt...]', 'Prompt text (or use --prompt-file / --prompt-stdin)')
-  .option('--chat <name>', 'Chat name to persist (host-side)', 'default')
+  .option('--chat <name>', 'Chat name to persist (host-side)')
   .option('--model <model>', 'Cursor agent model (optional)')
   .option('--new', 'Create a new chatId (reset stored chat)', false)
   .option('--prompt-file <path>', 'Read prompt from a file on the host')
@@ -2701,7 +2702,7 @@ program
         promptStdin: Boolean(options.promptStdin),
       });
 
-      const chatName = String(options.chat || 'default');
+      const chatName = preferredChatName(Object.keys(drone.chats ?? {}), options.chat);
       const model = options.model ? String(options.model) : undefined;
       const chatId = await ensureChatId({ droneName: String(name), chatName, model, reset: Boolean(options.new) });
 
@@ -2867,12 +2868,12 @@ program
   .command('agent-reset')
   .description('Forget a persisted Cursor Agent chatId (host-side)')
   .argument('<name>', 'Drone display name')
-  .option('--chat <name>', 'Chat name to reset', 'default')
+  .option('--chat <name>', 'Chat name to reset')
   .action(async (name, options) => {
-    const chatName = String(options.chat || 'default');
     const registry = await loadRegistry();
     const { key, drone } = resolveDroneFromRegistry(registry as any, String(name));
     const droneId = String((drone as any)?.id ?? key ?? name).trim() || String(name);
+    const chatName = preferredChatName(Object.keys(drone.chats ?? {}), options.chat);
     const had = Boolean((drone as any)?.chats?.[chatName]);
     if ((globalThis as any).Bun) await updateRegistry((reg) => {
       const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));

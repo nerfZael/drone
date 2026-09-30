@@ -1,3 +1,5 @@
+import { droneChatNames } from '../drone-chat-names';
+import { preferredChatName } from '../preferred-chat';
 import {
   createChatWorkspaceAccessService,
   type WorkspaceAccessMesh,
@@ -13,7 +15,7 @@ export type AssistantRouteDependencies = {
   blipAssistantHost: any;
   nowIso: () => string;
   writeAssistantSseEvent: (res: ServerResponse, event: string, data: any) => void;
-  resolveDroneOrPendingForReadRef: (ref: string) => Promise<{ id: string } | null>;
+  resolveDroneOrPendingForReadRef: (ref: string) => Promise<{ id: string; drone?: { chats?: Record<string, unknown> } } | null>;
   requireWhiteboardStore: () => any;
   submitAssistantPrompt: (input: {
     threadId: string;
@@ -166,7 +168,7 @@ export function registerAssistantRoutes(
         const droneRef = String(rawAction?.droneId ?? rawAction?.drone ?? '').trim();
         const resolved = await resolveDroneOrPendingForReadRef(droneRef);
         if (!resolved) throw new Error(`unknown drone: ${droneRef || 'missing drone'}`);
-        const chatName = String(rawAction?.chatName ?? rawAction?.chat ?? '').trim() || 'default';
+        const chatName = preferredChatName(droneChatNames(resolved.id, resolved.drone?.chats), rawAction?.chatName ?? rawAction?.chat);
         uiAction = {
           type: 'open_drone_chat',
           droneId: resolved.id,

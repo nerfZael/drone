@@ -1,3 +1,4 @@
+import { getChatNodeActionFlags } from '../src/droneHub/canvas/chat-node-utils';
 import { describe, expect, test } from 'bun:test';
 import {
   DRONE_CHAT_DND_MIME,
@@ -65,6 +66,11 @@ describe('canvas drag payload helpers', () => {
       betaDefault,
     ]);
   });
+});
+
+
+test('default chat deletion is enabled when other chats exist', () => {
+  expect(getChatNodeActionFlags({ droneId: 'd', chatName: 'default' }, { d: 2 }).deleteDisabled).toBe(false);
 });
 
 test('a drone card targets its default chat, or its first chat when it has none', () => {
