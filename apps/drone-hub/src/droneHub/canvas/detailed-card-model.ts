@@ -84,13 +84,16 @@ export const DETAILED_CARD_WIDTH_PX = 440;
 const DETAILED_CARD_MIN_WIDTH_PX = 140;
 /** Padding and border around a detailed card's content. */
 const DETAILED_CARD_CHROME_PX = 22;
+/** Room kept for a working clock ("2h25m"), so the card does not change width as it ticks. */
+const DETAILED_CLOCK_PX = 44;
 
 /**
- * A detailed card as wide as its name (title text at 13px, beside its icons). Its dots, time and cost sit
- * under the card, so they don't widen it. `titleWidthPx` is the name's width at the compact card's 12.5px.
+ * A detailed card as wide as its name (title text at 13px, beside its icons and, while it works, its clock).
+ * Its steps are in the panel that opens on hover. `titleWidthPx` is the name's width at the compact card's 12.5px.
  */
-export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boolean; runtimeIcon: boolean }): number {
-  const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateIcon ? 18 : 0) + (opts.runtimeIcon ? 20 : 0);
+export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boolean; runtimeIcon: boolean; clock?: boolean }): number {
+  const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateIcon ? 18 : 0) + (opts.runtimeIcon ? 20 : 0) +
+    (opts.clock ? DETAILED_CLOCK_PX : 0);
   return Math.max(DETAILED_CARD_MIN_WIDTH_PX, Math.min(DETAILED_CARD_WIDTH_PX, title + DETAILED_CARD_CHROME_PX));
 }
 /** One line: the name and its state. */

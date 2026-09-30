@@ -976,7 +976,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
   const card = () => container.querySelector(`[data-drone-id="${chatCard}"]`) as unknown as HTMLElement;
   try {
     await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={{
-      [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: false, lastAgentSnippet: 'Refactoring the parser' },
+      [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: true, lastAgentSnippet: 'Refactoring the parser' },
     }} />));
     expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
     const toggle = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Detailed cards') as unknown as HTMLButtonElement;
@@ -986,9 +986,8 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
     expect(card().textContent).not.toContain('Splitting the tokenizer');
     expect(card().querySelector('[title*="Splitting the tokenizer"]')).not.toBeNull();
-    // The dots, time and cost sit in a row under the card, not inside it.
-    const stats = () => card().querySelector('[data-canvas-card-stats]');
-    expect(stats()?.querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
+    // Its steps are not drawn on the card: a summary is rewritten as the chat works, so it is no progress bar.
+    expect(card().querySelector('[data-canvas-card-progress]')).toBeNull();
     expect(card().querySelector('[data-canvas-detailed-card] [aria-label="1 done, 1 in progress, 1 next"]')).toBeNull();
     // Its state is the sidebar's icon at the top right, not a word.
     expect(card().querySelector('[data-canvas-card-state="working"] svg, [data-canvas-card-state="working"] span')).not.toBeNull();
@@ -1002,8 +1001,12 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(container.contains(settingsPanel as never)).toBe(false);
     await act(async () => (dom.document.querySelector('.fixed.inset-0') as unknown as HTMLElement).click());
     expect(dom.document.querySelector('[aria-label="Chat step tracking"][role="dialog"]')).toBeNull();
-    expect(stats()?.textContent).toContain('$0.42');
-    expect(stats()?.textContent).toContain('1m');
+    // While it works, its clock sits beside its state; its cost is off the card, in the canvas total and on hover.
+    expect(card().querySelector('[data-canvas-card-clock]')?.textContent).toContain('1m');
+    expect(card().textContent).not.toContain('$0.42');
+    expect(container.querySelector('[data-canvas-cost-total]')?.textContent).toBe('$0.42');
+    // An unread reply is flagged once the chat is idle, as in the sidebar; while it works on, no corner dot.
+    expect(card().querySelector('[data-canvas-card-unread]')).toBeNull();
     expect(card().querySelector('[data-canvas-detailed-card]')?.textContent).not.toContain('$0.42');
     expect(card().style.transform).toContain('translate3d(225px, 250px, 0)');
     // It looks like the Entity's cards and sits on their darker ground.
@@ -1019,8 +1022,8 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => Simulate.mouseEnter(card()));
     expect(panel()?.textContent).toContain('Read the parser');
     expect(panel()?.textContent).toContain('Run tests');
-    // Its time and cost are under the card; the panel keeps to the steps, and lists the current step once.
-    expect(panel()?.textContent).not.toContain('$0.42');
+    // The panel says how long and what it cost, and lists the current step once.
+    expect(panel()?.querySelector('[data-canvas-steps-panel-usage]')?.textContent).toContain('$0.42');
     expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
     await act(async () => Simulate.mouseLeave(card()));
     expect(panel()).toBeNull();
@@ -1331,6 +1334,73 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     await act(async () => root.unmount());
     dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('back and forward switch between the global and this drone boards, and a middle click opens a card\'s drone', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', panX: 0, panY: 0, scale: 1 });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const opened: string[] = [];
+  const scope = () => useDroneCanvasStore.getState().scope;
+  const viewport = () => container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'fork'])}
+      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
+    // Backspace goes back to the global board, Shift+Backspace forward to this drone's; so do Alt+Left and Alt+Right.
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
+    expect(scope()).toBe('global');
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
+    expect(scope()).toBe('global');
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace', shiftKey: true }));
+    expect(scope()).toBe('drone');
+    await act(async () => Simulate.keyDown(viewport(), { key: 'ArrowLeft', altKey: true }));
+    expect(scope()).toBe('global');
+    await act(async () => Simulate.keyDown(viewport(), { key: 'ArrowRight', altKey: true }));
+    expect(scope()).toBe('drone');
+    // The mouse's back and forward side buttons.
+    await act(async () => Simulate.mouseUp(viewport(), { button: 3 }));
+    expect(scope()).toBe('global');
+    await act(async () => Simulate.mouseUp(viewport(), { button: 4 }));
+    expect(scope()).toBe('drone');
+
+    // On the global board, Backspace with a card selected navigates and never removes the card; Delete does.
+    await act(async () => useDroneCanvasStore.getState().setScope('global'));
+    const chatCard = alpha('fork');
+    await act(async () => {
+      useDroneCanvasStore.getState().upsertNodes([{ droneId: chatCard, label: 'fork', x: 100, y: 100 }]);
+      useDroneCanvasStore.getState().setSelectedDroneIds([chatCard]);
+    });
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
+    expect(scope()).toBe('global');
+    expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toBeTruthy();
+
+    // A middle click on a card opens its chat and that drone's own board.
+    const card = container.querySelector(`[data-drone-id="${chatCard}"]`) as unknown as Element;
+    await act(async () => Simulate.auxClick(card, { button: 1 }));
+    expect(opened).toEqual(['alpha:fork']);
+    expect(scope()).toBe('drone');
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

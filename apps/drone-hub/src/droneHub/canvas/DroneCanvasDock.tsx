@@ -39,13 +39,14 @@ import {
   WORKER_STATE_OF,
   detailedCardWidthPx,
   combineDetailedCards,
+  costText,
   deriveDetailedCard,
   type DetailedCard,
 } from './detailed-card-model';
 import { useCanvasChatActivity } from './use-canvas-chat-activity';
 import { ChatStepsControl } from './ChatStepsControl';
 import { DraftAgentAndRepo, DraftChatAgentSelect, DraftModelPicker } from './CanvasDraftControls';
-import { Dot, Pips, STATE_COLOR, Steps } from '../entity/EntityWork';
+import { Dot, STATE_COLOR, Steps } from '../entity/EntityWork';
 import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
   createCanvasChatNodeId,
@@ -211,6 +212,8 @@ type CanvasNodeActions = {
   onNodeMouseDown: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onNodeClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onNodeDoubleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Middle click: on the global board, opens the card's drone on its own board. */
+  onNodeMiddleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   /** The pointer is over a card (an id) or left it (null): the steps panel follows it. */
   hoverCard: (id: string | null) => void;
   setInlineRenameDraft: (value: string) => void;
@@ -300,8 +303,8 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
   ) : (
     renderNodeIndicator(indicatorState)
   );
-  const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
-  const showCardStats = Boolean(detail && (detail.steps || detail.workingSince !== null || detail.cost));
+  // As in the sidebar, a new reply is flagged once the chat is idle, not while it works on.
+  const unread = detail ? detail.unread && detail.icon === 'idle' : hasUnreadAgentMessage(indicatorState);
   // The green frame says drone; the icon says where it runs.
   const runtimeIcon = droneNode ? (
     <span
@@ -327,6 +330,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       onMouseDown={(event) => actions.current.onNodeMouseDown(node.droneId, event)}
       onClick={(event) => actions.current.onNodeClick(node.droneId, event)}
       onDoubleClick={(event) => actions.current.onNodeDoubleClick(node.droneId, event)}
+      onAuxClick={(event) => actions.current.onNodeMiddleClick(node.droneId, event)}
       onMouseEnter={detail ? () => actions.current.hoverCard(node.droneId) : undefined}
       onMouseLeave={detail ? () => actions.current.hoverCard(null) : undefined}
       aria-pressed={selected}
@@ -376,8 +380,11 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       {indicator && !detail ? (
         <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">{indicator}</span>
       ) : null}
-      {unreadIndicator && !detail ? (
-        <span className="pointer-events-none absolute left-0 bottom-full mb-1 z-[2]">{unreadIndicator}</span>
+      {/* A new reply: a dot on the card's corner, in either card mode. */}
+      {unread ? (
+        <span className="pointer-events-none absolute -right-[3px] -top-[3px] z-[3] flex" data-canvas-card-unread>
+          <span className="h-2 w-2 rounded-full bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]" title="Unread agent message" aria-label="Unread agent message" />
+        </span>
       ) : null}
       {showCanvasLastMessagePreviews && lastAgentSnippet && !detail ? (
         <span
@@ -392,26 +399,14 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
           Draft
         </span>
       ) : null}
-      {detail && showCardStats ? (
-        // Under the card, as above it is where a new reply is flagged: its dots on the left, and while it
-        // works, how long, then its cost on the right. At least as wide as the card, wider when the dots need it.
-        <span
-          className="pointer-events-none absolute left-0 top-full mt-[3px] flex h-4 min-w-full items-center gap-2 whitespace-nowrap px-1 text-[var(--muted)]"
-          data-canvas-card-stats
-        >
-          {detail.steps ? <Pips w={{ steps: detail.steps, state: WORKER_STATE_OF[detail.state] }} /> : null}
-          {/* Only while it works: how long since it stopped is in the steps panel. */}
-          <span className="ml-auto font-mono text-[11px] tabular-nums" title={detail.workingSince !== null ? 'How long it has been working' : undefined}>
-            {detail.workingSince !== null ? detail.clock : null}
-          </span>
-          <span className="flex-shrink-0 font-mono text-[11px] tabular-nums" title={detail.costTitle}>{detail.cost}</span>
-        </span>
-      ) : null}
       {repoLabel || repoBranch ? (
         // One row centred under the card: at least as wide as the card, and wider when the two
         // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
-          className={`pointer-events-none absolute left-1/2 top-full ${showCardStats ? 'mt-[22px]' : 'mt-[3px]'} flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap`}
+          className={`pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap transition-opacity ${
+            droneNode || draftNode || selected ? '' : 'opacity-0 group-hover/canvas-node:opacity-100'
+          }`}
+          data-canvas-card-repo
         >
           {repoLabel ? (
             <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[260px]`} title={repoLabel}>
@@ -496,11 +491,17 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
             <span className="flex min-w-0 items-center gap-1.5">
               {runtimeIcon}
               <span className="min-w-0 truncate text-[13px] font-semibold" title={`${primaryLabel}\n${detail.text}`}>{primaryLabel}</span>
+              {detail.workingSince !== null ? (
+                <span className="ml-auto flex-shrink-0 font-mono text-[11px] tabular-nums text-[var(--muted)]" title="How long it has been working"
+                  data-canvas-card-clock>
+                  {detail.clock}
+                </span>
+              ) : null}
               {detail.showState ? (
-                // The sidebar's icon for the same state: a spinner while working, a green dot for a new reply.
-                <span className="ml-auto inline-flex flex-shrink-0" title={detail.unread ? `${detail.label} · new reply` : detail.label}
+                // The sidebar's icon for the same state; a new reply is the dot on the card's corner.
+                <span className={`${detail.workingSince !== null ? '' : 'ml-auto'} inline-flex flex-shrink-0`} title={detail.unread ? `${detail.label} · new reply` : detail.label}
                   data-canvas-card-state={detail.icon}>
-                  <SidebarItemStateIndicator state={detail.icon} unread={detail.unread} showReadyAnchor={detail.state === 'idle'} />
+                  <SidebarItemStateIndicator state={detail.icon} unread={false} showReadyAnchor={detail.state === 'idle'} />
                 </span>
               ) : null}
             </span>
@@ -527,10 +528,18 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
   );
 });
 
+/** A drone's chats, main and side; a drone without any still has its default chat. */
+function droneChatNames(drone: { chats?: string[]; sideChats?: Array<{ name: string }> } | null | undefined): string[] {
+  const names = [...(drone?.chats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
+  return names.length ? names : ['default'];
+}
+
 /** One card in full at the canvas's bottom left: every step, its last reply, time and cost. */
 export const CANVAS_STEPS_PANEL_WIDTH_PX = 320;
 
 function CanvasStepsPanel({ title, card, bottomPx }: { title: string; card: DetailedCard; bottomPx: number }) {
+  // Nothing spent yet reads as no line, not a dash.
+  const cost = card.cost === '—' ? '' : card.cost;
   // The line under the steps is the last reply; while working it is the current step, already listed above.
   const listed = card.steps ? [...card.steps.done, ...card.steps.doing, ...card.steps.next, card.steps.blocker].includes(card.text)
     || card.text === `Blocked: ${card.steps.blocker}` : false;
@@ -544,6 +553,13 @@ function CanvasStepsPanel({ title, card, bottomPx }: { title: string; card: Deta
           <Dot pulse={card.state === 'working'} />{card.label}
         </span>
       </div>
+      {card.clock || cost ? (
+        <div className="flex gap-1.5 font-mono text-[11px] tabular-nums text-[var(--muted)]" data-canvas-steps-panel-usage>
+          {card.clock ? <span title={card.workingSince !== null ? 'How long it has been working' : 'Since it last stopped'}>{card.clock}</span> : null}
+          {card.clock && cost ? <span aria-hidden="true">·</span> : null}
+          {cost ? <span title={card.costTitle}>{cost}</span> : null}
+        </div>
+      ) : null}
       {card.steps ? <Steps w={{ steps: card.steps, state: WORKER_STATE_OF[card.state] }} /> : null}
       {card.stepsStale ? <div className="text-[11px] text-[var(--muted)]">Summarized while it was working; it stopped before a final summary.</div> : null}
       {card.text && !listed ? (
@@ -743,17 +759,10 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   return null;
 }
 
-function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
-  if (!state || !state.unreadAgentMessage) return null;
+function hasUnreadAgentMessage(state: DroneCanvasIndicatorState | null): boolean {
+  if (!state || !state.unreadAgentMessage) return false;
   const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
-  if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) return null;
-  return (
-    <span
-      className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--yellow)]"
-      title="Unread agent message"
-      aria-label="Unread agent message"
-    />
-  );
+  return !isStarting && !(state.busy && state.statusOk && state.hubPhase !== 'error');
 }
 
 /** Pans and zooms so every rect is inside the viewport, never zooming in past 1:1. */
@@ -1130,21 +1139,37 @@ export function DroneCanvasDock({
     [chatNodeStateById],
   );
   const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(canvasDetailedCards, busyChatKey);
-  // A detailed card is as wide as its name needs; its dots, time and cost sit under it.
+  // A detailed card is as wide as its name and, while it works, its clock need.
   const detailedWidthByNodeId = React.useMemo(() => {
     if (!canvasDetailedCards) return null;
     const out: Record<string, number> = {};
     for (const node of nodes) {
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      const busy = canvasDroneId
+        ? droneChatNames(droneById[canvasDroneId]).some((chatName) => chatNodeStateById[createCanvasChatNodeId(canvasDroneId, chatName)]?.busy)
+        : Boolean(chatNodeStateById[node.droneId]?.busy);
       const label = node.droneId === inlineRenamingDroneId
         ? inlineRenameDraft
         : canvasDroneId
           ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
           : parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label;
-      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: Boolean(canvasDroneId) });
+      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: Boolean(canvasDroneId), clock: busy });
     }
     return out;
-  }, [canvasDetailedCards, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  }, [canvasDetailedCards, chatNodeStateById, droneById, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  // What every chat on the canvas has cost, each counted once: a drone card stands for all its chats.
+  const canvasCost = React.useMemo(() => {
+    if (!canvasDetailedCards) return null;
+    const chatIds = new Set<string>();
+    for (const node of nodes) {
+      const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      if (canvasDroneId) {
+        for (const chatName of droneChatNames(droneById[canvasDroneId])) chatIds.add(createCanvasChatNodeId(canvasDroneId, chatName));
+      } else if (parseCanvasChatNodeId(node.droneId)) chatIds.add(node.droneId);
+    }
+    const total = [...chatIds].reduce((sum, id) => sum + (chatActivityByNodeId[id]?.estimatedCost ?? 0), 0);
+    return total > 0 ? costText({ estimatedCost: total }) : null;
+  }, [canvasDetailedCards, chatActivityByNodeId, droneById, nodes]);
   const viewNodeBoundsById = React.useMemo(() => {
     if (!detailedWidthByNodeId) return fallbackNodeBoundsById;
     const out: Record<string, CanvasRect> = {};
@@ -1318,7 +1343,7 @@ export function DroneCanvasDock({
         if (canvasDroneId) {
           const drone = droneById[canvasDroneId];
           const chatNames = [...(drone?.chats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
-          const chats = (chatNames.length ? chatNames : ['default']).map((chatName) => chatInput(canvasDroneId, chatName));
+          const chats = droneChatNames(drone).map((chatName) => chatInput(canvasDroneId, chatName));
           // With its chats on the canvas, each says its own state; a one-chat drone or one shown alone says it here.
           const showState = chatNames.length <= 1 || !chatNodesByDroneId[canvasDroneId]?.length;
           card = { ...combineDetailedCards(chats.map((chat) => chat.card), chats.map((chat) => chat.activity), cardNowMs, chatNames.length), showState };
@@ -2434,6 +2459,8 @@ export function DroneCanvasDock({
         event.stopPropagation();
         return;
       }
+      // A middle click opens the card's drone (see onNodeMiddleClick); keep it from starting autoscroll.
+      if (event.button === 1) event.preventDefault();
       if (event.button !== 0) return;
       focusViewportElement();
       if (event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -2506,7 +2533,39 @@ export function DroneCanvasDock({
     [beginInlineRename],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  // Like a browser's back and forward: back leaves this drone's board for the global one, forward returns.
+  const canvasBack = React.useCallback((): boolean => {
+    if (!droneScope) return false;
+    setScope('global');
+    return true;
+  }, [droneScope, setScope]);
+  const canvasForward = React.useCallback((): boolean => {
+    if (droneScope || !boardDrone) return false;
+    setScope('drone');
+    return true;
+  }, [boardDrone, droneScope, setScope]);
+  const onCanvasMouseUp = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // The mouse's back and forward side buttons; handled here so the app's window doesn't navigate.
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.button === 3) canvasBack();
+    else canvasForward();
+  }, [canvasBack, canvasForward]);
+
+  const onNodeMiddleClick = React.useCallback(
+    (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+      if (event.button !== 1 || droneScope || isCanvasDraftNodeId(droneId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Select the card's chat (a drone card: its default chat), then show that drone's board.
+      activateCanvasNode(droneId);
+      setScope('drone');
+    },
+    [activateCanvasNode, droneScope, setScope],
+  );
+
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, onNodeMiddleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
@@ -2946,7 +3005,20 @@ export function DroneCanvasDock({
         return;
       }
 
-      if ((key === 'delete' || key === 'backspace') && selectedDroneIds.length > 0) {
+      // Backspace and Alt+Left go back to the global board; Shift+Backspace and Alt+Right come forward to this drone's.
+      const plainBackspace = key === 'backspace' && !event.ctrlKey && !event.metaKey && !event.altKey;
+      const altArrow = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+        (key === 'arrowleft' || key === 'arrowright');
+      if (plainBackspace || altArrow) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.shiftKey || key === 'arrowright') canvasForward();
+        else canvasBack();
+        return;
+      }
+
+      // Only Delete removes cards: Backspace navigates, as in a browser.
+      if (key === 'delete' && selectedDroneIds.length > 0) {
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         event.preventDefault();
         event.stopPropagation();
@@ -2963,6 +3035,8 @@ export function DroneCanvasDock({
       }
     },
     [
+      canvasBack,
+      canvasForward,
       activeComposer,
       clearSelection,
       closeMessageBar,
@@ -3048,6 +3122,12 @@ export function DroneCanvasDock({
               Detailed cards
             </UiToolbarButton>
             {canvasDetailedCards ? <ChatStepsControl /> : null}
+            {canvasCost ? (
+              <span className="px-1 font-mono text-[11px] tabular-nums text-[var(--muted)]" data-canvas-cost-total
+                title="What the chats on this canvas have cost in all. Hover a card for its own.">
+                {canvasCost}
+              </span>
+            ) : null}
             <UiToolbarButton size="xsmall"
               pressed={!hideSideChatWindowsWithCanvas}
               onClick={() => setHideSideChatWindowsWithCanvas(!hideSideChatWindowsWithCanvas)}
@@ -3187,6 +3267,7 @@ export function DroneCanvasDock({
         className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${canvasDetailedCards ? 'dh-canvas-work-ground' : ''} ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onKeyDown={onViewportKeyDown}
         onMouseDown={onCanvasMouseDown}
+        onMouseUp={onCanvasMouseUp}
         onMouseMove={(event) => {
           cursorClientPointRef.current = { x: event.clientX, y: event.clientY };
         }}
