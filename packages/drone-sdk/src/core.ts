@@ -696,13 +696,14 @@ class DroneChatImpl implements DroneChat {
 
   async send(message: MessageInput, input?: SendOptions): Promise<Run> {
     const normalized = normalizeMessageInput(message);
-    const chatName = await this.resolveName(input);
+    let chatName: string | undefined;
     const sendOptions = mergeOptions(this.ctx.defaults, input) as SendOptions | undefined;
     const deadline = Date.now() + DEFAULT_SEND_ACCEPT_RETRY_WINDOW_MS;
     let attempt = 0;
     let record: RunRecord;
     while (true) {
       try {
+        chatName ??= await this.resolveName(input);
         record = await this.ctx.transport.sendMessage(
           this.drone.id,
           chatName,
@@ -995,7 +996,6 @@ class DroneBroadcastImpl implements DroneBroadcast {
   ) {}
 
   chat(name?: string): ChatBroadcast {
-    const chatName = normalizeChatName(name);
     return new ChatBroadcastImpl(async () => {
       const resolved = await Promise.all(
         this.targets.map(async (target) => {
@@ -1004,7 +1004,7 @@ class DroneBroadcastImpl implements DroneBroadcast {
           return await new DroneCollectionImpl(this.ctx).get(target.id);
         }),
       );
-      return resolved.filter((drone): drone is Drone => Boolean(drone)).map((drone) => drone.chat(chatName));
+      return resolved.filter((drone): drone is Drone => Boolean(drone)).map((drone) => drone.chat(name));
     });
   }
 }

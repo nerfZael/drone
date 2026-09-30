@@ -1,3 +1,4 @@
+import { droneChatNames } from '../drone-chat-names';
 import crypto from 'node:crypto';
 import { chatCatalogMetadata } from '../chat-catalog';
 
@@ -521,7 +522,8 @@ export function createChatManagementRouteHandler(
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
         const deleteSettings = await resolveEffectiveDeleteActionSettings();
         const archiveRetention = deleteSettings.archiveRetention;
-        if (chatName === 'default' && Object.keys(resolved.drone?.chats ?? {}).length <= 1) {
+        const chats = droneChatNames(droneId, resolved.drone?.chats);
+        if (chatName === 'default' && chats.includes(chatName) && chats.length <= 1) {
           json(res, 400, { ok: false, error: 'cannot archive the last default chat' });
           return;
         }
@@ -576,7 +578,8 @@ export function createChatManagementRouteHandler(
         if (!resolved) return;
         const droneId = resolved.id;
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        if (chatName === 'default' && Object.keys(resolved.drone?.chats ?? {}).length <= 1) {
+        const chats = droneChatNames(droneId, resolved.drone?.chats);
+        if (chatName === 'default' && chats.includes(chatName) && chats.length <= 1) {
           json(res, 400, { ok: false, error: 'cannot delete the last default chat' });
           return;
         }

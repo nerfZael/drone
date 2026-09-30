@@ -2771,7 +2771,12 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       .map((nodeId) => chatTreeByDrone[droneId]?.nodesById[nodeId])
       .filter((node): node is Extract<SidebarChatTreeNode, { kind: 'chat' }> => node?.kind === 'chat')
       .map((node) => node.chatName) : [];
-    const names = planChatDeletion(droneById[droneId]?.chats ?? ['default'], selectedNames.length ? selectedNames : [fallbackChatName]);
+    const droneChats = droneById[droneId]?.chats ?? ['default'];
+    if (droneChats.length === 1 && droneChats[0] === fallbackChatName) {
+      await handleDeleteChat(droneId, fallbackChatName);
+      return;
+    }
+    const names = planChatDeletion(droneChats, selectedNames.length ? selectedNames : [fallbackChatName]);
     if (!names.length) return;
     const defaultChatKept = selectedNames.includes('default') && !names.includes('default');
     const drone = droneById[droneId];

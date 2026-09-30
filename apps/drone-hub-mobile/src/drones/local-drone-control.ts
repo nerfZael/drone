@@ -27,6 +27,7 @@ import type { LocalAssistantPromptImage } from '../local-assistant/local-assista
 import { applyOptimisticMobileSidebarMove } from './mobile-sidebar-reorder';
 import {
   cleanLocalDroneRecords,
+  removeLocalDroneChat,
   createLegacyPhoneDroneRecord,
   localDroneDraftChatMap,
   localDroneDraftPromptsForChat,
@@ -874,30 +875,12 @@ function useLocalDroneControlValue() {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
         if (!chatName) throw new Error('Chat name is required.');
-        if (Object.keys(drone.chats).length <= 1)
-          throw new Error('The last chat cannot be deleted.');
-        const threadId = drone.chats[chatName];
-        if (!threadId) throw new Error(`Unknown chat: ${chatName}`);
-        await assistant.deleteThread(threadId);
-        const nextChats = Object.fromEntries(
-          Object.entries(drone.chats).filter(([name]) => name !== chatName),
-        );
-        const nextDraftChats = Object.fromEntries(
-          Object.entries(drone.draftChats ?? {}).filter(([name]) => name !== chatName),
-        );
-        const nextDraftChatPrompts = Object.fromEntries(
-          Object.entries(drone.draftChatPrompts ?? {}).filter(([name]) => name !== chatName),
-        );
-        const nextDrone = {
-          ...drone,
-          chats: nextChats,
-          draftChats: nextDraftChats,
-          draftChatPrompts: nextDraftChatPrompts,
-        };
+        const nextDrone = removeLocalDroneChat(drone, chatName);
+        await assistant.deleteThread(drone.chats[chatName]);
         await replaceDrones(
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
-        return { ok: true, deletedChat: chatName, chats: Object.keys(nextChats) };
+        return { ok: true, deletedChat: chatName, chats: Object.keys(nextDrone.chats) };
       }
       if (operation === 'files.list') {
         const { thread } = getThread();

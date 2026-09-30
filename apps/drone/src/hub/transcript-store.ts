@@ -1551,10 +1551,11 @@ export class ChatTranscriptRepository {
     fallbackChat?: { chatName: string; chatEntry: unknown };
   }): Promise<DeleteActiveChatStoreResult> {
     return await this.database.writeTransaction('delete active canonical chat', (connection) => {
-      const chatCount = this.listChatsWithConnection(connection, opts.droneId).chats.length;
-      if (opts.chatName === 'default' && chatCount <= 1) throw new Error('cannot delete the last default chat');
       const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
       if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      if (opts.chatName === 'default' && this.listChatsWithConnection(connection, opts.droneId).chats.length <= 1) {
+        throw new Error('cannot delete the last default chat');
+      }
       cancelResourceSubscriptionsForChatWithConnection(connection, current.id);
       deleteChatWithConnection(connection, opts);
       if (this.listChatsWithConnection(connection, opts.droneId).chats.length === 0 && opts.fallbackChat) {
@@ -3032,9 +3033,11 @@ export async function deleteActiveChatFromStore(opts: {
   if (store) {
     result = await store.deleteActiveChat(opts);
   } else {
-    if (opts.chatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length <= 1) throw new Error('cannot delete the last default chat');
     const current = memoryReadChat(opts.droneId, opts.chatName).chat;
     if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+    if (opts.chatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length <= 1) {
+      throw new Error('cannot delete the last default chat');
+    }
     await deleteChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
     if (listChatsFromStore({ droneId: opts.droneId }).chats.length === 0 && opts.fallbackChat) {
       await upsertChatInStore({

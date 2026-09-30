@@ -1,3 +1,4 @@
+import { droneChatNames } from '../drone-chat-names';
 import { preferredChatName } from '../preferred-chat';
 import {
   createChatWorkspaceAccessService,
@@ -167,7 +168,7 @@ export function registerAssistantRoutes(
         const droneRef = String(rawAction?.droneId ?? rawAction?.drone ?? '').trim();
         const resolved = await resolveDroneOrPendingForReadRef(droneRef);
         if (!resolved) throw new Error(`unknown drone: ${droneRef || 'missing drone'}`);
-        const chatName = preferredChatName(Object.keys(resolved.drone?.chats ?? {}), rawAction?.chatName ?? rawAction?.chat);
+        const chatName = preferredChatName(droneChatNames(resolved.id, resolved.drone?.chats), rawAction?.chatName ?? rawAction?.chat);
         uiAction = {
           type: 'open_drone_chat',
           droneId: resolved.id,

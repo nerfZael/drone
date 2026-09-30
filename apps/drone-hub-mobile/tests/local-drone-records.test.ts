@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   cleanLocalDroneRecords,
+  removeLocalDroneChat,
   createLegacyPhoneDroneRecord,
   localDroneDraftChatMap,
   localDroneDraftPromptsForChat,
@@ -138,4 +139,19 @@ describe('local drone records', () => {
     expect(localDroneDraftPromptsForChat(drone, 'default')[0]?.prompt).toBe('Default');
     expect(localDroneDraftPromptsForChat(drone, 'review')[0]?.prompt).toBe('Review');
   });
+});
+
+
+test('deleting default removes its legacy draft queue and preserves other chats on reload', () => {
+  const prompt = { id: 'p', prompt: 'Old default draft', promptImages: [], createdAt: '2026-09-30T00:00:00Z' };
+  const drone = { id: 'd', name: 'Drone', group: null, createdAt: prompt.createdAt,
+    chats: { default: 'thread-default', review: 'thread-review' }, draft: true,
+    draftPrompts: [prompt], draftChatPrompts: { review: [{ ...prompt, id: 'review-p' }] } };
+  const next = removeLocalDroneChat(drone, 'default');
+  expect(next.chats).toEqual({ review: 'thread-review' });
+  expect(next.draftPrompts).toBeUndefined();
+  const [reloaded] = cleanLocalDroneRecords([next]);
+  expect(localDroneDraftPromptsForChat(reloaded!, 'review')).toEqual(drone.draftChatPrompts.review);
+  expect(() => removeLocalDroneChat(next, 'review')).toThrow('last chat');
+  expect(() => removeLocalDroneChat(next, 'default')).toThrow('Unknown chat');
 });

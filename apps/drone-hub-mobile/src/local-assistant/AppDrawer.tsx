@@ -2788,11 +2788,6 @@ function AppDrawerView({
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
     const chatNodeId = sidebarChatNodeId(chatActionTarget.drone.id, chatActionTarget.chatName);
-    const droneChatNodeIds = new Set(chatActionTarget.drone.chats.map((name) =>
-      sidebarChatNodeId(chatActionTarget.drone.id, name)));
-    const selectedInDrone = selectedChatNodeIds.has(chatNodeId)
-      ? [...selectedChatNodeIds].filter((id) => droneChatNodeIds.has(id))
-      : [];
     actions.push({
       label: selectedChatNodeIds.has(chatNodeId) ? 'Deselect chat' : 'Select chat',
       onPress: () => toggleChatSelection(chatActionTarget.drone.id, chatActionTarget.chatName),
@@ -2848,10 +2843,16 @@ function AppDrawerView({
         },
       });
     }
-    if (chatActionTarget.drone.chats.length > 1 && onDeleteDroneChat) {
+    const deleteCount = resolveMobileChatDeletePlan({
+      droneId: chatActionTarget.drone.id,
+      chatNames: chatActionTarget.drone.chats,
+      targetChatName: chatActionTarget.chatName,
+      selectedChatNodeIds,
+    }).chatNames.length;
+    if (deleteCount > 0 && onDeleteDroneChat) {
       actions.push({
-        label: selectedInDrone.length > 1
-          ? `Delete ${selectedInDrone.length} selected chats`
+        label: deleteCount > 1
+          ? `Delete ${deleteCount} selected chats`
           : 'Delete chat',
         destructive: true,
         onPress: () => {
