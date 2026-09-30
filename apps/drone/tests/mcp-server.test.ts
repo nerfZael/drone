@@ -485,8 +485,11 @@ describe('Drone Hub assistant MCP transport', () => {
       const sendMessageDescription = catalog.tools.find(
         (tool) => tool.name === 'send_message',
       )?.description;
-      expect(sendMessageDescription).toContain('never live-steers or interrupts');
-      expect(sendMessageDescription).toContain('starts after the current one finishes');
+      expect(sendMessageDescription).toContain('deliveryMode "queue" (default)');
+      expect(sendMessageDescription).toContain('injected into the execution in progress');
+      expect(sendMessageDescription).toContain('gets no separate reply');
+      expect(sendMessageDescription).toContain('Otherwise it starts as the next execution');
+      expect(sendMessageDescription).toContain('Neither mode stops or cancels');
       const hostAskResult = await client.callTool({
         name: 'ask_questions',
         arguments: {
@@ -1915,7 +1918,12 @@ describe('Drone Hub assistant MCP transport', () => {
 
         const side = await client.callTool({
           name: 'send_message',
-          arguments: { drone: 'drone-1', chat: 'side-test', message: 'Ask the actual side chat' },
+          arguments: {
+            drone: 'drone-1',
+            chat: 'side-test',
+            message: 'Ask the actual side chat',
+            deliveryMode: 'asap',
+          },
         });
         expect(side.isError).not.toBe(true);
 
@@ -1957,8 +1965,9 @@ describe('Drone Hub assistant MCP transport', () => {
         expect(explicit.isError).not.toBe(true);
         expect(createdChats).toEqual(['review']);
         expect(promptedChats).toEqual(['default', 'side-test', 'legacy-drone/default', 'review']);
-        expect(promptBodies[0]).toMatchObject({ requireExistingChat: true });
-        expect(promptBodies[1]).toMatchObject({ requireExistingChat: true });
+        expect(promptBodies[0]).toMatchObject({ requireExistingChat: true, deliveryMode: 'queue' });
+        expect(promptBodies[1]).toMatchObject({ requireExistingChat: true, deliveryMode: 'asap' });
+        expect(JSON.parse((side.content as any)[0].text)).toMatchObject({ deliveryMode: 'asap' });
         expect(promptBodies[2]).toMatchObject({ requireExistingChat: true });
         expect(promptBodies[3]?.requireExistingChat).toBeUndefined();
       } finally {

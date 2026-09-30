@@ -3262,7 +3262,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Send drone message',
       description:
-        'Send a message to a Drone Hub drone chat as a new execution and return the queued run. This tool never live-steers or interrupts an execution already in progress; when the chat is busy, the new execution starts after the current one finishes. Draft chats hold messages until published; status held_in_draft means accepted but not running.',
+        'Send a message to a Drone Hub drone chat and return the run. deliveryMode "queue" (default) starts a new execution after the current one and after every message already queued; use it for new, separate tasks. deliveryMode "asap" jumps ahead of queued messages. When the chat\'s agent can accept input mid-run (Codex, Claude with unchanged model and effort, native agents), an asap message is injected into the execution in progress: the agent reads it mid-run, the message gets no separate reply, and its answer is part of that execution\'s final reply. Otherwise it starts as the next execution, ahead of the queue. Use asap only for corrections or information the current work needs now. Neither mode stops or cancels a running execution. Draft chats hold messages until published; status held_in_draft means accepted but not running.',
       inputSchema: {
         drone: z.string(),
         chat: z
@@ -3270,6 +3270,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           .describe('Existing chat name. Chat resource IDs are not accepted.')
           .optional(),
         message: z.string(),
+        deliveryMode: z
+          .enum(['queue', 'asap'])
+          .describe(
+            'queue (default): run after the current execution and existing queue. asap: jump the queue and, when the agent supports it, steer the execution in progress.',
+          )
+          .optional(),
         idempotencyKey: z.string().optional(),
         createChat: z
           .boolean()
@@ -3293,6 +3299,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       const body = {
         prompt: args.message,
         submissionSource: 'assistant-tool',
+        deliveryMode: args.deliveryMode ?? 'queue',
         ...(!args.createChat ? { requireExistingChat: true } : {}),
         ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}),
       };
@@ -3308,6 +3315,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         ok: true,
         drone: cleanString(response?.id, args.drone),
         chat,
+        deliveryMode: body.deliveryMode,
         runId: cleanString(response?.promptId || body.promptId),
         status:
           response?.draft === true ? 'held_in_draft' : cleanString(response?.pendingState, 'queued'),
