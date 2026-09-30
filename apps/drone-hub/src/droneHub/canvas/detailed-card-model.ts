@@ -84,20 +84,17 @@ export const DETAILED_CARD_WIDTH_PX = 440;
 const DETAILED_CARD_MIN_WIDTH_PX = 140;
 /** Padding and border around a detailed card's content. */
 const DETAILED_CARD_CHROME_PX = 26;
-/** Room kept for the working time and cost ("2h25m", "$0.00"), so the card does not change width as they change. */
-const DETAILED_FOOTER_TEXT_PX = 84;
-const PIP_PX = 9;
 
 /**
- * A detailed card as wide as its name (title text at 13px, beside its icons) or its footer needs, whichever is wider.
- * `titleWidthPx` is the name's width at the compact card's 12.5px.
+ * A detailed card as wide as its name (title text at 13px, beside its icons). Its dots, time and cost sit
+ * above the card, so they don't widen it. `titleWidthPx` is the name's width at the compact card's 12.5px.
  */
-export function detailedCardWidthPx(titleWidthPx: number, opts: { pips: number; stateIcon: boolean; runtimeIcon: boolean }): number {
+export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boolean; runtimeIcon: boolean }): number {
   const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateIcon ? 18 : 0) + (opts.runtimeIcon ? 20 : 0);
-  const footer = opts.pips * PIP_PX + (opts.pips ? 10 : 0) + DETAILED_FOOTER_TEXT_PX;
-  return Math.max(DETAILED_CARD_MIN_WIDTH_PX, Math.min(DETAILED_CARD_WIDTH_PX, Math.max(title, footer) + DETAILED_CARD_CHROME_PX));
+  return Math.max(DETAILED_CARD_MIN_WIDTH_PX, Math.min(DETAILED_CARD_WIDTH_PX, title + DETAILED_CARD_CHROME_PX));
 }
-export const DETAILED_CARD_HEIGHT_PX = 50;
+/** One line: the name and its state. */
+export const DETAILED_CARD_HEIGHT_PX = 38;
 /**
  * Detailed cards are drawn at the stored positions spread apart by these factors, so the arrangement made
  * with compact cards holds without the bigger cards overlapping. Positions stay stored in compact space.

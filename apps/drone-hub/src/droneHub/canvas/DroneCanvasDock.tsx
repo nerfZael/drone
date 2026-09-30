@@ -394,6 +394,21 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
           Draft
         </span>
       ) : null}
+      {detail && (detail.steps || detail.workingSince !== null || detail.cost) ? (
+        // Above the card: its dots on the left, and while it works, how long, then its cost on the right.
+        // At least as wide as the card, and wider when the dots need it.
+        <span
+          className="pointer-events-none absolute left-0 bottom-full mb-[3px] flex min-w-full items-center gap-2 whitespace-nowrap px-1 text-[var(--muted)]"
+          data-canvas-card-stats
+        >
+          {detail.steps ? <Pips w={{ steps: detail.steps, state: WORKER_STATE_OF[detail.state] }} /> : null}
+          {/* Only while it works: how long since it stopped is in the steps panel. */}
+          <span className="ml-auto font-mono text-[11px] tabular-nums" title={detail.workingSince !== null ? 'How long it has been working' : undefined}>
+            {detail.workingSince !== null ? detail.clock : null}
+          </span>
+          <span className="flex-shrink-0 font-mono text-[11px] tabular-nums" title={detail.costTitle}>{detail.cost}</span>
+        </span>
+      ) : null}
       {repoLabel || repoBranch ? (
         // One row centred under the card: at least as wide as the card, and wider when the two
         // chips need it, so the repository and the branch spread apart instead of overlapping.
@@ -479,7 +494,7 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
             </span>
           </span>
         ) : detail ? (
-          <span className="grid min-w-0 gap-[3px]" data-canvas-detailed-card={detail.state}>
+          <span className="grid min-w-0" data-canvas-detailed-card={detail.state}>
             <span className="flex min-w-0 items-center gap-1.5">
               {runtimeIcon}
               <span className="min-w-0 truncate text-[13px] font-semibold" title={`${primaryLabel}\n${detail.text}`}>{primaryLabel}</span>
@@ -490,14 +505,6 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
                   <SidebarItemStateIndicator state={detail.icon} unread={detail.unread} showReadyAnchor={detail.state === 'idle'} />
                 </span>
               ) : null}
-            </span>
-            <span className="flex min-h-[14px] min-w-0 items-center gap-2 text-[var(--muted)]">
-              {detail.steps ? <Pips w={{ steps: detail.steps, state: WORKER_STATE_OF[detail.state] }} /> : null}
-              {/* Only while it works: how long since it stopped is in the steps panel. */}
-              <span className="ml-auto whitespace-nowrap font-mono text-[11px] tabular-nums" title={detail.workingSince !== null ? 'How long it has been working' : undefined}>
-                {detail.workingSince !== null ? detail.clock : null}
-              </span>
-              <span className="flex-shrink-0 font-mono text-[11px] tabular-nums" title={detail.costTitle}>{detail.cost}</span>
             </span>
           </span>
         ) : (
@@ -1125,27 +1132,21 @@ export function DroneCanvasDock({
     [chatNodeStateById],
   );
   const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(canvasDetailedCards, busyChatKey);
-  // A detailed card is as wide as its name or its footer needs. Its dots count as the card will show them:
-  // a stopped chat without a final summary shows only what it did.
+  // A detailed card is as wide as its name needs; its dots, time and cost sit above it.
   const detailedWidthByNodeId = React.useMemo(() => {
     if (!canvasDetailedCards) return null;
     const out: Record<string, number> = {};
     for (const node of nodes) {
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
-      const steps = canvasDroneId ? null : chatStepsByNodeId[node.droneId];
-      const busy = Boolean(chatNodeStateById[node.droneId]?.busy);
-      const pips = !steps ? 0 : steps.final || busy
-        ? steps.done.length + steps.doing.length + steps.next.length
-        : steps.done.length;
       const label = node.droneId === inlineRenamingDroneId
         ? inlineRenameDraft
         : canvasDroneId
           ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
           : parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label;
-      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { pips, stateIcon: true, runtimeIcon: Boolean(canvasDroneId) });
+      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: Boolean(canvasDroneId) });
     }
     return out;
-  }, [canvasDetailedCards, chatNodeStateById, chatStepsByNodeId, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  }, [canvasDetailedCards, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
   const viewNodeBoundsById = React.useMemo(() => {
     if (!detailedWidthByNodeId) return fallbackNodeBoundsById;
     const out: Record<string, CanvasRect> = {};

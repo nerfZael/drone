@@ -73,12 +73,10 @@ test('each state takes the sidebar icon for it', () => {
 });
 
 test('a detailed card is as wide as its name or its footer, within limits', () => {
-  const short = detailedCardWidthPx(40, { pips: 0, stateIcon: true, runtimeIcon: false });
-  expect(short).toBe(140);
-  // Five dots and the time and cost need more than a short name.
-  expect(detailedCardWidthPx(40, { pips: 5, stateIcon: true, runtimeIcon: false })).toBe(5 * 9 + 10 + 84 + 26);
-  expect(detailedCardWidthPx(160, { pips: 0, stateIcon: true, runtimeIcon: true })).toBe(Math.ceil(160 * 13 / 12.5) + 18 + 20 + 26);
-  expect(detailedCardWidthPx(900, { pips: 0, stateIcon: true, runtimeIcon: false })).toBe(440);
+  // The dots, time and cost sit above the card, so only the name sets its width.
+  expect(detailedCardWidthPx(40, { stateIcon: true, runtimeIcon: false })).toBe(140);
+  expect(detailedCardWidthPx(160, { stateIcon: true, runtimeIcon: true })).toBe(Math.ceil(160 * 13 / 12.5) + 18 + 20 + 26);
+  expect(detailedCardWidthPx(900, { stateIcon: true, runtimeIcon: false })).toBe(440);
   // A long drone name fits: 'Combined Plan to Assets Spec Analysis' is about 270px at 12.5px.
-  expect(detailedCardWidthPx(270, { pips: 0, stateIcon: true, runtimeIcon: true })).toBeLessThan(440);
+  expect(detailedCardWidthPx(270, { stateIcon: true, runtimeIcon: true })).toBeLessThan(440);
 });

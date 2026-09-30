@@ -986,7 +986,10 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
     expect(card().textContent).not.toContain('Splitting the tokenizer');
     expect(card().querySelector('[title*="Splitting the tokenizer"]')).not.toBeNull();
-    expect(card().querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
+    // The dots, time and cost sit in a row above the card, not inside it.
+    const stats = () => card().querySelector('[data-canvas-card-stats]');
+    expect(stats()?.querySelector('[aria-label="1 done, 1 in progress, 1 next"]')).not.toBeNull();
+    expect(card().querySelector('[data-canvas-detailed-card] [aria-label="1 done, 1 in progress, 1 next"]')).toBeNull();
     // Its state is the sidebar's icon at the top right, not a word.
     expect(card().querySelector('[data-canvas-card-state="working"] svg, [data-canvas-card-state="working"] span')).not.toBeNull();
     expect(card().textContent).not.toContain('working');
@@ -999,23 +1002,24 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(container.contains(settingsPanel as never)).toBe(false);
     await act(async () => (dom.document.querySelector('.fixed.inset-0') as unknown as HTMLElement).click());
     expect(dom.document.querySelector('[aria-label="Chat step tracking"][role="dialog"]')).toBeNull();
-    expect(card().textContent).toContain('$0.42');
-    expect(card().textContent).toContain('1m');
+    expect(stats()?.textContent).toContain('$0.42');
+    expect(stats()?.textContent).toContain('1m');
+    expect(card().querySelector('[data-canvas-detailed-card]')?.textContent).not.toContain('$0.42');
     expect(card().style.transform).toContain('translate3d(225px, 250px, 0)');
     // It looks like the Entity's cards and sits on their darker ground.
     expect(card().classList.contains('dh-canvas-work')).toBe(true);
     expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
     // The card keeps one line; hovering it shows every step in a panel at the canvas's bottom left.
     expect(card().textContent).not.toContain('Read the parser');
-    expect(card().style.height).toBe('50px');
-    // As wide as its short name and its footer need, not a fixed width.
+    expect(card().style.height).toBe('38px');
+    // As wide as its short name needs, not a fixed width.
     expect(parseFloat(card().style.width)).toBeLessThan(200);
     const panel = () => container.querySelector('[data-canvas-steps-panel]');
     expect(panel()).toBeNull();
     await act(async () => Simulate.mouseEnter(card()));
     expect(panel()?.textContent).toContain('Read the parser');
     expect(panel()?.textContent).toContain('Run tests');
-    // Its time and cost are on the card; the panel keeps to the steps, and lists the current step once.
+    // Its time and cost are above the card; the panel keeps to the steps, and lists the current step once.
     expect(panel()?.textContent).not.toContain('$0.42');
     expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
     await act(async () => Simulate.mouseLeave(card()));
