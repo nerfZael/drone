@@ -25,6 +25,8 @@ export interface WorkItem {
   durationMs: number;
   cost: number;
   tokens: number;
+  /** Model calls with no known price, left out of `cost`. */
+  unpriced?: number;
   result?: string;
   status: string;
   /** What the worker was asked to do. */
@@ -117,7 +119,7 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
     parent: l.forkOf,
     claims: l.claims ?? [],
     durationMs: (l.endedAt ?? snapshot.t) - l.createdAt,
-    cost: l.usage?.cost ?? 0, tokens: l.usage ? tokens(l.usage) : 0,
+    cost: l.usage?.cost ?? 0, tokens: l.usage ? tokens(l.usage) : 0, unpriced: l.usage?.unpriced ?? 0,
     result: l.result,
     status: l.status, blockedBy: l.blockedBy?.limb, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor, after: l.after, kept: l.kept,
   };
@@ -151,6 +153,12 @@ export const clock = (ms: number) => {
   return s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 export const spend = (cost: number, tokens: number) => (cost > 0 ? (cost < 0.005 ? '<$0.01' : `$${cost < 10 ? cost.toFixed(2) : cost.toFixed(0)}`) : tokens > 0 ? `${tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : tokens} tok` : '—');
+
+/** Hover text for `spend`: says when the figure is tokens because no price is known, or leaves unpriced calls out. */
+export const spendTitle = (cost: number, tokens: number, unpriced = 0) =>
+  !(cost > 0) && tokens > 0 ? `${tokens.toLocaleString()} tokens; no price is known for this model, so no cost is shown`
+    : unpriced > 0 ? `Model cost at list price; ${unpriced} call${unpriced === 1 ? '' : 's'} with no known price not included`
+      : 'Model cost at list price';
 
 /** The Work tab: the canvas, loaded on demand (it brings in the graph library). */
 export function EntityWork(props: React.ComponentProps<typeof EntityWorkCanvas>) {

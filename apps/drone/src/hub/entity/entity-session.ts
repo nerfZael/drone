@@ -3,6 +3,7 @@ import path from 'node:path';
 import { chatChannel, Entity, keypadChannel, workspaceChannel, type EntityEvent, type EntitySnapshot, type Evaluator, type Mind } from '@entity/core';
 import { droneRootPath } from '../../host/paths';
 import { priceModelCall } from '../usage/priceModelCall';
+import { repriceUnpricedUsage } from './entity-usage-reprice';
 import { fileConversationStore, PiAiMind, type ConversationStore } from './entity-mind';
 import { isReasoning, type EntityModels } from './entity-profiles';
 import { createWorkSummarizer, SUMMARY_PROMPT } from './entity-summarizer';
@@ -151,7 +152,7 @@ export class EntitySession {
     const entity = this.entity;
     try {
       this.recorder = new EntityRecorder(this.sessionsDir, { ...this.config }, () => entity.snapshot(), recording);
-      entity.restore(recording.events);
+      entity.restore(repriceUnpricedUsage(recording.events, priceModelCall));
     } catch (error) {
       console.warn('[entity] could not resume session', latest.id, error instanceof Error ? error.message : error);
       this.recorder?.finish('could not be resumed');

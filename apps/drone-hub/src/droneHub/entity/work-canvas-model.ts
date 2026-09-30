@@ -48,6 +48,7 @@ export interface GroupNode {
   members: WorkItem[];
   cost: number;
   tokens: number;
+  unpriced: number;
   durationMs: number;
 }
 
@@ -299,6 +300,7 @@ function stacksFor(list: WorkItem[], col: Map<string, number>, groupTitles: Map<
       members,
       cost: members.reduce((sum, w) => sum + w.cost, 0),
       tokens: members.reduce((sum, w) => sum + w.tokens, 0),
+      unpriced: members.reduce((sum, w) => sum + (w.unpriced ?? 0), 0),
       durationMs: Math.max(...members.map(w => w.durationMs)),
     });
     for (const w of members) grouped.add(w.id);

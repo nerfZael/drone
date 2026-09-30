@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Background, BaseEdge, Handle, Position, ReactFlow, ViewportPortal, type Edge, type EdgeProps, type Node, type NodeChange, type NodeProps, type ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
-import { Dot, Pips, Steps, STATE_COLOR, WorkerDetail, clock, spend, type WorkItem } from './EntityWork';
+import { Dot, Pips, Steps, STATE_COLOR, WorkerDetail, clock, spend, spendTitle, type WorkItem } from './EntityWork';
 import { EntityComposer, EntityMessage, questionAnswer, type ChatOption, type ChatQuestion } from './EntityChat';
 import { WorkingElapsedStatus } from '../chat/WorkingElapsedStatus';
 import { LimbLog, LimbPanel } from './EntityLimbPanel';
@@ -359,7 +359,7 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
         {finished && !open ? null : <Pips w={w} />}
         {card.chips.length ? <span className="flex gap-1">{card.chips.map(c => <ChipView key={c.id} chip={c} />)}</span> : null}
         <span className="ml-auto font-mono text-[11.5px] tabular-nums">{clock(w.durationMs)}</span>
-        <span className="font-mono text-[11.5px] tabular-nums" title="Model cost at list price">{spend(w.cost, w.tokens)}</span>
+        <span className="font-mono text-[11.5px] tabular-nums" title={spendTitle(w.cost, w.tokens, w.unpriced)}>{spend(w.cost, w.tokens)}</span>
       </div>
       {handles}
     </div>
@@ -434,7 +434,7 @@ function GroupView({ data }: NodeProps<Node<GroupData, 'batch'>>) {
       <div className="flex items-center gap-2.5 text-[var(--muted)]">
         <span className="text-[12px]">{count('done')}/{group.members.length} done</span>
         <span className="ml-auto font-mono text-[11.5px] tabular-nums">{clock(group.durationMs)}</span>
-        <span className="font-mono text-[11.5px] tabular-nums">{spend(group.cost, group.tokens)}</span>
+        <span className="font-mono text-[11.5px] tabular-nums" title={spendTitle(group.cost, group.tokens, group.unpriced)}>{spend(group.cost, group.tokens)}</span>
       </div>
       {handles}
     </div>

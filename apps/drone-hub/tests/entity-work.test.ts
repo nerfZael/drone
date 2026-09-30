@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
-import { deriveWork } from '../src/droneHub/entity/EntityWork';
+import { deriveWork, spend, spendTitle } from '../src/droneHub/entity/EntityWork';
 
 let seq = 0;
 const ev = (t: number, type: string, by: string, data: Record<string, unknown> = {}): EntityEvent => ({ seq: ++seq, t, at: t, type, by, data });
@@ -55,4 +55,11 @@ test('deriveWork: states, links, blocks, questions and spend come from the snaps
   expect(w['task-5'].after).toBe('task-1');
   expect(w['task-6']).toMatchObject({ state: 'think', label: 'thinking' });
   expect(costTotal).toBeCloseTo(0.12);
+});
+
+test('spendTitle: says why a card shows tokens, and when unpriced calls are left out', () => {
+  expect(spend(0, 889_000)).toBe('889k tok');
+  expect(spendTitle(0, 889_000, 8)).toBe('889,000 tokens; no price is known for this model, so no cost is shown');
+  expect(spendTitle(1.25, 900_000, 2)).toBe('Model cost at list price; 2 calls with no known price not included');
+  expect(spendTitle(1.25, 900_000)).toBe('Model cost at list price');
 });
