@@ -1,5 +1,6 @@
 import { beginTerminalOpen, markTerminalModuleReady } from './terminal-performance';
 import React from 'react';
+import type { Terminal } from '@xterm/xterm';
 import type { PaneKey } from '../app/pane-key';
 import { UiPaneState, UiPanel, UiPanelBody, UiPanelStatusStrip } from '../../ui/components';
 import '@xterm/xterm/css/xterm.css';
@@ -151,8 +152,10 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
       });
     });
     observer.observe(host.current);
+    const stopFollowing = followCursorWhenCollapsed(host.current, acquired.terminal, acquired.element);
     return () => {
       if (frame != null) cancelAnimationFrame(frame);
+      stopFollowing();
       observer.disconnect();
       unsubscribe();
       acquired.release();
@@ -213,7 +216,7 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
   }));
   const error = closeError || state?.error;
   return (
-    <UiPanel flush surface="alternate" className="relative h-full w-full">
+    <UiPanel flush surface="alternate" className="relative h-full w-full" data-dh-collapsed-follow="">
       {error && (
         <UiPanelStatusStrip tone="danger">
           {error}{' '}
@@ -268,4 +271,36 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
       </div>
     </UiPanel>
   );
+}
+
+/**
+ * With expand on focus, a collapsed terminal keeps its full size and shows
+ * only a strip. Output starts at the top, so the strip is moved to the
+ * cursor's line rather than the terminal's last row (see styles.css).
+ */
+function followCursorWhenCollapsed(host: HTMLElement, terminal: Terminal, element: HTMLElement): () => void {
+  let frame: number | null = null;
+  const update = () => {
+    frame = null;
+    const panel = host.closest<HTMLElement>('[data-dh-collapsed-follow]');
+    const screen = element.querySelector<HTMLElement>('.xterm-screen');
+    if (!panel || !screen || !terminal.rows) return;
+    const buffer = terminal.buffer.active;
+    const screenRect = screen.getBoundingClientRect();
+    const rowHeight = screenRect.height / terminal.rows;
+    // Scrolled back into history: show the strip as it is.
+    const offset = buffer.viewportY === buffer.baseY
+      ? panel.getBoundingClientRect().bottom - (screenRect.top + (buffer.cursorY + 1) * rowHeight) - 4
+      : 0;
+    panel.style.setProperty('--dh-collapsed-follow-offset', `${Math.max(0, Math.round(offset))}px`);
+  };
+  const schedule = () => {
+    if (frame == null) frame = requestAnimationFrame(update);
+  };
+  const disposables = [terminal.onCursorMove(schedule), terminal.onScroll(schedule), terminal.onResize(schedule)];
+  schedule();
+  return () => {
+    if (frame != null) cancelAnimationFrame(frame);
+    for (const disposable of disposables) disposable.dispose();
+  };
 }

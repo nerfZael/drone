@@ -11,6 +11,7 @@ import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
 import { DockTabShell, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
+import { OCCUPIED_GROUP_CONSTRAINTS, useWorkspacePanelExpansion } from './workspace-panel-expansion';
 import { ChatsDockTab } from './ChatsDockTab';
 import { TerminalHeaderControlsContext } from '../terminal/terminal-header-controls-context';
 import {
@@ -863,7 +864,6 @@ function WorkspaceWatermark() {
   return <div className="h-full" data-workspace-empty-slot="" />;
 }
 
-const OCCUPIED_GROUP_CONSTRAINTS = { minimumWidth: 100, minimumHeight: 100 };
 const EMPTY_SLOT_CONSTRAINTS = { minimumWidth: 0, minimumHeight: 0 };
 
 /**
@@ -985,6 +985,7 @@ export function DockableDroneWorkspace({
   const renderFilePane = fileWindows?.render;
   const workspaceElementRef = React.useRef<HTMLDivElement | null>(null);
   const [readyVersion, setReadyVersion] = React.useState(0);
+  useWorkspacePanelExpansion({ apiRef, workspaceRef: workspaceElementRef, readyVersion });
   const initializingLayoutRef = React.useRef(true);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());

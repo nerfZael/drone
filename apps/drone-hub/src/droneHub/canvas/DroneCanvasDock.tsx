@@ -1052,7 +1052,6 @@ export function DroneCanvasDock({
   const inlineRenameSettledRef = React.useRef(false);
   const deletingChatNodeById = useChatDeletionStore((state) => state.deletingByNodeId);
   const [canvasControlsExpanded, setCanvasControlsExpanded] = React.useState(false);
-  const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [messageReferences, setMessageReferences] = React.useState<ComposerReference[]>([]);
   const [composerDropHover, setComposerDropHover] = React.useState(false);
@@ -1709,7 +1708,6 @@ export function DroneCanvasDock({
       setSelectedDroneIds([draftNodeId]);
       setMessageDraft('');
       setMessageError(null);
-      setMessageBarExpanded(true);
       if (options?.focus === 'canvas') focusViewport();
       else focusMessageInput();
     },
@@ -1807,7 +1805,6 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     if (selectedDroneIds.length > 0) return;
-    setMessageBarExpanded(false);
     setMessageError(null);
   }, [selectedDroneIds.length]);
 
@@ -2054,7 +2051,6 @@ export function DroneCanvasDock({
         const references = composerReferencesFromNodeIds(nodeDrag.droneIds);
         if (references.length) {
           setMessageReferences((current) => mergeComposerReferences(current, references));
-          setMessageBarExpanded(true);
         }
       } else if (nodeDrag?.moved) {
         suppressNodeClickRef.current = true;
@@ -2109,7 +2105,6 @@ export function DroneCanvasDock({
         const selected = getView().selectedDroneIds;
         if (selected.length === 1) {
           selectionAnchorRef.current = selected[0];
-          setMessageBarExpanded(true);
           activateCanvasNode(selected[0]);
         }
       }
@@ -2177,15 +2172,9 @@ export function DroneCanvasDock({
 
   const openMessageBar = React.useCallback(() => {
     if (selectedDroneIds.length === 0) return;
-    setMessageBarExpanded(true);
     setMessageError(null);
     focusMessageInput();
   }, [focusMessageInput, selectedDroneIds.length]);
-
-  const closeMessageBar = React.useCallback(() => {
-    setMessageBarExpanded(false);
-    setMessageError(null);
-  }, []);
 
   const sendCanvasPrompt = React.useCallback(async (payload: ChatSendPayload, context: ChatSendContext, overrides: ChatModelOverrides = {}): Promise<boolean> => {
     if (selectedDroneIds.length === 0) return false;
@@ -2509,7 +2498,6 @@ export function DroneCanvasDock({
         suppressNodeClickRef.current = false;
         return;
       }
-      setMessageBarExpanded(true);
       const additive = event.ctrlKey || event.metaKey;
       if (additive || event.shiftKey) {
         setSelectedDroneIds(selectSidebarChatNodes({ currentNodeIds: selectedDroneIds, orderedNodeIds: nodeOrder,
@@ -2937,7 +2925,6 @@ export function DroneCanvasDock({
         event.stopPropagation();
         // A canvas with no recipients must not fall through to another chat.
         if (!selectedDroneIds.length || !activeComposer) return;
-        setMessageBarExpanded(true);
         requestAnimationFrame(() => {
           const id = viewportRef.current?.querySelector<HTMLElement>('[data-canvas-message-bar] [data-active-composer-id]')?.dataset.activeComposerId;
           if (!id) return;
@@ -2997,10 +2984,6 @@ export function DroneCanvasDock({
       if (key === 'escape') {
         event.preventDefault();
         event.stopPropagation();
-        if (messageBarExpanded) {
-          closeMessageBar();
-          return;
-        }
         clearSelection();
         return;
       }
@@ -3039,12 +3022,10 @@ export function DroneCanvasDock({
       canvasForward,
       activeComposer,
       clearSelection,
-      closeMessageBar,
       copyCanvasNodesForClone,
       createDraftShortcutBinding,
       boardDroneId,
       droneScope,
-      messageBarExpanded,
       nodeOrder,
       openMessageBar,
       cancelActivePointerInteractions,
@@ -3475,13 +3456,11 @@ export function DroneCanvasDock({
           onDraftContentChange={(content) => { composerHasAttachmentsRef.current = content.attachments.length > 0; }}
           selectedCount={selectedDroneIds.length}
           selectedLabel={selectedMessageLabel}
-          expanded={messageBarExpanded}
           sending={messageSending}
           draft={selectedMessageDraft}
           spawnCountEnabled={Boolean(selectedDraftNodeId)}
           spawnCount={draftSpawnCount}
           error={messageError}
-          onExpand={openMessageBar}
           onSpawnCountChange={onDraftSpawnCountChange}
           onSpawnCountBlur={onDraftSpawnCountBlur}
           onDraftChange={(next) => {

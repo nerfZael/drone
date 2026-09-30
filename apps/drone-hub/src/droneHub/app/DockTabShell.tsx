@@ -3,11 +3,13 @@ import type { IDockviewPanelHeaderProps } from 'dockview';
 import { usePanelTitle } from './ChatWindowTab';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 import { desktopToolTabSupported, desktopToolWindowsAvailable, useDesktopToolWindows } from './desktop-tool-windows';
+import { expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPreferences } from './workspace-panel-expansion';
 
 /**
  * A dock tab that carries its own controls before the close button: the
  * panel's name, then whatever buttons the panel adds, then a divider and the X.
- * Middle-click closes, like dockview's stock tab.
+ * Middle-click closes, like dockview's stock tab; double-click expands the
+ * window over its neighbours until the next double-click.
  */
 export function DockTabShell({ api, children }: {
   api: IDockviewPanelHeaderProps['api'];
@@ -31,10 +33,14 @@ export function DockTabShell({ api, children }: {
       onPointerLeave={() => {
         middleButtonDown.current = false;
       }}
+      onDoubleClick={(event) => {
+        if ((event.target as Element).closest('button, .dv-default-tab-action')) return;
+        if (api.group) requestPanelExpansionToggle(api.group.id);
+      }}
     >
       <span className="dv-default-tab-content">{title}</span>
       {/* Controls that render nothing (outside the desktop app) leave the slot empty, and CSS drops the divider with it. */}
-      <span className="dh-dock-tab-controls">{children}</span>
+      <span className="dh-dock-tab-controls"><ExpandOnFocusButton panelId={api.id} />{children}</span>
       <span className="dh-dock-tab-divider" aria-hidden="true" />
       <div
         className="dv-default-tab-action"
@@ -54,6 +60,37 @@ export function DockTabShell({ api, children }: {
 
 /** Stops a tab control's press from dragging or activating the tab. */
 export const stopTabEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+
+/** Turns expand on focus on or off for this kind of window, in every layout. */
+function ExpandOnFocusButton({ panelId }: { panelId: string | undefined }) {
+  const key = panelId ? expansionKeyForPanel(panelId) : '';
+  const on = usePanelExpansionPreferences((state) => Boolean(key && state.enabled[key]));
+  const toggle = usePanelExpansionPreferences((state) => state.toggle);
+  if (!key) return null;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      className="dh-dock-tab-button"
+      data-expand-on-focus-toggle=""
+      title={on
+        ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
+        : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
+      aria-label="Expand on focus"
+      onPointerDown={stopTabEvent}
+      onDoubleClick={stopTabEvent}
+      onClick={(event) => {
+        stopTabEvent(event);
+        toggle(key);
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10 2h4v4M6 14H2v-4M14 2 9.5 6.5M2 14l4.5-4.5" />
+      </svg>
+    </button>
+  );
+}
 
 /**
  * Opens the tool in a desktop window that follows the selected drone until

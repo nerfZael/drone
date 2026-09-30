@@ -1,4 +1,5 @@
 import React from 'react';
+import { measureDiffOverflowPx, usePanelExpansionMeasure } from '../app/workspace-panel-expansion';
 import { createPortal } from 'react-dom';
 import { ChangesExplorerContext } from './changes-explorer-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -681,6 +682,8 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   const commitInflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
+  // Expand on focus widens the diff until most changed lines stop wrapping.
+  usePanelExpansionMeasure(dockRootRef, () => (dockRootRef.current ? measureDiffOverflowPx(dockRootRef.current) ?? 0 : null));
   const explorerRowHeightPx = Math.round(24 * explorerZoom);
   const explorerIconSizePx = Math.round(13 * explorerZoom * 10) / 10;
   const explorerLeadingSlotPx = Math.round(14 * explorerZoom * 10) / 10;

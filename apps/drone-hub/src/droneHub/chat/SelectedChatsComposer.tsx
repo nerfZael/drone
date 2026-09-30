@@ -29,7 +29,6 @@ type SelectedChatsComposerProps = {
   selectedLabel?: string | null;
   targets: CanvasChatTarget[];
   droneById: Record<string, DroneSummary>;
-  expanded: boolean;
   sending: boolean;
   draft: string;
   spawnCountEnabled?: boolean;
@@ -37,7 +36,6 @@ type SelectedChatsComposerProps = {
   hasDrafts?: boolean;
   spawnAgentKey?: string;
   error: string | null;
-  onExpand: () => void;
   onDraftChange: (next: string) => void;
   onDraftContentChange?: ChatInputProps['onDraftContentChange'];
   onSpawnCountChange?: (next: string) => void;
@@ -58,7 +56,6 @@ type SelectedChatsComposerProps = {
 export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const surface = props.surface ?? 'canvas';
   const [voiceRecordingActive, setVoiceRecordingActive] = React.useState(false);
-  const expanded = props.expanded || voiceRecordingActive;
   // Clearing canvas selection hides the current composition; it is not a switch
   // from a new-drone draft to the regular broadcast draft.
   const draftPropsRef = React.useRef(props);
@@ -73,7 +70,6 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const addReferences = (next: ComposerReference[]) => {
     if (!next.length) return;
     props.onReferencesChange(mergeComposerReferences(referencesRef.current, next));
-    props.onExpand();
   };
   const addReferencesRef = React.useRef(addReferences);
   addReferencesRef.current = addReferences;
@@ -153,44 +149,36 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
           event.stopPropagation();
         }
       }}>
-      {!expanded ? <button type="button" onClick={props.onExpand}
-        className={`mx-auto flex h-7 items-center rounded-md border bg-[var(--panel-overlay)] px-3 text-11 text-[var(--accent)] shadow-lg ${
-          dropActive ? 'border-[var(--accent)]' : 'border-[var(--accent-muted)]'}`}>
-        Message {targetLabel}
-      </button> : null}
-      {/* Keep the draft, attachments and recording alive when the bar is collapsed. */}
-      <div hidden={!expanded}>
-        <ChatInput resetKey={draftProps.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${draftProps.selectionKey}`}
-          onVoiceRecordingActiveChange={setVoiceRecordingActive}
-          draftValue={draftProps.draft} onDraftValueChange={draftProps.onDraftChange} onDraftContentChange={draftProps.onDraftContentChange}
-          promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
-          onSend={async (payload, context) => {
-            if (props.selectedCount === 0) return false;
-            const references = props.references;
-            const sent = await props.onSend({ ...payload, prompt: appendComposerReferences(payload.prompt, references, referenceDroneNames) }, context, overrides);
-            if (sent) {
-              setOverrides({});
-              props.onReferencesChange(referencesRef.current.filter((reference) => !references.includes(reference)));
-            }
-            return sent;
-          }} referenceTiles={referenceTiles} referenceDropActive={dropActive} composerTrailingControls={
-            // In the toolbar, where the agent chat keeps its model picker.
-            props.draftControls?.trailing ?? <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
-              draftAgentKey={props.hasDrafts ? props.spawnAgentKey : undefined}
-              value={overrides} onChange={setOverrides} disabled={props.sending || props.selectedCount === 0} />
-          } composerTopAction={
-            // One line of context above the composer, like the agent chat's runtime/branch row.
-            <div data-selected-chats-composer-meta="true" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-11 text-[var(--muted)]">
-              <span className="min-w-0 flex-1 truncate" title={targetLabel}>{props.selectedCount ? `To ${targetLabel}` : 'Select chats to message'}</span>
-              {props.draftControls?.meta ?? null}
-              {props.spawnCountEnabled ? <label className="flex flex-shrink-0 items-center gap-1">Spawn
-                <input aria-label="Number of drones" value={props.spawnCount ?? '1'} inputMode="numeric" pattern="[0-9]*"
-                  onChange={(event) => props.onSpawnCountChange?.(event.target.value)} onBlur={props.onSpawnCountBlur}
-                  className="h-5 w-9 rounded border border-[var(--border)] bg-[var(--panel)] px-1 text-[var(--fg)]" />
-              </label> : null}
-            </div>
-          } />
-      </div>
+      <ChatInput resetKey={draftProps.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${draftProps.selectionKey}`}
+        onVoiceRecordingActiveChange={setVoiceRecordingActive}
+        draftValue={draftProps.draft} onDraftValueChange={draftProps.onDraftChange} onDraftContentChange={draftProps.onDraftContentChange}
+        promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
+        onSend={async (payload, context) => {
+          if (props.selectedCount === 0) return false;
+          const references = props.references;
+          const sent = await props.onSend({ ...payload, prompt: appendComposerReferences(payload.prompt, references, referenceDroneNames) }, context, overrides);
+          if (sent) {
+            setOverrides({});
+            props.onReferencesChange(referencesRef.current.filter((reference) => !references.includes(reference)));
+          }
+          return sent;
+        }} referenceTiles={referenceTiles} referenceDropActive={dropActive} composerTrailingControls={
+          // In the toolbar, where the agent chat keeps its model picker.
+          props.draftControls?.trailing ?? <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
+            draftAgentKey={props.hasDrafts ? props.spawnAgentKey : undefined}
+            value={overrides} onChange={setOverrides} disabled={props.sending || props.selectedCount === 0} />
+        } composerTopAction={
+          // One line of context above the composer, like the agent chat's runtime/branch row.
+          <div data-selected-chats-composer-meta="true" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-11 text-[var(--muted)]">
+            <span className="min-w-0 flex-1 truncate" title={targetLabel}>{props.selectedCount ? `To ${targetLabel}` : 'Select chats to message'}</span>
+            {props.draftControls?.meta ?? null}
+            {props.spawnCountEnabled ? <label className="flex flex-shrink-0 items-center gap-1">Spawn
+              <input aria-label="Number of drones" value={props.spawnCount ?? '1'} inputMode="numeric" pattern="[0-9]*"
+                onChange={(event) => props.onSpawnCountChange?.(event.target.value)} onBlur={props.onSpawnCountBlur}
+                className="h-5 w-9 rounded border border-[var(--border)] bg-[var(--panel)] px-1 text-[var(--fg)]" />
+            </label> : null}
+          </div>
+        } />
     </div>
   );
 }

@@ -3324,6 +3324,37 @@ select:disabled optgroup {
   background: var(--border);
 }
 
+/* Expand on focus: the window floats over its neighbours; its grid slot stays where it was. */
+.dh-dockable-workspace [data-dh-expanded] {
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45), 0 0 0 1px var(--accent-muted);
+}
+
+/*
+ * A collapsed window whose content must not shrink (a terminal would redraw)
+ * keeps its expanded size, clipped to the part nearest its bottom or start.
+ */
+.dh-dockable-workspace [data-dh-expand-keep] .dv-content-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.dh-dockable-workspace [data-dh-expand-keep="y"] .dv-content-container > * {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: var(--dh-expand-keep-size) !important;
+}
+
+.dh-dockable-workspace [data-dh-expand-keep="x"] .dv-content-container > * {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--dh-expand-keep-size) !important;
+}
+
+/* The terminal moves its cursor line to the bottom of the collapsed strip. */
+.dh-dockable-workspace [data-dh-expand-keep="y"] [data-dh-collapsed-follow] {
+  transform: translateY(var(--dh-collapsed-follow-offset, 0px));
+}
+
 /* The slot a tab's controls render into; it keeps the tab's own flex layout. */
 .dh-dock-tab-controls {
   display: contents;

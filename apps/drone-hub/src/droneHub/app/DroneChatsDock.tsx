@@ -338,7 +338,6 @@ function ChatsWindowComposer({ drone, droneById, selectedNames, onSendToChats }:
   return <SelectedChatsComposer surface="chats" selectionKey={`chats-window:${drone.id}`}
     selectedCount={selectedNames.length} selectedLabel={selectedNames.join(', ')}
     targets={targets} droneById={{ ...droneById, [drone.id]: drone }}
-    expanded onExpand={() => {}}
     sending={sending} draft={draft} onDraftChange={setDraft} error={error} onSend={send}
     references={references} onReferencesChange={setReferences} />;
 }

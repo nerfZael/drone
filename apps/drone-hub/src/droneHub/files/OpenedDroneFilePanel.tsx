@@ -53,6 +53,7 @@ import {
   useMarkdownPreviewAlignment,
 } from './markdown-preview-alignment';
 import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from './editor-monaco-options';
+import { targetCodeColumns, usePanelExpansionMeasure, visualLineLength } from '../app/workspace-panel-expansion';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 import {
@@ -930,6 +931,23 @@ export function OpenedDroneFilePanel({
       onSave={onSaveFile}
     />
   );
+  // Expand on focus widens the editor just enough for most of its lines; previews ask for nothing.
+  usePanelExpansionMeasure(panelRef, () => {
+    const editor = editorRef.current;
+    const monaco = editorMonacoRef.current;
+    const model = editor?.getModel();
+    if (!openedFileEditorVisible || !editor || !monaco || !model) return 0;
+    const tabSize = model.getOptions().tabSize;
+    const lineCount = model.getLineCount();
+    // Large files are sampled; a percentile does not need every line.
+    const step = Math.max(1, Math.floor(lineCount / 20_000));
+    const lengths: number[] = [];
+    for (let line = 1; line <= lineCount; line += step) lengths.push(visualLineLength(model.getLineContent(line), tabSize));
+    const columns = targetCodeColumns(lengths);
+    if (!columns) return 0;
+    const characterWidth = editor.getOption(monaco.editor.EditorOption.fontInfo).typicalHalfwidthCharacterWidth;
+    return Math.max(0, Math.ceil((columns + 2) * characterWidth - editor.getLayoutInfo().contentWidth));
+  });
   return (
     <React.Profiler id="file-pane" onRender={(_id, _phase, duration) => {
       const id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });

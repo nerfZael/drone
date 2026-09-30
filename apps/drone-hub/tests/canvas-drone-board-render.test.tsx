@@ -657,10 +657,9 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect((input() as unknown as HTMLTextAreaElement).value).toBe('Keep my attachment');
     expect(container.textContent).toContain('notes.txt');
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('plan')}"]`) as unknown as Element, { ctrlKey: true }));
-    await act(async () => (viewport() as unknown as HTMLElement).focus());
-    await key(viewport() as unknown as Element, 'Escape');
+    // The full composer stays open with a selection; there is no collapsed "Message …" button.
+    expect(Array.from(container.querySelectorAll('button')).some(b => b.textContent?.startsWith('Message '))).toBe(false);
     expect(container.textContent).toContain('notes.txt');
-    await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent?.startsWith('Message ')) as unknown as HTMLButtonElement).click());
     await key(input() as unknown as Element, 'Tab');
     expect(sends[2].payload.attachments[0]).toMatchObject({ name: 'notes.txt', dataBase64: 'aGVsbG8=' });
     expect(sends[2].context.deliveryMode).toBe('asap');
@@ -905,7 +904,7 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(card(chatCard).textContent).toBe('default');
     // A selected drone card names the chat the composer sends to, then the drone.
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
-    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).toContain('Message default (Alpha)');
+    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).toContain('To default (Alpha)');
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
 
     // The global canvas draws a copy's line to its original, not to the drone.
