@@ -34,7 +34,13 @@ async function capturePayload(model: Model<"openai-codex-responses">, reasoning?
 }
 
 describe("openai codex responses", () => {
-	for (const id of ["gpt-6-sol", "gpt-6-luna"] as const) {
+	test("never sends none or minimal reasoning for GPT-6.1 Sol", async () => {
+		const model = getModel("openai-codex", "gpt-6.1-sol");
+		expect((await capturePayload(model))?.reasoning).toBeUndefined();
+		expect((await capturePayload(model, "minimal"))?.reasoning.effort).toBe("low");
+	});
+
+	for (const id of ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] as const) {
 		test(`sends ${id} and its selected reasoning without downgrading`, async () => {
 			const model = getModel("openai-codex", id);
 			for (const level of ["low", "medium", "high", "xhigh"] as const) {

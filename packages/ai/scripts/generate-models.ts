@@ -101,7 +101,8 @@ function supportsOpenAiXhigh(modelId: string): boolean {
 		modelId.includes("gpt-5.4") ||
 		modelId.includes("gpt-5.5") ||
 		modelId.includes("gpt-5.6") ||
-		isGpt6SolOrLuna(modelId)
+		isGpt6SolOrLuna(modelId) ||
+		modelId === "gpt-6.1-sol"
 	);
 }
 
@@ -171,6 +172,9 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	}
 	if (model.provider === "openai-codex" && supportsOpenAiXhigh(model.id)) {
 		mergeThinkingLevelMap(model, { minimal: "low" });
+	}
+	if (model.id === "gpt-6.1-sol") {
+		mergeThinkingLevelMap(model, { off: null, minimal: null, xhigh: "xhigh" });
 	}
 	if (isGpt6SolOrLuna(model.id)) {
 		mergeThinkingLevelMap(model, { minimal: null });
@@ -1206,7 +1210,9 @@ async function generateModels() {
 	// Add missing gpt models
 	// Official metadata: https://developers.openai.com/api/docs/models/gpt-6-sol
 	// https://developers.openai.com/api/docs/models/gpt-6-luna and /api/docs/pricing
+	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
 	const latestGptModels = [
+		{ id: "gpt-6.1-sol", name: "GPT-6.1 Sol", cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 } },
 		{ id: "gpt-6-sol", name: "GPT-6 Sol", cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
 		{ id: "gpt-6-luna", name: "GPT-6 Luna", cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 } },
 		{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } },

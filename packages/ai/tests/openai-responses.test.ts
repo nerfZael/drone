@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamSimpleOpenAIResponses } from "../src/providers/openai-responses.js";
 import { parseResponsesUsage } from "../src/providers/openai-responses-shared.js";
-import type { Context, Model } from "../src/types.js";
+import type { Context, Model, ThinkingLevel } from "../src/types.js";
 
 const context: Context = {
 	systemPrompt: "You are concise.",
@@ -10,10 +10,11 @@ const context: Context = {
 	tools: [],
 };
 
-async function capturePayload<TApi extends "openai-responses">(model: Model<TApi>): Promise<any> {
+async function capturePayload<TApi extends "openai-responses">(model: Model<TApi>, reasoning?: ThinkingLevel): Promise<any> {
 	let payload: any;
 	const stream = streamSimpleOpenAIResponses(model, context, {
 		apiKey: "test-key",
+		reasoning,
 		cacheRetention: "none",
 		onPayload: (nextPayload) => {
 			payload = nextPayload;
@@ -26,6 +27,16 @@ async function capturePayload<TApi extends "openai-responses">(model: Model<TApi
 }
 
 describe("openai responses", () => {
+	test("sends GPT-6.1 Sol with supported reasoning", async () => {
+		const model = getModel("openai", "gpt-6.1-sol");
+		for (const level of ["low", "medium", "high", "xhigh", "minimal"] as const) {
+			const payload = await capturePayload(model, level);
+			expect(payload.model).toBe("gpt-6.1-sol");
+			expect(payload.reasoning.effort).toBe(level === "minimal" ? "low" : level);
+		}
+		expect((await capturePayload(model))?.reasoning).toBeUndefined();
+	});
+
 	test("separates GPT-5.6 cache reads and writes from uncached input", () => {
 		const usage = parseResponsesUsage({
 			input_tokens: 100,

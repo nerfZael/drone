@@ -11,13 +11,31 @@ describe('native model catalog', () => {
   test('offers GPT-6 models for OpenAI and Codex native agents', () => {
     const catalog = buildNativeModelCatalog(HUB_AGENT_MODEL_OPTIONS);
     for (const provider of ['openai', 'codex']) {
-      for (const id of ['gpt-6-sol', 'gpt-6-luna']) {
+      for (const id of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
         expect(catalog.find((model) => model.provider === provider && model.id === id))
           .toMatchObject({
-            reasoningLevels: provider === 'openai' ? ['off', 'low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high', 'xhigh'],
+            reasoningLevels: provider === 'openai' && id !== 'gpt-6.1-sol' ? ['off', 'low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high', 'xhigh'],
             defaultReasoningLevel: 'medium',
           });
       }
+    }
+  });
+
+  test('companion accepts GPT-6.1 Sol for both providers and rejects unsupported reasoning', async () => {
+    for (const provider of ['openai', 'codex'] as const) {
+      for (const thinkingLevel of ['low', 'medium', 'high', 'xhigh']) {
+        expect(normalizeCompanionSettings({
+          ...DEFAULT_COMPANION_SETTINGS, provider, model: 'gpt-6.1-sol', thinkingLevel,
+        })).toMatchObject({ provider, model: 'gpt-6.1-sol', thinkingLevel });
+      }
+      for (const thinkingLevel of ['off', 'minimal']) {
+        expect(() => normalizeCompanionSettings({
+          ...DEFAULT_COMPANION_SETTINGS, provider, model: 'gpt-6.1-sol', thinkingLevel,
+        })).toThrow('Companion model selection is not supported');
+      }
+      const model = await resolveNativeModel(provider, 'gpt-6.1-sol', true);
+      expect(model.id).toBe('gpt-6.1-sol');
+      expect(model.contextWindow).toBe(provider === 'openai' ? 1050000 : 272000);
     }
   });
 
@@ -26,13 +44,13 @@ describe('native model catalog', () => {
     await withTempDroneDataDir('gpt6-catalog-', async () => {
       resetHubSettingsRepositoryForTests();
       try {
-        await saveCodexCatalog(['gpt-6-sol', 'gpt-6-luna'].map((id) => ({
+        await saveCodexCatalog(['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'].map((id) => ({
           id, label: id, reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
           defaultReasoningLevel: 'medium',
         })));
         await loadCodexCatalog();
         const catalog = buildNativeModelCatalog(HUB_AGENT_MODEL_OPTIONS, undefined, 'codex');
-        for (const id of ['gpt-6-sol', 'gpt-6-luna']) {
+        for (const id of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
           const selected = catalog.find((model) => model.id === id)!;
           expect(selected.defaultReasoningLevel).toBe('medium');
           expect(selected.reasoningLevels).toEqual(['low', 'medium', 'high', 'xhigh']);

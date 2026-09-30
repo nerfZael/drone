@@ -18,6 +18,21 @@ describe("model registry", () => {
 		}
 	}
 
+	for (const provider of ["openai", "openai-codex"] as const) {
+		it(`resolves ${provider}/gpt-6.1-sol without unsupported reasoning levels`, () => {
+			const model = getModel(provider, "gpt-6.1-sol");
+			expect(model.id).toBe("gpt-6.1-sol");
+			expect(model.api).toBe(provider === "openai" ? "openai-responses" : "openai-codex-responses");
+			expect(model.contextWindow).toBe(provider === "openai" ? 1050000 : 272000);
+			expect(model.maxTokens).toBe(128000);
+			expect(model.input).toEqual(["text", "image"]);
+			expect(model.cost).toEqual({ input: 2, output: 10, cacheRead: 0.1, cacheWrite: provider === "openai" ? 2.5 : 0 });
+			expect(getSupportedThinkingLevels(model)).toEqual(["low", "medium", "high", "xhigh"]);
+			expect(model.thinkingLevelMap?.off).toBeNull();
+			expect(model.thinkingLevelMap?.minimal).toBeNull();
+		});
+	}
+
 	it("includes Gemini 3.5 Flash-Lite with its documented thinking levels", () => {
 		const model = getModel("google", "gemini-3.5-flash-lite");
 
