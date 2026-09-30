@@ -9,6 +9,8 @@ type Bundled = Pick<UsagePrice, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>
  * shows what it would cost at list price.
  */
 const BUNDLED: Record<string, Bundled> = {
+  // https://developers.openai.com/api/docs/pricing (standard rates, verified 2026-09-30)
+  'gpt-6.1-sol': { input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, longContext: { inputTokensAbove: 272_000, input: 4, cacheRead: 0.2, cacheWrite: 5, output: 15 } },
   'gpt-6-sol': { input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, longContext: { inputTokensAbove: 272_000, input: 4, cacheRead: 0.4, cacheWrite: 5, output: 15 } },
   'gpt-6-luna': { input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, longContext: { inputTokensAbove: 272_000, input: 0.2, cacheRead: 0.02, cacheWrite: 0.25, output: 0.75 } },
 };

@@ -24,22 +24,44 @@ test('a request is priced at list rates, each token category at its own rate, an
 test('bundled long-context rates join the catalog price, survive a catalog refresh, and leave manual prices alone', async () => {
   const store = new UsageStore(':memory:');
   const fetcher = (async () => Response.json({ openai: { models: {
+    'gpt-6.1-sol': { cost: { input: 2, output: 10, cache_read: 0.1 } },
     'gpt-6-sol': { cost: { input: 2, output: 10, cache_read: 0.2 } },
     'gpt-6-luna': { cost: { input: 0.1, output: 0.5, cache_read: 0.01 } },
   } } })) as unknown as typeof fetch;
   await refreshUsagePrices(store, fetcher);
   await new Promise(r => setTimeout(r, 5));
   store.addPrice({ provider: 'openai', model: 'gpt-6-luna', effectiveAt: new Date().toISOString(), source: 'mine', input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: null, origin: 'manual' });
-  expect(applyBundledPrices(store)).toBe(3); // sol for both providers, luna for openai-codex; the manual openai luna stays
+  expect(applyBundledPrices(store)).toBe(5); // both Sol versions for both providers, luna for openai-codex; the manual openai luna stays
   expect(applyBundledPrices(store)).toBe(0);
   const codexSol = store.currentPrice('openai-codex', 'gpt-6-sol')!;
   expect(codexSol).toMatchObject({ input: 2, cacheWrite: 2.5, origin: 'bundled', longContext: { inputTokensAbove: 272_000, output: 15 } });
+  expect(store.currentPrice('openai-codex', 'gpt-6.1-sol')).toMatchObject({ input: 2, cacheRead: 0.1, cacheWrite: 2.5, origin: 'bundled', longContext: { inputTokensAbove: 272_000, cacheRead: 0.2 } });
   expect(store.currentPrice('openai', 'gpt-6-luna')).toMatchObject({ origin: 'manual' });
   // A later catalog change keeps the long-context rates.
   const raised = (async () => Response.json({ openai: { models: { 'gpt-6-sol': { cost: { input: 3, output: 12, cache_read: 0.3 } } } } })) as unknown as typeof fetch;
   await new Promise(r => setTimeout(r, 5));
   await refreshUsagePrices(store, raised);
   expect(store.currentPrice('openai-codex', 'gpt-6-sol')).toMatchObject({ input: 3, origin: 'catalog', longContext: { inputTokensAbove: 272_000 } });
+});
+
+test('GPT-6.1 Sol is priced without a catalog entry, with long-context rates only above 272K input tokens', async () => {
+  const store = new UsageStore(':memory:');
+  applyBundledPrices(store);
+  for (const provider of ['openai', 'openai-codex']) {
+    const price = store.currentPrice(provider, 'gpt-6.1-sol')!;
+    expect(price).toMatchObject({ input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, origin: 'bundled' });
+    expect(estimateUsageCost(price, { input: 100_000, cacheRead: 150_000, cacheWrite: 22_000, output: 10_000, reasoning: null })).toBeCloseTo(0.2 + 0.015 + 0.055 + 0.1, 10);
+    expect(estimateUsageCost(price, { input: 100_001, cacheRead: 150_000, cacheWrite: 22_000, output: 10_000, reasoning: null })).toBeCloseTo(0.400004 + 0.03 + 0.11 + 0.15, 10);
+  }
+  // A catalog entry can arrive later without cache-write or long-context rates.
+  const fetcher = (async () => Response.json({ openai: { models: {
+    'gpt-6.1-sol': { cost: { input: 3, output: 12, cache_read: 0.15 } },
+  } } })) as unknown as typeof fetch;
+  await refreshUsagePrices(store, fetcher);
+  expect(applyBundledPrices(store)).toBe(0);
+  for (const provider of ['openai', 'openai-codex']) {
+    expect(store.currentPrice(provider, 'gpt-6.1-sol')).toMatchObject({ input: 3, output: 12, cacheRead: 0.15, cacheWrite: 2.5, origin: 'catalog', longContext: { inputTokensAbove: 272_000, input: 4, cacheRead: 0.2, cacheWrite: 5, output: 15 } });
+  }
 });
 
 test('a cache rate the catalog leaves out is kept from the current price', async () => {
