@@ -404,3 +404,11 @@ test('a new drone can receive Companion home files with its first message, shown
   expect(broken('/x.png')).toThrow('at most 8');
   expect(broken([''])).toThrow();
 });
+
+
+test('allows proposals to delete default; execution enforces the remaining-chat guard', () => {
+  const proposal = validateCompanionProposal({ version: 1, title: 'Remove original chat', operations: [
+    { id: 'delete', type: 'delete_chat', droneId: 'drone-1', chatName: 'default' },
+  ] });
+  expect(proposal.operations[0]).toMatchObject({ type: 'delete_chat', chatName: 'default' });
+});

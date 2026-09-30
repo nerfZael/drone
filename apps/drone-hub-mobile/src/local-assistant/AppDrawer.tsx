@@ -1,3 +1,4 @@
+import { deletableChatNames as planChatDeletion } from '@drone/hub-model/sidebar';
 import React from 'react';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -2787,7 +2788,6 @@ function AppDrawerView({
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
     const chatNodeId = sidebarChatNodeId(chatActionTarget.drone.id, chatActionTarget.chatName);
-    const defaultChatNodeId = sidebarChatNodeId(chatActionTarget.drone.id, 'default');
     const droneChatNodeIds = new Set(chatActionTarget.drone.chats.map((name) =>
       sidebarChatNodeId(chatActionTarget.drone.id, name)));
     const selectedInDrone = selectedChatNodeIds.has(chatNodeId)
@@ -2848,10 +2848,10 @@ function AppDrawerView({
         },
       });
     }
-    if ((chatActionTarget.chatName !== 'default' || selectedInDrone.some((id) => id !== defaultChatNodeId)) && onDeleteDroneChat) {
+    if (chatActionTarget.drone.chats.length > 1 && onDeleteDroneChat) {
       actions.push({
-        label: selectedInDrone.filter((id) => id !== defaultChatNodeId).length > 1
-          ? `Delete ${selectedInDrone.filter((id) => id !== defaultChatNodeId).length} selected chats`
+        label: selectedInDrone.length > 1
+          ? `Delete ${selectedInDrone.length} selected chats`
           : 'Delete chat',
         destructive: true,
         onPress: () => {
@@ -2899,8 +2899,7 @@ function AppDrawerView({
         nodeOrderByParent: droneSidebarOrder.sidebarChatNodeOrderByParent,
       });
       const groupChatNames = sidebarChatTreeChatNamesInGroup(chatTree, groupNodeId);
-      const deletableChatNames = groupChatNames
-        .filter((chatName) => chatName !== 'default');
+      const deletableChatNames = planChatDeletion(drone.chats, groupChatNames);
       actions.push({
         label: 'Rename group',
         onPress: () => setChatGroupEditor({
@@ -2928,7 +2927,7 @@ function AppDrawerView({
             setDeleteChatGroupTarget({
               path,
               chatNames: deletableChatNames,
-              defaultChatKept: groupChatNames.includes('default'),
+              defaultChatKept: groupChatNames.includes('default') && !deletableChatNames.includes('default'),
             });
             setDeleteChatTarget({ drone, chatName: deletableChatNames[0]! });
           },

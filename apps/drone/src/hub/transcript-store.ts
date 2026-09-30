@@ -1542,7 +1542,8 @@ export class ChatTranscriptRepository {
     fallbackChat?: { chatName: string; chatEntry: unknown };
   }): Promise<DeleteActiveChatStoreResult> {
     return await this.database.writeTransaction('delete active canonical chat', (connection) => {
-      if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+      const chatCount = this.listChatsWithConnection(connection, opts.droneId).chats.length;
+      if (opts.chatName === 'default' && chatCount <= 1) throw new Error('cannot delete the last default chat');
       const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
       if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
       cancelResourceSubscriptionsForChatWithConnection(connection, current.id);
@@ -1601,6 +1602,7 @@ export class ChatTranscriptRepository {
       if (!chat) {
         return { available: true, archived: false, archivedChat: null, chats: this.listChatsWithConnection(connection, opts.droneId).chats };
       }
+      if (opts.chatName === 'default' && this.listChatsWithConnection(connection, opts.droneId).chats.length <= 1) throw new Error('cannot archive the last default chat');
       const record: ArchivedChatRecord = {
         droneId: opts.droneId,
         chatName: opts.chatName,
@@ -3021,7 +3023,7 @@ export async function deleteActiveChatFromStore(opts: {
   if (store) {
     result = await store.deleteActiveChat(opts);
   } else {
-    if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+    if (opts.chatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length <= 1) throw new Error('cannot delete the last default chat');
     const current = memoryReadChat(opts.droneId, opts.chatName).chat;
     if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
     await deleteChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
@@ -3067,6 +3069,7 @@ export async function archiveChatInStore(opts: {
   if (!read.chat) {
     return { available: true, archived: false, archivedChat: null, chats: listChatsFromStore({ droneId: opts.droneId }).chats };
   }
+  if (opts.chatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length <= 1) throw new Error('cannot archive the last default chat');
   const record: ArchivedChatRecord = {
     droneId: opts.droneId,
     chatName: opts.chatName,

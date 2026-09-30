@@ -372,7 +372,7 @@ function useLocalDroneControlValue() {
       };
       const getThread = () => {
         const drone = getDrone();
-        const chatName = String(payload.chatName ?? 'default').trim() || 'default';
+        const chatName = String(payload.chatName ?? '').trim() || (drone.chats.default ? 'default' : Object.keys(drone.chats).sort()[0] ?? 'default');
         const threadId = drone.chats[chatName];
         const thread = assistant.threads.find((candidate) => candidate.id === threadId);
         if (!thread) throw new Error('Phone drone chat was not found');
@@ -873,8 +873,9 @@ function useLocalDroneControlValue() {
       if (operation === 'chat.delete') {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
-        if (!chatName || chatName === 'default')
-          throw new Error('The default chat cannot be deleted.');
+        if (!chatName) throw new Error('Chat name is required.');
+        if (Object.keys(drone.chats).length <= 1)
+          throw new Error('The last chat cannot be deleted.');
         const threadId = drone.chats[chatName];
         if (!threadId) throw new Error(`Unknown chat: ${chatName}`);
         await assistant.deleteThread(threadId);

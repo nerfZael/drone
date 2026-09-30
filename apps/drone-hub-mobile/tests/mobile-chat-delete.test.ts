@@ -38,12 +38,12 @@ describe('mobile chat deletion', () => {
     });
   });
 
-  test('never schedules the default chat for deletion', () => {
+  test('allows deleting default when another chat remains', () => {
     expect(resolveMobileChatDeletePlan({
       droneId: 'drone-1',
       chatNames: ['default', 'review'],
       targetChatName: 'default',
       selectedChatNodeIds: new Set(),
-    }).chatNames).toEqual([]);
+    }).chatNames).toEqual(['default']);
   });
 });

@@ -1,3 +1,4 @@
+import { deletableChatNames as planChatDeletion } from '@drone/hub-model/sidebar';
 import { useChatDeleting } from './chat-deletion-store';
 import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
 import React from 'react';
@@ -939,7 +940,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
                 <IconTrash className="h-3.5 w-3.5" />
               ),
               disabled:
-                selectedChatNames.every((name) => name === 'default') ||
                 chatActionsDisabled ||
                 selectedChatNames.some((name) => Boolean(deletingChats[`${drone.id}:${name}`])),
               tone: 'danger',
@@ -1134,8 +1134,7 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
     chatTreeEditor.droneId === drone.id && chatTreeEditor.parentPath === node.path;
   const canCreateNestedGroups = Object.values(tree.nodesById)
     .filter((entry) => entry.kind === 'chat').length > 1;
-  const deletableChatNames = sidebarChatTreeChatNamesInGroup(tree, node.id)
-    .filter((chatName) => chatName !== 'default');
+  const deletableChatNames = planChatDeletion(drone.chats ?? ['default'], sidebarChatTreeChatNamesInGroup(tree, node.id));
   const deletingGroupChats = deletableChatNames.some((chatName) =>
     Boolean(deletingChats[`${drone.id}:${chatName}`]));
   const directlyMuted = mutedChatIdSet.has(node.id);
@@ -2728,7 +2727,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     ) => {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim();
-      if (!droneId || !chatName || chatName === 'default') return false;
+      if (!droneId || !chatName) return false;
       const key = `${droneId}:${chatName}`;
       if (deletingChats[key]) return false;
       setDeletingChats((prev) => ({ ...prev, [key]: true }));
@@ -2772,9 +2771,9 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       .map((nodeId) => chatTreeByDrone[droneId]?.nodesById[nodeId])
       .filter((node): node is Extract<SidebarChatTreeNode, { kind: 'chat' }> => node?.kind === 'chat')
       .map((node) => node.chatName) : [];
-    const names = (selectedNames.length ? selectedNames : [fallbackChatName]).filter((name) => name !== 'default');
+    const names = planChatDeletion(droneById[droneId]?.chats ?? ['default'], selectedNames.length ? selectedNames : [fallbackChatName]);
     if (!names.length) return;
-    const defaultChatKept = selectedChatNodeIdSet.has(sidebarChatNodeId(droneId, 'default'));
+    const defaultChatKept = selectedNames.includes('default') && !names.includes('default');
     const drone = droneById[droneId];
     const confirmed = await confirmDelete(buildSidebarChatDeleteConfirmation({
       chatNames: names,
@@ -2798,7 +2797,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     const groupNodeId = sidebarChatGroupNodeId(droneId, path);
     if (!tree?.nodesById[groupNodeId]) return;
     const allChatNames = sidebarChatTreeChatNamesInGroup(tree, groupNodeId);
-    const names = allChatNames.filter((chatName) => chatName !== 'default');
+    const names = planChatDeletion(droneById[droneId]?.chats ?? ['default'], allChatNames);
     if (!names.length) return;
     const confirmed = await confirmDelete(buildSidebarChatGroupDeleteConfirmation({
       chatCount: names.length,
@@ -2807,7 +2806,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       deleteMode: props.deleteMode,
       draftChatCount: names.filter((chatName) =>
         droneById[droneId]?.draftChats?.[chatName] === true).length,
-      defaultChatKept: allChatNames.includes('default'),
+      defaultChatKept: allChatNames.includes('default') && !names.includes('default'),
     }));
     if (!confirmed) return;
     const deletedIds = new Set<string>();

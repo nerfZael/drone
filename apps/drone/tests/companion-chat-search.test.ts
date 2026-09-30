@@ -70,6 +70,11 @@ test('active chat keyword search indexes visible text and drops archived chats',
       (await searchActiveChatMessages({ query: 'cobalt deployment', droneIds: [] })).results,
     ).toEqual([]);
 
+    await upsertChatInStore({
+      droneId: 'search-drone',
+      chatName: 'review',
+      chatEntry: { id: 'surviving-chat', createdAt: '2026-08-15T11:00:00.000Z' },
+    });
     await archiveChatInStore({
       droneId: 'search-drone',
       chatName: 'default',

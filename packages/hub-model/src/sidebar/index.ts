@@ -13,3 +13,5 @@ export * from './command-queue';
 export * from './chat-groups';
 
 export { buildChatOrganizationIntent } from './buildChatOrganizationIntent';
+
+export { deletableChatNames } from './chat-deletion';

@@ -604,7 +604,7 @@ class DroneImpl implements Drone {
   }
 
   chat(name?: string): DroneChat {
-    return new DroneChatImpl(this.ctx, this, normalizeChatName(name));
+    return new DroneChatImpl(this.ctx, this, normalizeChatName(name), !String(name ?? '').trim());
   }
 
   broadcast(chatNames: string[]): ChatBroadcast {
@@ -621,22 +621,30 @@ class DroneChatImpl implements DroneChat {
     subscribe: (input?: SubscribeMessagesInput) => AsyncIterable<ChatEvent>;
   };
 
-  constructor(private readonly ctx: SDKContext, readonly drone: Drone, readonly name: string) {
+  private async resolveName(input?: RequestOptions): Promise<string> {
+    if (!this.implicitTarget) return this.name;
+    const chats = await this.ctx.transport.listChats(this.drone.id, mergeOptions(this.ctx.defaults, input));
+    const names = chats.map((chat) => chat.name);
+    return names.includes('default') ? 'default' : names.sort()[0] ?? 'default';
+  }
+
+  constructor(private readonly ctx: SDKContext, readonly drone: Drone, readonly name: string, private readonly implicitTarget = false) {
     const sdkCtx = this.ctx;
     const targetDrone = this.drone;
-    const chatName = this.name;
+    const resolveName = (input?: RequestOptions) => this.resolveName(input);
     this.messages = {
-      list: async (input?: ListMessagesInput) => await this.ctx.transport.listMessages(this.drone.id, this.name, input, mergeOptions(this.ctx.defaults, input)),
+      list: async (input?: ListMessagesInput) => await this.ctx.transport.listMessages(this.drone.id, await this.resolveName(input), input, mergeOptions(this.ctx.defaults, input)),
       last: async (input?: RequestOptions) => {
         const list = await this.ctx.transport.listMessages(
           this.drone.id,
-          this.name,
+          await this.resolveName(input),
           { limit: 1, order: 'desc' },
           mergeOptions(this.ctx.defaults, input),
         );
         return list[0] ?? null;
       },
       subscribe: async function* subscribe(input?: SubscribeMessagesInput): AsyncIterable<ChatEvent> {
+        const chatName = await resolveName(input);
         const seen = new Set<string>();
         let cursor = input?.sinceMessageId;
         while (true) {
@@ -659,12 +667,12 @@ class DroneChatImpl implements DroneChat {
   }
 
   async ensure(input?: RequestOptions): Promise<DroneChat> {
-    await this.ctx.transport.ensureChat(this.drone.id, this.name, mergeOptions(this.ctx.defaults, input));
+    await this.ctx.transport.ensureChat(this.drone.id, await this.resolveName(input), mergeOptions(this.ctx.defaults, input));
     return this;
   }
 
   async remove(input?: RequestOptions): Promise<void> {
-    await this.ctx.transport.removeChat(this.drone.id, this.name, mergeOptions(this.ctx.defaults, input));
+    await this.ctx.transport.removeChat(this.drone.id, await this.resolveName(input), mergeOptions(this.ctx.defaults, input));
   }
 
   async delete(input?: RequestOptions): Promise<void> {
@@ -688,6 +696,7 @@ class DroneChatImpl implements DroneChat {
 
   async send(message: MessageInput, input?: SendOptions): Promise<Run> {
     const normalized = normalizeMessageInput(message);
+    const chatName = await this.resolveName(input);
     const sendOptions = mergeOptions(this.ctx.defaults, input) as SendOptions | undefined;
     const deadline = Date.now() + DEFAULT_SEND_ACCEPT_RETRY_WINDOW_MS;
     let attempt = 0;
@@ -696,7 +705,7 @@ class DroneChatImpl implements DroneChat {
       try {
         record = await this.ctx.transport.sendMessage(
           this.drone.id,
-          this.name,
+          chatName,
           normalized,
           sendOptions,
         );
@@ -713,7 +722,7 @@ class DroneChatImpl implements DroneChat {
         await sleep(delayMs, sendOptions?.signal);
       }
     }
-    return new SingleRunImpl(this.ctx, this.drone.id, this.name, record);
+    return new SingleRunImpl(this.ctx, this.drone.id, chatName, record);
   }
 
   async sendAndWait(
@@ -734,7 +743,7 @@ class DroneChatImpl implements DroneChat {
       this.queueState = [];
       return single;
     }
-    const run = new BatchRunImpl(this.ctx, this.drone.id, this.name, messages, input);
+    const run = new BatchRunImpl(this.ctx, this.drone.id, await this.resolveName(input), messages, input);
     await run.start();
     this.queueState = [];
     return run;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { preferredChatName } from './preferred-chat';
 import { pendingChatSummary } from './chat-read/helpers/chat-read-presentation';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -2020,10 +2021,18 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     async (args) => toolResult(await reorderDronesInUiPreferences(args, context.hubServices)),
   );
 
+  const resolveTargetChat = async (drone: string, requested: unknown): Promise<string> => {
+    if (cleanString(requested)) return chatName(requested);
+    const response = await requestJson(`/api/drones/${encodeURIComponent(drone)}/chats`, { method: 'GET' });
+    const chats = normalizeMcpChatList(response);
+    const ordinaryChats = chats.filter((entry) => entry.type === 'ordinary');
+    return preferredChatName((ordinaryChats.length ? ordinaryChats : chats).map((entry) => entry.name));
+  };
+
   const openDroneChat = async (args: any) => {
     const droneRef = cleanString(args.droneId);
     const [droneId] = await resolveRequiredDroneIds([droneRef]);
-    const chat = chatName(args.chatName);
+    const chat = await resolveTargetChat(droneId, args.chatName);
     if (chat !== 'default') {
       const response = await requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
         method: 'GET',
@@ -2943,13 +2952,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Delete drone chat',
       description:
-        'Delete or archive a non-default chat according to Drone Hub delete settings and remove its sidebar metadata.',
+        'Delete or archive a chat when another chat remains according to Drone Hub delete settings and remove its sidebar metadata.',
       inputSchema: { drone: z.string(), chat: z.string() },
     },
     async (args) => {
       const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
       const chat = cleanString(args.chat);
-      if (chat === 'default') throw new Error('cannot delete default chat');
       const targetChat = snapshot.chats.find((entry) => entry.name === chat);
       if (!targetChat) throw new Error(`unknown chat: ${chat}`);
       const principal = chatPrincipal(context);
@@ -3270,7 +3278,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       },
     },
     async (args) => {
-      const chat = chatName(args.chat);
+      const chat = await resolveTargetChat(args.drone, args.chat);
       if (args.createChat) {
         await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
         await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
@@ -3601,7 +3609,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       },
     },
     async (args) => {
-      const chat = chatName(args.chat);
+      const chat = await resolveTargetChat(args.drone, args.chat);
       const limit = cleanPositiveInt(args.limit, 10, 20);
       const maxCharsPerField = cleanPositiveInt(args.maxCharsPerField, 4000, 8000);
       const includeActivity = args.includeActivity === true;

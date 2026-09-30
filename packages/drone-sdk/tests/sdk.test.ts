@@ -587,3 +587,19 @@ describe('drone-sdk core', () => {
     }
   });
 });
+
+test('omitted SDK chat targets follow a survivor after deleting default', async () => {
+  const sdk = createDroneSDK({ transport: createMockTransport({ responder: ({ chatName, prompt }) => `${chatName}:${prompt}` }) });
+  const drone = await sdk.drones.create('default-deletion');
+  const implicitChat = drone.chat();
+  await drone.chat('review').ensure();
+  await drone.chat('default').delete();
+  await implicitChat.ensure();
+  const run = await implicitChat.send('hello');
+  expect(run.chatName).toBe('review');
+  expect(await run.lastMessageText()).toBe('review:hello');
+  expect((await implicitChat.messages.list()).map((item) => item.content)).toContain('hello');
+  expect((await drone.chats.list()).map((chat) => chat.name)).toEqual(['review']);
+  const batch = await implicitChat.queue('one').queue('two').dispatch();
+  expect(batch.chatName).toBe('review');
+});

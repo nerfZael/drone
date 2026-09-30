@@ -1,3 +1,4 @@
+import { preferredChatName } from '../../preferred-chat';
 import { completedTurnIds, normalizePendingPromptState, pendingPromptIsWaiting } from '@drone/assistant-chat';
 import type {
   AssistantChatIdleStatus,
@@ -144,7 +145,6 @@ export function chatReadSnapshotFromRegistry(
   requireChat = true,
 ): ChatReadSnapshot {
   const ref = String(target.droneId ?? '').trim();
-  const chatName = String(target.chatName ?? '').trim() || 'default';
   for (const collection of [registry?.drones, registry?.pending]) {
     const entry = collection?.[ref]
       ? [ref, collection[ref]]
@@ -154,8 +154,9 @@ export function chatReadSnapshotFromRegistry(
     if (!entry) continue;
     const [key, raw] = entry;
     const drone = raw as any;
+    const chatName = preferredChatName(Object.keys(drone.chats ?? {}), target.chatName);
     const chat = drone.chats?.[chatName];
-    const seed = chatName === 'default' ? String(drone.seed?.prompt ?? '').trim() : '';
+    const seed = chatName === 'default' && (chat || Object.keys(drone.chats ?? {}).length === 0) ? String(drone.seed?.prompt ?? '').trim() : '';
     if (!chat && requireChat && !seed) throw new Error(`unknown chat: ${ref}/${chatName}`);
     return {
       id: String(drone.id ?? key),

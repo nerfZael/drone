@@ -181,6 +181,6 @@ export function getChatNodeActionFlags(
   const chatName = String(chatRef?.chatName ?? '').trim();
   const chatCountForDrone = droneId ? Math.max(1, chatCountByDroneId[droneId] ?? 1) : 0;
   const renameDisabled = chatName === 'default';
-  const deleteDisabled = chatName === 'default' && chatCountForDrone > 1;
+  const deleteDisabled = false;
   return { chatCountForDrone, renameDisabled, deleteDisabled };
 }

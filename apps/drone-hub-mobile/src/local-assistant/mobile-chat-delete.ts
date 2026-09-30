@@ -1,4 +1,4 @@
-import { sidebarChatNodeId } from '@drone/hub-model/sidebar';
+import { deletableChatNames, sidebarChatNodeId } from '@drone/hub-model/sidebar';
 
 export type MobileChatDeletePlan = {
   chatNames: string[];
@@ -19,19 +19,12 @@ export function resolveMobileChatDeletePlan({
   const targetIsSelected = selectedChatNodeIds.has(
     sidebarChatNodeId(droneId, targetChatName),
   );
-  if (!targetIsSelected) {
-    return {
-      chatNames: targetChatName === 'default' ? [] : [targetChatName],
-      defaultChatKept: false,
-    };
-  }
-
+  const selected = targetIsSelected
+    ? chatNames.filter((name) => selectedChatNodeIds.has(sidebarChatNodeId(droneId, name)))
+    : [targetChatName];
+  const names = deletableChatNames(chatNames, selected);
   return {
-    chatNames: chatNames.filter(
-      (name) =>
-        name !== 'default' &&
-        selectedChatNodeIds.has(sidebarChatNodeId(droneId, name)),
-    ),
-    defaultChatKept: selectedChatNodeIds.has(sidebarChatNodeId(droneId, 'default')),
+    chatNames: names,
+    defaultChatKept: selected.includes('default') && !names.includes('default'),
   };
 }

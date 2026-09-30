@@ -254,12 +254,12 @@ export const COMPANION_PROPOSAL_FORMAT = [
   'Agent overrides use "native", "builtin:cursor", "builtin:codex", "builtin:claude", "builtin:opencode", "builtin:pi", "builtin:blip", or an existing "custom:<id>" agent. Custom agents are unavailable on mobile and host runtime targets.',
   'For both create_drone and create_chat, resolve friendly model names through list_agent_models before proposing overrides. Use the exact supported model ID with its compatible agent (catalog codex becomes builtin:codex) and, for native only, provider. Never guess IDs; ask the user or leave settings unchanged when unresolved or ambiguous.',
   'Provider is openai, codex, gemini, openrouter, or cerebras and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
-  '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
+  '- delete_chat: { id, type, droneId, chatName } (the default chat can be deleted when another chat remains)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',
   '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue", attachmentPaths?: string[] (absolute Companion home paths) }',
   'attachmentPaths take up to 8 images or text files from Companion home (uploads or files you wrote there), 6 MB each; they reach the agent as real chat attachments.',
   'A later operation may target a drone created or cloned earlier in the document with droneId "$<operation id>".',
-  'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default" where it is optional.',
+  'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default", or a remaining chat if "default" has been deleted, where it is optional.',
   'Any Apply attempt is terminal for this proposal. Create a separate correction proposal containing only unfinished work after a failure. Completed operations must never be replayed. Use discard_proposal to dismiss obsolete drafts or failures; other proposals remain usable.',
 ].join('\n');
 
@@ -670,7 +670,6 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
   if (type === 'delete_chat') {
     exactKeys(operation, ['id', 'type', 'droneId', 'chatName'], path);
     const chatName = requiredSingleLineText(operation.chatName, `${path}.chatName`, 160);
-    if (chatName === 'default') throw new Error(`${path}.chatName cannot be the default chat`);
     return {
       id,
       type,
