@@ -223,8 +223,8 @@ function BrainNode({ id, compact, snapshot, limb, work, recent, hot, events, clo
         </span>
       </div>
       {!compact ? (
-        <div className="min-h-0 w-full flex-1 overflow-hidden text-[var(--fg-secondary,var(--fg))]">
-          {work ? (work.steps ? <Steps w={work} limit={3} /> : <div className="line-clamp-3">{statusText(work, wid => snapshot.limbs.find(l => l.id === wid)?.name ?? wid)}</div>) : content.body}
+        <div className="min-h-0 w-full flex-1 overflow-y-auto break-words text-[var(--fg-secondary,var(--fg))]">
+          {work ? (work.steps ? <Steps w={work} limit={3} wrap /> : <div>{statusText(work, wid => snapshot.limbs.find(l => l.id === wid)?.name ?? wid)}</div>) : content.body}
         </div>
       ) : null}
     </button>
@@ -515,8 +515,8 @@ function layoutBrain(width: number, height: number, snapshot: EntitySnapshot): {
       { id: 'jev', h: Math.min(110, 34 + 17 * Math.max(1, snapshot.senses.length)) },
     ] },
     ...(code.length ? [{ title: 'Reflexes', minW: 130, maxW: 220, items: code.map((l) => ({ id: l.id, h: 54, ended: ENDED.has(l.status) })) }] : []),
-    { title: 'Mind', minW: 180, maxW: 320, items: mind.map((l) => ({ id: l.id, h: 84 })) },
-    ...(tasks.length ? [{ title: 'Tasks', minW: 160, maxW: 280, items: tasks.map((l) => ({ id: l.id, h: 84, ended: ENDED.has(l.status) })) }] : []),
+    { title: 'Mind', minW: 280, maxW: 400, items: mind.map((l) => ({ id: l.id, h: 150 })) },
+    ...(tasks.length ? [{ title: 'Tasks', minW: 280, maxW: 400, items: tasks.map((l) => ({ id: l.id, h: 150, ended: ENDED.has(l.status) })) }] : []),
   ];
   const pad = 10; const hgap = 10; const vgap = 8; const label = 17;
   const innerW = width - pad * 2;

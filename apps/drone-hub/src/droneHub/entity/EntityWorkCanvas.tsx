@@ -341,7 +341,7 @@ function CardView({ data }: NodeProps<Node<CardData, 'card'>>) {
       </div>
       {/* Its summary when it has one: short steps say more than the status line, which can run long. */}
       {w.steps ? (
-        <div className="min-w-0 text-[12px]"><Steps w={w} limit={open ? undefined : 4} /></div>
+        <div className="min-w-0 text-[12px]"><Steps w={w} limit={open ? undefined : 4} wrap /></div>
       ) : (
         <div className={`min-w-0 text-[12px] text-[var(--fg-secondary,var(--fg))] ${open ? '' : 'line-clamp-2'}`} title={statusText(w, ctx.nameOf)}>
           {statusText(w, ctx.nameOf)}

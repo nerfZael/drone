@@ -186,7 +186,7 @@ export function Pips({ w }: { w: StepsOwner }) {
  * A worker's done / doing / next, from its summary. With `limit`, a compact view for a card: what it is doing and any
  * blocker first, then its latest done steps, then what is next, and how many more there are.
  */
-export function Steps({ w, limit }: { w: StepsOwner; limit?: number }) {
+export function Steps({ w, limit, wrap = false }: { w: StepsOwner; limit?: number; wrap?: boolean }) {
   if (!w.steps) return <div className="text-[12px] text-[var(--muted)] opacity-80">No summary yet.</div>;
   type Item = { glyph: string; color: string; text: string; key: string; dim?: boolean; rank: number; order: number };
   const all: Item[] = [
@@ -206,7 +206,7 @@ export function Steps({ w, limit }: { w: StepsOwner; limit?: number }) {
       {shown.map(item => (
         <li key={item.key} className={`grid grid-cols-[14px_1fr] gap-1.5 ${item.dim ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary,var(--fg))]'}`}>
           <span className="text-center text-[11px] leading-[19px]" style={{ color: item.color }}>{item.glyph}</span>
-          <span className={limit ? 'truncate' : undefined} title={limit ? item.text : undefined}>{item.text}</span>
+          <span className={wrap ? 'min-w-0 whitespace-normal break-words' : limit ? 'truncate' : undefined} title={limit ? item.text : undefined}>{item.text}</span>
         </li>
       ))}
       {shown.length < all.length ? <li className="pl-[20px] text-[11px] text-[var(--muted)]">+{all.length - shown.length} more</li> : null}

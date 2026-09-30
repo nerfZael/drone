@@ -327,7 +327,7 @@ const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0
 // ---------- layout ----------
 
 export const LINE_W = 236;
-export const CARD_W = 288;
+export const CARD_W = 400;
 const COL_X0 = 268;
 const COL_GAP = 48;
 const ROW_GAP = 18;
