@@ -558,6 +558,43 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           if (applyBuiltinSessionId(entry, 'codex', threadId)) {
             changed = true;
           }
+          // The agent may end a completed turn without a final answer, e.g. when an
+          // automated event needs no reply. Only a complete, untruncated transcript
+          // proves that silence; anything else stays a recoverable parse failure.
+          const completedSilently =
+            !output &&
+            parsed.terminalStatus === 'completed' &&
+            job?.transcript?.stdoutTruncated !== true;
+          if (completedSilently) {
+            turns.push({
+              ...runMetadata,
+              ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
+              at: promptAt,
+              promptAt,
+              startedAt,
+              completedAt: finishedAt,
+              id,
+              prompt: String(p?.prompt ?? ''),
+              ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
+              ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
+              ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
+              ok: true,
+              output: '',
+              silentCompletion: true,
+            });
+            transcriptIds.add(id);
+            completedTurnIdsForSnapshot.push(id);
+            pendingList[i] = {
+              ...p,
+              state: 'sent',
+              error: undefined,
+              observability: undefined,
+              updatedAt: nowIso(),
+            };
+            changed = true;
+            continue;
+          }
           if (!output) {
             const error = formatTranscriptJobFailure({
               agentId: jobKind,
@@ -1051,6 +1088,17 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         changed = true;
         continue;
       }
+    }
+
+    // A recoverable failure is retried for a window measured from its updatedAt.
+    // Re-failing the same way must not restamp it, or the window never closes and
+    // the chat is reconciled every retry tick forever.
+    for (let i = 0; i < pendingList.length; i++) {
+      const pending = pendingList[i];
+      const original = pendingBefore.get(String(pending?.id ?? '').trim());
+      if (!original || pending?.state !== 'failed') continue;
+      const before = JSON.parse(original);
+      if (before.state === 'failed' && before.error === pending.error) pendingList[i] = before;
     }
 
     const reconciledPendingList = [...pendingList];
