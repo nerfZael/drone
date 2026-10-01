@@ -117,7 +117,7 @@ import {
 } from '../../ui/dropdown';
 import { UiTooltip, type UiMenuSelectEntry } from '../../ui/components';
 import { ChatDeletingOverlay } from './ChatDeletingOverlay';
-import { fetchDroneChatTranscript, fetchDroneChatTurnActivity } from './chat-api';
+import { fetchDroneChatTranscript, fetchDroneChatTurnActivity, uploadChatAttachmentFile } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
 import { formatBytes } from './selected-drone-workspace-utils';
@@ -171,6 +171,7 @@ type DockerSizePayload = {
 };
 
 const EXTERNAL_AGENT_CHAT_SURFACE = adaptExternalAgentChatSurface();
+const uploadDroneChatAttachmentFile = (file: File) => uploadChatAttachmentFile(requestJson, file);
 const NATIVE_AGENT_CHAT_SURFACE = adaptNativeAgentChatSurface();
 
 function HeaderDropdownPortal({
@@ -2785,6 +2786,7 @@ export function SelectedDroneWorkspace({
                   }
                   stopping={stoppingResponse}
                   onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
+                  uploadAttachmentFile={uploadDroneChatAttachmentFile}
                   onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
                     if (chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
                     const sent = await sendPromptText(payload, context);

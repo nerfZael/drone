@@ -104,6 +104,8 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
         referenceTiles={references.tiles}
         attachmentsEnabled={attachments !== 'none'}
         attachmentMode={attachments === 'files' ? 'files' : 'images'}
+        // A native chat hands files to the model or its artifacts as bytes, so they stay inline-sized.
+        uploadAttachmentFile={adapter.agentType === 'external' ? composer.uploadAttachmentFile : undefined}
         allowSendWhileWaiting={sendWhileWaiting}
       />
     </div>

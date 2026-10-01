@@ -20,7 +20,11 @@ import {
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
-import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
+import {
+  inlineChatAttachments,
+  type ChatImageAttachment,
+  type ChatImageAttachmentRef,
+} from './chat-attachments';
 import {
   cancelQueuedPendingPromptInStore,
   claimQueuedPendingPromptInStore,
@@ -566,13 +570,24 @@ export function createDronePendingPromptStore(deps: {
     if (resolved?.kind === 'real') return 'active';
     if (resolved?.kind !== 'pending') return 'missing';
 
+    // A startup prompt keeps its attachments in the drone's metadata until the drone is ready,
+    // so a file uploaded ahead of the prompt has to fit inline there.
+    let attachments: ChatImageAttachment[] = [];
+    try {
+      attachments = opts.attachments?.length ? await inlineChatAttachments(opts.attachments) : [];
+    } catch (error: any) {
+      throw new Error(
+        `drone "${droneId}" is still starting (${error?.message ?? error}); larger files can be attached once it is ready`,
+      );
+    }
+
     const chatName = deps.normalizeChatName(opts.chatName);
     const next: PendingStartupPrompt = {
       id,
       chatName,
       at: String(opts.pending?.at ?? deps.nowIso()),
       prompt,
-      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+      ...(attachments.length ? { attachments } : {}),
       ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim()
         ? { messageId: opts.pending.messageId.trim() }
         : {}),

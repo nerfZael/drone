@@ -386,7 +386,9 @@ import { hubChatSessionName } from './terminal-open';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
+  configureChatAttachmentUploads,
   copyChatAttachmentsToContainer,
+  inlineChatAttachments,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
   readChatAttachmentsFromRefs,
@@ -4191,6 +4193,7 @@ async function startDroneHubApiServerWithLifecycle(
   registerBackgroundResource('Hub application events', async () => {
     unsubscribeHubApplicationEvents();
   });
+  configureChatAttachmentUploads(droneRootPath('chat-attachment-uploads'));
   const globalShortcutService = new GlobalShortcutService();
   await globalShortcutService.start();
   registerBackgroundResource('global shortcuts', async () => globalShortcutService.close());
@@ -4499,7 +4502,8 @@ async function startDroneHubApiServerWithLifecycle(
         approvalPolicy,
       });
     }
-    const nativeAttachments = Array.isArray(attachments) ? attachments : [];
+    // A native chat hands attachments to the model or its artifacts store as bytes.
+    const nativeAttachments = await inlineChatAttachments(Array.isArray(attachments) ? attachments : []);
     const promptImages = validateAssistantPromptImages(
       nativeAttachments
         .filter((attachment) => String(attachment?.mime ?? '').startsWith('image/'))

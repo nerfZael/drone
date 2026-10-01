@@ -113,6 +113,65 @@ describe('shared chat attachment policy', () => {
     });
   });
 
+  test('holds uploaded plain files to the uploaded-file limits and keeps inline limits for the rest', () => {
+    const MiB = 1024 * 1024;
+    expect(
+      validateChatAttachments([
+        { name: 'video.mp4', mime: 'video/mp4', size: 90 * MiB, uploaded: true },
+        { name: 'photo.png', mime: 'image/png', size: 5 * MiB },
+      ]),
+    ).toEqual({
+      ok: true,
+      attachments: [
+        { name: 'video.mp4', mime: 'video/mp4', size: 90 * MiB },
+        { name: 'photo.png', mime: 'image/png', size: 5 * MiB },
+      ],
+      totalBytes: 95 * MiB,
+    });
+
+    // An uploaded image or text is still shown to the model, so it keeps the inline limit.
+    expect(
+      validateChatAttachments([
+        { name: 'huge.png', mime: 'image/png', size: 7 * MiB, uploaded: true },
+      ]),
+    ).toMatchObject({
+      ok: false,
+      issue: { code: 'attachment_too_large', limit: CHAT_ATTACHMENT_POLICY.maxBytesEach },
+    });
+
+    expect(
+      validateChatAttachments([
+        {
+          name: 'disk.img',
+          mime: 'application/octet-stream',
+          size: CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesEach + 1,
+          uploaded: true,
+        },
+      ]),
+    ).toMatchObject({
+      ok: false,
+      issue: {
+        code: 'attachment_too_large',
+        limit: CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesEach,
+      },
+    });
+
+    expect(
+      validateChatAttachments([
+        { name: 'a.bin', mime: 'application/octet-stream', size: 100 * MiB, uploaded: true },
+        { name: 'b.bin', mime: 'application/octet-stream', size: 100 * MiB, uploaded: true },
+        { name: 'c.bin', mime: 'application/octet-stream', size: 1, uploaded: true },
+      ]),
+    ).toMatchObject({
+      ok: false,
+      issue: {
+        code: 'attachments_too_large',
+        attachmentIndex: 2,
+        limit: CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesTotal,
+      },
+    });
+  });
+
   test('builds stable type and attachment-only preview labels', () => {
     expect(chatAttachmentTypeLabel({ mime: 'image/png' })).toBe('Image');
     expect(chatAttachmentTypeLabel({ mime: 'text/plain' })).toBe('Text');

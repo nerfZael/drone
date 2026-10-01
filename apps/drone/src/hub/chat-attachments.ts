@@ -1,4 +1,7 @@
+import crypto from 'node:crypto';
+import { statSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import type { IncomingMessage } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -18,15 +21,18 @@ type ChatImageAttachmentInput = {
   mime?: unknown;
   size?: unknown;
   dataBase64?: unknown;
+  uploadId?: unknown;
 };
 
+/** The bytes travel inline as `dataBase64`, or were uploaded ahead of the prompt and wait at `sourcePath` on the hub. */
 export type ChatImageAttachment = {
   name: string;
   mime: string;
   size: number;
-  dataBase64: string;
   fileName: string;
-};
+} & ({ dataBase64: string; sourcePath?: undefined } | { sourcePath: string; dataBase64?: undefined });
+
+export type InlineChatImageAttachment = Extract<ChatImageAttachment, { dataBase64: string }>;
 
 export type ChatImageAttachmentRef = {
   name: string;
@@ -147,7 +153,20 @@ function uniqueAttachmentFileName(fileNameRaw: string, usedNames: Set<string>): 
   return candidate;
 }
 
-export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment[] {
+/**
+ * `allowUploads`: the caller copies attachments into the drone straight away, so plain files
+ * uploaded ahead of the prompt (`uploadId`) are accepted and get the uploaded-file limits.
+ * Everywhere else attachments must carry their bytes inline.
+ */
+export function normalizeChatImageAttachments(raw: unknown): InlineChatImageAttachment[];
+export function normalizeChatImageAttachments(
+  raw: unknown,
+  opts: { allowUploads?: boolean },
+): ChatImageAttachment[];
+export function normalizeChatImageAttachments(
+  raw: unknown,
+  opts: { allowUploads?: boolean } = {},
+): ChatImageAttachment[] {
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new Error('attachments must be an array');
 
@@ -162,25 +181,40 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     if (!isSupportedAttachmentMime(mime))
       throw new Error('attachment type is not valid');
 
-    const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
-    if (!dataBase64) throw new Error('attachment is missing dataBase64');
+    let bytes: { dataBase64: string } | { sourcePath: string };
+    let effectiveSize: number;
+    const uploadId = String(item.uploadId ?? '').trim();
+    if (uploadId) {
+      if (!opts.allowUploads) throw new Error('uploaded attachments are not accepted here');
+      if (chatAttachmentKind({ mime }) !== 'file') {
+        throw new Error('only plain files can be uploaded ahead of a prompt');
+      }
+      const upload = resolveChatAttachmentUpload(uploadId);
+      bytes = { sourcePath: upload.path };
+      effectiveSize = upload.size;
+    } else {
+      const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
+      if (!dataBase64) throw new Error('attachment is missing dataBase64');
 
-    // Basic sanity: avoid absurd payloads (and obvious non-base64).
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))) {
-      throw new Error('attachment dataBase64 looks invalid');
+      // Basic sanity: avoid absurd payloads (and obvious non-base64).
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))) {
+        throw new Error('attachment dataBase64 looks invalid');
+      }
+
+      const sizeFromB64 = base64DecodedByteLength(dataBase64);
+      const declared = Number(item.size);
+      const size = Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : sizeFromB64;
+      effectiveSize = sizeFromB64 > 0 ? sizeFromB64 : size;
+      bytes = { dataBase64 };
     }
-
-    const sizeFromB64 = base64DecodedByteLength(dataBase64);
-    const declared = Number(item.size);
-    const size = Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : sizeFromB64;
-    const effectiveSize = sizeFromB64 > 0 ? sizeFromB64 : size;
     if (!effectiveSize || effectiveSize <= 0) throw new Error('attachment size is invalid');
     const policy = validateChatAttachments([
-      ...out,
+      ...out.map((a) => ({ name: a.name, mime: a.mime, size: a.size, uploaded: Boolean(a.sourcePath) })),
       {
         name: String(item.name ?? '').trim(),
         mime,
         size: effectiveSize,
+        uploaded: 'sourcePath' in bytes,
       },
     ]);
     if (!policy.ok) {
@@ -189,12 +223,12 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
       }
       if (policy.issue.code === 'attachment_too_large') {
         throw new Error(
-          `attachment too large (${effectiveSize} bytes, max ${CHAT_ATTACHMENT_POLICY.maxBytesEach})`,
+          `attachment too large (${effectiveSize} bytes, max ${policy.issue.limit})`,
         );
       }
       if (policy.issue.code === 'attachments_too_large') {
         throw new Error(
-          `attachments too large in total (max ${CHAT_ATTACHMENT_POLICY.maxBytesTotal} bytes)`,
+          `attachments too large in total (max ${policy.issue.limit} bytes)`,
         );
       }
       if (policy.issue.code === 'invalid_mime') {
@@ -213,10 +247,142 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
       usedFileNames,
     );
 
-    out.push({ name, mime, size: effectiveSize, dataBase64, fileName });
+    out.push({ name, mime, size: effectiveSize, fileName, ...bytes } as ChatImageAttachment);
   }
 
   return out;
+}
+
+/** The attachment's bytes, read from its upload when it was not sent inline. */
+export async function chatAttachmentBytes(attachment: ChatImageAttachment): Promise<Buffer> {
+  if (attachment.sourcePath) return await fs.readFile(attachment.sourcePath);
+  const buf = Buffer.from(String(attachment.dataBase64 ?? ''), 'base64');
+  if (!buf || buf.length === 0) throw new Error('attachment decode failed');
+  return buf;
+}
+
+/**
+ * Writes an attachment into a local directory. An uploaded file is copied, not moved: the same
+ * upload can go out with several prompts (one message sent to many chats), and expires on its own.
+ */
+export async function writeChatAttachmentFile(
+  attachment: ChatImageAttachment,
+  filePath: string,
+): Promise<void> {
+  if (attachment.sourcePath) {
+    await fs.copyFile(attachment.sourcePath, filePath);
+    await fs.chmod(filePath, 0o600);
+    return;
+  }
+  await fs.writeFile(filePath, await chatAttachmentBytes(attachment), { mode: 0o600 });
+}
+
+/** Attachments with their bytes inline, for consumers that hand them to a model or an API directly. */
+export async function inlineChatAttachments(
+  attachments: readonly ChatImageAttachment[],
+): Promise<InlineChatImageAttachment[]> {
+  if (!attachments.some((attachment) => attachment.sourcePath)) {
+    return attachments as InlineChatImageAttachment[];
+  }
+  const inlined = await Promise.all(
+    attachments.map(async (attachment) => ({
+      name: attachment.name,
+      mime: attachment.mime,
+      size: attachment.size,
+      dataBase64: (await chatAttachmentBytes(attachment)).toString('base64'),
+    })),
+  );
+  // Re-checked as inline attachments: an uploaded file too large to send inline is refused here.
+  return normalizeChatImageAttachments(inlined);
+}
+
+// Plain files uploaded ahead of a prompt wait here until the prompt copies them into the drone.
+const CHAT_ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60_000;
+const CHAT_ATTACHMENT_UPLOAD_ID_PATTERN = /^chat-upload-[0-9a-f-]{36}$/;
+let chatAttachmentUploadsDir: string | null = null;
+
+export function configureChatAttachmentUploads(dir: string): void {
+  chatAttachmentUploadsDir = path.resolve(dir);
+  void pruneChatAttachmentUploads().catch(() => undefined);
+}
+
+function requireChatAttachmentUploadsDir(): string {
+  if (!chatAttachmentUploadsDir) throw new Error('attachment uploads are not available');
+  return chatAttachmentUploadsDir;
+}
+
+function resolveChatAttachmentUpload(uploadIdRaw: string): { path: string; size: number } {
+  const uploadId = String(uploadIdRaw ?? '').trim();
+  if (!CHAT_ATTACHMENT_UPLOAD_ID_PATTERN.test(uploadId)) throw new Error('attachment uploadId is invalid');
+  const filePath = path.join(requireChatAttachmentUploadsDir(), uploadId);
+  let size = 0;
+  try {
+    const stat = statSync(filePath);
+    if (stat.isFile()) size = stat.size;
+  } catch {
+    // reported below
+  }
+  if (size <= 0) throw new Error('attachment upload was not found; it may have expired, attach the file again');
+  return { path: filePath, size };
+}
+
+export async function pruneChatAttachmentUploads(now = Date.now()): Promise<void> {
+  const dir = chatAttachmentUploadsDir;
+  if (!dir) return;
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  await Promise.all(
+    names.map(async (name) => {
+      const filePath = path.join(dir, name);
+      const stat = await fs.stat(filePath).catch(() => null);
+      if (stat && now - stat.mtimeMs > CHAT_ATTACHMENT_UPLOAD_TTL_MS) {
+        await fs.rm(filePath, { force: true }).catch(() => undefined);
+      }
+    }),
+  );
+}
+
+/** Streams one request body to the upload area; only plain files within the uploaded-file limit are kept. */
+export async function stageChatAttachmentUpload(
+  req: IncomingMessage,
+  opts: { name: unknown; mime: unknown },
+): Promise<{ uploadId: string; name: string; mime: string; size: number }> {
+  const dir = requireChatAttachmentUploadsDir();
+  const name = path.posix.basename(String(opts.name ?? '').replace(/[\0\r\n\t]/g, '').trim());
+  if (!name) throw Object.assign(new Error('attachment name is required'), { statusCode: 400 });
+  const mime = normalizeChatAttachmentMime(opts.mime, name);
+  if (!isValidChatAttachmentMime(mime) || chatAttachmentKind({ mime }) !== 'file') {
+    throw Object.assign(new Error('only plain files can be uploaded ahead of a prompt'), {
+      statusCode: 400,
+    });
+  }
+  const maxBytes = CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesEach;
+  const uploadId = `chat-upload-${crypto.randomUUID()}`;
+  const filePath = path.join(dir, uploadId);
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  void pruneChatAttachmentUploads().catch(() => undefined);
+  const handle = await fs.open(filePath, 'wx', 0o600);
+  let size = 0;
+  try {
+    try {
+      for await (const chunkRaw of req) {
+        const chunk = Buffer.isBuffer(chunkRaw) ? chunkRaw : Buffer.from(chunkRaw as any);
+        size += chunk.length;
+        if (size > maxBytes) {
+          throw Object.assign(new Error(`attachment too large (more than ${maxBytes} bytes)`), {
+            statusCode: 413,
+          });
+        }
+        await handle.write(chunk);
+      }
+    } finally {
+      await handle.close();
+    }
+    if (size <= 0) throw Object.assign(new Error('attachment upload body is empty'), { statusCode: 400 });
+  } catch (error) {
+    await fs.rm(filePath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  return { uploadId, name, mime, size };
 }
 
 export function promptWithImageAttachments(
@@ -297,10 +463,7 @@ export async function copyChatAttachmentsToContainer(opts: {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), `drone-hub-attachments-${process.pid}-`));
   try {
     for (const a of list) {
-      const filePath = path.join(tmpRoot, a.fileName);
-      const buf = Buffer.from(String(a.dataBase64 ?? ''), 'base64');
-      if (!buf || buf.length === 0) throw new Error('attachment decode failed');
-      await fs.writeFile(filePath, buf, { mode: 0o600 });
+      await writeChatAttachmentFile(a, path.join(tmpRoot, a.fileName));
     }
 
     // Ensure destination directory exists and is private-ish.

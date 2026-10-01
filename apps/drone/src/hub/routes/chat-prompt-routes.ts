@@ -4,7 +4,7 @@ import {
   normalizeAgentRunActivity,
   normalizePromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
-import type { ChatImageAttachment } from '../chat-attachments';
+import { stageChatAttachmentUpload, type ChatImageAttachment } from '../chat-attachments';
 import { chatPromptBodySchema } from '../chat-route-schemas';
 import { parseBoolParam } from '../hub-format';
 import { readJsonBody, sendJson as json } from '../hub-http';
@@ -162,6 +162,28 @@ export function createChatPromptRouteHandler(
   } = deps;
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
+      // POST /api/chat-attachment-uploads?name=...&mime=...
+      // A plain file too large to send inline with a prompt: the raw body is kept on the hub for a
+      // while, and the prompt names it by `uploadId`.
+      if (
+        method === 'POST' &&
+        parts.length === 2 &&
+        parts[0] === 'api' &&
+        parts[1] === 'chat-attachment-uploads'
+      ) {
+        try {
+          const upload = await stageChatAttachmentUpload(req, {
+            name: u.searchParams.get('name'),
+            mime: u.searchParams.get('mime'),
+          });
+          json(res, 200, { ok: true, ...upload });
+        } catch (e: any) {
+          const status = Number(e?.statusCode) || 500;
+          json(res, status, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
       // POST /api/drones/:id/chats/:chat/prompt
       // Chat input. For builtin transcript agents (cursor/codex/claude/opencode/pi/blip):
       // record a clean transcript turn.
@@ -200,7 +222,7 @@ export function createChatPromptRouteHandler(
         let prompt = String(body?.prompt ?? '').trim();
         let attachments: ChatImageAttachment[] = [];
         try {
-          attachments = normalizeChatImageAttachments(body?.attachments);
+          attachments = normalizeChatImageAttachments(body?.attachments, { allowUploads: true });
           timer.mark('validate');
         } catch (e: any) {
           timer.setHeader(res);
@@ -480,7 +502,7 @@ export function createChatPromptRouteHandler(
             'new chat action',
           );
           let prompt = String(body?.prompt ?? '').trim();
-          const attachments = normalizeChatImageAttachments(body?.attachments);
+          const attachments = normalizeChatImageAttachments(body?.attachments, { allowUploads: true });
           if (!prompt && attachments.length === 0) {
             json(res, 400, { ok: false, error: 'missing prompt' });
             return;

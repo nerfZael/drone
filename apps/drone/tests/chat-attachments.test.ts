@@ -1,10 +1,20 @@
 import { describe, expect, test } from 'bun:test';
+import fs from 'node:fs/promises';
+import type { IncomingMessage } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { CHAT_ATTACHMENT_POLICY } from '@drone/assistant-chat';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
   codexImageAttachmentFlags,
+  configureChatAttachmentUploads,
+  inlineChatAttachments,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
+  stageChatAttachmentUpload,
+  writeChatAttachmentFile,
   type ChatImageAttachment,
 } from '../src/hub/chat-attachments';
 
@@ -163,4 +173,100 @@ test('any file type is a chat attachment: stored under its own name and presente
   expect(prompt).toContain('Attachment:');
   expect(prompt).toContain('/work/repo/.drone-hub/attachments/report.pdf');
   expect(() => normalizeChatImageAttachments([{ ...pdf, mime: 'not a mime' }])).toThrow('not valid');
+});
+
+describe('plain files uploaded ahead of a prompt', () => {
+  const MiB = 1024 * 1024;
+  const body = (bytes: Buffer) => Readable.from([bytes]) as unknown as IncomingMessage;
+
+  async function withUploadsDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-attachment-uploads-'));
+    configureChatAttachmentUploads(dir);
+    try {
+      return await run(dir);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('a file over the inline limit is uploaded, named by uploadId, and copied into place without base64', async () => {
+    await withUploadsDir(async (dir) => {
+      const bytes = Buffer.alloc(7 * MiB, 7);
+      const upload = await stageChatAttachmentUpload(body(bytes), {
+        name: 'recording.mp4',
+        mime: 'video/mp4',
+      });
+      expect(upload).toMatchObject({ name: 'recording.mp4', mime: 'video/mp4', size: bytes.length });
+
+      const [attachment] = normalizeChatImageAttachments(
+        [{ name: 'recording.mp4', mime: 'video/mp4', size: bytes.length, uploadId: upload.uploadId }],
+        { allowUploads: true },
+      );
+      expect(attachment).toMatchObject({ size: bytes.length, sourcePath: path.join(dir, upload.uploadId) });
+      expect(attachment?.dataBase64).toBeUndefined();
+
+      // Copied, not moved: the same upload can go out with several prompts.
+      for (const target of ['one.mp4', 'two.mp4']) {
+        await writeChatAttachmentFile(attachment!, path.join(dir, target));
+        expect((await fs.readFile(path.join(dir, target))).equals(bytes)).toBe(true);
+      }
+    });
+  });
+
+  test('uploads are refused where attachments must travel inline, and for images and text', async () => {
+    await withUploadsDir(async () => {
+      const upload = await stageChatAttachmentUpload(body(Buffer.from('zip')), {
+        name: 'a.zip',
+        mime: 'application/zip',
+      });
+      const item = { name: 'a.zip', mime: 'application/zip', size: 3, uploadId: upload.uploadId };
+      expect(() => normalizeChatImageAttachments([item])).toThrow('uploaded attachments are not accepted here');
+      expect(() =>
+        normalizeChatImageAttachments([{ ...item, mime: 'image/png' }], { allowUploads: true }),
+      ).toThrow('only plain files can be uploaded ahead of a prompt');
+      await expect(
+        stageChatAttachmentUpload(body(Buffer.from('hi')), { name: 'notes.txt', mime: 'text/plain' }),
+      ).rejects.toThrow('only plain files can be uploaded ahead of a prompt');
+      expect(() =>
+        normalizeChatImageAttachments(
+          [{ ...item, uploadId: 'chat-upload-00000000-0000-0000-0000-000000000000' }],
+          { allowUploads: true },
+        ),
+      ).toThrow('attachment upload was not found');
+    });
+  });
+
+  test('an upload over the uploaded-file limit is refused and nothing is kept', async () => {
+    await withUploadsDir(async (dir) => {
+      const tooLarge = Buffer.alloc(CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesEach + 1);
+      await expect(
+        stageChatAttachmentUpload(body(tooLarge), { name: 'disk.img', mime: 'application/octet-stream' }),
+      ).rejects.toMatchObject({ statusCode: 413 });
+      expect(await fs.readdir(dir)).toEqual([]);
+    });
+  });
+
+  test('a native chat gets uploaded bytes inline, still held to the inline limit', async () => {
+    await withUploadsDir(async () => {
+      const small = await stageChatAttachmentUpload(body(Buffer.from('PK')), {
+        name: 'a.zip',
+        mime: 'application/zip',
+      });
+      const large = await stageChatAttachmentUpload(body(Buffer.alloc(7 * MiB)), {
+        name: 'b.zip',
+        mime: 'application/zip',
+      });
+      const [smallAttachment, largeAttachment] = normalizeChatImageAttachments(
+        [
+          { name: 'a.zip', mime: 'application/zip', uploadId: small.uploadId },
+          { name: 'b.zip', mime: 'application/zip', uploadId: large.uploadId },
+        ],
+        { allowUploads: true },
+      );
+      expect(await inlineChatAttachments([smallAttachment!])).toMatchObject([
+        { name: 'a.zip', dataBase64: Buffer.from('PK').toString('base64') },
+      ]);
+      await expect(inlineChatAttachments([largeAttachment!])).rejects.toThrow('attachment too large');
+    });
+  });
 });

@@ -54,6 +54,18 @@ export type EncodedDraftChatAttachment = {
   disposition?: 'artifact' | 'prompt';
 };
 
+/** For destinations that need the bytes inline: a plain file uploaded to this hub cannot go there. */
+export function requireInlineAttachmentPayloads<T extends { name: string; dataBase64?: string }>(
+  attachments: readonly T[],
+): Array<T & { dataBase64: string }> {
+  return attachments.map((attachment) => {
+    if (typeof attachment.dataBase64 !== 'string') {
+      throw new Error(`${attachment.name} was uploaded to this hub and cannot be sent here; attach it again.`);
+    }
+    return attachment as T & { dataBase64: string };
+  });
+}
+
 export function makeDraftImageAttachmentId(): string {
   // Non-crypto id; only used for React keys.
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

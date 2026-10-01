@@ -4,6 +4,7 @@ import {
   type ChatAttachmentValidationIssue,
 } from '@drone/assistant-chat';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
+import { requireInlineAttachmentPayloads } from '../chat/chat-input-attachments';
 
 type RemotePromptRequest = (payload: Record<string, unknown>) => Promise<any>;
 
@@ -36,9 +37,10 @@ function remoteAttachmentPolicyError(issue: ChatAttachmentValidationIssue): Erro
 function validateAttachments(
   attachments: readonly ChatAttachmentPayload[],
 ): Array<ChatAttachmentPayload & { dataBase64: string }> {
-  const policy = validateChatAttachments(attachments);
+  const inline = requireInlineAttachmentPayloads(attachments);
+  const policy = validateChatAttachments(inline);
   if (!policy.ok) throw remoteAttachmentPolicyError(policy.issue);
-  return attachments.map((attachment, index) => {
+  return inline.map((attachment, index) => {
     const metadata = policy.attachments[index]!;
     const dataBase64 = normalizedBase64(attachment.dataBase64);
     const size = decodedBase64Bytes(dataBase64);

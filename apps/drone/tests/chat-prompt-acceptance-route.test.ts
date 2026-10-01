@@ -95,3 +95,50 @@ describe('prompt acceptance without fleet history', () => {
     ]);
   });
 });
+
+describe('plain files uploaded ahead of the prompt', () => {
+  test('the upload route keeps the file and the prompt route hands it on by path', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { configureChatAttachmentUploads } = await import('../src/hub/chat-attachments');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-upload-route-'));
+    configureChatAttachmentUploads(dir);
+    try {
+      const handler = createChatPromptRouteHandler({ normalizeChatImageAttachments } as any);
+      let uploaded: any;
+      const req = Readable.from([Buffer.alloc(7 * 1024 * 1024, 1)]);
+      Object.assign(req, { headers: {} });
+      await handler({
+        req: req as any,
+        res: {
+          statusCode: 0,
+          setHeader() {},
+          end(value: string) {
+            uploaded = JSON.parse(value);
+          },
+        } as any,
+        method: 'POST',
+        parts: ['api', 'chat-attachment-uploads'],
+        url: new URL('http://hub.test/api/chat-attachment-uploads?name=trace.zip&mime=application%2Fzip'),
+      });
+      expect(uploaded).toMatchObject({ ok: true, name: 'trace.zip', size: 7 * 1024 * 1024 });
+
+      const calls = await submit({
+        attachments: [{ name: 'trace.zip', mime: 'application/zip', uploadId: uploaded.uploadId }],
+      });
+      expect(calls).toMatchObject([
+        {
+          operation: 'active',
+          input: {
+            attachments: [
+              { name: 'trace.zip', size: 7 * 1024 * 1024, sourcePath: path.join(dir, uploaded.uploadId) },
+            ],
+          },
+        },
+      ]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

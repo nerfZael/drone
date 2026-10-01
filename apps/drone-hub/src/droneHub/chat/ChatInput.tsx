@@ -3,6 +3,7 @@ import React from 'react';
 import { browserMicrophoneOwnerLabel } from './browser-microphone-coordinator';
 import {
   CHAT_ATTACHMENT_POLICY,
+  isUploadedChatAttachmentFile,
   validateChatAttachments,
   type ChatAttachmentValidationIssue,
 } from '@drone/assistant-chat';
@@ -132,22 +133,22 @@ function attachmentPolicyError(
   if (issue.code === 'attachment_too_large') {
     const label = kind === 'text' ? 'Pasted text' : kind === 'file' ? 'File' : 'Image';
     const subject = kind === 'text' ? 'attachment' : kind;
-    return `${label} too large (${formatBytes(issue.actual)}). Max per ${subject} is ${formatBytes(CHAT_ATTACHMENT_POLICY.maxBytesEach)}.`;
+    return `${label} too large (${formatBytes(issue.actual)}). Max per ${subject} is ${formatBytes(issue.limit ?? CHAT_ATTACHMENT_POLICY.maxBytesEach)}.`;
   }
   if (issue.code === 'attachments_too_large') {
-    return `Attachments too large in total. Max total is ${formatBytes(CHAT_ATTACHMENT_POLICY.maxBytesTotal)}.`;
+    return `Attachments too large in total. Max total is ${formatBytes(issue.limit ?? CHAT_ATTACHMENT_POLICY.maxBytesTotal)}.`;
   }
   if (issue.code === 'invalid_mime') return 'One of the selected files has an invalid type.';
   return `One of the selected ${kind === 'image' ? 'images' : 'files'} is empty or unreadable.`;
 }
 
+/** The bytes go inline as `dataBase64`, or a plain file was uploaded ahead of the prompt and is named by `uploadId`. */
 export type ChatAttachmentPayload = {
   name: string;
   mime: string;
   size: number;
-  dataBase64: string;
   disposition?: 'artifact' | 'prompt';
-};
+} & ({ dataBase64: string; uploadId?: undefined } | { uploadId: string; dataBase64?: undefined });
 
 export type ChatImageAttachmentPayload = ChatAttachmentPayload;
 
@@ -231,6 +232,12 @@ export type ChatInputProps = {
   allowSendWhileWaiting?: boolean;
   continuousVoiceEnabled?: boolean;
   editorCtrlEnterBehavior?: ChatEditorCtrlEnterBehavior;
+  /**
+   * Uploads a plain file ahead of the prompt and returns its upload id. Given, plain files may be as
+   * large as the uploaded-file limit, since the agent only gets their path; images and text are
+   * shown to the model and keep the inline limit.
+   */
+  uploadAttachmentFile?: (file: File) => Promise<string>;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -288,6 +295,7 @@ export function ChatInput({
   allowSendWhileWaiting = false,
   continuousVoiceEnabled = true,
   editorCtrlEnterBehavior = 'queue',
+  uploadAttachmentFile,
   onSend,
   onSendInNewChat,
   onPublish,
@@ -424,6 +432,7 @@ export function ChatInput({
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
+  const uploadsFiles = Boolean(uploadAttachmentFile);
   React.useEffect(() => {
     if (draftRef.current === draft) return;
     draftRef.current = draft;
@@ -867,8 +876,8 @@ export function ChatInput({
         const mime = mimeForChatAttachmentFile(f);
         const name = String((f as any).name ?? '').trim() || `attachment-${next.length + 1}`;
         const policy = validateChatAttachments([
-          ...next.map(({ name, mime, size }) => ({ name, mime, size })),
-          { name, mime, size },
+          ...next.map(({ name, mime, size }) => ({ name, mime, size, uploaded: uploadsFiles })),
+          { name, mime, size, uploaded: uploadsFiles },
         ]);
         if (!policy.ok) {
           setAttachmentError(
@@ -922,7 +931,7 @@ export function ChatInput({
       const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
       const name = makePastedTextAttachmentName(textCount);
       const policy = validateChatAttachments([
-        ...prev.map(({ name, mime, size }) => ({ name, mime, size })),
+        ...prev.map(({ name, mime, size }) => ({ name, mime, size, uploaded: uploadsFiles })),
         { name, mime: 'text/plain', size },
       ]);
       if (!policy.ok) {
@@ -993,8 +1002,21 @@ export function ChatInput({
     let encoded: ChatAttachmentPayload[] = [];
     try {
       encoded = await Promise.all(
-        snapshotAttachments.map(async (a) =>
-          a.kind === 'image'
+        snapshotAttachments.map(async (a): Promise<ChatAttachmentPayload> =>
+          uploadAttachmentFile && a.kind === 'file' && isUploadedChatAttachmentFile({ ...a, uploaded: true })
+            ? {
+                name: a.name,
+                mime: a.mime,
+                size: a.size,
+                uploadId: await uploadAttachmentFile(a.file).catch((error: unknown) => {
+                  throw Object.assign(
+                    new Error(`Failed to upload ${a.name}: ${error instanceof Error ? error.message : String(error)}`),
+                    { attachmentUploadFailed: true },
+                  );
+                }),
+                disposition: a.disposition,
+              }
+            : a.kind === 'image'
             ? {
                 name: a.name,
                 mime: a.mime,
@@ -1023,7 +1045,7 @@ export function ChatInput({
       const msg = e?.message ?? String(e);
       const restored = restoreSubmissionSnapshot(snapshot);
       if (restored.draftRestored || restored.attachmentsRestored) {
-        setAttachmentError(`Failed to read attachment: ${msg}`);
+        setAttachmentError(e?.attachmentUploadFailed ? msg : `Failed to read attachment: ${msg}`);
       }
       return;
     }

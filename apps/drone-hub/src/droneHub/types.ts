@@ -615,12 +615,12 @@ export type PendingPrompt = {
   at: string;
   prompt: string;
   attachments?: ChatImageAttachmentRef[];
-  attachmentPayloads?: Array<{
-    name: string;
-    mime: string;
-    size: number;
-    dataBase64: string;
-  }>;
+  attachmentPayloads?: Array<
+    { name: string; mime: string; size: number } & (
+      | { dataBase64: string; uploadId?: undefined }
+      | { uploadId: string; dataBase64?: undefined }
+    )
+  >;
   deliveryMode?: 'queue' | 'asap';
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;

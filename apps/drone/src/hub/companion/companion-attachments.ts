@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { droneRootPath } from '../../host/paths';
 import { CHAT_ATTACHMENT_POLICY } from '@drone/assistant-chat';
-import { normalizeChatImageAttachments, promptWithImageAttachments } from '../chat-attachments';
+import { normalizeChatImageAttachments, promptWithImageAttachments, type InlineChatImageAttachment } from '../chat-attachments';
 
 export const COMPANION_HOME_TARGET_ID = 'companion-home';
 
@@ -74,11 +74,11 @@ const isStored = (item: any): item is StoredAttachment => Boolean(item) && typeo
  * is not limited here: the user may collect screenshots freely, and preparation decides what the
  * model sees inline and what it gets as a path.
  */
-export function validateCompanionAttachments(raw: unknown): Array<StoredAttachment | ReturnType<typeof normalizeChatImageAttachments>[number]> {
+export function validateCompanionAttachments(raw: unknown): Array<StoredAttachment | InlineChatImageAttachment> {
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new Error('attachments must be an array');
   if (raw.length > 500) throw new Error('too many attachments');
-  return raw.flatMap((item): Array<StoredAttachment | ReturnType<typeof normalizeChatImageAttachments>[number]> => {
+  return raw.flatMap((item): Array<StoredAttachment | InlineChatImageAttachment> => {
     if (!isStored(item)) return normalizeChatImageAttachments([item]);
     if (!path.isAbsolute(item.path) || item.path.length > 4096) throw new Error('Invalid attachment path.');
     return [{ name: String(item.name ?? '').slice(0, 256), mime: String(item.mime ?? ''), size: Number(item.size) || 0, path: item.path }];

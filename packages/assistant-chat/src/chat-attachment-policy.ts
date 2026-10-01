@@ -1,7 +1,12 @@
 export const CHAT_ATTACHMENT_POLICY = {
   maxCount: 8,
+  // Images and text are shown to the model, and anything sent inline travels as base64 in the
+  // prompt request, so these stay small.
   maxBytesEach: 6 * 1024 * 1024,
   maxBytesTotal: 20 * 1024 * 1024,
+  // A plain file uploaded ahead of the prompt is only named to the agent by its path.
+  maxUploadedFileBytesEach: 100 * 1024 * 1024,
+  maxUploadedFileBytesTotal: 200 * 1024 * 1024,
 } as const;
 
 export type ChatAttachmentMetadata = {
@@ -9,6 +14,9 @@ export type ChatAttachmentMetadata = {
   mime: string;
   size: number;
 };
+
+/** `uploaded`: the bytes go ahead of the prompt as their own upload, so a plain file gets the uploaded-file limits. */
+export type ChatAttachmentPolicyInput = ChatAttachmentMetadata & { uploaded?: boolean };
 
 export type ChatAttachmentKind = 'image' | 'text' | 'file';
 
@@ -104,8 +112,13 @@ export function chatAttachmentPreviewLabel(
   return attachments.length === 1 ? '[attachment]' : `[${attachments.length} attachments]`;
 }
 
+/** Whether an attachment is held to the uploaded-file limits rather than the inline ones. */
+export function isUploadedChatAttachmentFile(attachment: ChatAttachmentPolicyInput): boolean {
+  return attachment.uploaded === true && chatAttachmentKind(attachment) === 'file';
+}
+
 export function validateChatAttachments(
-  attachmentsRaw: readonly ChatAttachmentMetadata[],
+  attachmentsRaw: readonly ChatAttachmentPolicyInput[],
 ): ChatAttachmentValidationResult {
   const attachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
   if (attachments.length > CHAT_ATTACHMENT_POLICY.maxCount) {
@@ -121,6 +134,8 @@ export function validateChatAttachments(
 
   const normalized: ChatAttachmentMetadata[] = [];
   let totalBytes = 0;
+  let inlineBytes = 0;
+  let uploadedFileBytes = 0;
   for (let attachmentIndex = 0; attachmentIndex < attachments.length; attachmentIndex += 1) {
     const attachment = attachments[attachmentIndex]!;
     const mime = normalizeChatAttachmentMime(attachment.mime, attachment.name);
@@ -147,27 +162,37 @@ export function validateChatAttachments(
         },
       };
     }
-    if (size > CHAT_ATTACHMENT_POLICY.maxBytesEach) {
+    const uploadedFile = isUploadedChatAttachmentFile({ ...attachment, mime });
+    const limitEach = uploadedFile
+      ? CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesEach
+      : CHAT_ATTACHMENT_POLICY.maxBytesEach;
+    if (size > limitEach) {
       return {
         ok: false,
         issue: {
           code: 'attachment_too_large',
           attachmentIndex,
           actual: size,
-          limit: CHAT_ATTACHMENT_POLICY.maxBytesEach,
+          limit: limitEach,
         },
       };
     }
 
     totalBytes += size;
-    if (totalBytes > CHAT_ATTACHMENT_POLICY.maxBytesTotal) {
+    if (uploadedFile) uploadedFileBytes += size;
+    else inlineBytes += size;
+    const groupBytes = uploadedFile ? uploadedFileBytes : inlineBytes;
+    const limitTotal = uploadedFile
+      ? CHAT_ATTACHMENT_POLICY.maxUploadedFileBytesTotal
+      : CHAT_ATTACHMENT_POLICY.maxBytesTotal;
+    if (groupBytes > limitTotal) {
       return {
         ok: false,
         issue: {
           code: 'attachments_too_large',
           attachmentIndex,
-          actual: totalBytes,
-          limit: CHAT_ATTACHMENT_POLICY.maxBytesTotal,
+          actual: groupBytes,
+          limit: limitTotal,
         },
       };
     }

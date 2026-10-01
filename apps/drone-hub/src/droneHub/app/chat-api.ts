@@ -1,5 +1,6 @@
 import { sameAgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
+import { mimeForChatAttachmentFile } from '../chat/chat-input-attachments';
 import { requestJsonConditional } from '../http';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import {
@@ -11,6 +12,16 @@ import {
 import { clientTimeZone } from './client-time-zone';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
+
+/** Sends a plain file to the hub ahead of its prompt; the prompt then names it by the returned upload id. */
+export async function uploadChatAttachmentFile(requestJson: RequestJson, file: File): Promise<string> {
+  const query = new URLSearchParams({ name: file.name, mime: mimeForChatAttachmentFile(file) });
+  const response = await requestJson<{ ok: true; uploadId: string }>(
+    `/api/chat-attachment-uploads?${query.toString()}`,
+    { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file },
+  );
+  return response.uploadId;
+}
 
 export type SendDroneChatPromptResponse = {
   ok: true;

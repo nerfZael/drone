@@ -8,7 +8,7 @@ import { chatAgentSupportsReasoning, normalizeAgentSkillUses } from '@drone/assi
 import { normalizeMcpChatAccessScope } from './mcp-chat-access';
 import { settleAgentRunActivity } from './builtin-agent-activity';
 
-import type { ChatImageAttachment } from './chat-attachments';
+import { writeChatAttachmentFile, type ChatImageAttachment } from './chat-attachments';
 import { ChatStateMaintenanceScheduler } from './chat-state-maintenance';
 import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from './chat-types';
 import type { PendingPrompt } from './drone-pending-prompts';
@@ -1807,9 +1807,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         dir,
         path.basename(String(a.fileName ?? '').trim() || 'attachment.bin'),
       );
-      const buf = Buffer.from(String(a.dataBase64 ?? ''), 'base64');
-      if (!buf || buf.length === 0) throw new Error('attachment decode failed');
-      await fs.writeFile(filePath, buf, { mode: 0o600 });
+      await writeChatAttachmentFile(a, filePath);
     }
   }
 

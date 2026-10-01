@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { uploadChatAttachmentFile } from '../src/droneHub/app/chat-api';
 import {
   filesFromClipboardData,
   imageFilesFromClipboardData,
   mimeForChatAttachmentFile,
+  requireInlineAttachmentPayloads,
 } from '../src/droneHub/chat/chat-input-attachments';
 
 describe('chat input attachment helpers', () => {
@@ -83,5 +85,32 @@ describe('chat input attachment helpers', () => {
     const archive = new File(['zip'], 'bundle.zip', { type: 'application/zip' });
 
     expect(mimeForChatAttachmentFile(archive)).toBe('application/zip');
+  });
+});
+
+describe('plain files uploaded ahead of a prompt', () => {
+  test('a file goes to the hub as its raw bytes and comes back as an upload id', async () => {
+    const file = new File(['PK'], 'build output.zip', { type: 'application/zip' });
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const uploadId = await uploadChatAttachmentFile(async <T,>(url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return { ok: true, uploadId: 'chat-upload-1' } as T;
+    }, file);
+    expect(uploadId).toBe('chat-upload-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe('/api/chat-attachment-uploads?name=build+output.zip&mime=application%2Fzip');
+    expect(calls[0]!.init?.method).toBe('POST');
+    expect(calls[0]!.init?.body).toBe(file);
+  });
+
+  test('destinations that need bytes inline refuse an uploaded file by name', () => {
+    const inline = { name: 'a.png', mime: 'image/png', size: 1, dataBase64: 'AA==' };
+    expect(requireInlineAttachmentPayloads([inline])).toEqual([inline]);
+    expect(() =>
+      requireInlineAttachmentPayloads([
+        inline,
+        { name: 'b.zip', mime: 'application/zip', size: 1, uploadId: 'chat-upload-1' },
+      ]),
+    ).toThrow('b.zip was uploaded to this hub and cannot be sent here; attach it again.');
   });
 });

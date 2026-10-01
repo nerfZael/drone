@@ -25,6 +25,7 @@ import {
   type ChatSendPayload,
 } from '../chat';
 import { PendingTranscriptTurn } from '../chat/PendingTranscriptTurn';
+import { requireInlineAttachmentPayloads } from '../chat/chat-input-attachments';
 import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
@@ -1421,7 +1422,9 @@ function NativeAssistantDock({
       if (!activeThread) return false;
       const referencedDroneSnapshot = referencedDronesRef.current.slice();
       const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
-      const encodedAttachments: AssistantAttachmentPayload[] = sharedPayload.attachments.map(
+      const encodedAttachments: AssistantAttachmentPayload[] = requireInlineAttachmentPayloads(
+        sharedPayload.attachments,
+      ).map(
         (attachment) => ({
           ...attachment,
           disposition: attachment.disposition,
