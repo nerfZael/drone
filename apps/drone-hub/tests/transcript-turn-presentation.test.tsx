@@ -448,4 +448,28 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('Technical details');
     expect(html).not.toContain('dh-markdown--error');
   });
+
+  test('marks a silent completion as read so the message does not look ignored', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 1,
+          at: '2026-10-01T10:09:51.000Z',
+          startedAt: '2026-10-01T10:09:08.000Z',
+          completedAt: '2026-10-01T10:09:51.000Z',
+          prompt: 'Automated update.',
+          session: 'codex-app-server',
+          logPath: '',
+          ok: true,
+          output: '',
+          silentCompletion: true,
+        }}
+        messageId="silent-turn"
+      />,
+    );
+
+    expect(html).toContain('Read, no reply');
+    expect(html).not.toContain('Worked for');
+  });
 });
+

@@ -584,6 +584,24 @@ export class PromptQueueRepository {
             : {}),
         };
       }
+      // A drone daemon keys prompt jobs by ID across all chats. Reusing an ID in
+      // another chat would bind this chat to that chat's job and agent thread.
+      const owner = connection
+        .prepare(
+          `SELECT chat_name FROM prompts WHERE drone_id = ? AND chat_name != ? AND prompt_id = ?
+           UNION ALL
+           SELECT chat_name FROM prompt_submission_receipts
+           WHERE drone_id = ? AND chat_name != ? AND prompt_id = ?
+           LIMIT 1`,
+        )
+        .get(opts.droneId, opts.chatName, prompt.id, opts.droneId, opts.chatName, prompt.id) as
+        | { chat_name: string }
+        | undefined;
+      if (owner) {
+        throw new Error(
+          `promptId ${prompt.id} is already used by chat "${owner.chat_name}" in this drone; prompt IDs must be unique per drone`,
+        );
+      }
       const pause =
         opts.submissionSource === 'human'
           ? rowForPause(connection, opts.droneId, opts.chatName)

@@ -179,6 +179,10 @@ type CodexRunSession = {
   closing?: Promise<void>;
 };
 
+function isChatIdentity(key: string): boolean {
+  return key.startsWith('chat:');
+}
+
 export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   private readonly options: CodexPromptRunManagerOptions<TMessage>;
   private readonly sessions = new Map<string, CodexRunSession>();
@@ -190,7 +194,11 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
 
   async enqueue(message: TMessage): Promise<CodexPromptEnqueueResult> {
     const spec = message.codexAppServer;
-    const session = this.findSession(spec) ?? this.createSession(spec);
+    const found = this.findSession(spec);
+    if (!found && this.threadOwner(spec)) {
+      throw new Error(`Codex thread ${spec.threadId ?? spec.existingThreadId} is in use by another chat`);
+    }
+    const session = found ?? this.createSession(spec);
     if (session.closing) {
       await session.closing;
       return this.enqueue(message);
@@ -445,11 +453,18 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   }
 
   private findSession(spec: CodexPromptSpec): CodexRunSession | undefined {
-    const byIdentity = this.sessions.get(codexSessionIdentity(spec.sessionKey));
+    const identity = codexSessionIdentity(spec.sessionKey);
+    const byIdentity = this.sessions.get(identity);
     if (byIdentity) return byIdentity;
     // A legacy binding can identify the same thread with a different key.
     // Reuse its owner for enqueue, cancellation, approvals and restart recovery.
     // A fork's source thread is deliberately NOT an ownership candidate.
+    const owner = this.threadOwner(spec);
+    // Two chats never share a session. Merging them would interleave their turns.
+    return owner && !(isChatIdentity(owner.key) && isChatIdentity(identity)) ? owner : undefined;
+  }
+
+  private threadOwner(spec: CodexPromptSpec): CodexRunSession | undefined {
     const threadId = spec.threadId ?? (spec.forkThreadId ? undefined : spec.existingThreadId);
     return threadId
       ? Array.from(this.sessions.values()).find((session) => session.threadId === threadId)

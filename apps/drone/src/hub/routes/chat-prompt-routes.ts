@@ -448,7 +448,7 @@ export function createChatPromptRouteHandler(
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
-          const code = /still starting/i.test(msg)
+          const code = /still starting|already used by chat/i.test(msg)
             ? 409
             : /unknown drone|unknown chat/i.test(msg)
               ? 404
@@ -601,7 +601,7 @@ export function createChatPromptRouteHandler(
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
-          const code = /still starting/i.test(msg)
+          const code = /still starting|already used by chat/i.test(msg)
             ? 409
             : /unknown drone/i.test(msg)
               ? 404

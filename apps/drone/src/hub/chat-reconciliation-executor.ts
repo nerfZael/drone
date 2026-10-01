@@ -5,11 +5,22 @@ import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 import { completePendingChatFork } from './chat-fork';
 import { readChatReconciliationEntry } from './chat-reconciliation-read';
+import { codexSessionIdentity } from '../codex-session-identity';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import {
   BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT,
   writeBuiltinTranscriptSessionId,
 } from './builtin-transcript-session-metadata';
+
+function promptJobBelongsToOtherChat(job: any, chatId: string): boolean {
+  const normalizedChatId = chatId.trim().toLowerCase();
+  if (!job || !normalizedChatId) return false;
+  return [job.codexAppServer?.sessionKey, job.claudeStream?.sessionKey, job.chatKey]
+    .map((key) => String(key ?? '').trim())
+    .filter(Boolean)
+    .map(codexSessionIdentity)
+    .some((identity) => identity.startsWith('chat:') && identity !== `chat:${normalizedChatId}`);
+}
 
 export type ChatReconciliationExecutorDependencies = {
   applyChatReconciliationInStore: any;
@@ -352,6 +363,19 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         continue;
       }
       let job = jobResp?.job ?? null;
+      if (promptJobBelongsToOtherChat(job, String(entry?.id ?? ''))) {
+        // The daemon dedupes prompt jobs by ID across chats. Adopting this job
+        // would copy another chat's agent thread, response and usage here.
+        pendingList[i] = {
+          ...p,
+          state: 'failed',
+          error: `prompt id ${id} is already used by another chat in this drone; the message was not delivered`,
+          observability: undefined,
+          updatedAt: nowIso(),
+        };
+        changed = true;
+        continue;
+      }
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       recordExternalUsage({ job, droneId, chatId: String(entry.id), chatName, repo: d.repoPath, model: pendingModel });

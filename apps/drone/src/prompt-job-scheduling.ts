@@ -1,10 +1,33 @@
+import { codexSessionIdentity } from './codex-session-identity';
+
 export type SchedulablePromptJob = {
   id: string;
   state: 'queued' | 'running' | 'done' | 'failed' | 'canceled';
   deliveryMode?: 'queue' | 'asap';
   chatKey?: string;
   claudeStream?: { sessionKey: string };
+  codexAppServer?: { sessionKey: string };
 };
+
+function promptJobChatKeys(job: Omit<SchedulablePromptJob, 'id' | 'state'>): string[] {
+  return [
+    job.chatKey?.trim(),
+    job.claudeStream?.sessionKey?.trim(),
+    job.codexAppServer?.sessionKey?.trim() ? codexSessionIdentity(job.codexAppServer.sessionKey.trim()) : '',
+  ].filter((key): key is string => Boolean(key));
+}
+
+// Job IDs are unique per daemon, not per chat. A resubmission from another
+// chat must not be treated as a retry of this job.
+export function promptJobBelongsToOtherChat(
+  existing: Omit<SchedulablePromptJob, 'id' | 'state'>,
+  incoming: Omit<SchedulablePromptJob, 'id' | 'state'>,
+): boolean {
+  const existingKeys = promptJobChatKeys(existing);
+  const incomingKeys = promptJobChatKeys(incoming);
+  return existingKeys.length > 0 && incomingKeys.length > 0 &&
+    !incomingKeys.some((key) => existingKeys.includes(key));
+}
 
 export function selectNextPromptJobId(jobs: readonly SchedulablePromptJob[]): string | null {
   const keys = (job: SchedulablePromptJob) =>

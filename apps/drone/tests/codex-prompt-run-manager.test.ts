@@ -99,3 +99,32 @@ test('restart recovery preserves a canceled outcome from the durable transcript'
   expect(savedRun).toMatchObject({ state: 'canceled', pendingApprovals: [] });
   expect(savedMessage).toMatchObject({ state: 'canceled', exitCode: 1 });
 });
+
+test('refuses to attach a chat to another chat\'s live Codex thread', async () => {
+  const manager = new CodexPromptRunManager<any>({
+    loadMessage: async () => null,
+    saveMessage: async () => {},
+    createRun: async () => { throw new Error('must not start a run'); },
+    loadRun: async () => null,
+    saveRun: async () => {},
+    appendRunEvents: async (current) => current,
+    appendRunStderr: async () => {},
+    mutate: async (operation) => await operation(),
+  });
+  const hudKey = 'chat:d6c00def-ec99-4b7f-9233-5c0188615d25';
+  (manager as any).sessions.set(hudKey, { key: hudKey, threadId: 'hud-thread' });
+
+  await expect(manager.enqueue({
+    id: 'units-message',
+    state: 'queued',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    codexAppServer: {
+      sessionKey: 'codex-chat:drone-1:431477b1-9fb4-4f42-8c2f-5231e8b2e527',
+      existingThreadId: 'hud-thread',
+      launchScript: 'exit 1',
+      prompt: 'hello',
+    },
+  })).rejects.toThrow('in use by another chat');
+  expect((manager as any).sessions.size).toBe(1);
+});

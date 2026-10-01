@@ -25,7 +25,7 @@ function codexJob(transcript: Record<string, unknown>) {
   };
 }
 
-function harness(opts: { pending: any; job: any }) {
+function harness(opts: { pending: any; job: any; chatId?: string }) {
   const pendingUpdates: any[] = [];
   const storedTurns: any[] = [];
   const retries: string[] = [];
@@ -69,7 +69,7 @@ function harness(opts: { pending: any; job: any }) {
     parseStructuredAgentJobTranscript: () => ({}),
     projectCanonicalChatToRegistry: async () => {},
     pruneCompletedPendingPrompts: (list: any[]) => list,
-    readChatMetadataFromStore: () => ({ available: true, chat: { id: 'chat-1' } }),
+    readChatMetadataFromStore: () => ({ available: true, chat: { id: opts.chatId ?? 'chat-1' } }),
     readChatRowsFromStore: () => ({ available: true, pending: [opts.pending], pendingTurns: [] }),
     recoverStalePromptJobSession: async () => ({}),
     resolveCanonicalDroneOrPendingForReadRef: async () => null,
@@ -153,5 +153,36 @@ describe('codex reconciliation', () => {
 
     expect(h.pendingUpdates).toEqual([]);
     expect(h.storedTurns).toEqual([]);
+  });
+
+  test('fails a prompt whose daemon job belongs to another chat instead of adopting it', async () => {
+    const chatId = '431477b1-9fb4-4f42-8c2f-5231e8b2e527';
+    const otherChatId = 'd6c00def-ec99-4b7f-9233-5c0188615d25';
+    const job = codexJob({ message: 'other chat reply', terminalStatus: 'completed' });
+    const h = harness({
+      chatId,
+      pending: sentPending,
+      job: { ...job, codexAppServer: { ...job.codexAppServer, sessionKey: `codex-chat:${DRONE_ID}:${otherChatId}` } },
+    });
+
+    await h.run();
+
+    expect(h.storedTurns).toEqual([]);
+    expect(h.pendingUpdates[0].patch).toMatchObject({ state: 'failed' });
+    expect(h.pendingUpdates[0].patch.error).toContain('already used by another chat');
+  });
+
+  test('adopts a daemon job that belongs to this chat', async () => {
+    const chatId = '431477b1-9fb4-4f42-8c2f-5231e8b2e527';
+    const job = codexJob({ message: 'reply', terminalStatus: 'completed' });
+    const h = harness({
+      chatId,
+      pending: sentPending,
+      job: { ...job, codexAppServer: { ...job.codexAppServer, sessionKey: `codex-chat:${DRONE_ID}:${chatId}` } },
+    });
+
+    await h.run();
+
+    expect(h.storedTurns).toHaveLength(1);
   });
 });

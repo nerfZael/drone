@@ -30,7 +30,7 @@ import {
 } from './daemon-workspace';
 import { handleDaemonManagedStateRequest } from './daemon-managed-state';
 import { DRONE_DAEMON_CAPABILITIES } from './daemon-capabilities';
-import { selectNextPromptJobId } from './prompt-job-scheduling';
+import { promptJobBelongsToOtherChat, selectNextPromptJobId } from './prompt-job-scheduling';
 import {
   claudeStreamPaths,
   claudeStreamRunnerScript,
@@ -1537,6 +1537,15 @@ async function main() {
     return await result;
   }
 
+  async function failQueuedPromptJob(id: string, error: string): Promise<void> {
+    await withPromptMutationLock(async () => {
+      const latest = await loadPromptJob(promptsDir, id);
+      if (latest?.state !== 'queued') return;
+      const finishedAt = nowIso();
+      await savePromptJob(promptsDir, { ...latest, state: 'failed', error, finishedAt, updatedAt: finishedAt });
+    });
+  }
+
   const codexCredentials = new CodexProviderCredentials(dataDir);
   const codexPromptRuns = new CodexPromptRunManager<CodexPromptJob>({
     environment: (spec) => codexModelRoute(spec.model).provider === 'openrouter'
@@ -1649,13 +1658,17 @@ async function main() {
           setImmediate(() => {
             void codexPromptRuns
               .enqueue(job as CodexPromptJob)
-              .catch((error) => {
+              .catch(async (error) => {
                 // startRun normally persists its own failure; keep an explicit
                 // daemon diagnostic for failures before a run can be created.
                 // eslint-disable-next-line no-console
                 console.error(
                   `Codex queued prompt resume failed for ${job.id}: ${String(error?.message ?? error)}`,
                 );
+                // A job that never got a run would otherwise stay queued forever.
+                if (!codexPromptRuns.ownsMessage(job as CodexPromptJob)) {
+                  await failQueuedPromptJob(job.id, String(error?.message ?? error));
+                }
               })
               .finally(() => codexRestartResumesInFlight.delete(job.id));
           });
@@ -1900,11 +1913,23 @@ async function main() {
           await savePromptIndex(promptsDir, idx);
           return null;
         });
+        if (existing && promptJobBelongsToOtherChat(existing, job)) {
+          json(res, 409, { ok: false, error: `prompt id ${id} is already used by another chat` });
+          return;
+        }
         if (existing) {
           json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
           return;
         }
-        const enqueueResult = await codexPromptRuns.enqueue(job);
+        let enqueueResult: Awaited<ReturnType<typeof codexPromptRuns.enqueue>>;
+        try {
+          enqueueResult = await codexPromptRuns.enqueue(job);
+        } catch (error: any) {
+          const message = String(error?.message ?? error);
+          await failQueuedPromptJob(id, message);
+          json(res, 409, { ok: false, error: message });
+          return;
+        }
         const decidedAt = nowIso();
         await withPromptMutationLock(async () => {
           const latest = await loadPromptJob(promptsDir, id);
@@ -2017,6 +2042,10 @@ async function main() {
           await savePromptIndex(promptsDir, idx);
           return null;
         });
+        if (existing && promptJobBelongsToOtherChat(existing, job)) {
+          json(res, 409, { ok: false, error: `prompt id ${id} is already used by another chat` });
+          return;
+        }
         if (existing) {
           json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
           return;

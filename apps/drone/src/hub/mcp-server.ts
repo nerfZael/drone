@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { preferredChatName } from './preferred-chat';
 import { pendingChatSummary } from './chat-read/helpers/chat-read-presentation';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -106,6 +107,15 @@ type HubConnection = {
 function cleanString(value: unknown, fallback = ''): string {
   const text = String(value ?? '').trim();
   return text || fallback;
+}
+
+// Prompt IDs are unique per drone, while an idempotency key only dedupes
+// retries to one chat. Scope the key so one key can address several chats.
+export function chatScopedPromptId(idempotencyKey: string, chat: string): string {
+  const key = idempotencyKey.trim();
+  const chatHash = crypto.createHash('sha256').update(chat).digest('hex').slice(0, 8);
+  if (/^[A-Za-z0-9._-]+$/.test(key) && key.length <= 87) return `${key}.${chatHash}`;
+  return `k-${crypto.createHash('sha256').update(`${key}\0${chat}`).digest('hex').slice(0, 32)}`;
 }
 
 function cleanPositiveInt(value: unknown, fallback: number, max: number): number {
@@ -3276,7 +3286,10 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
             'queue (default): run after the current execution and existing queue. asap: jump the queue and, when the agent supports it, steer the execution in progress.',
           )
           .optional(),
-        idempotencyKey: z.string().optional(),
+        idempotencyKey: z
+          .string()
+          .describe('Dedupes retries of this message to this chat. The same key may be used for different chats.')
+          .optional(),
         createChat: z
           .boolean()
           .describe('Create the named chat before sending. Defaults to false.')
@@ -3301,7 +3314,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         submissionSource: 'assistant-tool',
         deliveryMode: args.deliveryMode ?? 'queue',
         ...(!args.createChat ? { requireExistingChat: true } : {}),
-        ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}),
+        ...(cleanString(args.idempotencyKey)
+          ? { promptId: chatScopedPromptId(cleanString(args.idempotencyKey), chat) }
+          : {}),
       };
       const response = await requestJson(
         `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/prompt`,

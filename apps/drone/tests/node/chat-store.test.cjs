@@ -710,6 +710,23 @@ describe('canonical chat and transcript repository', () => {
     assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
   });
 
+  test('rejects a prompt ID already used by another chat in the same drone', async () => {
+    tempDataDir('prompt-id-other-chat');
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'HUD', chatEntry: legacyChat('HUD') });
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'Units', chatEntry: legacyChat('Units') });
+    await upsertChatInStore({ droneId: 'drone-2', chatName: 'Units', chatEntry: legacyChat('Units') });
+    const prompts = getPromptQueueRepository();
+    const prompt = { id: 'shared-key', at: '2026-01-01T00:01:00.000Z', prompt: 'work', state: 'queued' };
+    await prompts.enqueue({ droneId: 'drone-1', chatName: 'HUD', prompt });
+
+    await assert.rejects(
+      prompts.enqueue({ droneId: 'drone-1', chatName: 'Units', prompt }),
+      /already used by chat "HUD"/,
+    );
+    assert.equal((await prompts.enqueue({ droneId: 'drone-1', chatName: 'HUD', prompt })).inserted, false);
+    assert.equal((await prompts.enqueue({ droneId: 'drone-2', chatName: 'Units', prompt })).inserted, true);
+  });
+
   test('recreating an archived chat name does not inherit its prompt queue history', async () => {
     tempDataDir('archive-name-reuse');
     await upsertChatInStore({ droneId: 'drone-1', chatName: 'default', chatEntry: legacyChat('default') });

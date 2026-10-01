@@ -9,7 +9,7 @@ import {
   registerChangeRequestMcpTools,
 } from '../src/hub/change-requests/change-request-mcp-tools';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
-import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
+import { authorizeDroneHubMcpTool, chatScopedPromptId, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
 import { upsertStoredSpeechSettings } from '../src/hub/hub-settings';
 import { withTempDroneDataDir } from './test-helpers';
@@ -3171,5 +3171,21 @@ describe('Drone Hub assistant MCP transport', () => {
         else process.env.DRONE_TOKEN = previousToken;
       }
     });
+  });
+});
+
+describe('send_message idempotency keys', () => {
+  test('scopes one key to distinct, stable prompt IDs per chat', () => {
+    const hud = chatScopedPromptId('no-direct-review-messages', 'HUD');
+    const units = chatScopedPromptId('no-direct-review-messages', 'Units Buildings Effects');
+    expect(hud).not.toBe(units);
+    expect(hud).toBe(chatScopedPromptId('no-direct-review-messages', 'HUD'));
+    expect(hud.startsWith('no-direct-review-messages.')).toBe(true);
+  });
+
+  test('hashes keys that would not be valid prompt IDs', () => {
+    const id = chatScopedPromptId('x'.repeat(200), 'HUD');
+    expect(id).toMatch(/^k-[0-9a-f]{32}$/);
+    expect(chatScopedPromptId('has spaces', 'HUD')).toMatch(/^k-[0-9a-f]{32}$/);
   });
 });

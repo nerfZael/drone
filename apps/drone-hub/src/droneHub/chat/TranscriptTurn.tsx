@@ -25,7 +25,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { collectInlineAgentMedia } from './inline-agent-media';
-import { AgentRunSummaryLine } from './WorkingElapsedStatus';
+import { AgentRunSummaryLine, formatWorkingDuration } from './WorkingElapsedStatus';
 import { UserChatMessage, type UserChatMessageFollowUp } from './UserChatMessage';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
@@ -339,6 +339,17 @@ export const TranscriptTurn = React.memo(
         )}
 
         <ChatExecutionNotice text={executionOrderNote} />
+
+        {isSilentCompletion ? (
+          <AgentRunSummaryLine
+            active={false}
+            durationMs={completedRunDurationMs ?? 0}
+            preRunDurationMs={preRunDurationMs}
+            label="Read, no reply"
+            detail={completedRunDurationMs === null ? undefined : `after ${formatWorkingDuration(completedRunDurationMs)}`}
+            at={agentIso}
+          />
+        ) : null}
 
         {completedRunDurationMs !== null && !activity && !activitySummary && !isSilentCompletion && !isUserOnly ? (
           <AgentRunSummaryLine

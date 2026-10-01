@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { selectNextPromptJobId, type SchedulablePromptJob } from '../src/prompt-job-scheduling';
+import {
+  promptJobBelongsToOtherChat,
+  selectNextPromptJobId,
+  type SchedulablePromptJob,
+} from '../src/prompt-job-scheduling';
 
 function job(
   id: string,
@@ -67,5 +71,28 @@ describe('per-chat execution slots', () => {
     expect(selectNextPromptJobId([active, { ...job('same'), chatKey: 'graphics', claudeStream: { sessionKey: 'new-stream' } }])).toBeNull();
     expect(selectNextPromptJobId([stream, job('unknown')])).toBeNull();
     expect(selectNextPromptJobId([job('unknown', 'queue', 'running'), { ...job('next'), chatKey: 'known' }])).toBeNull();
+  });
+});
+
+describe('prompt job chat ownership', () => {
+  const hud = 'codex-chat:drone-1:d6c00def-ec99-4b7f-9233-5c0188615d25';
+  const units = 'codex-chat:drone-1:431477b1-9fb4-4f42-8c2f-5231e8b2e527';
+
+  test('detects a resubmitted job ID from another chat', () => {
+    expect(promptJobBelongsToOtherChat({ codexAppServer: { sessionKey: hud } }, { codexAppServer: { sessionKey: units } })).toBe(true);
+  });
+
+  test('treats a retry from the same chat as the same job, including legacy keys', () => {
+    expect(promptJobBelongsToOtherChat({ codexAppServer: { sessionKey: hud } }, { codexAppServer: { sessionKey: hud } })).toBe(false);
+    expect(
+      promptJobBelongsToOtherChat(
+        { codexAppServer: { sessionKey: 'codex:drone-1:HUD:d6c00def-ec99-4b7f-9233-5c0188615d25' } },
+        { codexAppServer: { sessionKey: hud } },
+      ),
+    ).toBe(false);
+  });
+
+  test('cannot prove a conflict without chat identities', () => {
+    expect(promptJobBelongsToOtherChat({}, { codexAppServer: { sessionKey: units } })).toBe(false);
   });
 });
