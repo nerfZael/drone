@@ -3336,7 +3336,7 @@ select:disabled optgroup {
 
 /* Expand on focus: the window floats over its neighbours; its grid slot stays where it was. */
 .dh-dockable-workspace [data-dh-expanded] {
-  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45), 0 0 0 1px var(--accent-muted);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
 }
 
 /*

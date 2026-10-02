@@ -6,6 +6,7 @@ import { expect, test } from 'bun:test';
 import { DroneChangesDock } from '../src/droneHub/changes/DroneChangesDock';
 import { ChangesExplorerContext } from '../src/droneHub/changes/changes-explorer-context';
 import { changesQueryKeys } from '../src/droneHub/changes/useChangesQueries';
+import { appDialogQueue } from '../src/ui/AppConfirmDialog';
 import { AgentRunHistoricalChangesView } from '../src/droneHub/changes/AgentRunHistoricalChangesView';
 
 test('the separate changes explorer selects the main diff, survives moving and reopening, and keeps embedded views combined', async () => {
@@ -13,8 +14,14 @@ test('the separate changes explorer selects the main diff, survives moving and r
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const requests: string[] = [];
   class FakeWebSocket { send() {} close() {} }
-  const fetch = async (url: string) => {
+  const actions: Array<{ action: string; paths: string[] }> = [];
+  const detachDialogHost = appDialogQueue.attachHost();
+  const fetch = async (url: string, init?: RequestInit) => {
     requests.push(String(url));
+    if (String(url).endsWith('/changes/action')) actions.push(JSON.parse(String(init?.body)));
+    if (String(url).endsWith('/changes')) {
+      return Response.json(client.getQueryData(changesQueryKeys.workingTree(droneId, '/work/repo')));
+    }
     return Response.json({ ok: true, diff: '', truncated: false, fromUntracked: false });
   };
   for (const [key, value] of Object.entries({
@@ -94,6 +101,33 @@ test('the separate changes explorer selects the main diff, survives moving and r
     expect(main.querySelectorAll('[role="treeitem"]')).toHaveLength(2);
     expect(main.querySelector('[aria-label="Resize changes explorer"]')).not.toBeNull();
 
+    // Bulk controls operate on their entire section without toggling its collapse state.
+    await step(() => render(explorer));
+    await step(() => explorer.querySelector<HTMLButtonElement>('[aria-label="Stage all changes"]')!.click());
+    expect(actions.at(-1)).toMatchObject({ action: 'stage', paths: ['first.ts', 'second.ts'] });
+    expect(explorer.querySelectorAll('[role="treeitem"]')).toHaveLength(2);
+
+    await step(() => explorer.querySelector<HTMLButtonElement>('[aria-label="Revert all unstaged changes"]')!.click());
+    expect(appDialogQueue.current()?.title).toBe('Revert all unstaged changes?');
+    expect(actions).toHaveLength(1);
+    await step(() => appDialogQueue.settle(false));
+    expect(actions).toHaveLength(1);
+    await step(() => explorer.querySelector<HTMLButtonElement>('[aria-label="Revert all unstaged changes"]')!.click());
+    await step(() => appDialogQueue.settle(true));
+    expect(actions.at(-1)).toMatchObject({ action: 'discard', paths: ['first.ts', 'second.ts'] });
+
+    await step(() => client.setQueryData(changesQueryKeys.workingTree(droneId, '/work/repo'), (previous: any) => ({
+      ...previous,
+      entries: [...entries, {
+        ...entries[0], path: 'renamed.ts', originalPath: 'old.ts', code: 'R ',
+        stagedChar: 'R', unstagedChar: ' ', stagedType: 'renamed', unstagedType: null,
+      }],
+    })));
+    await step(() => explorer.querySelector<HTMLButtonElement>('[aria-label="Unstage all changes"]')!.click());
+    expect(actions.at(-1)).toMatchObject({ action: 'unstage', paths: ['renamed.ts', 'old.ts'] });
+    await step(() => explorer.querySelector<HTMLButtonElement>('[aria-label="Stage all changes"]')!.click());
+    expect(actions.at(-1)).toMatchObject({ action: 'stage', paths: ['first.ts', 'second.ts'] });
+
     const commit = { sha: 'a'.repeat(40), parents: [], subject: 'Example commit', authorName: 'Test', authoredAt: '2026-09-27T00:00:00Z' };
     client.setQueryData(changesQueryKeys.branchCommits(droneId, '/work/repo'), { ok: true, id: droneId, commits: [commit] });
     client.setQueryData(changesQueryKeys.branchCommit(droneId, '/work/repo', commit.sha), {
@@ -149,6 +183,7 @@ test('the separate changes explorer selects the main diff, survives moving and r
     await step(() => renderReview({ ...reviewOverride, revisionKey: 'revision-2' }));
     expect(reviewRenders).toBeGreaterThan(initialReviewRenders);
   } finally {
+    detachDialogHost();
     await act(async () => root.unmount());
     client.clear();
     for (const [key, descriptor] of originals) {

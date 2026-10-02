@@ -2183,6 +2183,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
         affectedPaths: string[];
         isDirectory: boolean;
         isUntracked: boolean;
+        isAll?: boolean;
       },
       action: 'stage' | 'unstage' | 'discard',
     ) => {
@@ -2190,8 +2191,10 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       if (
         action === 'discard' &&
         !(await confirm({
-          title: target.isDirectory ? 'Discard folder changes?' : 'Discard file changes?',
-          message: target.isDirectory
+          title: target.isAll ? 'Revert all unstaged changes?' : target.isDirectory ? 'Discard folder changes?' : 'Discard file changes?',
+          message: target.isAll
+            ? 'All unstaged changes, including untracked files, will be permanently discarded. Staged changes will be kept.'
+            : target.isDirectory
             ? `All unstaged changes in ${target.path}, including untracked files, will be permanently discarded.`
             : target.isUntracked
               ? `${target.path} is untracked and will be deleted. This cannot be undone.`
@@ -2528,6 +2531,36 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
             title="Unstage folder changes"
           />
         )}
+      </div>
+    );
+  }
+
+  function renderSectionQuickActions(kind: 'staged' | 'unstaged'): React.ReactNode {
+    const sectionEntries = allEntries.filter(kind === 'staged' ? hasStaged : hasUnstaged);
+    const target = {
+      path: '.',
+      paths: Array.from(new Set(sectionEntries.flatMap((entry) =>
+        [entry.path, entry.originalPath].filter((path): path is string => Boolean(path)),
+      ))),
+      affectedPaths: sectionEntries.map((entry) => entry.path),
+      isDirectory: true,
+      isUntracked: false,
+      isAll: true,
+    };
+    const disabled = Boolean(workingTreeActionBusy) || sectionEntries.length === 0;
+    return (
+      <div className="shrink-0 inline-flex items-center gap-0.5 pr-2">
+        {kind === 'unstaged' ? (
+          <UiToolbarIconButton size="xsmall" tone="danger"
+            label="Revert all unstaged changes" title="Revert all unstaged changes"
+            icon={<DiscardChangesIcon />} disabled={disabled}
+            onClick={() => { void runWorkingTreeAction(target, 'discard'); }} />
+        ) : null}
+        <UiToolbarIconButton size="xsmall" tone={kind === 'staged' ? 'warning' : 'success'}
+          label={kind === 'staged' ? 'Unstage all changes' : 'Stage all changes'}
+          title={kind === 'staged' ? 'Unstage all changes' : 'Stage all changes'}
+          icon={<StageIcon unstage={kind === 'staged'} />} disabled={disabled}
+          onClick={() => { void runWorkingTreeAction(target, kind === 'staged' ? 'unstage' : 'stage'); }} />
       </div>
     );
   }
@@ -2992,16 +3025,19 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
           <>
             {stagedEntries.length > 0 ? (
               <section>
-                <button
-                  type="button"
-                  onClick={() => setStagedSectionOpen((open) => !open)}
-                  aria-expanded={stagedSectionOpen}
-                  className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-                >
-                  <IconChevron down={stagedSectionOpen} size={11} />
-                  <span className="min-w-0 flex-1 truncate">Staged Changes</span>
-                  <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
-                </button>
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setStagedSectionOpen((open) => !open)}
+                    aria-expanded={stagedSectionOpen}
+                    className="flex h-7 min-w-0 flex-1 items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                  >
+                    <IconChevron down={stagedSectionOpen} size={11} />
+                    <span className="min-w-0 flex-1 truncate">Staged Changes</span>
+                    <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
+                  </button>
+                  {renderSectionQuickActions('staged')}
+                </div>
                 {stagedSectionOpen ? (
                   <div className="w-full">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
                 ) : null}
@@ -3009,16 +3045,19 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
             ) : null}
             {unstagedEntries.length > 0 ? (
               <section>
-                <button
-                  type="button"
-                  onClick={() => setUnstagedSectionOpen((open) => !open)}
-                  aria-expanded={unstagedSectionOpen}
-                  className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-                >
-                  <IconChevron down={unstagedSectionOpen} size={11} />
-                  <span className="min-w-0 flex-1 truncate">Changes</span>
-                  <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
-                </button>
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setUnstagedSectionOpen((open) => !open)}
+                    aria-expanded={unstagedSectionOpen}
+                    className="flex h-7 min-w-0 flex-1 items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                  >
+                    <IconChevron down={unstagedSectionOpen} size={11} />
+                    <span className="min-w-0 flex-1 truncate">Changes</span>
+                    <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
+                  </button>
+                  {renderSectionQuickActions('unstaged')}
+                </div>
                 {unstagedSectionOpen ? (
                   <div className="w-full">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
                 ) : null}
