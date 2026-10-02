@@ -67,6 +67,8 @@ import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 import { FloatingQuestionDock } from '../chat/FloatingQuestionDock';
+import { NextActionsRow } from '../chat/NextActionsRow';
+import { nextActionsAnchorFromTranscript } from '../chat/next-actions';
 import { useExternalQuestionRequests } from '../chat/use-external-question-requests';
 import type { ChatResourceSubscriptionInfo } from '../../domain';
 import {
@@ -609,6 +611,12 @@ export function GroupMultiChatColumn({
     return visiblePendingPrompts.some(pendingPromptShowsWorkingState);
   }, [sendingPrompt, visiblePendingPrompts]);
   useLocalChatBusy(createCanvasChatNodeId(drone.id, chatName), waitingForAgent);
+  const nextActionsAnchor = React.useMemo(() => {
+    const last = timelineGroups[timelineGroups.length - 1];
+    if (onPublish || waitingForAgent || !last) return null;
+    if (![last.primary, ...last.followUps].every((entry) => entry.kind === 'turn')) return null;
+    return nextActionsAnchorFromTranscript(transcripts);
+  }, [onPublish, timelineGroups, transcripts, waitingForAgent]);
 
   const canStopResponse = React.useMemo(
     () => visiblePendingPrompts.some(pendingPromptCanStopResponse),
@@ -1268,6 +1276,15 @@ export function GroupMultiChatColumn({
                 />
               );
             })}
+            {nextActionsAnchor ? (
+              <NextActionsRow
+                key={nextActionsAnchor.turnId}
+                droneId={drone.id}
+                chatName={chatName}
+                anchor={nextActionsAnchor}
+                onSend={(prompt) => sendPrompt({ prompt, attachments: [] }, { trigger: 'button', deliveryMode: 'asap' })}
+              />
+            ) : null}
             {executionOrder.activeEarlier ? <EarlierRequestWorkingNotice {...executionOrder.activeEarlier} /> : null}
           </div>
         ) : (

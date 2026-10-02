@@ -345,6 +345,7 @@ import { createLocalCheckoutRouteHandler } from './routes/local-checkout-routes'
 import { registerFleetRoutes } from './routes/fleet-routes';
 import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
+import { registerNextActionsRoutes } from './next-actions/next-actions-routes';
 import { registerOperationalRoutes } from './routes/operational-routes';
 import { registerResourceSubscriptionRoutes } from './routes/resource-subscription-routes';
 import { registerGlobalShortcutRoutes } from './routes/global-shortcut-routes';
@@ -5775,6 +5776,7 @@ async function startDroneHubApiServerWithLifecycle(
     normalizeDroneIdentity,
     hubLog,
   });
+  registerNextActionsRoutes(apiRouter, { hubLog });
 
   registerAssistantRoutes(apiRouter, {
     assistantService,

@@ -25,6 +25,8 @@ import {
   type ChatSendPayload,
 } from '../chat';
 import { PendingTranscriptTurn } from '../chat/PendingTranscriptTurn';
+import { NextActionsRow } from '../chat/NextActionsRow';
+import { nextActionsTurnsFromMessages } from '../chat/next-actions';
 import { requireInlineAttachmentPayloads } from '../chat/chat-input-attachments';
 import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
@@ -2441,6 +2443,38 @@ function NativeAssistantDock({
           onSkip={(notes) =>
             void resolveQuestionRequest(request, { kind: 'skip', notes })
           }
+        />
+      ),
+    });
+  }
+  const nextActionsItem = visibleItems[latestCompletedAgentMessageIndex];
+  if (
+    !running &&
+    visibleQueuedPrompts.length === 0 &&
+    nextActionsItem &&
+    latestCompletedAgentMessageIndex > latestUserItemIndex
+  ) {
+    const turnId = `${activeThreadId}:${nextActionsItem.key}`;
+    nativeTranscriptItems.push({
+      key: `next-actions:${turnId}`,
+      kind: 'status',
+      content: (
+        <NextActionsRow
+          droneId={nativeDroneId}
+          chatName={nativeChatName}
+          anchor={{
+            turnId,
+            turns: nextActionsTurnsFromMessages(
+              visibleMessages.map((message) => ({
+                role: message.role,
+                text: message.role === 'assistant' && message.errorMessage ? '' : messageVisibleText(message),
+              })),
+            ),
+          }}
+          onSend={async (prompt) => {
+            scrollAssistantToBottom();
+            return await sendPrompt({ prompt, attachments: [] }, 'asap');
+          }}
         />
       ),
     });

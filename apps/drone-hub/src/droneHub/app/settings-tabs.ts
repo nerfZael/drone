@@ -1,4 +1,4 @@
-export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'next-actions' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -14,6 +14,12 @@ export const SETTINGS_TABS: Array<{
   },
   { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'Floating desktop cards for drone completion, failure, and selected custom events.' },
   { id: 'usage', label: 'Usage', title: 'Usage analytics', description: 'Token consumption, estimated cost, and model prices for new agent executions.' },
+  {
+    id: 'next-actions',
+    label: 'Next actions',
+    title: 'Next actions',
+    description: 'Suggest one-click follow-up replies under finished agent messages.',
+  },
   {
     id: 'companion',
     label: 'Companion',

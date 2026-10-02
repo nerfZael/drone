@@ -1,6 +1,8 @@
 import { chatExecutionOrder } from './chat-execution-order';
 import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import { PendingEventsCard } from '../chat/PendingEventsCard';
+import { NextActionsRow } from '../chat/NextActionsRow';
+import { nextActionsAnchorFromTranscript } from '../chat/next-actions';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { SideChatControls } from './SideChatControls';
@@ -1622,6 +1624,31 @@ export function SelectedDroneWorkspace({
         });
       }
     }
+  }
+  const lastTimelineGroup = externalTimelineGroups[externalTimelineGroups.length - 1];
+  const nextActionsAnchor =
+    !currentChatIsDraft &&
+    !chatInputWaiting &&
+    lastTimelineGroup &&
+    [lastTimelineGroup.primary, ...lastTimelineGroup.followUps].every((entry) => entry.kind === 'turn')
+      ? nextActionsAnchorFromTranscript(transcripts)
+      : null;
+  if (nextActionsAnchor) {
+    externalTranscriptItems.push({
+      key: `next-actions:${nextActionsAnchor.turnId}`,
+      kind: 'status',
+      content: (
+        <NextActionsRow
+          droneId={currentDrone.id}
+          chatName={activeChatName}
+          anchor={nextActionsAnchor}
+          onSend={async (prompt) => {
+            scrollTranscriptToBottom({ force: true });
+            return await sendPromptText({ prompt, attachments: [] }, { trigger: 'button', deliveryMode: 'asap' });
+          }}
+        />
+      ),
+    });
   }
   if (executionOrder.activeEarlier) {
     externalTranscriptItems.push({
