@@ -11,6 +11,7 @@ import type { FolderWorkspaceTarget } from '../files/FolderWorkspaceFiles';
 import { EntityModelsControl } from './EntityModels';
 import { ChatPane } from './EntityChat';
 import { EntityPromptsPanel } from './EntityPrompts';
+import { EntityRecord } from './EntityRecord';
 import { WorkspaceAccessPicker } from '../assistant/WorkspaceAccessPicker';
 import { requestJson } from '../http';
 
@@ -18,7 +19,7 @@ import { requestJson } from '../http';
 const FolderWorkspaceFiles = React.lazy(() => import('../files/FolderWorkspaceFiles').then(m => ({ default: m.FolderWorkspaceFiles })));
 /** The Hub serves the entity's home folder through the drone file routes under this id (see folder-workspaces.ts). */
 const ENTITY_WORKSPACE_ID = 'entity-workspace';
-type BenchView = 'brain' | 'work' | 'inspector' | 'files';
+type BenchView = 'brain' | 'work' | 'record' | 'inspector' | 'files';
 
 /** The entity test bench: chat, keypad and inspector over the Hub's live entity session. */
 export function EntityBench() {
@@ -56,12 +57,13 @@ export function EntityBench() {
         </div>
       ) : (
         <div className={`grid min-h-0 flex-1 gap-px bg-[var(--border)] ${keypad
-          ? (brain || view === 'work' ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]')
-          : (brain || view === 'work' ? 'grid-cols-[minmax(260px,0.9fr)_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1fr)_minmax(300px,1.2fr)]')}`}>
+          ? (brain || view === 'work' || view === 'record' ? 'grid-cols-[minmax(240px,0.9fr)_200px_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1.1fr)_220px_minmax(300px,1.2fr)]')
+          : (brain || view === 'work' || view === 'record' ? 'grid-cols-[minmax(260px,0.9fr)_minmax(440px,2fr)]' : 'grid-cols-[minmax(260px,1fr)_minmax(300px,1.2fr)]')}`}>
           <ChatPane events={events} snapshot={snapshot} disabled={locked} replaying={!!replaying} onInput={session.input}
             onWorker={session.worker} onOpenWorker={showWorker} onOpenFile={openFile} sessionId={state.sessionId} />
           {keypad ? <KeypadPane events={events} snapshot={snapshot} disabled={locked} onInput={session.input} /> : null}
           {brain ? <EntityBrain events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} onOpenFile={openFile} />
+            : view === 'record' ? <EntityRecord events={events} snapshot={snapshot} onOpenWorker={showWorker} />
             : view === 'work' ? <EntityWork events={events} snapshot={snapshot} live={!replaying} onWorker={session.worker} open={openWorker} onReroute={session.reroute} onOpenFile={openFile} />
             : <Inspector events={events} snapshot={snapshot} onOpenFile={openFile} />}
         </div>
@@ -143,7 +145,7 @@ function BenchHeader({ snapshot, config, connected, error, onControl, onConfigur
         {!idle ? <UiButton size="small" variant="danger" onClick={() => onControl('reset')}>Reset</UiButton> : null}
       </div>
       <div className="flex rounded border border-[var(--border)] p-px" role="tablist" aria-label="Right pane">
-        {(['brain', 'work', 'inspector', 'files'] as const).map((id) => (
+        {(['brain', 'work', 'record', 'inspector', 'files'] as const).map((id) => (
           <button key={id} type="button" role="tab" aria-selected={view === id}
             className={`rounded-sm px-2 py-0.5 capitalize ${view === id ? 'bg-[var(--hover)] text-[var(--fg)]' : 'text-[var(--muted)]'}`}
             onClick={() => onView(id)}>{id}</button>

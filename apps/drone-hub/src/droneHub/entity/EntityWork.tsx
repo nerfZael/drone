@@ -1,7 +1,8 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
+import { ReportPoints } from './ReportPoints';
 
-const EntityWorkCanvas = React.lazy(() => import('./EntityWorkCanvas').then(m => ({ default: m.EntityWorkCanvas })));
+const EntityWorkTree = React.lazy(() => import('./EntityWorkTree').then(m => ({ default: m.EntityWorkTree })));
 
 /**
  * The Work view: which worker is on which request, whether it is thinking, and how far it has got.
@@ -42,6 +43,14 @@ export interface WorkItem {
   blockedBy?: string;
   /** Finished, with its conversation kept: a message picks it back up. */
   kept?: boolean;
+  /** Its result's findings or parts, each a few words and a sentence. */
+  points?: { label: string; text: string; section?: string }[];
+  /** Why it exists: what started it, and the reason its starter gave. */
+  cause?: { kind: string; seqs?: number[] };
+  why?: string;
+  /** Rounds of open-ended work it reported, and the latest one's line. */
+  rounds?: number;
+  lastRound?: string;
 }
 
 const VERBS: Record<string, string> = {
@@ -122,6 +131,7 @@ function deriveWorker(l: Limb, snapshot: EntitySnapshot, own: EntityEvent[], mes
     cost: l.usage?.cost ?? 0, tokens: l.usage ? tokens(l.usage) : 0, unpriced: l.usage?.unpriced ?? 0,
     result: l.result,
     status: l.status, blockedBy: l.blockedBy?.limb, task: l.task, createdAt: l.createdAt, endedAt: l.endedAt, replyTo: l.replyTo, group: l.group, waitFor: l.waitFor, after: l.after, kept: l.kept,
+    points: l.points, cause: l.cause, why: l.why, rounds: l.rounds, lastRound: l.lastRound,
   };
 }
 
@@ -160,14 +170,13 @@ export const spendTitle = (cost: number, tokens: number, unpriced = 0) =>
     : unpriced > 0 ? `Model cost at list price; ${unpriced} call${unpriced === 1 ? '' : 's'} with no known price not included`
       : 'Model cost at list price';
 
-/** The Work tab: the canvas, loaded on demand (it brings in the graph library). */
-export function EntityWork(props: React.ComponentProps<typeof EntityWorkCanvas>) {
+/** The Work tab: requests, their outcomes and their agents (EntityWorkTree), loaded on demand. */
+export function EntityWork(props: React.ComponentProps<typeof EntityWorkTree> & { onReroute?(seq: number, how: 'separate' | 'fork'): void }) {
+  const { onReroute: _reroute, ...rest } = props;
   return (
-    <section className="flex h-full min-h-0 flex-col bg-[var(--panel)]" aria-label="Work">
-      <React.Suspense fallback={<div className="p-4 text-[var(--muted)]">Loading the canvas…</div>}>
-        <div className="entity-work-canvas flex min-h-0 flex-1 flex-col"><EntityWorkCanvas {...props} /></div>
-      </React.Suspense>
-    </section>
+    <React.Suspense fallback={<div className="p-4 text-[var(--muted)]">Loading the work…</div>}>
+      <EntityWorkTree {...rest} />
+    </React.Suspense>
   );
 }
 
@@ -223,13 +232,24 @@ export function Steps({ w, limit, wrap = false }: { w: StepsOwner; limit?: numbe
 }
 
 /** What a worker is doing: its steps and the files it holds. The thread's composer talks to it. */
-export function WorkerDetail({ w }: { w: WorkItem }) {
+/** The top of an agent's panel: its steps, claims and result, its points (opening into its report) and why it exists. */
+export function WorkerDetail({ w, report, onOpenFile }: { w: WorkItem; report?: string; onOpenFile?(path: string): void }) {
   const running = w.state !== 'done' && w.state !== 'stop';
+  const claims = w.claims.length ? <div className="flex flex-wrap gap-1">{w.claims.map(c => <span key={c} className="rounded bg-[var(--panel-alt)] px-1 font-mono text-[11px]">{c}</span>)}</div> : null;
   return (
-    <div className="grid gap-1.5 bg-[var(--hover)] py-2 pl-[15px] pr-3" style={{ borderLeft: `3px solid ${STATE_COLOR[w.state]}` }}>
-      <Steps w={w} />
-      {w.claims.length ? <div className="flex flex-wrap gap-1">{w.claims.map(c => <span key={c} className="rounded bg-[var(--panel-alt)] px-1 font-mono text-[11px]">{c}</span>)}</div> : null}
-      {!running && w.result ? <div className="text-[var(--muted)]">{w.result}</div> : null}
+    <div className="grid gap-2 border-b border-[var(--border)] px-4 py-3">
+      {/* Done: what it produced leads, then its points; while it works, where it is. */}
+      {!running && w.result ? <p className="text-[14px] leading-snug">{w.result}</p> : null}
+      {w.points?.length ? <ReportPoints points={w.points} report={report} onOpenFile={onOpenFile} /> : null}
+      {running ? <Steps w={w} /> : null}
+      {w.why ? <div className="text-[12px] text-[var(--muted)]">Why: {w.why}</div> : null}
+      {claims}
+      {!running && w.steps ? (
+        <details className="text-[12px] text-[var(--muted)]">
+          <summary className="cursor-pointer">How it went</summary>
+          <div className="mt-1"><Steps w={w} /></div>
+        </details>
+      ) : null}
     </div>
   );
 }

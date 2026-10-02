@@ -48,6 +48,7 @@ import {
   getCanvasBoardActions,
   isCanvasDraftNodeId,
   selectCanvasBoard,
+  topicBoardKey,
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
@@ -140,6 +141,7 @@ import { isSelectionHistoryEntryAvailable, type SelectionHistoryEntry } from './
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import {
   buildCanvasChatDeleteConfirmation,
+  chatIsUntouchedDraft,
   type DeleteDroneChatOptions,
 } from './droneHub/app/sidebar-chat-delete-confirmation';
 import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
@@ -475,6 +477,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (oldNodeId && newNodeId) {
         getCanvasBoardActions(null).replaceNodeId(oldNodeId, newNodeId, newName);
         getCanvasBoardActions(droneId).replaceNodeId(oldNodeId, newNodeId, newName);
+        // Every topic holding the drone keeps the card where it was, too.
+        for (const topic of useDroneCanvasStore.getState().topics) {
+          if (topic.droneIds.includes(droneId)) {
+            getCanvasBoardActions(topicBoardKey(topic.id)).replaceNodeId(oldNodeId, newNodeId, newName);
+          }
+        }
       }
       setOptimisticChatRenames((current) => {
         // A chat renamed again before the summary caught up goes straight to its latest name.
@@ -4513,6 +4521,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [resolveAgentKeyToConfig],
   );
+  const resolveCanvasNewChatDefaults = React.useCallback((drone: DroneSummary): NewChatConfiguration | null => {
+    try {
+      return resolveNewChatConfiguration(drone);
+    } catch {
+      return null;
+    }
+  }, [resolveNewChatConfiguration]);
   const createDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -5409,6 +5424,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const results: CanvasChatDeleteResult[] = [];
       const deletable: Array<{ droneId: string; chatName: string; drone: DroneSummary | null; chats: string[] }> = [];
       const seen = new Set<string>();
+      // A draft chat nothing was sent to and nothing is typed in loses nothing when it goes: no question.
+      const untouchedDraft = (droneId: string, chatName: string, drone: DroneSummary | null): boolean => {
+        const key = droneChatQueueKey(droneId, chatName);
+        const tracked = newDraftChatsRef.current.get(key);
+        return chatIsUntouchedDraft({
+          draft: Boolean(tracked) || drone?.draftChats?.[chatName] === true,
+          sending: tracked?.submissionInFlight || tracked?.preserveOnLeave,
+          queuedOrBusy: Boolean(drone?.queuedChats?.includes(chatName) || drone?.busyChats?.includes(chatName)),
+          localQueuedCount: getQueuedPromptsForKey(key).length,
+          composerText: useDroneHubUiStore.getState().chatInputDrafts[chatInputDraftKeyForDroneChat(droneId, chatName)],
+        });
+      };
+      const untouched = new Set<string>();
       for (const raw of targetsRaw) {
         const droneId = String(raw?.droneId ?? '').trim();
         const chatName = String(raw?.chatName ?? '').trim() || 'default';
@@ -5428,10 +5456,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const chats =
           Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
         const sideChat = (drone?.sideChats ?? []).some((chat) => chat.name === chatName);
+        const queueKey = droneChatQueueKey(droneId, chatName);
+        const tracked = newDraftChatsRef.current.get(queueKey);
+        if (!chats.includes(chatName) && !sideChat && tracked && untouchedDraft(droneId, chatName, drone)) {
+          // Just created and not listed yet: drop it the way an abandoned new chat is dropped.
+          removeOptimisticDraftChat(droneId, chatName);
+          hideOptimisticallyRemovedDraftChat(droneId, chatName);
+          clearStartupSeedForChat(droneId, chatName);
+          if (tracked.serverCreated) deleteAbandonedDraftChat(queueKey, tracked);
+          else tracked.abandoned = true;
+          if (selectedDrone === droneId && selectedChat === chatName) setSelectedChat('default');
+          results.push({ droneId, chatName, ok: true, deletedDrone: false, error: null });
+          continue;
+        }
         if (!chats.includes(chatName) && !sideChat) {
           fail(`Chat "${chatName}" is unavailable.`);
           continue;
         }
+        if (untouchedDraft(droneId, chatName, drone)) untouched.add(queueKey);
         deletable.push({ droneId, chatName, drone, chats: sideChat ? [] : chats });
       }
 
@@ -5459,7 +5501,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       if (kept.length === 0) return results;
 
-      if (opts?.confirmed !== true) {
+      const allUntouched = kept.every((target) => untouched.has(droneChatQueueKey(target.droneId, target.chatName)));
+      if (opts?.confirmed !== true && !allUntouched) {
         const defaultChatKept = deletable.some((target) => target.chatName === 'default' && !kept.includes(target));
         const question = buildCanvasChatDeleteConfirmation({
           targets: kept,
@@ -5485,6 +5528,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       // Every surface showing one of these chats (its card, the open chat) shows it going away.
       const endChatDeletion = beginChatDeletion(kept);
       for (const { droneId, chatName, chats } of kept) {
+        // Deleted here, so the cleanup of abandoned new chats must not delete it a second time.
+        newDraftChatsRef.current.delete(droneChatQueueKey(droneId, chatName));
         try {
           const deletion = await requestJson<{ ok: true; deletedChat: string; chats: string[] }>(
             `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
@@ -5524,9 +5569,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       deleteActionSettingsState.deleteSettings,
+      clearStartupSeedForChat,
       confirmDelete,
+      deleteAbandonedDraftChat,
       drones,
       forgetDeletedChat,
+      getQueuedPromptsForKey,
+      hideOptimisticallyRemovedDraftChat,
+      removeOptimisticDraftChat,
       requestDeleteDrones,
       requestJson,
       selectedChat,
@@ -5682,6 +5732,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
           canvasCreateGroup={draftCreateGroup}
           onCanvasCreateGroupChange={setDraftCreateGroup}
+          resolveCanvasNewChatDefaults={resolveCanvasNewChatDefaults}
+          onDeleteCanvasDrones={(droneIds) => { requestDeleteDrones(droneIds); }}
+          canvasDroneDeleteMode={deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent'}
+          onDeleteCanvasDronesConfirmed={(droneIds) => {
+            const rows = resolveDeleteDroneRows(droneIds);
+            if (rows.length > 0) void runConfirmedDroneDelete(rows);
+          }}
           currentDroneId={previewCurrentDroneId}
           currentCanvasChatNodeId={selectedCanvasChatNodeId}
           defaultFsPathForCurrentDrone={isSelectedDrone ? defaultFsPathForCurrentDrone : droneHomePath(drone) || '/'}

@@ -833,6 +833,16 @@ code, pre {
 .brain-comet { stroke-dasharray: 22 200; animation: brain-comet .42s cubic-bezier(.3,0,.2,1) both; }
 @keyframes entity-flash { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); } }
 .entity-flash { animation: entity-flash .9s ease-out; }
+/* Entity window palette (from the Work mockup): a dark ground with slightly lighter cards, neutral chrome, colour kept
+   for state (amber working, green done, dashed waiting). The accent only marks what is selected. */
+[data-entity-bench] {
+  --bg: #0e1117; --panel: #141922; --panel-alt: #1a2030; --hover: rgba(255, 255, 255, .045); --border: #262e3d;
+  --fg: #dce1ea; --fg-strong: #eef1f6; --fg-secondary: #b9c0cd; --muted: #8b94a6; --faint: #5f687a;
+  --accent: #9198ff; --accent-soft: #1d2140; --act: #e0a33a;
+  --accent-muted: #7c83e6; --accent-subtle: rgba(145, 152, 255, .08); --accent-border: rgba(145, 152, 255, .24); --accent-fg: #0e1117;
+  --green: #4cc06d; --yellow: #e0a33a; --orange: #f2804a; --red: #e07a7a;
+  color: var(--fg);
+}
 /* Work canvas palette (from the mockup): a darker ground than the cards, a faint dot grid, softer status colours.
    The canvas's detailed cards use it too, on the same ground. */
 .entity-work-canvas, .dh-canvas-work {

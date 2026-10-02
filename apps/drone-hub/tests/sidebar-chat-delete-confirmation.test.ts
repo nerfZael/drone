@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  chatIsUntouchedDraft,
   buildCanvasChatDeleteConfirmation,
   buildSidebarChatDeleteConfirmation,
   buildSidebarChatGroupDeleteConfirmation,
@@ -156,4 +157,14 @@ describe('buildCanvasChatDeleteConfirmation', () => {
       }),
     ).toMatchObject({ title: 'Archive and delete 2 chats?', confirmLabel: 'Archive and delete' });
   });
+});
+
+test('only a draft chat with nothing sent, queued or typed deletes without a question', () => {
+  const untouched = { draft: true, queuedOrBusy: false, localQueuedCount: 0, composerText: '  ' };
+  expect(chatIsUntouchedDraft(untouched)).toBe(true);
+  expect(chatIsUntouchedDraft({ ...untouched, draft: false })).toBe(false);
+  expect(chatIsUntouchedDraft({ ...untouched, sending: true })).toBe(false);
+  expect(chatIsUntouchedDraft({ ...untouched, queuedOrBusy: true })).toBe(false);
+  expect(chatIsUntouchedDraft({ ...untouched, localQueuedCount: 1 })).toBe(false);
+  expect(chatIsUntouchedDraft({ ...untouched, composerText: 'half a thought' })).toBe(false);
 });

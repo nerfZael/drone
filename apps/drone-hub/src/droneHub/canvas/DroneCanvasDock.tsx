@@ -46,6 +46,9 @@ import {
 import { useCanvasChatActivity } from './use-canvas-chat-activity';
 import { ChatStepsControl } from './ChatStepsControl';
 import { DraftAgentAndRepo, DraftChatAgentSelect, DraftModelPicker } from './CanvasDraftControls';
+import { describeNewCardDefaults, type NewCardDefaults } from './new-card-defaults';
+import type { NewChatConfiguration } from '../app/new-chat-creation';
+import type { DroneDeleteMode } from '../app/settings-types';
 import { Dot, STATE_COLOR, Steps } from '../entity/EntityWork';
 import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
@@ -88,9 +91,17 @@ import {
   getCanvasBoardActions,
   isCanvasDraftNodeId,
   selectCanvasBoard,
+  topicBoardKey,
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
-import { OPTIMISTIC_MEMBER_TTL_MS, buildDroneBoardMembers, planDroneBoardPlacements, type DroneBoardMember } from './drone-board';
+import {
+  OPTIMISTIC_MEMBER_TTL_MS,
+  buildDroneBoardMembers,
+  planDroneBoardPlacements,
+  planTopicBoardPlacements,
+  type DroneBoardMember,
+} from './drone-board';
+import { CanvasTopicSwitcher } from './CanvasTopicSwitcher';
 import {
   scaleCanvasRect,
   type CanvasRect,
@@ -211,9 +222,8 @@ function resolveCanvasAssignmentDropTarget(
 type CanvasNodeActions = {
   onNodeMouseDown: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onNodeClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Double click: on the global board, opens the card's drone on its own board. F2 renames. */
   onNodeDoubleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
-  /** Middle click: on the global board, opens the card's drone on its own board. */
-  onNodeMiddleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   /** The pointer is over a card (an id) or left it (null): the steps panel follows it. */
   hoverCard: (id: string | null) => void;
   setInlineRenameDraft: (value: string) => void;
@@ -330,7 +340,6 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       onMouseDown={(event) => actions.current.onNodeMouseDown(node.droneId, event)}
       onClick={(event) => actions.current.onNodeClick(node.droneId, event)}
       onDoubleClick={(event) => actions.current.onNodeDoubleClick(node.droneId, event)}
-      onAuxClick={(event) => actions.current.onNodeMiddleClick(node.droneId, event)}
       onMouseEnter={detail ? () => actions.current.hoverCard(node.droneId) : undefined}
       onMouseLeave={detail ? () => actions.current.hoverCard(null) : undefined}
       aria-pressed={selected}
@@ -823,6 +832,10 @@ export function DroneCanvasDock({
   onCreateRepoPathChange,
   createGroup,
   onCreateGroupChange,
+  resolveNewChatDefaults,
+  onDeleteDrones,
+  droneDeleteMode,
+  onDeleteDronesConfirmed,
 }: {
   /** The open drone. Its board shows all of its chats without dragging them in. */
   boardDrone?: DroneSummary | null;
@@ -872,12 +885,33 @@ export function DroneCanvasDock({
   onCreateRepoPathChange: (next: string) => void;
   createGroup: string;
   onCreateGroupChange: (next: string) => void;
+  /** The settings a new chat of this drone starts with, for the canvas's new-card hint. */
+  resolveNewChatDefaults?: (drone: DroneSummary) => NewChatConfiguration | null;
+  /** Deletes drones, behind the app's own confirmation. Shift+Delete on a topic's drone card. */
+  onDeleteDrones?: (droneIds: string[]) => void;
+  /** Whether deleting drones archives or deletes them, from the app's delete setting. */
+  droneDeleteMode?: DroneDeleteMode;
+  /** Deletes drones without asking again, for a question already asked here (deleting a topic with its drones). */
+  onDeleteDronesConfirmed?: (droneIds: string[]) => void;
 }) {
   const { scope, setScope } = useDroneCanvasStore(
     useShallow((s) => ({ scope: s.scope, setScope: s.setScope })),
   );
+  const activeTopic = useDroneCanvasStore((s) =>
+    s.scope === 'topic' ? s.topics.find((topic) => topic.id === s.activeTopicId) ?? null : null,
+  );
+  const topicScope = Boolean(activeTopic);
+  const activeTopicId = activeTopic?.id ?? null;
   const boardDroneId = scope === 'drone' ? String(boardDrone?.id ?? '').trim() || null : null;
   const droneScope = Boolean(boardDroneId);
+  // Where this board's cards are stored: a drone's board, the active topic's, or the global one.
+  const boardKey = boardDroneId ?? (activeTopicId ? topicBoardKey(activeTopicId) : null);
+  // Members of a topic are every chat of its drones, each drone with its own card.
+  const topicDrones = React.useMemo(
+    () => (activeTopic ? activeTopic.droneIds.flatMap((droneId) => (droneById[droneId] ? [droneById[droneId]] : [])) : []),
+    [activeTopic, droneById],
+  );
+  const autoMembers = droneScope || topicScope;
   const {
     nodesByDroneId,
     nodeOrder: storedNodeOrder,
@@ -887,7 +921,7 @@ export function DroneCanvasDock({
     scale,
   } = useDroneCanvasStore(
     useShallow((s) => {
-      const board = selectCanvasBoard(s, boardDroneId);
+      const board = selectCanvasBoard(s, boardKey);
       return {
         nodesByDroneId: board.nodesByDroneId,
         nodeOrder: board.nodeOrder,
@@ -910,10 +944,11 @@ export function DroneCanvasDock({
     setPan,
     setViewport,
     resetViewport,
-  } = React.useMemo(() => getCanvasBoardActions(boardDroneId), [boardDroneId]);
+  } = React.useMemo(() => getCanvasBoardActions(boardKey), [boardKey]);
   const optimisticMembers = useDroneCanvasStore((s) =>
     boardDroneId ? s.optimisticMembersByDroneId[boardDroneId] : undefined,
   );
+  const optimisticMembersByDroneId = useDroneCanvasStore((s) => (topicScope ? s.optimisticMembersByDroneId : null));
   const boardChats = boardDrone?.chats;
   const boardSideChats = boardDrone?.sideChats;
   const boardChatCloneSources = boardDrone?.chatCloneSources;
@@ -928,13 +963,23 @@ export function DroneCanvasDock({
             boardChatCloneSources ?? {},
             optimisticMembers ?? [],
           ])
-        : '',
-    [boardChatCloneSources, boardChats, boardSideChats, droneScope, optimisticMembers],
+        : topicScope
+          ? JSON.stringify(topicDrones.map((drone) => [
+              drone.id,
+              drone.chats ?? [],
+              (drone.sideChats ?? []).map((chat) => [chat.name, chat.sourceChatName]),
+              drone.chatCloneSources ?? {},
+              optimisticMembersByDroneId?.[drone.id] ?? [],
+            ]))
+          : '',
+    [boardChatCloneSources, boardChats, boardSideChats, droneScope, optimisticMembers, optimisticMembersByDroneId, topicDrones, topicScope],
   );
   const summaryBoardMembers = React.useMemo(
-    () => (droneScope ? buildDroneBoardMembers(boardDrone, optimisticMembers) : []),
+    () => droneScope
+      ? buildDroneBoardMembers(boardDrone, optimisticMembers)
+      : topicDrones.flatMap((drone) => buildDroneBoardMembers(drone, optimisticMembersByDroneId?.[drone.id])),
     // The summary is rebuilt on every refresh; only its chat list matters here.
-    [boardDroneId, boardMemberKey],
+    [boardKey, boardMemberKey],
   );
   // A chat deleted or renamed here keeps its old entry in the summary until the next refresh.
   // Apply the change meanwhile, or placement would take the old name for a new chat and drop
@@ -963,8 +1008,9 @@ export function DroneCanvasDock({
   }, [deletedAtByNodeId, renamedChatNodes, summaryBoardMembers]);
   React.useEffect(() => {
     if (boardDrone && droneScope) pruneDeletedChatsOfDrone(boardDrone);
+    for (const drone of topicDrones) pruneDeletedChatsOfDrone(drone);
     // Keyed like the members: the summary object is rebuilt on every refresh.
-  }, [boardDroneId, boardMemberKey]);
+  }, [boardKey, boardMemberKey]);
   React.useEffect(() => {
     const listed = new Set(summaryBoardMembers.map((member) => member.nodeId));
     // Done once the summary no longer lists the old name.
@@ -1000,21 +1046,28 @@ export function DroneCanvasDock({
 
   // Stored positions outlive a chat briefly (renames land in two steps), so a
   // drone board renders members only instead of pruning the store.
-  const boardMemberIds = React.useMemo(
-    () => (droneScope ? new Set(boardMembers.map((member) => member.nodeId)) : null),
-    [boardMembers, droneScope],
+  const boardMemberIds = React.useMemo(() => {
+    if (!autoMembers) return null;
+    const ids = new Set(boardMembers.map((member) => member.nodeId));
+    for (const drone of topicDrones) ids.add(createCanvasDroneNodeId(drone.id));
+    return ids;
+  }, [autoMembers, boardMembers, topicDrones]);
+  // A topic also holds drafts: double-click makes a new drone there, as on the global board.
+  const isShownNode = React.useCallback(
+    (nodeId: string) => !boardMemberIds || boardMemberIds.has(nodeId) || (topicScope && isCanvasDraftNodeId(nodeId)),
+    [boardMemberIds, topicScope],
   );
   const nodeOrder = React.useMemo(
-    () => (boardMemberIds ? storedNodeOrder.filter((nodeId) => boardMemberIds.has(nodeId)) : storedNodeOrder),
-    [boardMemberIds, storedNodeOrder],
+    () => (boardMemberIds ? storedNodeOrder.filter(isShownNode) : storedNodeOrder),
+    [boardMemberIds, isShownNode, storedNodeOrder],
   );
   // A chat deleted elsewhere (or an optimistic card that expired) must not stay
   // selected: the message bar and prompt sending act on the selection.
   const selectedDroneIds = React.useMemo(() => {
     if (!boardMemberIds) return storedSelectedDroneIds;
-    const kept = storedSelectedDroneIds.filter((nodeId) => boardMemberIds.has(nodeId));
+    const kept = storedSelectedDroneIds.filter(isShownNode);
     return kept.length === storedSelectedDroneIds.length ? storedSelectedDroneIds : kept;
-  }, [boardMemberIds, storedSelectedDroneIds]);
+  }, [boardMemberIds, isShownNode, storedSelectedDroneIds]);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   /** Whether a client point is over the visible message composer, which takes drops as references. */
   const isOverMessageComposer = React.useCallback((clientX: number, clientY: number) => {
@@ -1039,7 +1092,7 @@ export function DroneCanvasDock({
   /** Pasted clones shown before the server has finished copying them; each settles to whether it was created. */
   const pendingClonesRef = React.useRef(new Map<string, Promise<boolean>>());
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
-  const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardDroneId), [boardDroneId]);
+  const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardKey), [boardKey]);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
@@ -1070,6 +1123,11 @@ export function DroneCanvasDock({
   const effectiveDroneNameById = React.useMemo(
     () => ({ ...optimisticDroneNameById, ...droneNameById, ...renamedDroneNameById }),
     [droneNameById, optimisticDroneNameById, renamedDroneNameById],
+  );
+
+  const existingDroneNameById = React.useMemo(
+    () => Object.fromEntries(Object.keys(droneById).map((droneId) => [droneId, String(effectiveDroneNameById[droneId] ?? '').trim()])),
+    [droneById, effectiveDroneNameById],
   );
 
   const canvasDetailedCards = useDroneHubUiStore((s) => s.canvasDetailedCards);
@@ -1386,21 +1444,89 @@ export function DroneCanvasDock({
   }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds, selectedMessageTargets]);
   const controlsDisabled = messageSending;
   const spawnReasoning = useDroneHubUiStore((s) => s.spawnReasoning);
+  const spawnAgentPermissionMode = useDroneHubUiStore((s) => s.spawnAgentPermissionMode);
+  const spawnApprovalPolicy = useDroneHubUiStore((s) => s.spawnApprovalPolicy);
+  // A chat's agent picked on this canvas becomes its repository's default: the hint follows it.
+  const spawnContextByRepoKey = useDroneHubUiStore((s) => s.spawnContextByRepoKey);
   // A new drone (a draft card) or a new chat on a drone's canvas is set up from the composer.
   const selectedDraftChat = React.useMemo(() => {
-    if (!droneScope || selectedMessageTargets.length !== 1 || selectedDroneIds.length !== 1) return null;
+    if (!autoMembers || selectedMessageTargets.length !== 1 || selectedDroneIds.length !== 1) return null;
     const target = selectedMessageTargets[0];
     const drone = droneById[target.droneId];
     return drone?.draftChats?.[target.chatName] === true ? { ...target, repoPath: String(drone.repoPath ?? '').trim() } : null;
-  }, [droneById, droneScope, selectedDroneIds.length, selectedMessageTargets]);
+  }, [autoMembers, droneById, selectedDroneIds.length, selectedMessageTargets]);
   const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
   const normalizedSpawnModel = String(spawnModel ?? '');
-  const normalizedCreateRepoPath = String(createRepoPath ?? '').trim();
+  // A topic keeps its own repository for new drones; the global board uses the app's.
+  const normalizedCreateRepoPath = String((activeTopic ? activeTopic.repoPath || createRepoPath : createRepoPath) ?? '').trim();
+  const changeCreateRepoPath = React.useCallback((next: string) => {
+    if (activeTopicId) useDroneCanvasStore.getState().setTopicRepoPath(activeTopicId, next);
+    else onCreateRepoPathChange(next);
+  }, [activeTopicId, onCreateRepoPathChange]);
   const normalizedCreateGroup = String(createGroup ?? '');
   const normalizedDraftRepoLabel = React.useMemo(
     () => String(draftRepoLabel ?? '').trim(),
     [draftRepoLabel],
   );
+  // What a double-click makes next, shown at all times so it is never a surprise.
+  const newCardDefaultParts = React.useMemo((): string[] | null => {
+    void spawnContextByRepoKey;
+    let defaults: NewCardDefaults | null = null;
+    if (droneScope) {
+      const config = boardDrone && resolveNewChatDefaults ? resolveNewChatDefaults(boardDrone) : null;
+      if (config) {
+        defaults = { kind: 'chat', agent: config.agent, model: config.model, reasoning: config.reasoning,
+          permissionMode: config.agentPermissionMode, approvalPolicy: config.approvalPolicy };
+      }
+    } else {
+      defaults = {
+        kind: 'drone',
+        agent: spawnAgentConfig,
+        model: normalizedSpawnModel,
+        reasoning: spawnReasoning,
+        permissionMode: spawnAgentPermissionMode,
+        approvalPolicy: spawnApprovalPolicy,
+        runtime: 'container',
+        repoPath: normalizedCreateRepoPath,
+      };
+    }
+    return defaults ? describeNewCardDefaults(defaults) : null;
+  }, [
+    boardDrone,
+    droneScope,
+    normalizedCreateRepoPath,
+    normalizedSpawnModel,
+    resolveNewChatDefaults,
+    spawnAgentConfig,
+    spawnAgentPermissionMode,
+    spawnApprovalPolicy,
+    spawnContextByRepoKey,
+    spawnReasoning,
+  ]);
+  const newCardHintRef = React.useRef<HTMLDivElement | null>(null);
+  const [newCardHintBottomPx, setNewCardHintBottomPx] = React.useState(8);
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const bar = viewport?.querySelector<HTMLElement>('[data-canvas-message-bar]');
+    const hint = newCardHintRef.current;
+    if (!viewport || !bar || !hint) return;
+    // Above the composer when a narrow canvas puts the two side by side.
+    const place = () => {
+      const area = viewport.getBoundingClientRect();
+      const rect = bar.getBoundingClientRect();
+      const hintWidth = hint.getBoundingClientRect().width;
+      const overlaps = !bar.hidden && rect.height > 0 && rect.right > area.right - 8 - hintWidth - 8;
+      setNewCardHintBottomPx(overlaps ? Math.round(area.bottom - rect.top) + 8 : 8);
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(viewport);
+    observer?.observe(bar);
+    observer?.observe(hint);
+    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(place);
+    mutations?.observe(bar, { attributes: true, attributeFilter: ['hidden'], subtree: true });
+    return () => { observer?.disconnect(); mutations?.disconnect(); };
+  }, [newCardDefaultParts]);
   const {
     createDraftShortcutBinding,
     focusPrimaryChatInputShortcutBinding,
@@ -1634,6 +1760,31 @@ export function DroneCanvasDock({
     [nodeOrder, onDeleteChats, removeNodes],
   );
 
+  /**
+   * Delete on a topic: a drone card leaves the topic with its chats (Shift deletes the drone);
+   * a chat is deleted either way, as on its drone's board.
+   */
+  const deleteTopicSelection = React.useCallback(
+    (nodeIds: readonly string[], deleteDrones: boolean) => {
+      if (!activeTopicId) return;
+      const droneIds = nodeIds.flatMap((nodeId) => parseCanvasDroneNodeId(nodeId) ?? []);
+      const leaving = new Set(droneIds);
+      const rest = nodeIds.filter((nodeId) =>
+        !parseCanvasDroneNodeId(nodeId) && !leaving.has(parseCanvasChatNodeId(nodeId)?.droneId ?? ''));
+      if (rest.length > 0) void deleteChatNodes(sortChatNodeIdsForDestructiveDelete([...rest]));
+      if (droneIds.length === 0) return;
+      if (deleteDrones) {
+        if (onDeleteDrones) onDeleteDrones(droneIds);
+        else setMessageError('Drone deletion is unavailable.');
+        return;
+      }
+      useDroneCanvasStore.getState().removeDronesFromTopic(activeTopicId, droneIds);
+      removeNodes(storedNodeOrder.filter((nodeId) =>
+        leaving.has(parseCanvasDroneNodeId(nodeId) ?? parseCanvasChatNodeId(nodeId)?.droneId ?? '')));
+    },
+    [activeTopicId, deleteChatNodes, onDeleteDrones, removeNodes, storedNodeOrder],
+  );
+
   const getDraftPlacement = React.useCallback(
     (
       anchorWorldX: number,
@@ -1777,6 +1928,32 @@ export function DroneCanvasDock({
     },
     [draftPromptByNodeId, removeNodes, selectedDraftNodeId],
   );
+
+  React.useEffect(() => {
+    if (!topicScope) return;
+    const viewport = viewportRef.current;
+    const view = getView();
+    const rect = viewport?.getBoundingClientRect();
+    // A drone added without a drop point lands where the user is looking.
+    const anchor = rect
+      ? screenToStorePoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, view.panX, view.panY, view.scale)
+      : { x: 0, y: 0 };
+    const planned = planTopicBoardPlacements({
+      drones: topicDrones.map((drone) => {
+        const label = String(effectiveDroneNameById[drone.id] ?? '').trim() || drone.id;
+        return {
+          droneId: drone.id,
+          label,
+          width: getNodeWidthPx(label, DRONE_NODE_CHROME_WIDTH_PX),
+          members: boardMembers.filter((member) => parseCanvasChatNodeId(member.nodeId)?.droneId === drone.id),
+        };
+      }),
+      nodesById: nodesByDroneId,
+      anchor: { x: anchor.x - NODE_MIN_WIDTH_PX / 2, y: anchor.y - CHAT_NODE_HEIGHT_PX / 2 },
+      widthOf: (nodeId, label) => getNodeWidthPx(label, parseCanvasDroneNodeId(nodeId) ? DRONE_NODE_CHROME_WIDTH_PX : 0),
+    });
+    if (planned.length > 0) upsertNodes(planned);
+  }, [boardMembers, effectiveDroneNameById, getView, nodesByDroneId, topicDrones, topicScope, upsertNodes]);
 
   React.useEffect(() => {
     if (!droneScope) return;
@@ -2308,6 +2485,10 @@ export function DroneCanvasDock({
                 errors.push(String(result.error ?? '').trim() || fallback);
               }
 
+              // A drone made on a topic joins it; its card is laid out above its first chat.
+              if (activeTopicId && created.length > 0) {
+                useDroneCanvasStore.getState().addDronesToTopic(activeTopicId, created.map((item) => item.droneId));
+              }
               if (created.length === 0) {
                 // Restore the prompt if creation failed and the draft still exists.
                 setDraftPromptForNode(draftNodeId, promptForDraft);
@@ -2427,6 +2608,7 @@ export function DroneCanvasDock({
     nodesByDroneId,
     normalizedCreateGroup,
     normalizedCreateRepoPath,
+    activeTopicId,
     normalizedSpawnAgentKey,
     normalizedSpawnModel,
     onCreateCanvasDroneFromDraft,
@@ -2448,7 +2630,7 @@ export function DroneCanvasDock({
         event.stopPropagation();
         return;
       }
-      // A middle click opens the card's drone (see onNodeMiddleClick); keep it from starting autoscroll.
+      // A middle click does nothing on a card; keep it from starting autoscroll.
       if (event.button === 1) event.preventDefault();
       if (event.button !== 0) return;
       focusViewportElement();
@@ -2512,26 +2694,25 @@ export function DroneCanvasDock({
     [activateCanvasNode, focusViewportElement, nodeOrder, selectedDroneIds, setSelectedDroneIds],
   );
 
-  const onNodeDoubleClick = React.useCallback(
-    (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      beginInlineRename(droneId);
-    },
-    [beginInlineRename],
-  );
-
-  // Like a browser's back and forward: back leaves this drone's board for the global one, forward returns.
+  // Like a browser's back and forward: back leaves this drone's board for the board it was
+  // opened from (the global one or a topic), forward returns.
+  const returnScopeRef = React.useRef<'global' | 'topic'>('global');
+  const openDroneBoard = React.useCallback(() => {
+    returnScopeRef.current = topicScope ? 'topic' : 'global';
+    setScope('drone');
+  }, [setScope, topicScope]);
   const canvasBack = React.useCallback((): boolean => {
     if (!droneScope) return false;
-    setScope('global');
+    const state = useDroneCanvasStore.getState();
+    const topicOpen = returnScopeRef.current === 'topic' && state.topics.some((topic) => topic.id === state.activeTopicId);
+    setScope(topicOpen ? 'topic' : 'global');
     return true;
   }, [droneScope, setScope]);
   const canvasForward = React.useCallback((): boolean => {
     if (droneScope || !boardDrone) return false;
-    setScope('drone');
+    openDroneBoard();
     return true;
-  }, [boardDrone, droneScope, setScope]);
+  }, [boardDrone, droneScope, openDroneBoard]);
   const onCanvasMouseUp = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     // The mouse's back and forward side buttons; handled here so the app's window doesn't navigate.
     if (event.button !== 3 && event.button !== 4) return;
@@ -2541,19 +2722,19 @@ export function DroneCanvasDock({
     else canvasForward();
   }, [canvasBack, canvasForward]);
 
-  const onNodeMiddleClick = React.useCallback(
+  const onNodeDoubleClick = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
-      if (event.button !== 1 || droneScope || isCanvasDraftNodeId(droneId)) return;
       event.preventDefault();
       event.stopPropagation();
+      if (droneScope || isCanvasDraftNodeId(droneId)) return;
       // Select the card's chat (a drone card: its default chat), then show that drone's board.
       activateCanvasNode(droneId);
-      setScope('drone');
+      openDroneBoard();
     },
-    [activateCanvasNode, droneScope, setScope],
+    [activateCanvasNode, droneScope, openDroneBoard],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, onNodeMiddleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
@@ -2698,6 +2879,26 @@ export function DroneCanvasDock({
       const clientX = activeRect.left + activeRect.width / 2;
       const clientY = activeRect.top + activeRect.height / 2;
       const origin = screenToStorePoint(clientX, clientY, rect, panX, panY, scale);
+      if (activeTopicId) {
+        // A drone or chat dropped on a topic adds its drone, which brings every chat with it.
+        const droneIds = [...new Set(ids.map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? parseCanvasDroneNodeId(nodeId) ?? ''))]
+          .filter(Boolean);
+        if (droneIds.length === 0) return;
+        const unplaced = droneIds.filter((droneId) => !nodesByDroneId[createCanvasDroneNodeId(droneId)]);
+        upsertNodes(unplaced.map((droneId, idx) => {
+          const label = String(effectiveDroneNameById[droneId] ?? '').trim() || droneId;
+          const width = getNodeWidthPx(label, DRONE_NODE_CHROME_WIDTH_PX);
+          return {
+            droneId: createCanvasDroneNodeId(droneId),
+            label,
+            x: origin.x - width / 2,
+            y: origin.y - NODE_HEIGHT_PX / 2 + idx * DROP_STACK_SPACING_Y_PX,
+          };
+        }));
+        useDroneCanvasStore.getState().addDronesToTopic(activeTopicId, droneIds);
+        setSelectedDroneIds(droneIds.map((droneId) => createCanvasDroneNodeId(droneId)));
+        return;
+      }
       upsertNodes(
         ids.map((nodeId, idx) => {
           const chatRef = parseCanvasChatNodeId(nodeId);
@@ -2719,7 +2920,7 @@ export function DroneCanvasDock({
       );
       setSelectedDroneIds(ids);
     },
-    [droneScope, effectiveDroneNameById, isOverMessageComposer, getView, setSelectedDroneIds, upsertNodes],
+    [activeTopicId, droneScope, effectiveDroneNameById, isOverMessageComposer, getView, nodesByDroneId, setSelectedDroneIds, upsertNodes],
   );
 
   useDndMonitor({
@@ -2758,7 +2959,7 @@ export function DroneCanvasDock({
   React.useLayoutEffect(() => {
     cancelActivePointerInteractions();
     setComposerDropHover(false);
-  }, [boardDroneId, cancelActivePointerInteractions]);
+  }, [boardKey, cancelActivePointerInteractions]);
 
   const copyCanvasNodesForClone = React.useCallback((nodeIds: string[] = selectedDroneIds): number => {
     const sourceNodeIdByDroneId = collectCloneSourceNodeIdByDroneId(nodeIds);
@@ -2850,6 +3051,7 @@ export function DroneCanvasDock({
           const label = String(result.droneName ?? '').trim() || cloneDroneId;
           if (result.droneName) setOptimisticDroneNameById((prev) => ({ ...prev, [cloneDroneId]: label }));
           upsertNodes([{ droneId: nodeId, label, ...position }]);
+          if (activeTopicId) useDroneCanvasStore.getState().addDronesToTopic(activeTopicId, [cloneDroneId]);
           pastedNodeIds.push(nodeId);
           showPasted(nodeId);
         }
@@ -2871,6 +3073,8 @@ export function DroneCanvasDock({
               const placedNodeId = createCanvasChatNodeId(source.droneId, chatName);
               if (!placedNodeId) return;
               if (!ownBoard) upsertNodes([{ droneId: placedNodeId, label: chatName, ...position }]);
+              // A chat cloned into a topic brings its drone along.
+              if (activeTopicId) useDroneCanvasStore.getState().addDronesToTopic(activeTopicId, [source.droneId]);
               placedNodeIds.push(placedNodeId);
               pendingClonesRef.current.set(placedNodeId, settled);
               showPasted(placedNodeId);
@@ -2899,6 +3103,7 @@ export function DroneCanvasDock({
       await Promise.all([cloneDrones(), cloneChats()]);
     })();
   }, [
+    activeTopicId,
     boardDroneId,
     droneById,
     fallbackNodeBoundsById,
@@ -2988,6 +3193,14 @@ export function DroneCanvasDock({
         return;
       }
 
+      if (key === 'f2' && !isPrimaryMod && !event.altKey && !event.shiftKey) {
+        if (selectedDroneIds.length !== 1) return;
+        event.preventDefault();
+        event.stopPropagation();
+        beginInlineRename(selectedDroneIds[0]);
+        return;
+      }
+
       // Backspace and Alt+Left go back to the global board; Shift+Backspace and Alt+Right come forward to this drone's.
       const plainBackspace = key === 'backspace' && !event.ctrlKey && !event.metaKey && !event.altKey;
       const altArrow = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
@@ -3008,6 +3221,10 @@ export function DroneCanvasDock({
         cancelActivePointerInteractions();
         setMessageError(null);
         setMessageDraft('');
+        if (topicScope) {
+          deleteTopicSelection(selectedDroneIds, event.shiftKey);
+          return;
+        }
         // On the global board Delete only takes cards off the board; Shift+Delete deletes the
         // chats themselves. A drone board has no cards to remove, so Delete deletes there too.
         if (droneScope || event.shiftKey) {
@@ -3021,6 +3238,7 @@ export function DroneCanvasDock({
       canvasBack,
       canvasForward,
       activeComposer,
+      beginInlineRename,
       clearSelection,
       copyCanvasNodesForClone,
       createDraftShortcutBinding,
@@ -3030,6 +3248,8 @@ export function DroneCanvasDock({
       openMessageBar,
       cancelActivePointerInteractions,
       deleteChatNodes,
+      deleteTopicSelection,
+      topicScope,
       createDraftNearViewportCenter,
       focusPrimaryChatInputShortcutBinding,
       pasteCopiedCanvasNodesAsClones,
@@ -3056,24 +3276,26 @@ export function DroneCanvasDock({
       className="h-full w-full"
     >
         <UiPanelToolbar aria-label="Canvas controls" className="min-h-0 gap-1.5 px-2 py-1">
-          {boardDrone ? (
-            <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
+          <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
+            {boardDrone ? (
               <UiToolbarButton size="xsmall"
                 pressed={droneScope}
-                onClick={() => setScope('drone')}
+                onClick={() => (droneScope ? undefined : openDroneBoard())}
                 title="Every chat of this drone, laid out for you. New, cloned and side chats appear on their own."
               >
                 This drone
               </UiToolbarButton>
-              <UiToolbarButton size="xsmall"
-                pressed={!droneScope}
-                onClick={() => setScope('global')}
-                title="One board shared across drones. Drag drones and chats in from the sidebar."
-              >
-                Global
-              </UiToolbarButton>
-            </div>
-          ) : null}
+            ) : null}
+            <UiToolbarButton size="xsmall"
+              pressed={!droneScope && !topicScope}
+              onClick={() => setScope('global')}
+              title="One board shared across drones. Drag drones and chats in from the sidebar."
+            >
+              Global
+            </UiToolbarButton>
+            <CanvasTopicSwitcher defaultRepoPath={String(createRepoPath ?? '').trim()} onOpened={focusViewportElement}
+              droneNameById={existingDroneNameById} deleteMode={droneDeleteMode} onDeleteDrones={onDeleteDronesConfirmed} />
+          </div>
           {droneScope ? null : (
             <UiToolbarIconButton size="xsmall"
               onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
@@ -3203,7 +3425,7 @@ export function DroneCanvasDock({
               <UiMenuSelect
                 variant="toolbar"
                 value={normalizedCreateRepoPath}
-                onValueChange={onCreateRepoPathChange}
+                onValueChange={changeCreateRepoPath}
                 entries={createRepoMenuEntries}
                 disabled={controlsDisabled}
                 triggerClassName="min-w-[170px] max-w-[280px]"
@@ -3260,7 +3482,7 @@ export function DroneCanvasDock({
         onContextMenu={(event) => event.preventDefault()}
         onWheel={onWheel}
       >
-        <CanvasWorldLayer boardDroneId={boardDroneId}>
+        <CanvasWorldLayer boardDroneId={boardKey}>
           {relationshipEdges.length > 0 ? (
             <svg
               width="1"
@@ -3422,10 +3644,8 @@ export function DroneCanvasDock({
         </CanvasWorldLayer>
 
         {(() => {
-          // The card under the pointer, or the one selected card: its steps in full, off the cards.
-          const focusId = hoveredCardId && detailByNodeId?.[hoveredCardId]
-            ? hoveredCardId
-            : selectedDroneIds.length === 1 ? selectedDroneIds[0] : null;
+          // Only the card under the pointer: its steps in full, off the cards. A selected card shows nothing here.
+          const focusId = hoveredCardId && detailByNodeId?.[hoveredCardId] ? hoveredCardId : null;
           const focus = focusId ? detailByNodeId?.[focusId] : null;
           if (!focusId || !focus) return null;
           const focusDroneId = parseCanvasDroneNodeId(focusId);
@@ -3434,6 +3654,18 @@ export function DroneCanvasDock({
             : parseCanvasChatNodeId(focusId)?.chatName ?? nodesByDroneId[focusId]?.label ?? '';
           return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
         })()}
+
+        {newCardDefaultParts ? (
+          <div
+            ref={newCardHintRef}
+            data-canvas-new-card-defaults=""
+            style={{ bottom: newCardHintBottomPx }}
+            className="pointer-events-none absolute right-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1.5 truncate rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
+          >
+            <span className="flex-shrink-0 font-medium text-[var(--fg)]">New {droneScope ? 'chat' : 'drone'}</span>
+            <span className="min-w-0 truncate">{newCardDefaultParts.join(' · ')}</span>
+          </div>
+        ) : null}
 
         {selectionBox ? (
           <div
@@ -3448,7 +3680,7 @@ export function DroneCanvasDock({
         ) : null}
 
         <CanvasMessageBar
-          selectionKey={`canvas:${boardDroneId ?? 'global'}:${selectedDraftNodeId ?? 'messages'}`}
+          selectionKey={`canvas:${boardKey ?? 'global'}:${selectedDraftNodeId ?? 'messages'}`}
           targets={selectedMessageTargets}
           droneById={droneById}
           hasDrafts={selectedDroneIds.some(isCanvasDraftNodeId)}
@@ -3477,7 +3709,7 @@ export function DroneCanvasDock({
             meta: (
               <>
                 <DraftAgentAndRepo agentKey={normalizedSpawnAgentKey} agentEntries={spawnAgentMenuEntries} onAgentChange={onSpawnAgentKeyChange}
-                  repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries} onRepoChange={onCreateRepoPathChange} disabled={controlsDisabled} />
+                  repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries} onRepoChange={changeCreateRepoPath} disabled={controlsDisabled} />
                 <DraftModelPicker agent={spawnAgentConfig} agentKey={normalizedSpawnAgentKey} model={normalizedSpawnModel} reasoning={spawnReasoning}
                   onModelChange={onSpawnModelChange} onReasoningChange={(next) => useDroneHubUiStore.getState().setSpawnReasoning(next)} disabled={controlsDisabled} />
               </>
@@ -3497,9 +3729,17 @@ export function DroneCanvasDock({
         {nodes.length === 0 ? (
           <UiPaneState
             kind="empty"
-            title={droneScope ? 'Drone board' : 'Drone Canvas'}
+            title={droneScope ? 'Drone board' : activeTopic ? activeTopic.name : 'Drone Canvas'}
             description={droneScope ? (
               <span className="block">This drone has no chats yet. Double-click to create one.</span>
+            ) : activeTopic ? (
+              <>
+                <span className="block">Drag drones or chats in from the sidebar: each brings its drone and all of its chats.</span>
+                <span className="mt-1 block">Double-click makes a new drone here.</span>
+                <span className="mt-1 block">
+                  Delete takes a drone off this topic; Shift+Delete deletes it. Either deletes a chat.
+                </span>
+              </>
             ) : (
               <>
                 <span className="block">Drag drones or chats from the sidebar and drop them here.</span>
@@ -3508,6 +3748,9 @@ export function DroneCanvasDock({
                 </span>
                 <span className="mt-1 block">
                   Esc clears selection. Delete removes cards. Shift+Delete deletes chats.
+                </span>
+                <span className="mt-1 block">
+                  Double-click a card to open its drone; F2 renames it.
                 </span>
                 <span className="mt-1 block">
                   Ctrl/Cmd+A selects all nodes. Right-click drag pans; the wheel zooms.

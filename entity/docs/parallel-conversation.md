@@ -17,7 +17,7 @@ The front limb (the voice when one is configured, otherwise the head) routes eac
 | Building on a worker's context ("do the same for signup") | Fork that worker: clone its conversation at its current point | `fork` |
 | A refinement of work in progress ("keep the old API") | Steer that worker only, with the user's own words; it hears it with its next tool result | `steer` |
 | More work for a worker once it's done ("then add tests") | Queue it: the worker continues in the same conversation when it finishes (or is revived if it already has) | `steer` with `when: "after"` |
-| Something that needs another worker's result first | Dispatch with a gate: the worker starts when the other one finishes | `dispatch` with `after` |
+| Something that needs other workers' results first ("then give me one list") | Dispatch with a gate: the worker starts when they have all finished, with their results: one worker, several, or a whole batch, including workers added to it later | `dispatch` with `after` |
 
 Workers run on the task model (gpt-6-sol by default); the router may pick the head model for small requests.
 
@@ -48,7 +48,7 @@ Routing is the entity's hardest call, so wrong guesses are cheap to fix. On the 
 
 ## Real replies
 
-Workers speak for themselves. Each reply is tagged with the worker and the message it answers (`reply_to`, filled in automatically), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes says its result, then calls `finish_task` with a one-line summary.
+Workers speak for themselves. Each reply is tagged with the worker and the message it answers (`reply_to`, filled in automatically), so parallel threads stay readable. There are no "steering acknowledged" messages. A worker that finishes says its result, then calls `finish_task` with the outcome in one sentence and, when there are several findings or parts, its points ([asks.md](asks.md#what-work-reports)).
 
 **Keeping the chat short.** The chat is for decisions and outcomes, whatever the model's speed. What makes a message hard to read is density as much as length, so both are limited (`chatLimits` in the config): a message is at most 800 characters from the front limb, 1,200 from a worker in the main chat and 2,000 in its own thread; no block of prose is longer than 300 characters (list items and code are not prose); chat has no headings or tables; and a wake sends at most two messages. The prompts ask for chat written for scanning: short paragraphs, a list whenever an answer has several parts, code formatting for names. Longer text goes into an artifact: a file in the worker's home folder, under `.entity/artifacts/<session>/` in the Hub. Most often a Markdown report, but any file the work produces (an HTML page, a script, an image). It is linked from the message (`say` with `files`, checked to exist) and shown as a link that opens it in Files. A message over the limit is refused with what to do instead; after two refusals in a wake the runtime does it: a worker's full text is saved as a file and linked with its first sentence, anything else is cut at the limit. Under each user message, a line from the log says what was done with it ("→ started Sprites", "→ sent to E2E tests"), so routing never depends on the model saying so.
 

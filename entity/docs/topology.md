@@ -24,7 +24,7 @@ One table per role decides which tools a limb gets (`runtimeTools` in `tools.ts`
 | Head | all | `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, and `amend` with review `head` |
 | Voice | all | `note`, `dispatch`, `dispatch_many`, `fork`, `steer`, `cancel`, `handoff` |
 | Reviewer | read-only | `amend`, `handoff`, `note` |
-| Worker | all | `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `claim`, `release`, `share`, `ask`, `finish_task` |
+| Worker | all | `set_watch` and `run_program` when code limbs are on, `stop_output`, `resume_output`, `note`, `set_timer`, `cancel`, `claim`, `release`, `share`, `ask`, `report_round`, `finish_task` |
 | Watch, program | their author's | — |
 
 The front limb (and the head) may cancel any worker; other limbs only their own watches and programs.

@@ -31,8 +31,9 @@ An entity is a realtime AI agent: a continuous control loop over an **event log*
 
 | Doc | Covers |
 |---|---|
+| [asks.md](asks.md) | Why each piece of work exists (its cause and reason), what workers report (short names, results with points, rounds), and the user's asks: split from messages, linked to work, resolved |
 | [parallel-conversation.md](parallel-conversation.md) | Routing every message: dispatch, fork, steer, batches, the worker queue, rerouting, answer review, the routing eval |
-| [work-canvas.md](work-canvas.md) | The Work tab as a map: time rows, lineage columns, arrows, folds, group cards, the side panel |
+| [work-canvas.md](work-canvas.md) | The Work tab: requests in time order, outcome first, your asks and where they stand, agents in stages, what is running now |
 | [demo.md](demo.md) | The bench, scenarios, end-to-end stories and latency targets |
 | [session-logs.md](session-logs.md) | Where sessions are recorded, the log format, and replaying them in the bench |
 

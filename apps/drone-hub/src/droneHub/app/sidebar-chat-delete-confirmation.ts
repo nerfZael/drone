@@ -150,3 +150,20 @@ export function buildCanvasChatDeleteConfirmation({
     destructive: true,
   };
 }
+
+/**
+ * A draft chat that nothing was sent to and nothing is typed in: deleting it loses nothing, so it
+ * goes without a question.
+ */
+export function chatIsUntouchedDraft(input: {
+  /** Listed as a draft by the hub, or just created here and not listed yet. */
+  draft: boolean;
+  /** A first message is being sent, or one failed to go and must not be lost. */
+  sending?: boolean;
+  queuedOrBusy: boolean;
+  localQueuedCount: number;
+  composerText: string | null | undefined;
+}): boolean {
+  if (!input.draft || input.sending || input.queuedOrBusy || input.localQueuedCount > 0) return false;
+  return !String(input.composerText ?? '').trim();
+}

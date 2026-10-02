@@ -146,6 +146,22 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
 
   // The Files view browses a granted workspace like a folder: a drone through its own file routes, a folder or
   // repository on this device registered for the time being. Folders other devices share are not browsable here.
+  // A text file in the entity's home folder, such as a worker's report, for the Work view to show a section of it.
+  router.get('/api/entity/home-file', async ({ url, json, fail }) => {
+    const root = path.resolve((await current()).getConfig().workspace || defaultEntityWorkspace());
+    const full = path.resolve(root, url.searchParams.get('path') ?? '');
+    const inside = path.relative(root, full);
+    if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return fail(400, 'the file must be inside the entity\'s home folder');
+    try {
+      const stat = fs.statSync(full);
+      if (!stat.isFile()) return fail(404, 'not a file');
+      if (stat.size > 512 * 1024) return fail(413, 'the file is too large to show here');
+      json(200, { ok: true, path: inside, content: fs.readFileSync(full, 'utf8') });
+    } catch {
+      fail(404, 'no such file in the home folder');
+    }
+  });
+
   router.get('/api/entity/files-target', async ({ url, json, fail }) => {
     const id = url.searchParams.get('target') ?? '';
     const session = await current();
@@ -240,6 +256,7 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
       update.models = models;
     }
     if (body?.summaries !== undefined) update.summaries = body.summaries === true;
+    if (body?.asks !== undefined) update.asks = body.asks === true;
     if (body?.review !== undefined) { if (!['off', 'separate', 'head'].includes(body.review)) return fail(400, 'review must be off, separate or head'); update.review = body.review; }
     if (body?.workspace !== undefined) {
       const dir = String(body.workspace).trim();

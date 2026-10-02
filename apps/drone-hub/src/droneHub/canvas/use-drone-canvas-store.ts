@@ -47,8 +47,29 @@ type DroneCanvasBoardActions = {
   resetViewport: () => void;
 };
 
-/** `drone` shows every chat of the open drone; `global` is the hand-curated board shared across drones. */
-export type DroneCanvasScope = 'global' | 'drone';
+/**
+ * `drone` shows every chat of the open drone; `global` is the hand-curated board shared across drones;
+ * `topic` shows every chat of the drones added to the active topic.
+ */
+export type DroneCanvasScope = 'global' | 'drone' | 'topic';
+
+/**
+ * A board for one piece of work: the drones added to it, from any repository, and all of their chats.
+ * A drone can be in several topics. New drones made on it start in `repoPath`.
+ */
+export type CanvasTopic = {
+  id: string;
+  name: string;
+  droneIds: string[];
+  repoPath: string;
+};
+
+const TOPIC_BOARD_KEY_PREFIX = 'topic:';
+
+/** A topic's board is kept with the drone boards, under this key. */
+export function topicBoardKey(topicId: string): string {
+  return `${TOPIC_BOARD_KEY_PREFIX}${topicId}`;
+}
 
 /**
  * A chat this client just created. It joins its drone's board at once instead
@@ -75,12 +96,25 @@ type DroneCanvasState = DroneCanvasBoard &
     dropOptimisticBoardMembers: (droneId: string, chatNames: string[]) => void;
     applyToBoard: (boardDroneId: string | null, reducer: BoardReducer) => void;
     removeDroneBoards: (droneIds: string[]) => void;
+    topics: CanvasTopic[];
+    activeTopicId: string | null;
+    /** Makes a topic, opens it and returns its id. */
+    createTopic: (input?: { name?: string; repoPath?: string; droneIds?: string[] }) => string;
+    renameTopic: (topicId: string, name: string) => void;
+    /** Forgets the topic and its layout; its drones and chats are untouched. */
+    deleteTopic: (topicId: string) => void;
+    openTopic: (topicId: string) => void;
+    addDronesToTopic: (topicId: string, droneIds: string[]) => void;
+    removeDronesFromTopic: (topicId: string, droneIds: string[]) => void;
+    setTopicRepoPath: (topicId: string, repoPath: string) => void;
   };
 
 type DroneCanvasPersistedBoard = Omit<DroneCanvasBoard, 'selectedDroneIds'>;
 type DroneCanvasPersistedState = DroneCanvasPersistedBoard & {
   droneBoards: Record<string, DroneCanvasPersistedBoard>;
   scope: DroneCanvasScope;
+  topics: CanvasTopic[];
+  activeTopicId: string | null;
 };
 
 const BOARD_KEYS = [
@@ -230,7 +264,51 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
     const droneId = String(rawId ?? '').trim();
     if (droneId) droneBoards[droneId] = normalizePersistedBoard(rawBoard);
   }
-  return { ...normalizePersistedBoard(raw), droneBoards, scope: raw.scope === 'global' ? 'global' : 'drone' };
+  const topics = normalizeTopics(raw.topics);
+  const storedActiveTopicId = String(raw.activeTopicId ?? '').trim();
+  const activeTopicId = topics.some((topic) => topic.id === storedActiveTopicId) ? storedActiveTopicId : null;
+  const scope: DroneCanvasScope = raw.scope === 'global'
+    ? 'global'
+    : raw.scope === 'topic' && activeTopicId ? 'topic' : 'drone';
+  return { ...normalizePersistedBoard(raw), droneBoards, scope, topics, activeTopicId };
+}
+
+function uniqueIds(ids: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const raw of ids) {
+    const id = String(raw ?? '').trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function normalizeTopics(value: unknown): CanvasTopic[] {
+  if (!Array.isArray(value)) return [];
+  const out: CanvasTopic[] = [];
+  for (const candidate of value) {
+    const item = candidate && typeof candidate === 'object' ? (candidate as Record<string, unknown>) : {};
+    const id = String(item.id ?? '').trim();
+    if (!id || out.some((topic) => topic.id === id)) continue;
+    out.push({
+      id,
+      name: String(item.name ?? '').trim() || 'Untitled topic',
+      droneIds: uniqueIds(Array.isArray(item.droneIds) ? item.droneIds : []),
+      repoPath: String(item.repoPath ?? '').trim(),
+    });
+  }
+  return out;
+}
+
+function createTopicId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** "Topic 3" for the third, skipping names already taken. */
+function nextTopicName(topics: CanvasTopic[]): string {
+  const taken = new Set(topics.map((topic) => topic.name));
+  for (let n = topics.length + 1; ; n += 1) {
+    if (!taken.has(`Topic ${n}`)) return `Topic ${n}`;
+  }
 }
 
 function areStringArraysEqual(a: string[], b: string[]): boolean {
@@ -343,6 +421,8 @@ function toPersistedState(state: DroneCanvasState): DroneCanvasPersistedState {
   return {
     ...toPersistedBoard(state),
     scope: state.scope,
+    topics: state.topics,
+    activeTopicId: state.activeTopicId,
     droneBoards: Object.fromEntries(
       Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
     ),
@@ -612,10 +692,81 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
           if (next === board) return state;
           return { ...state, droneBoards: { ...state.droneBoards, [boardDroneId]: pickBoard(next) } };
         });
+      const updateTopic = (topicId: string, update: (topic: CanvasTopic) => CanvasTopic) =>
+        set((state) => {
+          let changed = false;
+          const topics = state.topics.map((topic) => {
+            if (topic.id !== topicId) return topic;
+            const next = update(topic);
+            if (next !== topic) changed = true;
+            return next;
+          });
+          return changed ? { ...state, topics } : state;
+        });
       return {
         ...pickBoard(EMPTY_CANVAS_BOARD),
         droneBoards: {},
         scope: 'drone',
+        topics: [],
+        activeTopicId: null,
+        createTopic: (input) => {
+          const id = createTopicId();
+          set((state) => ({
+            ...state,
+            topics: [...state.topics, {
+              id,
+              name: String(input?.name ?? '').trim() || nextTopicName(state.topics),
+              droneIds: uniqueIds(input?.droneIds ?? []),
+              repoPath: String(input?.repoPath ?? '').trim(),
+            }],
+            activeTopicId: id,
+            scope: 'topic',
+          }));
+          return id;
+        },
+        renameTopic: (topicId, name) => {
+          const nextName = String(name ?? '').trim();
+          if (!nextName) return;
+          updateTopic(topicId, (topic) => (topic.name === nextName ? topic : { ...topic, name: nextName }));
+        },
+        deleteTopic: (topicId) =>
+          set((state) => {
+            if (!state.topics.some((topic) => topic.id === topicId)) return state;
+            const key = topicBoardKey(topicId);
+            const droneBoards = { ...state.droneBoards };
+            delete droneBoards[key];
+            boardActionsByDroneId.delete(key);
+            const topics = state.topics.filter((topic) => topic.id !== topicId);
+            const closing = state.activeTopicId === topicId;
+            return {
+              ...state,
+              droneBoards,
+              topics,
+              activeTopicId: closing ? null : state.activeTopicId,
+              scope: closing && state.scope === 'topic' ? 'global' : state.scope,
+            };
+          }),
+        openTopic: (topicId) =>
+          set((state) => {
+            if (!state.topics.some((topic) => topic.id === topicId)) return state;
+            if (state.activeTopicId === topicId && state.scope === 'topic') return state;
+            return { ...state, activeTopicId: topicId, scope: 'topic' };
+          }),
+        addDronesToTopic: (topicId, droneIds) =>
+          updateTopic(topicId, (topic) => {
+            const added = uniqueIds(droneIds).filter((id) => !topic.droneIds.includes(id));
+            return added.length === 0 ? topic : { ...topic, droneIds: [...topic.droneIds, ...added] };
+          }),
+        removeDronesFromTopic: (topicId, droneIds) =>
+          updateTopic(topicId, (topic) => {
+            const removed = new Set(uniqueIds(droneIds));
+            const kept = topic.droneIds.filter((id) => !removed.has(id));
+            return kept.length === topic.droneIds.length ? topic : { ...topic, droneIds: kept };
+          }),
+        setTopicRepoPath: (topicId, repoPath) => {
+          const next = String(repoPath ?? '').trim();
+          updateTopic(topicId, (topic) => (topic.repoPath === next ? topic : { ...topic, repoPath: next }));
+        },
         setScope: (scope) => set((state) => (state.scope === scope ? state : { ...state, scope })),
         optimisticMembersByDroneId: {},
         addOptimisticBoardMember: (droneId, member) =>
@@ -646,11 +797,19 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
         ...bindBoardActions(applyToBoard, null),
         removeDroneBoards: (droneIds) =>
           set((state) => {
-            // A deleted drone takes its board and any cards still waiting for a summary with it.
-            const ids = (Array.isArray(droneIds) ? droneIds : []).filter(
+            // A deleted drone takes its board, its place in topics and any cards still waiting for a summary with it.
+            const requested = Array.isArray(droneIds) ? droneIds : [];
+            const inTopics = state.topics.some((topic) => topic.droneIds.some((id) => requested.includes(id)));
+            const topics = inTopics
+              ? state.topics.map((topic) => {
+                const kept = topic.droneIds.filter((id) => !requested.includes(id));
+                return kept.length === topic.droneIds.length ? topic : { ...topic, droneIds: kept };
+              })
+              : state.topics;
+            const ids = requested.filter(
               (id) => state.droneBoards[id] || state.optimisticMembersByDroneId[id],
             );
-            if (ids.length === 0) return state;
+            if (ids.length === 0) return inTopics ? { ...state, topics } : state;
             const droneBoards = { ...state.droneBoards };
             const optimisticMembersByDroneId = { ...state.optimisticMembersByDroneId };
             for (const id of ids) {
@@ -658,7 +817,7 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
               delete optimisticMembersByDroneId[id];
               boardActionsByDroneId.delete(id);
             }
-            return { ...state, droneBoards, optimisticMembersByDroneId };
+            return { ...state, droneBoards, optimisticMembersByDroneId, topics };
           }),
       };
     },

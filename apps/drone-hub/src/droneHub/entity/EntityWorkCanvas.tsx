@@ -7,6 +7,7 @@ import { EntityComposer, EntityMessage, questionAnswer, type ChatOption, type Ch
 import { WorkingElapsedStatus } from '../chat/WorkingElapsedStatus';
 import { LimbLog, LimbPanel } from './EntityLimbPanel';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
+import { reportOf } from './ReportPoints';
 import {
   CARD_W, LINE_W, cardId, deriveCanvas, foldId, groupId, layoutCanvas, lineId, moreId,
   type CanvasModel, type CardNode, type Chip, type FoldRow, type GroupNode, type MoreNode, type OriginLine, type WorkRow,
@@ -537,7 +538,7 @@ export function WorkerDrawer({ w, events, snapshot, t, live, onWorker, onOpenFil
       ) : undefined}
       thread={
         <div className="grid content-start gap-2">
-          <WorkerDetail w={w} />
+          <WorkerDetail w={w} report={reportOf(thread.flatMap(e => (e.type === 'chat_message' && Array.isArray(e.data.files) ? e.data.files as string[] : [])))} onOpenFile={onOpenFile} />
           <div className="dh-chat-transcript flex flex-col gap-4 px-4 pb-3 pt-1">
             {origin ? <EntityMessage mine at={origin.at} label={`you · ${timeOfDay(origin.at, origin.t)}`} text={String(origin.data.text ?? '')} title={timeTitle(origin.at, origin.t, w.createdAt)} /> : null}
             {w.task ? (

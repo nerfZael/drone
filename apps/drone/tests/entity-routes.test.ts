@@ -22,7 +22,7 @@ function harness(sessionsDir: string | null = null) {
     },
   };
   const prompts = new EntityPrompts(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'entity-prompts-')), 'prompts.json'));
-  const session = new EntitySession(() => undefined, {}, () => mind, { sessionsDir, prompts });
+  const session = new EntitySession(() => undefined, { asks: false }, () => mind, { sessionsDir, prompts });
   const profiles = new EntityProfiles(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'entity-profiles-')), 'profiles.json'));
   let result: { status: number; body: any } = { status: 0, body: null };
   let body: unknown = null;
@@ -126,7 +126,7 @@ test('entity session: after a Hub restart the newest session resumes, paused, wi
       return {};
     },
   });
-  let session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+  let session = new EntitySession(() => undefined, { asks: false }, makeMind, { sessionsDir: dir });
   try {
     session.control('start');
     const id = session.state().sessionId!;
@@ -137,7 +137,7 @@ test('entity session: after a Hub restart the newest session resumes, paused, wi
     expect(JSON.parse(fs.readFileSync(path.join(dir, id, 'meta.json'), 'utf8')).status).toBe('suspended');
 
     // A new Hub: the same session, paused, its log and the worker's conversation intact.
-    session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+    session = new EntitySession(() => undefined, { asks: false }, makeMind, { sessionsDir: dir });
     expect(session.state().sessionId).toBe(id);
     expect(session.state().snapshot.status).toBe('paused');
     expect(session.state().snapshot.limbs.find(l => l.name === 'job')).toMatchObject({ status: 'running', runs: [] });
@@ -149,7 +149,7 @@ test('entity session: after a Hub restart the newest session resumes, paused, wi
     // A Reset ends it for good: the next Hub starts fresh.
     session.control('reset');
     session.close();
-    session = new EntitySession(() => undefined, {}, makeMind, { sessionsDir: dir });
+    session = new EntitySession(() => undefined, { asks: false }, makeMind, { sessionsDir: dir });
     expect(session.state().snapshot.status).toBe('idle');
   } finally {
     session.close();
@@ -224,5 +224,23 @@ test('entity prompts: every section is listed with its default; an edit is used 
     expect((await call('POST', '/api/entity/prompts', { id: 'supersede', text: def })).body.sections.find((x: any) => x.id === 'supersede').edited).toBe(false);
   } finally {
     session.close();
+  }
+});
+
+test('entity routes: a report in the home folder can be read for the Work view; nothing outside it can', async () => {
+  const { session, call } = harness();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.entity/artifacts/s1'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.entity/artifacts/s1/audit.md'), '# Audit\n\n## 1. Fix the copy\nIt promises patrol.\n');
+    await call('POST', '/api/entity/config', { workspace: home });
+    const read = await call('GET', '/api/entity/home-file?path=.entity/artifacts/s1/audit.md');
+    expect(read.status).toBe(200);
+    expect(read.body.content).toContain('## 1. Fix the copy');
+    expect((await call('GET', `/api/entity/home-file?path=${encodeURIComponent('../../etc/passwd')}`)).status).toBe(400);
+    expect((await call('GET', '/api/entity/home-file?path=missing.md')).status).toBe(404);
+  } finally {
+    session.close();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

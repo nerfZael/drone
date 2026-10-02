@@ -37,9 +37,10 @@ export const TOOL_SCHEMAS = {
     type: 'object', additionalProperties: false, required: ['task'],
     properties: {
       task: { type: 'string', maxLength: 8000, description: 'The request, with any context the worker needs' },
-      name: { type: 'string', maxLength: 60, description: 'Short label, e.g. "flaky test"' },
+      name: { type: 'string', maxLength: 60, description: '2–4 words naming the work, e.g. "Flaky login test"' },
       model: { type: 'string', enum: ['task', 'head'], description: 'task (default): the capable model; head: cheaper, for small requests' },
-      after: { type: 'string', description: 'Worker id to wait for before starting' },
+      why: { type: 'string', maxLength: 300, description: 'One short sentence: why this, in the user\'s terms. Say so when the user did not ask for it.' },
+      after: { description: 'Start only when these have finished: a worker id, a list of worker ids, or a batch id ("group-7") to wait for every worker in it, including ones added later. Work that combines a batch\'s results (one list at the end) waits on the batch id.', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, maxItems: 20 }] },
       reply_to: { type: 'integer', description: 'The user message seq this answers (default: the latest)' },
     },
   },
@@ -51,20 +52,22 @@ export const TOOL_SCHEMAS = {
       reply_to: { type: 'integer', description: 'The user message seq this answers (default: the latest)' },
       items: {
         type: 'array', maxItems: 200,
-        items: { type: 'object', additionalProperties: false, required: ['task'], properties: { task: { type: 'string', maxLength: 4000 }, name: { type: 'string', maxLength: 60 } } },
+        items: { type: 'object', additionalProperties: false, required: ['task'], properties: { task: { type: 'string', maxLength: 4000 }, name: { type: 'string', maxLength: 60, description: '2–4 words' } } },
       },
       model: { type: 'string', enum: ['task', 'head'] },
+      why: { type: 'string', maxLength: 300, description: 'One short sentence: why this, in the user\'s terms. Say so when the user did not ask for it.' },
     },
   },
   fork: {
     type: 'object', additionalProperties: false, required: ['worker', 'task'],
-    properties: { worker: { type: 'string' }, task: { type: 'string', maxLength: 8000 }, name: { type: 'string', maxLength: 60 }, reply_to: { type: 'integer' } },
+    properties: { worker: { type: 'string' }, task: { type: 'string', maxLength: 8000 }, name: { type: 'string', maxLength: 60, description: '2–4 words' }, reply_to: { type: 'integer' }, why: { type: 'string', maxLength: 300, description: 'One short sentence: why this, in the user\'s terms. Say so when the user did not ask for it.' } },
   },
   steer: {
     type: 'object', additionalProperties: false, required: ['worker', 'text'],
     properties: {
       worker: { type: 'string' }, text: { type: 'string', maxLength: 4000 },
       when: { type: 'string', enum: ['now', 'after'], description: 'now (default): the worker hears it with its next tool result. after: it continues with this in the same conversation once it finishes its current work.' },
+      why: { type: 'string', maxLength: 300, description: 'One short sentence: why this, in the user\'s terms. Say so when the user did not ask for it.' },
     },
   },
   claim: {
@@ -73,7 +76,24 @@ export const TOOL_SCHEMAS = {
   },
   release: { type: 'object', additionalProperties: false, properties: { paths: { type: 'array', items: { type: 'string' }, maxItems: 50 } } },
   share: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 1000 } } },
-  finish_task: { type: 'object', additionalProperties: false, required: ['result'], properties: { result: { type: 'string', maxLength: 8000 } } },
+  finish_task: {
+    type: 'object', additionalProperties: false, required: ['result', 'points'],
+    properties: {
+      result: { type: 'string', maxLength: 8000, description: 'The outcome in one sentence of at most 200 characters: what you found or did, not what you looked at. Findings go in points.' },
+      points: {
+        type: 'array', maxItems: 10, description: 'The findings or parts of your work, 2–8 of them, most important first. [] only when the result is a single thing (one answer, one change).',
+        items: {
+          type: 'object', additionalProperties: false, required: ['label', 'text'],
+          properties: {
+            label: { type: 'string', maxLength: 48, description: '2–4 words' },
+            text: { type: 'string', maxLength: 240, description: 'One short sentence' },
+            section: { type: 'string', maxLength: 160, description: 'The heading in your report file that this point expands, if any' },
+          },
+        },
+      },
+    },
+  },
+  report_round: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', maxLength: 200, description: 'One line: what changed in this round' } } },
   ask: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 4000, description: 'The question, or with questions a short line introducing them' }, questions: { type: 'array', maxItems: 20, description: 'Several questions at once, each with its own options', items: { type: 'object', additionalProperties: false, required: ['question'], properties: { question: { type: 'string', maxLength: 500 }, options: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } } } } }, options: { type: 'array', maxItems: 6, description: 'Answers the user can click instead of typing, for a question with a few likely answers. Mark the one you recommend.', items: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string', maxLength: 120 }, recommended: { type: 'boolean' } } } } } },
 } satisfies Record<string, Schema>;
 
@@ -98,7 +118,7 @@ export function runtimeTools({ role, codeLimbs, review }: ToolPolicy): ToolName[
     case 'head': return [...ROUTER, ...(review === 'head' ? ['amend' as const] : []), ...code, 'stop_output', 'resume_output', 'note', 'set_timer'];
     case 'voice': return ['note', ...ROUTER, 'handoff'];
     case 'reviewer': return ['amend', 'handoff', 'note'];
-    case 'task': return [...code, 'stop_output', 'resume_output', 'note', 'set_timer', 'cancel', 'claim', 'release', 'share', 'ask', 'finish_task'];
+    case 'task': return [...code, 'stop_output', 'resume_output', 'note', 'set_timer', 'cancel', 'claim', 'release', 'share', 'ask', 'report_round', 'finish_task'];
     default: return [];
   }
 }
@@ -109,7 +129,7 @@ export const mayUseEffect = (role: LimbRole, spec: EffectSpec) => role !== 'revi
 const NOTE = 'Keep a short note in your state; you remember nothing else between wakes.';
 
 export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => string)> = {
-  dispatch: 'Start a worker (a capable model) on a user request right away. It replies to the user itself. Use "after" to start it only when another worker finishes.',
+  dispatch: 'Start a worker (a capable model) on a user request right away. It replies to the user itself. Use "after" to start it only when other workers finish: one, several, or a whole batch (to combine their results).',
   dispatch_many: 'Start one worker per item as one batch with a title, for many independent items of the same kind (one per issue, per file). To add items to a batch that exists ("make it 6"), pass its id as batch: it keeps one progress line. Past the running limit, workers queue.',
   fork: 'Start a worker from another worker\'s conversation, for a request that builds on its context.',
   steer: 'Send a message to one worker: it gets it with its next tool result (or wakes up with it).',
@@ -131,6 +151,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string | ((role: LimbRole) => s
   claim: 'Claim files or folders you are working on, so other workers leave them alone. Writing a file claims it automatically.',
   release: 'Release your claims (all, or the given paths).',
   share: 'Share a discovery that other workers should know (e.g. a root cause).',
-  finish_task: 'Finish: first say your answer to the user, then call this with a one-line summary.',
+  finish_task: 'Finish: first say your answer to the user, then call this with the outcome in one sentence, and its points when there are several findings or parts.',
+  report_round: 'Only for open-ended work you keep iterating on: after each round of changes, one line saying what changed. This is how the user follows your rounds, so do not also say them in the chat. Not for a single task.',
   ask: 'Ask the user something you need answered before you can go on. It is posted in the chat and ends your turn: you wait, and their answer wakes you with your conversation intact. When the likely answers are few, pass them as options for the user to click, the one you recommend marked; several questions go together in questions, each with its options. Do not also finish.',
 };

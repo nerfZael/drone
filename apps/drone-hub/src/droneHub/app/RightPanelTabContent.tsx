@@ -1,6 +1,8 @@
 import type { CanvasSendPrompt, CanvasDraftCreation } from '../canvas/canvas-messaging';
 import React from 'react';
 import type { DroneChatsPaneOptions } from './DroneChatsDock';
+import type { NewChatConfiguration } from './new-chat-creation';
+import type { DroneDeleteMode } from './settings-types';
 import type { PaneKey } from './pane-key';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
@@ -169,6 +171,10 @@ type RightPanelTabContentProps = {
   onCanvasCreateRepoPathChange: (next: string) => void;
   canvasCreateGroup: string;
   onCanvasCreateGroupChange: (next: string) => void;
+  resolveCanvasNewChatDefaults?: (drone: DroneSummary) => NewChatConfiguration | null;
+  onDeleteCanvasDrones?: (droneIds: string[]) => void;
+  canvasDroneDeleteMode?: DroneDeleteMode;
+  onDeleteCanvasDronesConfirmed?: (droneIds: string[]) => void;
   currentDroneId: string | null;
   currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
@@ -291,6 +297,10 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   onCanvasCreateRepoPathChange,
   canvasCreateGroup,
   onCanvasCreateGroupChange,
+  resolveCanvasNewChatDefaults,
+  onDeleteCanvasDrones,
+  canvasDroneDeleteMode,
+  onDeleteCanvasDronesConfirmed,
   currentDroneId,
   currentCanvasChatNodeId,
   defaultFsPathForCurrentDrone,
@@ -413,6 +423,10 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               onCreateRepoPathChange={onCanvasCreateRepoPathChange}
               createGroup={canvasCreateGroup}
               onCreateGroupChange={onCanvasCreateGroupChange}
+              resolveNewChatDefaults={resolveCanvasNewChatDefaults}
+              onDeleteDrones={onDeleteCanvasDrones}
+              droneDeleteMode={canvasDroneDeleteMode}
+              onDeleteDronesConfirmed={onDeleteCanvasDronesConfirmed}
             />
           )}
         </PaneModule>

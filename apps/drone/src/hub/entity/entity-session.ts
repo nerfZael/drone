@@ -7,6 +7,7 @@ import { repriceUnpricedUsage } from './entity-usage-reprice';
 import { fileConversationStore, PiAiMind, type ConversationStore } from './entity-mind';
 import { isReasoning, type EntityModels } from './entity-profiles';
 import { createWorkSummarizer, SUMMARY_PROMPT } from './entity-summarizer';
+import { ASK_LINK_PROMPT, ASK_RESOLVE_PROMPT, ASK_SPLIT_PROMPT, createAskTracker } from './entity-asks';
 import type { EntityPrompts } from './entity-prompts';
 import type { EvaluatorKind } from './entity-evaluator';
 import { EntityRecorder, isResumable, listSessions, readSession, type SessionMeta, type SessionRecording } from './entity-recorder';
@@ -31,6 +32,8 @@ export interface EntitySessionConfig {
   workspaceAccess: ChatWorkspaceAccess;
   /** Work view summaries of busy workers, written by a cheap model. */
   summaries: boolean;
+  /** What the user asked for, split from their messages and checked against finished work by a cheap model. */
+  asks: boolean;
   /** Second looks at the front limb's answers: a separate reviewer on the head's model, the head itself, or none. */
   review: 'off' | 'separate' | 'head';
 }
@@ -56,6 +59,7 @@ export const DEFAULT_ENTITY_CONFIG: EntitySessionConfig = {
   workspace: '',
   workspaceAccess: EMPTY_WORKSPACE_ACCESS,
   summaries: true,
+  asks: true,
   // One head decides; a reviewer is an experimental extra (it and the head acting on one message caused duplicates).
   review: 'off',
 };
@@ -185,6 +189,7 @@ export class EntitySession {
       models: { head: this.config.models.head.model, task: this.config.models.task.model, voice: this.config.models.voice?.model },
       evaluator: this.config.evaluator === 'off' ? undefined : this.createEvaluator(this.config.evaluator),
       summarizer: this.config.summaries ? createWorkSummarizer(undefined, () => this.prompts?.text('hub_work_summaries') ?? SUMMARY_PROMPT) : undefined,
+      asks: this.config.asks ? createAskTracker(undefined, () => ({ split: this.prompts?.text('hub_ask_split') ?? ASK_SPLIT_PROMPT, resolve: this.prompts?.text('hub_ask_resolve') ?? ASK_RESOLVE_PROMPT, link: this.prompts?.text('hub_ask_link') ?? ASK_LINK_PROMPT })) : undefined,
       prompts: () => this.prompts?.current() ?? {},
       artifactsFolder: () => this.artifactsFolder(),
       overflow: (limbId, text) => this.saveOverflow(home(), limbId, text),

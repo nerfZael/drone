@@ -1,50 +1,30 @@
-# Work canvas
+# Work view
 
-The Work tab as a map of the work: what is running, what came from what, what is waiting on what, and what needs you. You look at it from the top and click into a worker when you need to; you don't arrange it. It is the whole Work tab; the earlier Rows and Cards views are gone.
+The Work tab answers three questions at a glance: what is running, what came of what you asked, and why each piece of work exists. You read it top-down and open things only when you want more. Nothing moves on its own.
 
-Code: `EntityWorkCanvas.tsx` renders on `@xyflow/react`; `work-canvas-model.ts` derives the layout from the snapshot and the event log. What a worker is (its fork and `after` links, who blocks it, the question it is waiting on, its name and usage) is a runtime fact in the snapshot; the log adds what it is doing right now and its summaries. So it all works when replaying a recording too, and the model is pure and tested. Mockups: [v10](https://claude.ai/artifact/6v5hf6Guu2qZBdHo47NZDv), which the colours follow, and earlier [v4](https://claude.ai/artifact/HVFDQC3DCx37wUrogT2oZq)–[v9](https://claude.ai/artifact/DoyjCnp1amyTwSvqjX3VVA).
+Code: `EntityWorkTree.tsx` renders it; `work-tree-model.ts` derives it from the snapshot and the log, purely, so replays show it too (tested in `work-tree-model.test.ts`). It is built on what the runtime records ([asks.md](asks.md)): each worker's cause and reason, its result and points, its rounds, and your asks with the work they went to. The mockup it follows is [Entity Work Tree](https://claude.ai/artifact/Ken25EcWDHMJPN5hLoWAxQ).
 
-## Layout
+## Requests
 
-- **Rows run in time order.** The left column has one line per origin, the message that started the work, with its time of day; the work sits level with it. Hovering a time shows the exact time and how far into the session (and into the worker) it was.
-- **Columns show lineage.** A fork sits right of the worker it came from, and gated work right of what it waits for.
-- **Rows are laid out from measured sizes**, so expanding a card, or a row folding, slides the rows below. The view keeps everything in sight until you pan or zoom yourself; **Fit** brings that back.
+The view is a list of **requests** in time order. A request is one of your messages that started work, or one piece of work the entity started on its own:
 
-**Arrows**, only three kinds: forked from (solid), waiting on (dashed amber, green once released), and blocked by a file another worker holds (red dotted). An arrow into folded or grouped work attaches to the fold line or the group card.
+- A worker belongs to the message of the ask it serves; failing that, the message it was started for (`cause.seqs`, `reply_to`). A batch stays together. Work the entity started itself (its cause is a heartbeat, a timer, a batch ending…) is its own request, marked **Started by the entity** with the reason it gave, never pinned to your latest message.
+- The heading shows the time, a title (the batch title, the one agent's name, or the first ask), whether it is still working, how long it has run and what it cost. Under it, what you asked in that message, each ask with its state: done, answered, open, or asked again.
+- **Outcome first.** A finished request leads with what it produced: the result of its one agent, or of the agent the others led to (`after`), with its first points and "▸ N more". When agents worked side by side with no one result, each agent's result gets one line. The agents behind it fold into a line of names until **Show the work**.
+- **Running now**, pinned to the top, has one line per running request: what its one agent is on (its latest round, or its summary's current step), or how many of its agents are done. Clicking a line jumps to it.
+- **Asked, not started** lists things to do you asked for that no agent took, 30 s on: work the entity may have dropped.
 
-## Cards
+## Agents
 
-- **Header:** the worker's name and its state: working (one colour for thinking and acting), waiting, queued, blocked, asking you, failed, done. The id (`worker-N`) only shows on hover. Double-click the name to rename it: the rename goes to the Hub (`limb_renamed`), so the canvas, the chat, the top strip and the entity's own state all use it, and replays show it.
-- **Summary** (when the worker has one): its done / doing / next as short steps, at most four on a closed card (what it is doing and any blocker first, then the latest done, then what is next; "+N more"), all of them when open. Every worker that finishes gets a final summary of what it did, so a finished card says what happened in a few steps and no step is left looking undone because the summary was written just before the end.
-- **Status line** (up to two lines, when there is no summary yet): what the worker is doing, from its latest summary's current step, or else the task it was given. Never the tool it happens to be calling: that changes every second, and external agents don't report it. Blocked, waiting, queued and asking workers say what they're waiting for: the worker holding the file, the worker it starts after, a free slot, or the question they asked. Done workers show their result.
-- **Footer:** summary steps as pips, watch and program chips, time, and cost at list price (see [parallel-conversation.md](parallel-conversation.md#cost)). A chip shows the label, an eye (watch) or `</>` (program), and one value: a watch's fire count, a program's running time, ✓ or failed. Hover shows the full condition.
-- **⌄ expands a card in place**: the done / doing / next steps, each watch and program spelled out, claims and the model.
-- **Click opens the side panel**: the message that started the worker, the task it was given (collapsed), then its replies and every steer, in markdown with times of day, plus Message and Stop.
-- **Motion:** a pulse runs along an arrow when a fork starts or a wait is released; a card flashes when it finishes, starts from the queue, or is steered.
+While a request runs, or once its work is shown, its agents sit in stages: each below what it waits for (`after`: one agent, several, or a whole batch), with arrows, dashed while waiting and green once released. An agent that waits on a whole stage gets one bracket under it instead of an arrow per agent; its card says "after all of Audit". Work that waits on a batch belongs to the batch's request, even when the head started it as the batch ended.
 
-Text fits by being written short: summaries are asked for short steps, and watches and programs carry a label beside their full condition. Anything still cut off shows in full on hover.
-
-## Scale
-
-- **Folds.** Messages that started no work, and finished work that nothing live depends on, fold into one line such as `··· 57 finished · $8.17 · 6 messages · steered Signup flake`. Click it to open it in place. Folding waits: nothing folds within a minute, the 5 most recently finished rows and the 3 most recent plain messages never fold, and nothing folds while selected, expanded or hovered. Folded work fades out and the rows below slide up. The canvas keeps its own clock between events, so work folds in quiet sessions too.
-- **Group cards.** A batch of 4 or more, or 4 or more workers from one message in the first column, becomes one card (smaller batches stay separate cards): counts by state, one cell per worker coloured by state, and totals. Hover a cell to see that worker, click it to open it, ⌄ for a filterable list. Workers that need attention (failed, blocked, stopped) also get their own card under the group, the first three as cards and the rest in one "N more need attention" list.
-- **Top strip:** what needs you (by name), what's waiting on what, how many are queued, the entity's own running watches and programs as chips, what the head is thinking about, the session time and cost (hover for tokens by kind, what summaries and senses took, and calls with no known price), and **Fit**. Clicking an item opens that worker.
-
-## Chat and the canvas
-
-- Hovering a card or a message line highlights the matching messages in Chat (a soft tint), and scrolls Chat to them.
-- Hovering in Chat highlights the related work on the canvas.
-- Clicking a worker's reply in Chat opens that worker in the side panel.
-- Holding Ctrl or ⌘ turns hover into a lens: everything unrelated dims. Without it, nothing dims.
-- A message that was only answered, or steered into a worker, offers **Own worker** and **Fork of X** on hover ([parallel-conversation.md](parallel-conversation.md#when-routing-is-a-guess)).
-- Messages you send a worker from its side panel get their own line, "in X's thread".
+- **Labels / Gists**: a card is its name alone, or its name and one line: its result when done, else what it is on, from its own rounds or the summarizer's current step. The switch at the top sets every request; each request has its own beside its heading.
+- Time sits in the card's corner; the agent's id, model, cost and the reason it was started are on hover. **▸ N points** opens a finished agent's points in place.
+- Clicking an agent opens its panel: its points and reason. When the agent linked a report (a Markdown file in its messages), each point opens that report in place, at the section the point names or else the heading matching its label, with a link to the whole report (read through `GET /api/entity/home-file`). Below them are its summary steps, the message that started it and the task it was given, its replies and every steer, with Message and Stop. Clicking a request's heading opens the request's panel: your words, each ask with how it was resolved, and every agent with its reason.
 
 ## Not built yet
 
-- **The entity's own limbs.** Watches and programs of the head and voice show as chips in the top strip; they could have their own row with their conditions and meters.
-- **Work no message started.** Head-started work lands in the row of your latest message, because dispatch defaults `reply_to` to it. The left column could mean "started by": your message, the head at 12:40, or a watch firing.
-- **More states:** continued after running out of steps (`2/4`), frozen by an output stop, the whole entity paused.
-- **Zoomed out:** below about 45%, cards need their own design, such as the name large and the status as a coloured bar.
-- **Fork from the side panel.** The side panel has Message and Stop; forking a worker is only possible by asking the router.
+- **Changed since you looked**: a mark on what changed since you last opened it, instead of anything moving.
+- **Rerouting** (Own worker, Fork of X) from the old canvas, and renaming a worker by double-click.
 
-Results stay general: workers may be external agents (Codex, Claude Code) whose file changes we can't see, so a card shows the worker's own result, never harness data like files changed. The "blocked by a file" arrow comes from our workspace claims, so it only appears for workers that use our tools.
+The previous canvas (`EntityWorkCanvas.tsx`, `work-canvas-model.ts`) is no longer the Work tab; its worker panel and status pieces are still used by the Work view and the Brain.

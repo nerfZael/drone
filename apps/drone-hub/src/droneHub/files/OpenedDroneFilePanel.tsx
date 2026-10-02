@@ -36,6 +36,7 @@ import {
 } from './MarkdownOutlinePreview';
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 import { useHeldHtmlPreview } from './use-held-html-preview';
+import { useLargeHtmlSource } from './use-large-html-source';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
@@ -339,9 +340,10 @@ export function OpenedDroneFilePanel({
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
   const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
-  const openedFileIsHtml = openedEditorIsText && isHtmlFile(activeFilePath, fileMime);
+  const openedFileIsHtml = (openedEditorIsText || openedFileIsLargeText) && isHtmlFile(activeFilePath, fileMime);
+  const openedFileHasTextMode = openedEditorIsText || openedFileIsHtml;
   const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>(() =>
-    activeFilePath && openedEditorIsText
+    activeFilePath && openedFileHasTextMode
       ? defaultTextFileViewModeForFile(activeFilePath, fileMime)
       : 'edit',
   );
@@ -435,7 +437,7 @@ export function OpenedDroneFilePanel({
   }, []);
 
   React.useEffect(() => {
-    if (!activeFilePath || !openedEditorIsText) {
+    if (!activeFilePath || !openedFileHasTextMode) {
       setOpenedTextMode('edit');
       return;
     }
@@ -444,7 +446,7 @@ export function OpenedDroneFilePanel({
         defaultTextFileViewModeForFile(activeFilePath, fileMime),
     );
     setMarkdownOutlineExpansionCommand(null);
-  }, [activeFilePath, activeFileViewModeKey, fileMime, openedEditorIsText]);
+  }, [activeFilePath, activeFileViewModeKey, fileMime, openedFileHasTextMode]);
 
   const setOpenedTextModeForActiveFile = React.useCallback(
     (mode: TextFileViewMode) => {
@@ -507,12 +509,20 @@ export function OpenedDroneFilePanel({
     openedFileShowsMarkdownPreview || openedFileShowsHtmlPreview;
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsPreview;
+  const largeHtmlSource = useLargeHtmlSource({
+    enabled: openedFileIsLargeText && openedFileShowsHtmlPreview && !fileLoading,
+    droneId,
+    path: activeFilePath,
+    revision: fileRevision,
+  });
+  const htmlSource = openedFileIsLargeText ? largeHtmlSource.source ?? '' : fileContent ?? '';
+  const htmlPreviewLoading = Boolean(fileLoading) || (openedFileIsLargeText && largeHtmlSource.loading);
   // A rendered page is not swapped under the reader: newer contents wait behind a prompt.
   const heldHtmlPreview = useHeldHtmlPreview({
     fileKey: activeFileViewModeKey,
     showing: openedFileShowsHtmlPreview,
-    loading: Boolean(fileLoading),
-    source: fileContent ?? '',
+    loading: htmlPreviewLoading,
+    source: htmlSource,
   });
   const [reloadPromptOpen, setReloadPromptOpen] = React.useState(false);
   React.useEffect(() => setReloadPromptOpen(false), [activeFileViewModeKey]);
@@ -820,7 +830,7 @@ export function OpenedDroneFilePanel({
   );
 
   const copyPreviewContents = React.useCallback(async () => {
-    const didCopy = await copyText(fileContent ?? '');
+    const didCopy = await copyText(openedFileIsHtml ? htmlSource : fileContent ?? '');
     if (!didCopy) return;
     setPreviewContentsCopied(true);
     if (previewCopyTimerRef.current != null) clearTimeout(previewCopyTimerRef.current);
@@ -828,7 +838,7 @@ export function OpenedDroneFilePanel({
       setPreviewContentsCopied(false);
       previewCopyTimerRef.current = null;
     }, 1200);
-  }, [fileContent]);
+  }, [fileContent, openedFileIsHtml, htmlSource]);
 
   const languageCommandsDisabled =
     !openedFileEditorVisible ||
@@ -1024,8 +1034,8 @@ export function OpenedDroneFilePanel({
                         <button
                           type="button"
                           onClick={() => void copyPreviewContents()}
-                          disabled={Boolean(fileLoading)}
-                          className={headingActionClassName(Boolean(fileLoading))}
+                          disabled={htmlPreviewLoading}
+                          className={headingActionClassName(htmlPreviewLoading)}
                           title={previewContentsCopied ? 'Copied file contents' : 'Copy file contents'}
                           aria-label="Copy file contents"
                         >
@@ -1036,9 +1046,12 @@ export function OpenedDroneFilePanel({
                     {openedFileShowsHtmlPreview ? (
                       <button
                         type="button"
-                        onClick={heldHtmlPreview.refresh}
-                        disabled={Boolean(fileLoading)}
-                        className={headingActionClassName(Boolean(fileLoading))}
+                        onClick={() => {
+                          if (openedFileIsLargeText && largeHtmlSource.error) largeHtmlSource.retry();
+                          heldHtmlPreview.refresh();
+                        }}
+                        disabled={htmlPreviewLoading}
+                        className={headingActionClassName(htmlPreviewLoading)}
                         title="Reload preview"
                         aria-label="Reload preview"
                       >
@@ -1101,13 +1114,13 @@ export function OpenedDroneFilePanel({
                       className={modeButtonClassName(Boolean(fileLoading))}
                       title={
                         openedFileShowsPreview
-                          ? readOnly
+                          ? readOnly || openedFileIsLargeText
                             ? `View ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
                             : `Edit ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
                           : `Render ${openedFileIsHtml ? 'isolated HTML' : 'markdown'} preview`
                       }
                     >
-                      {openedFileShowsPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
+                      {openedFileShowsPreview ? (readOnly || openedFileIsLargeText ? 'Source' : 'Edit') : 'Preview'}
                     </button>
                   </>
                 ) : null}
@@ -1284,7 +1297,7 @@ export function OpenedDroneFilePanel({
                   loadingClassName="min-h-[120px] flex items-center justify-center text-12 text-[var(--muted)] px-3 text-center"
                 />
               </div>
-            ) : openedFileIsLargeText && activeFilePath ? (
+            ) : openedFileIsLargeText && activeFilePath && !openedFileShowsHtmlPreview ? (
               <LargeTextFileViewer
                 droneId={droneId}
                 path={activeFilePath}
@@ -1314,6 +1327,12 @@ export function OpenedDroneFilePanel({
                 targetLine={fileTargetLine}
                 targetNavigationSeq={fileNavigationSeq}
               />
+            ) : openedFileShowsHtmlPreview && htmlPreviewLoading ? (
+              <UiCenteredLoadingState message="Loading complete HTML file…" />
+            ) : openedFileShowsHtmlPreview && openedFileIsLargeText && largeHtmlSource.error ? (
+              <div role="alert" className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-compact text-[var(--red)]">
+                {largeHtmlSource.error} Use Reload preview to try again.
+              </div>
             ) : openedFileShowsHtmlPreview ? (
               <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={heldHtmlPreview.source} fileName={fileName} droneId={droneId} filePath={activeFilePath} />
             ) : openedFileEditorVisible ? (

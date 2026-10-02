@@ -5,7 +5,7 @@ import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 import { DndContext } from '@dnd-kit/core';
-import { createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
+import { createCanvasChatNodeId, createCanvasDroneNodeId, parseCanvasChatNodeId, parseCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
@@ -17,6 +17,7 @@ import {
   EMPTY_CANVAS_BOARD,
   getCanvasBoardActions,
   selectCanvasBoard,
+  topicBoardKey,
   useDroneCanvasStore,
 } from '../src/droneHub/canvas/use-drone-canvas-store';
 import type { DroneSummary } from '../src/droneHub/types';
@@ -54,6 +55,8 @@ function Dock({
   chatNodeStateById = {},
   droneRepoById = {},
   onRenameDrone,
+  resolveNewChatDefaults,
+  onDeleteDrones,
 }: {
   children?: React.ReactNode;
   drone: DroneSummary;
@@ -67,6 +70,8 @@ function Dock({
   chatNodeStateById?: DockProps['chatNodeStateById'];
   droneRepoById?: DockProps['droneRepoById'];
   onRenameDrone?: DockProps['onRenameDrone'];
+  resolveNewChatDefaults?: DockProps['resolveNewChatDefaults'];
+  onDeleteDrones?: DockProps['onDeleteDrones'];
 }) {
   const noop = () => {};
   return (
@@ -100,9 +105,21 @@ function Dock({
         onCreateRepoPathChange={noop}
         createGroup=""
         onCreateGroupChange={noop}
+        resolveNewChatDefaults={resolveNewChatDefaults}
+        onDeleteDrones={onDeleteDrones}
       />
     </DndContext></ActiveComposerProvider>
   );
+}
+
+/** F2 renames the one selected card. */
+async function renameCard(card: Element) {
+  const id = card.getAttribute('data-drone-id')!;
+  const boardDroneId = useDroneCanvasStore.getState().scope === 'drone'
+    ? parseCanvasDroneNodeId(id) ?? parseCanvasChatNodeId(id)?.droneId ?? null
+    : null;
+  await act(async () => getCanvasBoardActions(boardDroneId).setSelectedDroneIds([id]));
+  await act(async () => Simulate.keyDown(card, { key: 'F2' }));
 }
 
 test('a drone board fills itself, follows new chats, and leaves the global board alone', async () => {
@@ -515,7 +532,7 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     const edgesBeforeRename = edgeCount();
     const originalWidth = (card('plan') as unknown as HTMLElement).style.width;
     const originalTransform = (card('plan') as unknown as HTMLElement).style.transform;
-    await act(async () => Simulate.doubleClick(card('plan')));
+    await renameCard(card('plan'));
     let input = container.querySelector('[data-canvas-node] input') as unknown as HTMLInputElement;
     await act(async () => Simulate.change(input, { target: { value: 'A much longer name that should grow while typing' } } as never));
     expect(parseFloat((card('plan') as unknown as HTMLElement).style.width)).toBeGreaterThan(parseFloat(originalWidth));
@@ -547,7 +564,7 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     expect(selectCanvasBoard(useDroneCanvasStore.getState(), 'alpha').nodesByDroneId[alpha('plan')]).toBeUndefined();
     expect(edgeCount()).toBe(edgesBeforeRename);
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan b'], [['side-1', 'plan b']])} onRenameChat={onRenameChat} />));
-    await act(async () => Simulate.doubleClick(card('plan b')));
+    await renameCard(card('plan b'));
     input = container.querySelector('[data-canvas-node] input') as unknown as HTMLInputElement;
     await act(async () => Simulate.change(input, { target: { value: 'plan c' } } as never));
     await act(async () => Simulate.keyDown(input, { key: 'Escape' }));
@@ -917,11 +934,11 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(edgeDashes()).toEqual(['2 5', '4 4']); // Drone to original, original to copy.
     await act(async () => useDroneCanvasStore.getState().removeNodes([alpha('default - Copy')]));
 
-    // Double-clicking a drone card renames the drone in place, like a chat card.
+    // F2 on a drone card renames the drone in place, like a chat card.
     const droneRenames: string[] = [];
     await act(async () => root.render(<Dock drone={drone} droneRepoById={{ alpha: 'frontier' }}
       onRenameDrone={async (droneId, newName) => { droneRenames.push(`${droneId}:${newName}`); return { ok: true }; }} />));
-    await act(async () => Simulate.doubleClick(card(droneCard)));
+    await renameCard(card(droneCard));
     const renameInput = card(droneCard).querySelector('input') as unknown as HTMLInputElement;
     expect(renameInput.value).toBe('Alpha');
     expect(card(droneCard).querySelector('[data-canvas-drone-runtime]')).not.toBeNull();
@@ -1026,9 +1043,9 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(panel()?.textContent?.split('Splitting the tokenizer').length).toBe(2);
     await act(async () => Simulate.mouseLeave(card()));
     expect(panel()).toBeNull();
-    // So does selecting that one card.
+    // Selecting the card does not: the panel follows the pointer only.
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([chatCard]));
-    expect(panel()?.textContent).toContain('Read the parser');
+    expect(panel()).toBeNull();
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
     // Dragging moves the stored position by the pointer's distance in compact space.
     await act(async () => Simulate.mouseDown(card(), { button: 0, clientX: 300, clientY: 400 }));
@@ -1265,7 +1282,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     expect([...renders.keys()]).toEqual(['default']);
     expect(layoutReads).toBe(0);
 
-    await act(async () => Simulate.doubleClick(card('chat-0'), { button: 0 }));
+    await renameCard(card('chat-0'));
     await flushFrames();
     renders.clear();
     await act(async () => Simulate.change(container.querySelector('[data-canvas-node] input') as unknown as Element, { target: { value: 'a longer chat title' } } as never));
@@ -1341,7 +1358,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
   }
 });
 
-test('back and forward switch between the global and this drone boards, and a middle click opens a card\'s drone', async () => {
+test('back and forward switch between the global and this drone boards, and a double click opens a card\'s drone', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -1363,10 +1380,16 @@ test('back and forward switch between the global and this drone boards, and a mi
   const viewport = () => container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
   try {
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'fork'])}
-      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
+      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)}
+      resolveNewChatDefaults={() => ({ agent: { kind: 'builtin', id: 'codex' }, model: 'gpt-6-luna', reasoning: 'high', agentPermissionMode: 'execute', approvalPolicy: 'none' })} />));
+    // What a double-click makes next is always shown: a chat on this drone's board, a drone on the global one.
+    const newCardHint = () => container.querySelector('[data-canvas-new-card-defaults]')?.textContent;
+    expect(newCardHint()).toBe('New chatCodex · GPT-6 Luna · High · Execute · Never ask');
     // Backspace goes back to the global board, Shift+Backspace forward to this drone's; so do Alt+Left and Alt+Right.
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');
+    expect(newCardHint()).toStartWith('New drone');
+    expect(newCardHint()).toContain('Container');
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace', shiftKey: true }));
@@ -1392,14 +1415,110 @@ test('back and forward switch between the global and this drone boards, and a mi
     expect(scope()).toBe('global');
     expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toBeTruthy();
 
-    // A middle click on a card opens its chat and that drone's own board.
+    // A middle click on a card does nothing; a double click opens its chat and that drone's own board.
     const card = container.querySelector(`[data-drone-id="${chatCard}"]`) as unknown as Element;
     await act(async () => Simulate.auxClick(card, { button: 1 }));
+    expect(opened).toEqual([]);
+    expect(scope()).toBe('global');
+    await act(async () => Simulate.doubleClick(card, { button: 0 }));
     expect(opened).toEqual(['alpha:fork']);
     expect(scope()).toBe('drone');
   } finally {
     await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('a topic shows its drones with all of their chats; Delete takes a drone off it, Shift+Delete deletes it, and either deletes a chat', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node, Event: dom.Event,
+    CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', topics: [], activeTopicId: null });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const deletedChats: string[] = [];
+  const deletedDrones: string[][] = [];
+  const viewport = () => container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
+  const shown = () => [...container.querySelectorAll('[data-canvas-node]')].map((node) => node.getAttribute('data-drone-id')).sort();
+  const droneCard = createCanvasDroneNodeId('alpha');
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default', 'plan'])}
+      onDeleteChats={async (targets) => {
+        deletedChats.push(...targets.map((target) => target.chatName));
+        return targets.map((target) => ({ ...target, ok: true }));
+      }}
+      onDeleteDrones={(droneIds) => { deletedDrones.push(droneIds); }} />));
+    // A topic made from the toolbar opens empty, named in place.
+    await act(async () => Simulate.click(container.querySelector('[data-canvas-topic-switcher] button') as unknown as Element));
+    // The menu sits on the page, not in the toolbar, which scrolls sideways and would clip it.
+    expect(dom.document.querySelector('[role="menu"][aria-label="Topics"]')).not.toBeNull();
+    expect(container.querySelector('[role="menu"][aria-label="Topics"]')).toBeNull();
+    const newTopic = [...dom.document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === 'New topic') as unknown as Element;
+    await act(async () => Simulate.click(newTopic));
+    const nameInput = container.querySelector('[data-canvas-topic-rename]') as unknown as HTMLInputElement;
+    await act(async () => Simulate.change(nameInput, { target: { value: 'Auth rework' } } as never));
+    await act(async () => Simulate.keyDown(nameInput, { key: 'Enter' }));
+    const topicId = useDroneCanvasStore.getState().activeTopicId!;
+    expect(useDroneCanvasStore.getState().scope).toBe('topic');
+    expect(container.querySelector('[data-canvas-topic-switcher]')?.textContent).toContain('Auth rework');
+    expect(shown()).toEqual([]);
+
+    // Adding the drone brings its card and every chat.
+    await act(async () => useDroneCanvasStore.getState().addDronesToTopic(topicId, ['alpha']));
+    expect(shown()).toEqual([alpha('default'), alpha('plan'), droneCard].sort());
+    const actions = getCanvasBoardActions(topicBoardKey(topicId));
+
+    // Delete or Shift+Delete on a chat deletes it.
+    await act(async () => actions.setSelectedDroneIds([alpha('plan')]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete' }));
+    await act(async () => actions.setSelectedDroneIds([alpha('default')]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete', shiftKey: true }));
+    expect(deletedChats).toEqual(['plan', 'default']);
+
+    // Shift+Delete on a drone card asks the app to delete the drone; the topic waits for that.
+    await act(async () => actions.setSelectedDroneIds([droneCard]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete', shiftKey: true }));
+    expect(deletedDrones).toEqual([['alpha']]);
+    expect(useDroneCanvasStore.getState().topics[0].droneIds).toEqual(['alpha']);
+
+    // Delete takes the drone and its chats off the topic; nothing is deleted.
+    await act(async () => actions.setSelectedDroneIds([droneCard]));
+    await act(async () => Simulate.keyDown(viewport(), { key: 'Delete' }));
+    expect(useDroneCanvasStore.getState().topics[0].droneIds).toEqual([]);
+    expect(deletedDrones).toHaveLength(1);
+    expect(deletedChats).toEqual(['plan', 'default']);
+    expect(shown()).toEqual([]);
+
+    // Double-click makes a new drone draft here, as on the global board.
+    await act(async () => Simulate.doubleClick(viewport(), { button: 0, clientX: 200, clientY: 200 }));
+    expect(shown()).toHaveLength(1);
+    expect(shown()[0]?.startsWith('draft:')).toBe(true);
+    expect(container.querySelector('[data-canvas-new-card-defaults]')?.textContent).toStartWith('New drone');
+
+    // Delete topic… asks first (the dialog itself is covered in canvas-topics.test.tsx); nothing goes yet.
+    await act(async () => Simulate.click(container.querySelector('[data-canvas-topic-switcher] button') as unknown as Element));
+    const deleteItem = [...dom.document.querySelectorAll('[role="menuitem"]')].find((entry) => entry.textContent === 'Delete topic…') as unknown as Element;
+    await act(async () => Simulate.click(deleteItem));
+    expect(useDroneCanvasStore.getState().topics.map((topic) => topic.id)).toEqual([topicId]);
+  } finally {
+    await act(async () => root.unmount());
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', topics: [], activeTopicId: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

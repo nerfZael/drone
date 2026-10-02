@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { EntityEvent, EntitySnapshot } from '@entity/core';
-import { isEntityActor as isEntity, replayRuntime, snapshotLimbs } from '@entity/core/state';
+import { isEntityActor as isEntity, replayRuntime, snapshotAsks, snapshotLimbs } from '@entity/core/state';
 import { seconds } from './bench-format';
 import { requestJson } from '../http';
 
@@ -131,7 +131,7 @@ export function useEntityReplay() {
       const runtime = replayRuntime(shown, events.find((e) => e.type === 'session_started')?.data.setup as never);
       snapshot = {
         ...snapshot, limbs: snapshotLimbs(runtime), stops: runtime.stops, self: { notes: runtime.notes }, health: runtime.health,
-        usage: runtime.usage, usageBy: runtime.usageBy,
+        usage: runtime.usage, usageBy: runtime.usageBy, asks: snapshotAsks(runtime),
       };
     }
     return { events: shown, snapshot, event };

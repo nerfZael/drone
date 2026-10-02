@@ -1,4 +1,4 @@
-import { createCanvasChatNodeId, parseCanvasChatNodeId } from '../app/app-config';
+import { createCanvasChatNodeId, createCanvasDroneNodeId, parseCanvasChatNodeId } from '../app/app-config';
 import type { DroneSummary } from '../types';
 import { CHAT_NODE_HEIGHT_PX, getNodeWidthPx } from './node-metrics';
 import {
@@ -56,10 +56,12 @@ export function buildDroneBoardMembers(
   return out;
 }
 
-function collides(x: number, y: number, width: number, occupied: PlacedNode[]): boolean {
+type OccupiedNode = PlacedNode & { width?: number };
+
+function collides(x: number, y: number, width: number, occupied: OccupiedNode[]): boolean {
   const margin = SLOT_COLLISION_MARGIN_PX;
   return occupied.some((node) => {
-    const nodeWidth = getNodeWidthPx(node.label);
+    const nodeWidth = node.width ?? getNodeWidthPx(node.label);
     return (
       x - margin < node.x + nodeWidth &&
       x + width + margin > node.x &&
@@ -69,7 +71,7 @@ function collides(x: number, y: number, width: number, occupied: PlacedNode[]): 
   });
 }
 
-function firstFreeSlotBelow(anchor: Point, width: number, occupied: PlacedNode[]): Point {
+function firstFreeSlotBelow(anchor: Point, width: number, occupied: OccupiedNode[]): Point {
   const stepY = CHAT_NODE_HEIGHT_PX + SLOT_GAP_Y_PX;
   for (let step = 0; step < MAX_SLOT_STEPS; step += 1) {
     const y = anchor.y + step * stepY;
@@ -90,6 +92,8 @@ export function planDroneBoardPlacements(args: {
   members: DroneBoardMember[];
   nodesById: Record<string, { x: number; y: number } | undefined>;
   rootAnchor?: Point | null;
+  /** Other cards on the board that new ones must not overlap. */
+  occupied?: OccupiedNode[];
 }): PlacedNode[] {
   const memberIds = new Set(args.members.map((member) => member.nodeId));
   const placedById = new Map<string, PlacedNode>();
@@ -97,7 +101,7 @@ export function planDroneBoardPlacements(args: {
     const node = args.nodesById[member.nodeId];
     if (node) placedById.set(member.nodeId, { droneId: member.nodeId, label: member.chatName, x: node.x, y: node.y });
   }
-  const occupied = [...placedById.values()];
+  const occupied: OccupiedNode[] = [...(args.occupied ?? []), ...placedById.values()];
   const rootAnchor = args.rootAnchor ?? { x: 0, y: 0 };
   const planned: PlacedNode[] = [];
   let pending = args.members.filter((member) => !placedById.has(member.nodeId));
@@ -208,4 +212,48 @@ export function forgetStaleChatCard(droneIdRaw: string, chatNameRaw: string): vo
   if (!droneId || !nodeId) return;
   const actions = getCanvasBoardActions(droneId);
   if (selectCanvasBoard(useDroneCanvasStore.getState(), droneId).nodesByDroneId[nodeId]) actions.removeNodes([nodeId]);
+}
+
+/**
+ * Positions for a topic board's cards that have none yet. Each drone gets a card, and its chats
+ * hang below it as on the drone's own board. A drone whose chat is already placed (a new drone's
+ * first chat lands where it was asked for) gets its card just above that chat; any other lands at
+ * the first free slot below `anchor`.
+ */
+export function planTopicBoardPlacements(args: {
+  drones: Array<{ droneId: string; label: string; width: number; members: DroneBoardMember[] }>;
+  nodesById: Record<string, { x: number; y: number; label: string } | undefined>;
+  anchor: Point;
+  /** Width of a card already on the board, by node id. */
+  widthOf: (nodeId: string, label: string) => number;
+}): PlacedNode[] {
+  const occupied: OccupiedNode[] = Object.entries(args.nodesById).flatMap(([nodeId, node]) =>
+    node ? [{ droneId: nodeId, label: node.label, x: node.x, y: node.y, width: args.widthOf(nodeId, node.label) }] : []);
+  const planned: PlacedNode[] = [];
+  const stepY = CHAT_NODE_HEIGHT_PX + SLOT_GAP_Y_PX;
+  for (const drone of args.drones) {
+    const droneNodeId = createCanvasDroneNodeId(drone.droneId);
+    if (!droneNodeId) continue;
+    let card: PlacedNode | null = args.nodesById[droneNodeId]
+      ? { droneId: droneNodeId, label: drone.label, x: args.nodesById[droneNodeId]!.x, y: args.nodesById[droneNodeId]!.y }
+      : null;
+    if (!card) {
+      const placedChats = drone.members.map((member) => args.nodesById[member.nodeId]).filter((node) => node !== undefined);
+      const slot = placedChats.length > 0
+        ? { x: Math.min(...placedChats.map((node) => node.x)), y: Math.min(...placedChats.map((node) => node.y)) - stepY }
+        : firstFreeSlotBelow(args.anchor, drone.width, occupied);
+      card = { droneId: droneNodeId, label: drone.label, x: slot.x, y: slot.y };
+      planned.push(card);
+      occupied.push({ ...card, width: drone.width });
+    }
+    const chats = planDroneBoardPlacements({
+      members: drone.members,
+      nodesById: args.nodesById,
+      rootAnchor: { x: card.x + BRANCH_GAP_X_PX / 2, y: card.y + stepY },
+      occupied,
+    });
+    for (const chat of chats) occupied.push(chat);
+    planned.push(...chats);
+  }
+  return planned;
 }

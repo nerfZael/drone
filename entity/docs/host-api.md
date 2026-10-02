@@ -13,6 +13,7 @@ const entity = new Entity({
   models: { head, task, voice? },   // voice: an optional fast front limb
   evaluator?,           // backs judge / sense (Jev or a small LLM)
   summarizer?,          // writes work summaries of busy workers
+  asks?,                // splits user messages into asks and judges what resolved them (asks.md)
   config?,              // e.g. { review: 'separate', maxTasks: 6 }
   prompts?,             // replacement texts by section id, or a function giving them (read on every wake)
 });
@@ -28,7 +29,7 @@ The system prompts are built from named sections (`PROMPT_SECTIONS`: id, title, 
 | `start`, `pause`, `resume`, `reset`, `close` | The user controls ([architecture.md](architecture.md#user-controls)); `reset` returns the archived log |
 | `input(type, data)` | A user event from a channel, e.g. `chat_message`, `draft_changed`, `key_down` |
 | `hostEvent(type, data)` | An event from the host itself (`by: 'host'`), not validated |
-| `snapshot()` | Status, world, levels, stops, health, limbs (with their links, blocks, questions and usage), senses, Jev calls and model usage, for UIs |
+| `snapshot()` | Status, world, levels, stops, health, limbs (with their links, blocks, questions, cause, reason, points, rounds and usage), asks, senses, Jev calls and model usage, for UIs |
 | `restore(events)` | Rebuilds a session from its log, paused ([session-logs.md](session-logs.md)) |
 | `subscribe(listener)` | Events as they are logged |
 | `messageWorker(id, text)`, `stopWorker(id)`, `renameWorker(id, name)` | The Work view's Message, Stop and rename |
@@ -41,6 +42,7 @@ The host also supplies these:
 | `Mind` | `run(input)`: one LLM run with a system prompt, a rendered context, tools and a step limit; returns its usage (tokens by kind and cost, also attached to a thrown error) and whether it ran out of steps; stops after the step in which the limb ended its turn (`ended()`). Optional `forget(key)` and `fork(from, to)` for worker conversations | `PiAiMind`: pi-ai with Codex models, conversations in memory |
 | `Evaluator` | Answers a batch of questions about the world with probabilities, and may report what that cost | Jev through the AI Gateway, or qwen on Cerebras |
 | `Summarizer` | Turns a worker's task and activity into done / doing / next steps, and may report what that cost | gpt-6-luna on low reasoning |
+| `AskTracker` | Splits a user message into asks (and spots repeats and replacements); judges which open asks a result or reply resolved ([asks.md](asks.md)) | gpt-6-luna on low reasoning |
 
 ## Channels
 

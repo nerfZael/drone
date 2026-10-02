@@ -1,6 +1,7 @@
 import { isEntityActor } from './log.js';
 
 export { isEntityActor };
+import type { Ask, AskKind } from './asks.js';
 import type { EntityEvent } from './types.js';
 import type { StopMode, StopScope, WatchSpec } from './watch.js';
 
@@ -15,7 +16,23 @@ export type LimbRole = 'head' | 'voice' | 'reviewer' | 'task' | 'watch' | 'progr
 /** A worker is `waiting` while it waits for another worker to finish (dispatch with `after`), and `queued` while it waits for a free slot. */
 export type LimbStatus = 'idle' | 'queued' | 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'killed';
 
-export interface RunState { id: string; reason: string; startedAt: number; readSeq: number; firstToolAt?: number; /** Its model calls were counted as they happened (`usage` events), not at the end. */ reported?: boolean }
+/** What woke a run. A user message, or something the entity itself set off. */
+export type WakeKind = 'user' | 'session' | 'resume' | 'heartbeat' | 'watch' | 'program' | 'timer' | 'stop' | 'conflict' | 'handoff' | 'batch' | 'review' | 'task' | 'steer' | 'continue' | 'retry' | 'other';
+
+/** Why a worker exists: what woke the run that started it, and the user messages that run had just read. */
+export interface WorkCause { kind: WakeKind; seqs?: number[] }
+
+/** One finding or part of a worker's result: a few words, a sentence, and the report heading it expands. */
+export interface ResultPoint { label: string; text: string; section?: string }
+
+export interface RunState {
+  id: string; reason: string; startedAt: number; readSeq: number; firstToolAt?: number;
+  /** Its model calls were counted as they happened (`usage` events), not at the end. */
+  reported?: boolean;
+  kind?: WakeKind;
+  /** User messages this run was the first of its limb to read. */
+  userSeqs?: number[];
+}
 
 interface LimbBase {
   id: string;
@@ -37,6 +54,8 @@ interface LlmBase extends LimbBase {
   latestRun?: string;
   /** Log position up to which this limb has already been shown events. */
   seenSeq: number;
+  /** Log position up to which a run of this limb that acted had read: user messages after it are not yet handled. */
+  handledSeq: number;
   lastRunAt?: number;
   crashes: number[];
   /** What its model runs have used so far (cost in USD, when the provider reports it). */
@@ -69,6 +88,9 @@ export interface WorkerLimb extends LlmBase {
   /** Where it came from: the worker it was forked from, and the one it was dispatched to wait for. */
   forkOf?: string;
   after?: string;
+  /** Everything it waits for, when that is more than one worker: these workers, and every worker of a batch (added later too). */
+  afterAll?: string[];
+  afterGroup?: string;
   /** The worker holding a file its last write needed; cleared by its next successful tool call. */
   blockedBy?: { limb: string; path: string };
   /** The message where it asked the user something it needs to go on; it waits for the answer. */
@@ -79,6 +101,14 @@ export interface WorkerLimb extends LlmBase {
   later: string[];
   /** Times it was continued after running out of turns. */
   continuations: number;
+  /** Why it was started, and the reason its starter gave. */
+  cause?: WorkCause;
+  why?: string;
+  /** Its result's findings or parts, when it gave them. */
+  points?: ResultPoint[];
+  /** Rounds of open-ended work it reported, and the latest one's line. */
+  rounds: number;
+  lastRound?: string;
   cancelRequested?: boolean;
 }
 
@@ -141,9 +171,11 @@ export interface RuntimeState {
   /** Time spent paused so far, and since when the session is paused now. */
   pausedMs: number;
   pausedSince?: number;
-  /** What every model call in the session has used, and the part of it that went to work summaries and senses (Jev). */
+  /** What every model call in the session has used, and the part of it that went to work summaries, senses (Jev) and asks. */
   usage: Usage;
-  usageBy: { summaries: Usage; senses: Usage };
+  usageBy: { summaries: Usage; senses: Usage; asks: Usage };
+  /** What the user asked for, by id, in the order asked. */
+  asks: Record<string, Ask>;
 }
 
 /** A limb as views see it: one flat shape for every kind. */
@@ -152,7 +184,8 @@ export interface LimbSnapshot {
   runs: { id: string; reason: string; startedAt: number; firstToolAt?: number }[];
   task?: string; result?: string; watch?: WatchSpec; code?: string; fires?: number; label?: string; group?: string;
   createdAt: number; endedAt?: number; replyTo?: number; waitFor?: string; claims: string[];
-  forkOf?: string; after?: string; blockedBy?: { limb: string; path: string }; asking?: number; usage?: Usage;
+  forkOf?: string; after?: string; afterAll?: string[]; afterGroup?: string; blockedBy?: { limb: string; path: string }; asking?: number; usage?: Usage;
+  cause?: WorkCause; why?: string; points?: ResultPoint[]; rounds?: number; lastRound?: string;
   /** A finished worker whose conversation is kept: the user can message it and it picks the conversation back up. */
   kept?: boolean;
 }
@@ -167,7 +200,8 @@ export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
     ...(l.kind === 'llm' ? { model: l.model, usage: { ...l.usage } } : { label: l.label }),
     ...(l.role === 'task' ? {
       task: l.task, result: l.result, group: l.group, replyTo: l.replyTo, waitFor: l.waitFor,
-      forkOf: l.forkOf, after: l.after, blockedBy: l.blockedBy, asking: l.asking,
+      forkOf: l.forkOf, after: l.after, afterAll: l.afterAll, afterGroup: l.afterGroup, blockedBy: l.blockedBy, asking: l.asking,
+      cause: l.cause, why: l.why, points: l.points, rounds: l.rounds, lastRound: l.lastRound,
       ...(state.kept.includes(l.id) ? { kept: true } : {}),
     } : {}),
     ...(l.role === 'watch' ? { watch: l.watch, fires: l.fires } : {}),
@@ -175,16 +209,30 @@ export function snapshotLimbs(state: RuntimeState): LimbSnapshot[] {
   }));
 }
 
+/** An ask as views see it, with the workers it went to. */
+export type AskSnapshot = Ask;
+
+export function snapshotAsks(state: RuntimeState): AskSnapshot[] {
+  return Object.values(state.asks).map(ask => ({ ...ask, seqs: [...ask.seqs], workers: [...ask.workers], ...(ask.resolved ? { resolved: { ...ask.resolved } } : {}) }));
+}
+
 export const WORKER_ACTIVE: readonly LimbStatus[] = ['running', 'queued', 'waiting'];
 
+/** The workers one waits for: the ones named, and every worker of the batch it waits on, as of now. */
+export function dependenciesOf(state: RuntimeState, w: { id: string; after?: string; afterAll?: string[]; afterGroup?: string }): string[] {
+  const named = w.afterAll ?? (w.after && !w.afterGroup ? [w.after] : []);
+  const batch = w.afterGroup ? Object.values(state.limbs).filter(l => l.role === 'task' && l.group === w.afterGroup && l.id !== w.id).map(l => l.id) : [];
+  return [...new Set([...named, ...batch])];
+}
+
 const noUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 });
-const llm = (init: Pick<LlmBase, 'id' | 'name' | 'model' | 'status' | 'createdAt'> & Partial<LlmBase>) => ({ kind: 'llm' as const, runs: [], seenSeq: 0, crashes: [], usage: noUsage(), ...init });
+const llm = (init: Pick<LlmBase, 'id' | 'name' | 'model' | 'status' | 'createdAt'> & Partial<LlmBase>) => ({ kind: 'llm' as const, runs: [], seenSeq: 0, handledSeq: 0, crashes: [], usage: noUsage(), ...init });
 
 export function initialRuntimeState(setup: RuntimeSetup): RuntimeState {
   const limbs: Record<string, LimbState> = { head: { ...llm({ id: 'head', name: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'head' } };
   if (setup.review === 'separate') limbs.reviewer = { ...llm({ id: 'reviewer', name: 'reviewer', parent: 'head', model: setup.models.head, status: 'idle', createdAt: 0 }), role: 'reviewer' };
   if (setup.models.voice) limbs.voice = { ...llm({ id: 'voice', name: 'voice', parent: 'head', model: setup.models.voice, status: 'idle', createdAt: 0 }), role: 'voice' };
-  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0, timers: [], pausedMs: 0, usage: noUsage(), usageBy: { summaries: noUsage(), senses: noUsage() } };
+  return { setup, limbs, claims: {}, stops: [], notes: [], discoveries: [], batches: {}, unreviewed: [], reviewing: [], kept: [], health: [], lastEvents: {}, counter: 0, timers: [], pausedMs: 0, usage: noUsage(), usageBy: { summaries: noUsage(), senses: noUsage(), asks: noUsage() }, asks: {} };
 }
 
 /** Rebuilds the runtime state from a log. */
@@ -242,7 +290,10 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       return;
     case 'run_started': {
       if (!selfLlm) return;
-      selfLlm.runs.push({ id: String(data.run), reason: String(data.reason), startedAt: t, readSeq: event.seq - 1 });
+      selfLlm.runs.push({
+        id: String(data.run), reason: String(data.reason), startedAt: t, readSeq: event.seq - 1,
+        ...(data.kind ? { kind: data.kind as WakeKind } : {}), ...(Array.isArray(data.user_seqs) ? { userSeqs: data.user_seqs as number[] } : {}),
+      });
       selfLlm.latestRun = String(data.run);
       selfLlm.seenSeq = event.seq - 1;
       selfLlm.lastRunAt = t;
@@ -268,7 +319,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
         return;
       }
       // Model calls outside the limbs: work summaries and senses.
-      const bucket = data.kind === 'summaries' || data.kind === 'senses' ? state.usageBy[data.kind] : undefined;
+      const bucket = data.kind === 'summaries' || data.kind === 'senses' || data.kind === 'asks' ? state.usageBy[data.kind] : undefined;
       if (bucket) addUsage(bucket, data);
       addUsage(state.usage, data);
       return;
@@ -276,6 +327,8 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
     case 'tool_called': {
       const run = selfLlm?.runs.find(r => r.id === data.run);
       if (run) run.firstToolAt ??= t;
+      // A run that acts has handled the user messages it read; one that only notes, or was superseded, has not.
+      if (run && selfLlm && data.name !== 'note') selfLlm.handledSeq = Math.max(selfLlm.handledSeq, run.readSeq);
       return;
     }
     case 'tool_done':
@@ -304,7 +357,9 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
         role: 'task', task: String(data.task), replyTo: typeof data.reply_to === 'number' ? data.reply_to : undefined,
         waitFor: status === 'waiting' ? str(data.after) : undefined, group: str(data.group),
         forkOf: str(data.fork_of), after: str(data.after),
-        notices: [], later: [], continuations: 0,
+        ...(Array.isArray(data.after_all) ? { afterAll: (data.after_all as unknown[]).map(String) } : {}), ...(data.after_group ? { afterGroup: String(data.after_group) } : {}),
+        notices: [], later: [], continuations: 0, rounds: 0,
+        ...(data.cause ? { cause: data.cause as unknown as WorkCause } : {}), ...(data.why ? { why: String(data.why) } : {}),
         // What happened before it existed is in its state and task, not news to it.
         seenSeq: event.seq,
       };
@@ -333,6 +388,11 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       if (typeof data.reply_to === 'number') target.replyTo = data.reply_to;
       return;
     }
+    case 'work_round':
+      if (!selfWorker) return;
+      selfWorker.rounds++;
+      selfWorker.lastRound = String(data.text);
+      return;
     case 'task_continued':
       if (selfWorker) selfWorker.continuations = Number(data.continuations);
       return;
@@ -346,6 +406,7 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       selfWorker.status = data.status as LimbStatus;
       selfWorker.endedAt = t;
       selfWorker.result = String(data.result ?? '');
+      selfWorker.points = Array.isArray(data.points) ? data.points as unknown as ResultPoint[] : undefined;
       selfWorker.blockedBy = undefined;
       selfWorker.asking = undefined;
       state.kept = state.kept.filter(id => id !== selfWorker.id);
@@ -451,6 +512,37 @@ export function reduceRuntime(state: RuntimeState, event: EntityEvent): void {
       if (!target) return;
       target.status = (str(data.status) ?? (event.type === 'program_finished' ? 'done' : event.type === 'program_failed' ? 'failed' : 'cancelled')) as LimbStatus;
       target.endedAt = t;
+      return;
+    }
+    case 'ask_recorded': {
+      const id = String(data.id);
+      const kind: AskKind = data.kind === 'question' || data.kind === 'rule' ? data.kind : 'do';
+      state.asks[id] = { id, kind, text: String(data.text), seqs: [Number(data.seq)], t, status: 'open', workers: [] };
+      return;
+    }
+    case 'ask_repeated': {
+      const ask = state.asks[String(data.id)];
+      if (!ask) return;
+      if (!ask.seqs.includes(Number(data.seq))) ask.seqs.push(Number(data.seq));
+      // Asked again after it was resolved: open again, with its last resolution kept so views can say so.
+      if (ask.status === 'resolved') ask.status = 'open';
+      return;
+    }
+    case 'ask_linked': {
+      const ask = state.asks[String(data.id)];
+      if (ask && !ask.workers.includes(String(data.worker))) ask.workers.push(String(data.worker));
+      return;
+    }
+    case 'ask_replaced': {
+      const ask = state.asks[String(data.id)];
+      if (ask) { ask.status = 'replaced'; ask.replacedBy = str(data.by); }
+      return;
+    }
+    case 'ask_resolved': {
+      const ask = state.asks[String(data.id)];
+      if (!ask || ask.status === 'replaced' || ask.kind === 'rule') return;
+      ask.status = 'resolved';
+      ask.resolved = { by: String(data.by), t, ...(data.note ? { note: String(data.note) } : {}) };
       return;
     }
     case 'review_queued':
