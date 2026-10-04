@@ -36,7 +36,7 @@ describe('Companion model picker placement', () => {
     );
 
     expect(pickerSource).toContain("menuPlacement = 'above'");
-    expect(pickerSource).toContain("menuPlacement === 'below' ? 'top-full mt-[.375rem]'");
+    expect(pickerSource).toContain("side={menuPlacement === 'below' ? 'bottom' : 'top'}");
     expect(companionSource).toContain('label="Companion provider"');
     expect(companionSource).toContain('options: providerModels');
     expect(companionSource).toContain('requireExplicitModelSelection: true');
