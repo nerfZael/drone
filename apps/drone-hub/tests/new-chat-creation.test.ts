@@ -166,7 +166,9 @@ describe('new chat creation defaults', () => {
     expect(shortcutCreator).toContain('return target ? createChatForTarget(target) : false;');
     expect(modelSource).toContain('return drone ? createDraftDroneChat(drone, configuration, { keepWhenLeft }) : false;');
     // A chat made from the shortcut goes when left empty; one placed on the canvas stays with its card.
-    expect(modelSource).toContain('preserveOnLeave: opts?.keepWhenLeft === true,');
+    expect(modelSource).toContain('keepWhenLeft: opts?.keepWhenLeft === true,');
+    // Staying with its card does not make a canvas draft worth a delete question; a failed first message does.
+    expect(modelSource).toContain('sending: tracked?.submissionInFlight || tracked?.publishFailed,');
     const canvasCreator = modelSource.slice(
       modelSource.indexOf('onCreateCanvasChat={'),
       modelSource.indexOf('canvasSpawnAgentMenuEntries='),

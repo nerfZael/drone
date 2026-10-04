@@ -510,7 +510,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         chatName: string;
         wasActivated: boolean;
         submissionInFlight: boolean;
-        preserveOnLeave: boolean;
+        /** Placed on the canvas: its card keeps it when left empty. */
+        keepWhenLeft: boolean;
+        /** A first message failed to publish and must not be lost. */
+        publishFailed: boolean;
         serverCreated: boolean;
         abandoned: boolean;
         cleanupInFlight: boolean;
@@ -2553,7 +2556,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         },
         onPublishError: (error) => {
           tracked.submissionInFlight = false;
-          tracked.preserveOnLeave = true;
+          tracked.publishFailed = true;
           const message = String(error instanceof Error ? error.message : error ?? '').trim();
           showShortcutToast(
             message || 'The draft chat could not be published, so the message was not sent.',
@@ -4156,7 +4159,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             } catch (error) {
               if (tracked) {
                 tracked.submissionInFlight = false;
-                tracked.preserveOnLeave = true;
+                tracked.publishFailed = true;
               }
               throw error;
             }
@@ -4871,7 +4874,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       chatName,
       wasActivated: true,
       submissionInFlight: false,
-      preserveOnLeave: opts?.keepWhenLeft === true,
+      keepWhenLeft: opts?.keepWhenLeft === true,
+      publishFailed: false,
       serverCreated: false,
       abandoned: false,
       cleanupInFlight: false,
@@ -5060,7 +5064,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           newDraftChatsRef.current.delete(key);
         } catch (publishError: unknown) {
           tracked.submissionInFlight = false;
-          tracked.preserveOnLeave = true;
+          tracked.publishFailed = true;
           return {
             ok: false,
             error:
@@ -5213,7 +5217,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const draftKey = chatInputDraftKeyForDroneChat(tracked.droneId, tracked.chatName);
       const hasDraftContent = Boolean(
         String(useDroneHubUiStore.getState().chatInputDrafts[draftKey] ?? '').trim(),
-      ) || tracked.preserveOnLeave;
+      ) || tracked.keepWhenLeft || tracked.publishFailed;
       const disposition = shortcutDraftChatDisposition({
         active,
         wasActivated: tracked.wasActivated,
@@ -5437,7 +5441,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const tracked = newDraftChatsRef.current.get(key);
         return chatIsUntouchedDraft({
           draft: Boolean(tracked) || drone?.draftChats?.[chatName] === true,
-          sending: tracked?.submissionInFlight || tracked?.preserveOnLeave,
+          sending: tracked?.submissionInFlight || tracked?.publishFailed,
           queuedOrBusy: Boolean(drone?.queuedChats?.includes(chatName) || drone?.busyChats?.includes(chatName)),
           localQueuedCount: getQueuedPromptsForKey(key).length,
           composerText: useDroneHubUiStore.getState().chatInputDrafts[chatInputDraftKeyForDroneChat(droneId, chatName)],
