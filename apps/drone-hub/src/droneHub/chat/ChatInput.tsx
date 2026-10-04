@@ -9,6 +9,7 @@ import {
 } from '@drone/assistant-chat';
 import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
 import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
+import type { ChatComposerMenuAction } from './ChatComposerMenu';
 import { chatResponseStopVisible } from './chat-response-stop-visible';
 import {
   appendTextToDraft,
@@ -59,7 +60,7 @@ import {
   type CompanionTextareaUndoSnapshot,
 } from './companion-textarea-undo';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
-import { isShortcutMatch } from '../app/shortcuts';
+import { formatShortcutBinding, isShortcutMatch } from '../app/shortcuts';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 import {
   markCurrentChatComposerEditorModeTarget,
@@ -95,40 +96,20 @@ function ContinuousVoiceIcon() {
   );
 }
 
-function ChatComposerEditorToggle({
-  expanded,
-  enabled,
-  onToggle,
-}: {
-  expanded: boolean;
-  enabled: boolean;
-  onToggle: () => void;
-}) {
-  const label = enabled ? 'Close editor mode' : 'Open editor mode';
+/** Opens editor mode from the collapsed composer; expanded, it lives in the options menu. */
+function ChatComposerEditorToggle({ onToggle }: { onToggle: () => void }) {
   return (
     <button
       type="button"
-      data-chat-composer-collapsed-action={expanded ? undefined : 'true'}
-      onMouseDown={expanded ? undefined : (event) => event.preventDefault()}
+      data-chat-composer-collapsed-action="true"
+      onMouseDown={(event) => event.preventDefault()}
       onPointerEnter={preloadMonacoEditor}
       onFocus={preloadMonacoEditor}
       onClick={onToggle}
-      aria-pressed={enabled}
-      aria-label={label}
-      className={
-        expanded
-          ? `inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 ${
-              enabled
-                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
-            }`
-          : 'inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70'
-      }
-      title={
-        enabled
-          ? 'Switch back to the chat composer'
-          : 'Use a full text editor; queue with the button or Ctrl/Command+Enter'
-      }
+      aria-pressed={false}
+      aria-label="Open editor mode"
+      className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70"
+      title="Use a full text editor; queue with the button or Ctrl/Command+Enter"
     >
       <CodeEditorIcon />
     </button>
@@ -669,12 +650,24 @@ export function ChatInput({
     voiceActionInFlight ||
     voiceRecordingActive ||
     microphoneOwnedElsewhere;
-  // Continuous voice steering starts from the composer's options menu.
-  const composerControlsWithVoice: ChatComposerControlsConfig | undefined = continuousVoiceEnabled
-    ? {
-        ...composerControls,
-        controls: composerControls?.controls ?? [],
-        menuActions: [
+  // Editor mode and continuous voice steering start from the composer's options menu.
+  const composerMenuActions: ChatComposerMenuAction[] = [
+    {
+      id: 'editor-mode',
+      label: editorMode ? 'Close editor mode' : 'Open editor mode',
+      title: editorMode
+        ? 'Switch back to the chat composer'
+        : 'Use a full text editor; queue with the button or Ctrl/Command+Enter',
+      icon: <CodeEditorIcon />,
+      badge: toggleEditorModeShortcut ? formatShortcutBinding(toggleEditorModeShortcut) : undefined,
+      active: editorMode,
+      onSelect: () => {
+        preloadMonacoEditor();
+        toggleEditorMode();
+      },
+    },
+    ...(continuousVoiceEnabled
+      ? [
           {
             id: 'continuous-voice-steering',
             label: 'Start continuous voice steering',
@@ -683,10 +676,15 @@ export function ChatInput({
             disabled: continuousVoiceButtonDisabled,
             onSelect: () => void continuousVoice.start(),
           },
-          ...(composerControls?.menuActions ?? []),
-        ],
-      }
-    : composerControls;
+        ]
+      : []),
+    ...(composerControls?.menuActions ?? []),
+  ];
+  const composerControlsWithMenu: ChatComposerControlsConfig = {
+    ...composerControls,
+    controls: composerControls?.controls ?? [],
+    menuActions: composerMenuActions,
+  };
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
@@ -1566,11 +1564,7 @@ export function ChatInput({
               </button>
             ) : null}
             {!composerExpanded && !voiceRecordingActive ? (
-              <ChatComposerEditorToggle
-                expanded={false}
-                enabled={false}
-                onToggle={toggleEditorMode}
-              />
+              <ChatComposerEditorToggle onToggle={toggleEditorMode} />
             ) : null}
             {editorMode ? (
               <div
@@ -1801,16 +1795,12 @@ export function ChatInput({
                 </button>
               ) : null}
 
-              <ChatComposerEditorToggle
-                expanded
-                enabled={editorMode}
-                onToggle={toggleEditorMode}
-              />
-
               {!voiceRecordingActive && !continuousVoiceActive && composerLeadingControls ? (
                 <div
                   data-chat-composer-leading-controls="true"
-                  className="min-w-0 flex-shrink-0"
+                  // No basis, so a long label truncates instead of wrapping the
+                  // toolbar; it outgrows the spacer until its label fits.
+                  className="min-w-0 max-w-max flex-[1000_1_0%]"
                 >
                   {composerLeadingControls}
                 </div>
@@ -1873,7 +1863,7 @@ export function ChatInput({
                 </div>
               ) : null}
 
-              {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControlsWithVoice} /> : null}
+              {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControlsWithMenu} /> : null}
 
               {!voiceRecordingActive && !continuousVoiceActive && onPublish ? (
               <button
@@ -2000,12 +1990,11 @@ export function ChatInput({
                 data-chat-composer-stop-action="true"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-caption font-medium text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                 title={stopping ? 'Stopping response' : 'Stop response'}
                 aria-label={stopping ? 'Stopping response' : 'Stop response'}
               >
-                <span data-chat-composer-stop-label="true">{stopping ? 'Stopping...' : 'Stop'}</span>
-                <svg data-chat-composer-stop-icon="true" className="hidden" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <rect x="7" y="7" width="10" height="10" rx="1" />
                 </svg>
               </button>

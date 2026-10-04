@@ -937,10 +937,11 @@ code, pre {
   }
 }
 
-/* Keep the expanded composer useful in narrow desktop panes. Secondary
-   selectors compact before the primary voice/stop/send actions are allowed to
-   wrap. The query follows the chat pane width, not the browser viewport. */
-@container (min-width: 541px) and (max-width: 720px) {
+/* Keep the expanded composer on one row in narrow desktop panes: the agent
+   picker truncates and secondary controls compact before the primary
+   voice/stop/send actions wrap. The query follows the chat pane width, not the
+   browser viewport. */
+@container (max-width: 720px) {
   [data-chat-composer-toolbar='true'] {
     gap: .25rem;
     padding-inline: .375rem;
@@ -957,7 +958,7 @@ code, pre {
   }
 
   [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-picker='true'] > button {
-    max-width: 10.5rem;
+    max-width: min(10.5rem, 100%);
     padding-inline: .375rem;
   }
 
@@ -974,24 +975,19 @@ code, pre {
     padding-inline: .375rem;
   }
 
-  [data-chat-composer-stop-action='true'] {
-    width: 2rem;
-    flex-shrink: 0;
-    padding-inline: 0;
-  }
-
-  [data-chat-composer-stop-label='true'] {
-    display: none;
-  }
-
-  [data-chat-composer-stop-icon='true'] {
-    display: block;
-  }
 }
 
 @container (max-width: 540px) {
   [data-chat-composer-toolbar='true'] [data-chat-composer-primary-actions='true'] {
     margin-left: auto;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-toolbar-spacer='true'] {
+    min-width: 0;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-agent-label='true'] {
+    display: none;
   }
 }
 

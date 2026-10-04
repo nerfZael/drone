@@ -442,11 +442,10 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html).toContain('aria-label="Attach files"');
     expect(html.indexOf('aria-label="Attach files"')).toBeLessThan(
-      html.indexOf('aria-label="Open editor mode"'),
-    );
-    expect(html.indexOf('aria-label="Open editor mode"')).toBeLessThan(
       html.indexOf('Agent picker'),
     );
+    // Editor mode opens from the options menu once the composer is expanded.
+    expect(html).not.toContain('aria-label="Open editor mode"');
     expect(html.indexOf('Agent picker')).toBeLessThan(html.indexOf('Access picker'));
     expect(html.indexOf('Access picker')).toBeLessThan(html.indexOf('Model A'));
     // Continuous voice steering starts from the options menu, not a toolbar button.

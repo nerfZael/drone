@@ -227,6 +227,7 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = React.useState(false);
   const triggerLabel = chatComposerRuntimeTriggerLabel(config);
+  const modelLabel = model ? resolveChatComposerModelSelection(model).triggerLabel : '';
   if (!agent && !model && choiceGroups.length === 0) return null;
 
   const groupSummary = choiceGroups
@@ -262,9 +263,19 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
             aria-haspopup="dialog"
             aria-expanded={open}
             title={title}
-            className="inline-flex h-8 max-w-[20rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 max-w-[min(20rem,100%)] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <span className="min-w-0 truncate">{triggerLabel || 'Agent settings'}</span>
+            <span className="min-w-0 truncate">
+              {modelLabel ? (
+                <>
+                  {/* Narrow composers drop the agent name and keep the model. */}
+                  {agent ? <span data-chat-composer-runtime-agent-label="true">{agent.label} · </span> : null}
+                  {modelLabel}
+                </>
+              ) : (
+                triggerLabel || 'Agent settings'
+              )}
+            </span>
             <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
           </button>
         </Popover.Trigger>
