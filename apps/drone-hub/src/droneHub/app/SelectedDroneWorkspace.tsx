@@ -39,7 +39,10 @@ import {
   type AgentChatTranscriptItem,
   type ChatSendContext,
   type ChatSendPayload,
+  type ChatComposerControlsConfig,
   type ChatComposerMenuAction,
+  type ChatComposerRuntimePickerConfig,
+  ChatComposerRuntimePicker,
   CollapsibleOutput,
   EmptyState,
   PendingTranscriptTurn,
@@ -153,8 +156,8 @@ import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 import { WorkspaceToolIcon } from './WorkspaceToolIcon';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
-import { AgentComposerPicker } from './AgentComposerPicker';
-import { NewDroneAccessPicker } from './NewDroneAccessPicker';
+import { agentAccessChoiceGroups } from './agent-access-choice-groups';
+import { ADD_CUSTOM_AGENT_MENU_VALUE } from './use-drone-hub-toolbar-menu-state';
 
 type LaunchHint = {
   context: 'terminal' | 'code' | 'cursor';
@@ -1441,42 +1444,56 @@ export function SelectedDroneWorkspace({
       onSelect: () => setDroneHubPermissionsOpen(true),
     },
   ];
-  const externalComposerControls = {
-    ...(externalModelComposerControls ?? { controls: [] }),
+  // The agent, model, and access settings share one picker in the composer.
+  const externalModelPicker = externalModelComposerControls?.controls.find(
+    (control) => control.kind === 'model-picker',
+  );
+  const composerRuntimePicker: ChatComposerRuntimePickerConfig | undefined =
+    chatComposerControlsAvailable
+      ? {
+          agent: {
+            value: currentAgentKey,
+            label: agentLabel,
+            entries: toolbarAgentMenuEntries,
+            onChange: pickAgentValue,
+            disabled: agentLocked || agentDisabled || chatInputWaiting,
+            actionValues: [ADD_CUSTOM_AGENT_MENU_VALUE],
+          },
+          choiceGroups: agentAccessChoiceGroups({
+            permissionMode: agentPermissionMode,
+            onPermissionModeChange: (nextMode) => {
+              void setChatAgentPermissionMode(nextMode).catch((err: any) =>
+                setChatInfoError(err?.message ?? String(err)),
+              );
+            },
+            approvalPolicy,
+            onApprovalPolicyChange: (nextPolicy) => {
+              void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
+                setChatInfoError(err?.message ?? String(err)),
+              );
+            },
+            readOnlySupported,
+            approvalsSupported: approvalPolicySupported,
+            agentIsCodex: currentAgentKey === 'builtin:codex',
+            disabled: loadingChatInfo,
+          }),
+        }
+      : undefined;
+  const externalComposerControls: ChatComposerControlsConfig = {
+    controls: (externalModelComposerControls?.controls ?? []).filter(
+      (control) => control.kind !== 'model-picker',
+    ),
     menuActions: [
       ...(externalModelComposerControls?.menuActions ?? []),
       ...externalComposerMenuActions,
     ],
   };
-  const externalLeadingComposerControls = chatComposerControlsAvailable ? (
-    <AgentComposerPicker
-      value={currentAgentKey}
-      label={agentLabel}
-      entries={toolbarAgentMenuEntries}
-      onChange={pickAgentValue}
-      disabled={agentLocked || agentDisabled || chatInputWaiting}
-    />
-  ) : null;
-  const externalTrailingComposerControls = chatComposerControlsAvailable ? (
-    <NewDroneAccessPicker
-      permissionMode={agentPermissionMode}
-      onPermissionModeChange={(nextMode) => {
-        void setChatAgentPermissionMode(nextMode).catch((err: any) =>
-          setChatInfoError(err?.message ?? String(err)),
-        );
-      }}
-      approvalPolicy={approvalPolicy}
-      onApprovalPolicyChange={(nextPolicy) => {
-        void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
-          setChatInfoError(err?.message ?? String(err)),
-        );
-      }}
-      readOnlySupported={readOnlySupported}
-      approvalsSupported={approvalPolicySupported}
-      agentIsCodex={currentAgentKey === 'builtin:codex'}
-      disabled={loadingChatInfo}
-    />
-  ) : null;
+  const externalLeadingComposerControls =
+    composerRuntimePicker || externalModelPicker ? (
+      <ChatComposerRuntimePicker
+        config={{ ...composerRuntimePicker, model: externalModelPicker }}
+      />
+    ) : null;
 
   const executionOrder = chatExecutionOrder(externalTimelineGroups);
   const latestCompletedAgentGroupIndex = latestCompletedAgentTurnGroupIndex(externalTimelineGroups);
@@ -2659,8 +2676,7 @@ export function SelectedDroneWorkspace({
                         branch={currentDrone.repoBranch}
                       />
                     }
-                    composerLeadingControls={externalLeadingComposerControls}
-                    composerTrailingControls={externalTrailingComposerControls}
+                    composerRuntimePicker={composerRuntimePicker}
                     messageFeatures={{
                       linkedPullRequestContext,
                       droneId: currentDrone.id,
@@ -2805,7 +2821,6 @@ export function SelectedDroneWorkspace({
                     />
                   }
                   composerLeadingControls={externalLeadingComposerControls}
-                  composerTrailingControls={externalTrailingComposerControls}
                   composerControls={externalComposerControls}
                   autoFocus={false}
                   onStop={

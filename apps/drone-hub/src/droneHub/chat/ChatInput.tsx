@@ -83,6 +83,18 @@ function CodeEditorIcon() {
   );
 }
 
+function ContinuousVoiceIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 12h2" />
+      <path d="M8 8v8" />
+      <path d="M12 5v14" />
+      <path d="M16 8v8" />
+      <path d="M20 12h0" />
+    </svg>
+  );
+}
+
 function ChatComposerEditorToggle({
   expanded,
   enabled,
@@ -657,6 +669,24 @@ export function ChatInput({
     voiceActionInFlight ||
     voiceRecordingActive ||
     microphoneOwnedElsewhere;
+  // Continuous voice steering starts from the composer's options menu.
+  const composerControlsWithVoice: ChatComposerControlsConfig | undefined = continuousVoiceEnabled
+    ? {
+        ...composerControls,
+        controls: composerControls?.controls ?? [],
+        menuActions: [
+          {
+            id: 'continuous-voice-steering',
+            label: 'Start continuous voice steering',
+            title: microphoneOwnedElsewhere ? voiceRecordDisabledReason ?? undefined : undefined,
+            icon: <ContinuousVoiceIcon />,
+            disabled: continuousVoiceButtonDisabled,
+            onSelect: () => void continuousVoice.start(),
+          },
+          ...(composerControls?.menuActions ?? []),
+        ],
+      }
+    : composerControls;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
@@ -1843,7 +1873,7 @@ export function ChatInput({
                 </div>
               ) : null}
 
-              {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControls} /> : null}
+              {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControlsWithVoice} /> : null}
 
               {!voiceRecordingActive && !continuousVoiceActive && onPublish ? (
               <button
@@ -1944,25 +1974,6 @@ export function ChatInput({
                   </button>
                 </>
               ) : (
-                <>
-                <button
-                  type="button"
-                  onMouseDown={preserveEditorFocus}
-                  onClick={() => void continuousVoice.start()}
-                  disabled={continuousVoiceButtonDisabled}
-                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Start continuous voice steering"
-                  aria-label="Start continuous voice steering"
-                  aria-pressed="false"
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 12h2" />
-                    <path d="M8 8v8" />
-                    <path d="M12 5v14" />
-                    <path d="M16 8v8" />
-                    <path d="M20 12h0" />
-                  </svg>
-                </button>
                 <button
                   type="button"
                   onMouseDown={preserveEditorFocus}
@@ -1981,7 +1992,6 @@ export function ChatInput({
                     <path d="M12 18v3" />
                   </svg>
                 </button>
-                </>
               )}
 
               {showSeparateStopAction ? (

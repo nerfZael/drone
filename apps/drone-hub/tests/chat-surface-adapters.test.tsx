@@ -449,7 +449,9 @@ describe('agent chat surface adapters', () => {
     );
     expect(html.indexOf('Agent picker')).toBeLessThan(html.indexOf('Access picker'));
     expect(html.indexOf('Access picker')).toBeLessThan(html.indexOf('Model A'));
-    expect(html.indexOf('aria-label="Start continuous voice steering"')).toBeLessThan(
+    // Continuous voice steering starts from the options menu, not a toolbar button.
+    expect(html).not.toContain('aria-label="Start continuous voice steering"');
+    expect(html.indexOf('aria-label="Chat options"')).toBeLessThan(
       html.indexOf('aria-label="Record voice message"'),
     );
     expect(html).toContain('Model A');

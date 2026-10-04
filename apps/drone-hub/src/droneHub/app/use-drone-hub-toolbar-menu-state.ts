@@ -6,6 +6,9 @@ import type { UiMenuSelectEntry } from '../../ui/components';
 import { repoPathLabel } from './repo-path-label';
 import { formatModelDisplayLabel } from './chat-model-runtime';
 
+/** The agent menu entry that opens the custom agent dialog. */
+export const ADD_CUSTOM_AGENT_MENU_VALUE = '__add_custom__';
+
 type BuiltinAgentOption = {
   key: string;
   label: string;
@@ -119,7 +122,7 @@ export function useDroneHubToolbarMenuState({
     }
     entries.push({ kind: 'separator' });
     entries.push({
-      value: '__add_custom__',
+      value: ADD_CUSTOM_AGENT_MENU_VALUE,
       label: 'Add custom...',
       disabled: agentLocked,
       ...(agentLocked ? { title: 'Create a new chat to use a different agent.' } : {}),
@@ -139,7 +142,7 @@ export function useDroneHubToolbarMenuState({
   const pickAgentValue = React.useCallback(
     (v: string) => {
       if (agentLocked) return;
-      if (v === '__add_custom__') {
+      if (v === ADD_CUSTOM_AGENT_MENU_VALUE) {
         setCustomAgentError(null);
         setNewCustomAgentLabel('');
         setNewCustomAgentCommand('');

@@ -25,7 +25,7 @@ type RefreshInstalledAgentCatalogsResponse = {
 };
 
 const AGENT_LABELS: Record<string, string> = {
-  cursor: 'Cursor Agent',
+  cursor: 'Cursor',
   codex: 'Codex',
   claude: 'Claude Code',
   opencode: 'OpenCode',
@@ -106,7 +106,7 @@ export function ExternalAgentModelsSettingsSection({
 
       {!result ? (
         <div className="text-11 text-[var(--muted-dim)]">
-          Cursor Agent, Codex, Claude Code, OpenCode, Pi, and Blip are checked. Agents that are not
+          Cursor, Codex, Claude Code, OpenCode, Pi, and Blip are checked. Agents that are not
           available to the Drone Hub process are skipped.
         </div>
       ) : (

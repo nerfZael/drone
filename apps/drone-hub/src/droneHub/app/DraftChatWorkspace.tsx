@@ -2,14 +2,16 @@ import React from 'react';
 import { buildModelCatalogChoices } from '@drone/assistant-chat';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  ChatComposerRuntimePicker,
   ChatInput,
+  type ChatComposerRuntimePickerConfig,
   type ChatInputDraftContent,
   type ChatImageAttachmentPayload,
   type ChatSendContext,
   type ChatSendPayload,
   PendingTranscriptTurn,
 } from '../chat';
-import type { ChatComposerControl, ChatComposerControlsConfig } from '../chat/ChatComposerControls';
+import type { ChatComposerControlsConfig } from '../chat/ChatComposerControls';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import type { UiMenuSelectEntry } from '../../ui/components';
 import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../../domain';
@@ -26,8 +28,7 @@ import {
 } from './drone-create-runtime';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
-import { AgentComposerPicker } from './AgentComposerPicker';
-import { NewDroneAccessPicker } from './NewDroneAccessPicker';
+import { agentAccessChoiceGroups } from './agent-access-choice-groups';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
@@ -196,61 +197,63 @@ export function DraftChatWorkspace({
       : modelCatalog.stale
         ? 'Updating the agent model catalog in the background…'
         : undefined;
-  const newDroneComposerControls = React.useMemo<ChatComposerControlsConfig | undefined>(() => {
-    const controls: ChatComposerControl[] = [];
-    if (spawnAgentConfig.kind !== 'custom') {
-      controls.push({
-        kind: 'model-picker',
-        id: 'new-drone-model',
-        currentProvider: modelProvider,
-        currentModel: spawnModel,
-        currentThinkingLevel: spawnReasoning || undefined,
-        options: modelChoices,
-        disabled: controlsLocked,
-        showReasoning: !spawnModel.startsWith('openrouter:') ||
-          modelChoices.some((choice) => choice.id === spawnModel && Boolean(choice.thinkingLevel)),
-        searchable: true,
-        searchPlaceholder: 'Search models',
-        title: 'Choose model and reasoning',
-        statusMessage: modelCatalogStatusMessage,
-        onSelect: (choice, selection) => {
-          if (selection === 'reasoning') {
-            setSpawnReasoning(choice.thinkingLevel ?? '');
-            return;
-          }
-          setSpawnModel(choice.id);
-          setSpawnReasoning(choice.thinkingLevel ?? '');
-        },
-      });
-    }
-    return {
-      controls,
-      menuActions: runtimeSupportsCustomAgents(createRuntime)
-        ? [
-            {
-              id: 'manage-custom-agents',
-              label: 'Manage custom agents',
-              title: 'Add or edit custom agents',
-              onSelect: () => setCustomAgentModalOpen(true),
+  const newDroneRuntimePicker: ChatComposerRuntimePickerConfig = {
+    agent: {
+      value: spawnAgentKey,
+      label: agentLabel,
+      entries: filteredAgentMenuEntries,
+      onChange: setSpawnAgentKey,
+      disabled: controlsLocked,
+    },
+    model:
+      spawnAgentConfig.kind !== 'custom'
+        ? {
+            currentProvider: modelProvider,
+            currentModel: spawnModel,
+            currentThinkingLevel: spawnReasoning || undefined,
+            options: modelChoices,
+            disabled: controlsLocked,
+            showReasoning: !spawnModel.startsWith('openrouter:') ||
+              modelChoices.some((choice) => choice.id === spawnModel && Boolean(choice.thinkingLevel)),
+            searchable: true,
+            searchPlaceholder: 'Search models',
+            title: 'Choose model and reasoning',
+            statusMessage: modelCatalogStatusMessage,
+            onSelect: (choice, selection) => {
+              if (selection === 'reasoning') {
+                setSpawnReasoning(choice.thinkingLevel ?? '');
+                return;
+              }
+              setSpawnModel(choice.id);
+              setSpawnReasoning(choice.thinkingLevel ?? '');
             },
-          ]
+          }
         : undefined,
-      menuLabel: 'New drone options',
-    };
-  }, [
-    controlsLocked,
-    createRuntime,
-    modelChoices,
-    modelCatalogStatusMessage,
-    modelProvider,
-    setCustomAgentModalOpen,
-    setSpawnModel,
-    setSpawnReasoning,
-    spawnAgentConfig.kind,
-    spawnAgentKey,
-    spawnModel,
-    spawnReasoning,
-  ]);
+    choiceGroups: agentAccessChoiceGroups({
+      permissionMode: spawnAgentPermissionMode,
+      onPermissionModeChange: onSpawnAgentPermissionModeChange,
+      approvalPolicy: spawnApprovalPolicy,
+      onApprovalPolicyChange: onSpawnApprovalPolicyChange,
+      readOnlySupported: spawnAgentReadOnlySupported,
+      approvalsSupported: spawnAgentApprovalSupported,
+      agentIsCodex: spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex',
+      disabled: controlsLocked,
+    }),
+  };
+  const newDroneComposerControls: ChatComposerControlsConfig = {
+    controls: [],
+    menuActions: runtimeSupportsCustomAgents(createRuntime)
+      ? [
+          {
+            id: 'manage-custom-agents',
+            label: 'Manage custom agents',
+            title: 'Add or edit custom agents',
+            onSelect: () => setCustomAgentModalOpen(true),
+          },
+        ]
+      : undefined,
+    menuLabel: 'New drone options',
+  };
   const queuedDraftPrompts = draftChat.droneId
     ? (queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [])
     : [];
@@ -388,27 +391,7 @@ export function DraftChatWorkspace({
         editorCtrlEnterBehavior="new-chat"
         onDraftContentChange={onDraftContentChange}
         composerLeadingControls={
-          <AgentComposerPicker
-            value={spawnAgentKey}
-            label={agentLabel}
-            entries={filteredAgentMenuEntries}
-            onChange={setSpawnAgentKey}
-            disabled={controlsLocked}
-          />
-        }
-        composerTrailingControls={
-          <NewDroneAccessPicker
-            permissionMode={spawnAgentPermissionMode}
-            onPermissionModeChange={onSpawnAgentPermissionModeChange}
-            approvalPolicy={spawnApprovalPolicy}
-            onApprovalPolicyChange={onSpawnApprovalPolicyChange}
-            readOnlySupported={spawnAgentReadOnlySupported}
-            approvalsSupported={spawnAgentApprovalSupported}
-            agentIsCodex={
-              spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'
-            }
-            disabled={controlsLocked}
-          />
+          <ChatComposerRuntimePicker config={newDroneRuntimePicker} />
         }
         composerControls={newDroneComposerControls}
         composerTopAction={

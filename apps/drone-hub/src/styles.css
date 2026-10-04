@@ -952,24 +952,17 @@ code, pre {
   }
 
   [data-chat-composer-toolbar='true'] [data-chat-composer-leading-controls='true'],
-  [data-chat-composer-toolbar='true'] [data-chat-composer-agent-picker='true'] {
-    max-width: 4.5rem;
+  [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-picker='true'] {
+    max-width: 10.5rem;
   }
 
-  [data-chat-composer-toolbar='true'] [data-chat-composer-agent-picker='true'] button {
-    min-width: 0 !important;
-    max-width: 4.5rem !important;
-    padding-inline: .375rem !important;
-  }
-
-  [data-chat-composer-toolbar='true'] [data-chat-composer-trailing-controls='true'],
-  [data-chat-composer-toolbar='true'] [data-chat-composer-access-picker='true'] {
-    max-width: 6.25rem;
-  }
-
-  [data-chat-composer-toolbar='true'] [data-chat-composer-access-picker='true'] > button {
-    max-width: 6.25rem;
+  [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-picker='true'] > button {
+    max-width: 10.5rem;
     padding-inline: .375rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-trailing-controls='true'] {
+    max-width: 6.25rem;
   }
 
   [data-chat-composer-toolbar='true'] [data-chat-composer-model-picker='true'],

@@ -74,6 +74,12 @@ export {
   type ChatComposerModelPickerConfig,
 } from './ChatComposerModelPicker';
 export {
+  ChatComposerRuntimePicker,
+  type ChatComposerRuntimeAgentConfig,
+  type ChatComposerRuntimeChoiceGroup,
+  type ChatComposerRuntimePickerConfig,
+} from './ChatComposerRuntimePicker';
+export {
   ChatComposerContext,
   type ChatComposerContextConfig,
   type ChatComposerContextItem,

@@ -75,37 +75,22 @@ function ChevronIcon({ up = false }: { up?: boolean }) {
   );
 }
 
-export function ChatComposerModelPicker({ config }: { config: ChatComposerModelPickerConfig }) {
+type ModelPickerSettings = Omit<ChatComposerModelPickerConfig, 'id' | 'menuPlacement'>;
+
+export type ChatComposerModelSelection = ReturnType<typeof resolveChatComposerModelSelection>;
+
+/** Derives what the picker shows as selected from the chat's settings and catalog. */
+export function resolveChatComposerModelSelection(config: ModelPickerSettings) {
   const {
     currentProvider,
     currentModel,
     currentThinkingLevel,
     agentChoosesDefaultReasoning = false,
     options,
-    disabled = false,
     showReasoning = true,
-    searchable = true,
-    searchPlaceholder = 'Search models',
     triggerLabel: triggerLabelOverride,
-    allowCustomModel = false,
     requireExplicitModelSelection = false,
-    statusMessage,
-    title = showReasoning ? 'Choose model and reasoning' : 'Choose model',
-    menuPlacement = 'above',
-    onSelect,
   } = config;
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = React.useState(false);
-  const [modelsOpen, setModelsOpen] = React.useState(!showReasoning);
-  const [searchQuery, setSearchQuery] = React.useState('');
-  useDropdownDismiss(rootRef, open && menuPlacement === 'inline', setOpen);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setModelsOpen(!showReasoning || (requireExplicitModelSelection && !currentModel));
-    setSearchQuery('');
-  }, [currentModel, open, requireExplicitModelSelection, showReasoning]);
-
   const availableModels = uniqueModels(options);
   const exactCurrentModel = availableModels.find(
     (option) => option.provider === currentProvider && option.id === currentModel,
@@ -118,7 +103,6 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
       : undefined);
   const selectedProvider = selectedModel?.provider || currentProvider;
   const selectedModelId = selectedModel?.id ?? currentModel;
-  const modelListOpen = modelsOpen || (requireExplicitModelSelection && !selectedModelId);
   const selectedReasoning = agentChoosesDefaultReasoning
     ? currentThinkingLevel || ''
     : currentThinkingLevel || selectedModel?.thinkingLevel ||
@@ -160,16 +144,83 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     : requireExplicitModelSelection && !selectedModelId
       ? []
       : DEFAULT_REASONING_LEVELS;
-  const models = uniqueModels(choices);
+  const triggerLabel =
+    triggerLabelOverride ??
+    `${modelName(currentName)}${showReasoning && selectedReasoning ? ` (${formatReasoningLabel(selectedReasoning)})` : ''}`;
+  return {
+    choices,
+    models: uniqueModels(choices),
+    selectedProvider,
+    selectedModelId,
+    selectedReasoning,
+    currentName,
+    visibleReasoning,
+    triggerLabel,
+  };
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-9 flex-shrink-0 items-center px-3">
+      <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The model list and reasoning levels. `standalone` is the model picker's own
+ * menu; `sections` gives each part a heading so it can sit among other settings.
+ */
+export function ChatComposerModelMenuSections({
+  config,
+  layout = 'standalone',
+  onDone,
+}: {
+  config: ModelPickerSettings;
+  layout?: 'standalone' | 'sections';
+  /** Called after a choice that finishes the picker's job. */
+  onDone: () => void;
+}) {
+  const {
+    currentModel,
+    disabled = false,
+    showReasoning = true,
+    searchable = true,
+    searchPlaceholder = 'Search models',
+    allowCustomModel = false,
+    requireExplicitModelSelection = false,
+    statusMessage,
+    onSelect,
+  } = config;
+  const {
+    choices,
+    models,
+    selectedProvider,
+    selectedModelId,
+    selectedReasoning,
+    currentName,
+    visibleReasoning,
+  } = resolveChatComposerModelSelection(config);
+  // Alone, a picker without reasoning is just the model list. Among other
+  // settings the list stays folded until asked for.
+  const initialModelsOpen =
+    (layout === 'standalone' && !showReasoning) ||
+    (requireExplicitModelSelection && !currentModel);
+  const [modelsOpen, setModelsOpen] = React.useState(initialModelsOpen);
+  const [searchQuery, setSearchQuery] = React.useState('');
+
+  React.useEffect(() => {
+    setModelsOpen(initialModelsOpen);
+    setSearchQuery('');
+  }, [currentModel, initialModelsOpen]);
+
+  const modelListOpen = modelsOpen || (requireExplicitModelSelection && !selectedModelId);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleModels = normalizedQuery
     ? models.filter((choice) =>
         `${choice.name ?? ''} ${choice.id}`.toLowerCase().includes(normalizedQuery),
       )
     : models;
-  const triggerLabel =
-    triggerLabelOverride ??
-    `${modelName(currentName)}${showReasoning && selectedReasoning ? ` (${formatReasoningLabel(selectedReasoning)})` : ''}`;
   const customModelId =
     allowCustomModel &&
     normalizedQuery &&
@@ -199,7 +250,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
       },
       'reasoning',
     );
-    setOpen(false);
+    if (layout === 'standalone') onDone();
   };
 
   const selectModel = (model: ChatComposerModelChoice) => {
@@ -214,122 +265,164 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
       'model',
     );
     setSearchQuery('');
-    if (showReasoning) setModelsOpen(false);
-    else setOpen(false);
+    if (showReasoning || layout === 'sections') setModelsOpen(false);
+    else onDone();
   };
 
-  const menuContent = (
-    <>
-      <div className="flex min-h-9 flex-shrink-0 items-center px-3">
-        <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">
-          {showReasoning && !modelListOpen ? 'Reasoning' : 'Model'}
-        </div>
-      </div>
+  const reasoningChips = showReasoning && !modelListOpen && selectedModelId ? (
+    <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
+      {visibleReasoning.map((level) => {
+        const active = level === selectedReasoning;
+        return (
+          <button
+            key={level}
+            type="button"
+            disabled={disabled}
+            onClick={() => selectReasoning(level)}
+            aria-pressed={active}
+            className={`inline-flex h-8 items-center justify-center gap-1 rounded-[.5rem] border px-2.5 text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
+              active
+                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
+                : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
+            }`}
+          >
+            {formatReasoningLabel(level)}
+            {active ? <span className="text-[var(--accent)]"><CheckIcon /></span> : null}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
 
-      {showReasoning && !modelListOpen && selectedModelId ? (
-        <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
-          {visibleReasoning.map((level) => {
-            const active = level === selectedReasoning;
-            return (
-              <button
-                key={level}
-                type="button"
-                disabled={disabled}
-                onClick={() => selectReasoning(level)}
-                className={`inline-flex h-8 items-center justify-center gap-1 rounded-[.5rem] border px-2.5 text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
-                  active
-                    ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
-                    : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
-                }`}
-              >
-                {formatReasoningLabel(level)}
-                {active ? <span className="text-[var(--accent)]"><CheckIcon /></span> : null}
-              </button>
-            );
-          })}
+  const modelToggle = (
+    <button
+      type="button"
+      onClick={() => setModelsOpen((value) => !value)}
+      aria-expanded={modelListOpen}
+      className="mx-2 mb-2 flex h-[2.375rem] flex-shrink-0 items-center justify-between gap-3 rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-left"
+    >
+      <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
+        {currentName}
+      </span>
+      <span className="text-[var(--accent)]"><ChevronIcon up={modelListOpen} /></span>
+    </button>
+  );
+
+  const modelList = modelListOpen ? (
+    <>
+      {searchable ? (
+        <div className="flex-shrink-0 px-2 pb-1.5">
+          <input
+            autoFocus
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            className="h-8 w-full rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-[.75rem] font-normal text-[var(--chat-composer-fg)] placeholder:font-normal placeholder:text-[var(--chat-composer-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
+          />
         </div>
       ) : null}
-
-      <button
-        type="button"
-        onClick={() => setModelsOpen((value) => !value)}
-        className="mx-2 mb-2 flex h-[2.375rem] flex-shrink-0 items-center justify-between gap-3 rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-left"
-      >
-        <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
-          {currentName}
-        </span>
-        <span className="text-[var(--accent)]"><ChevronIcon up={modelListOpen} /></span>
-      </button>
-
-      {modelListOpen ? (
-        <>
-          {searchable ? (
-            <div className="flex-shrink-0 px-2 pb-1.5">
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                className="h-8 w-full rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-[.75rem] font-normal text-[var(--chat-composer-fg)] placeholder:font-normal placeholder:text-[var(--chat-composer-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
-              />
-            </div>
-          ) : null}
-          <div className="min-h-0 overflow-y-auto px-2 pb-2">
-            <div className="flex flex-col gap-1">
-              {visibleModels.length > 0 ? (
-                visibleModels.map((choice) => {
-                  const active =
-                    choice.provider === selectedProvider && choice.id === selectedModelId;
-                  return (
-                    <button
-                      key={`${choice.provider}:${choice.id}`}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => selectModel(choice)}
-                      title={choice.id || choice.name}
-                      className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
-                        active
-                          ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
-                          : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
-                      }`}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Auto'}</span>
-                      {active ? <span className="ml-2 text-[var(--accent)]"><CheckIcon /></span> : null}
-                    </button>
-                  );
-                })
-              ) : !customModelId ? (
-                <div className="flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
-                  No matching models.
-                </div>
-              ) : null}
-              {customModelId ? (
+      <div className={`min-h-0 overflow-y-auto px-2 pb-2 ${layout === 'sections' ? 'max-h-[15rem] flex-shrink-0' : ''}`}>
+        <div className="flex flex-col gap-1">
+          {visibleModels.length > 0 ? (
+            visibleModels.map((choice) => {
+              const active =
+                choice.provider === selectedProvider && choice.id === selectedModelId;
+              return (
                 <button
+                  key={`${choice.provider}:${choice.id}`}
                   type="button"
                   disabled={disabled}
-                  onClick={() =>
-                    selectModel({
-                      provider: selectedProvider,
-                      id: customModelId,
-                      name: customModelId,
-                    })
-                  }
-                  className="flex min-h-9 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
+                  onClick={() => selectModel(choice)}
+                  title={choice.id || choice.name}
+                  className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
+                    active
+                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
+                      : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
+                  }`}
                 >
-                  <span className="truncate">Use model ID “{customModelId}”</span>
+                  <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Auto'}</span>
+                  {active ? <span className="ml-2 text-[var(--accent)]"><CheckIcon /></span> : null}
                 </button>
-              ) : null}
+              );
+            })
+          ) : !customModelId ? (
+            <div className="flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
+              No matching models.
             </div>
-          </div>
-        </>
-      ) : null}
-      {statusMessage ? (
-        <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
-          {statusMessage}
+          ) : null}
+          {customModelId ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() =>
+                selectModel({
+                  provider: selectedProvider,
+                  id: customModelId,
+                  name: customModelId,
+                })
+              }
+              className="flex min-h-9 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
+            >
+              <span className="truncate">Use model ID “{customModelId}”</span>
+            </button>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </>
+  ) : null;
+
+  const status = statusMessage ? (
+    <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
+      {statusMessage}
+    </div>
+  ) : null;
+
+  if (layout === 'sections') {
+    return (
+      <>
+        <SectionTitle>Model</SectionTitle>
+        {modelToggle}
+        {modelList}
+        {reasoningChips ? (
+          <>
+            <SectionTitle>Reasoning</SectionTitle>
+            {reasoningChips}
+          </>
+        ) : null}
+        {statusMessage ? (
+          <div className="flex-shrink-0 px-3 pb-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
+            {statusMessage}
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SectionTitle>{showReasoning && !modelListOpen ? 'Reasoning' : 'Model'}</SectionTitle>
+      {reasoningChips}
+      {modelToggle}
+      {modelList}
+      {status}
+    </>
+  );
+}
+
+export function ChatComposerModelPicker({ config }: { config: ChatComposerModelPickerConfig }) {
+  const {
+    disabled = false,
+    showReasoning = true,
+    title = showReasoning ? 'Choose model and reasoning' : 'Choose model',
+    menuPlacement = 'above',
+  } = config;
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = React.useState(false);
+  useDropdownDismiss(rootRef, open && menuPlacement === 'inline', setOpen);
+  const { triggerLabel } = resolveChatComposerModelSelection(config);
+  const menuContent = (
+    <ChatComposerModelMenuSections config={config} onDone={() => setOpen(false)} />
   );
 
   return (

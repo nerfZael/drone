@@ -14,6 +14,7 @@ import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
   AgentChatTranscript,
   ChangedFilesCard,
+  ChatComposerRuntimePicker,
   ChatSurfaceComposer,
   EmptyState,
   useAgentChatSurfaceAdapter,
@@ -21,6 +22,7 @@ import {
   type AgentChatTranscriptItem,
   type ChatComposerMenuAction,
   type ChatComposerContextConfig,
+  type ChatComposerRuntimePickerConfig,
   type ChatSendContext,
   type ChatSendPayload,
 } from '../chat';
@@ -316,8 +318,7 @@ function NativeAssistantDock({
   promotingNewChatActionById = {},
   promoteNewChatActionErrorById = {},
   composerTopAction,
-  composerLeadingControls,
-  composerTrailingControls,
+  composerRuntimePicker,
 }: {
   autoFocus?: boolean;
   focusTargetId?: string;
@@ -333,8 +334,8 @@ function NativeAssistantDock({
   promotingNewChatActionById?: Record<string, true>;
   promoteNewChatActionErrorById?: Record<string, string>;
   composerTopAction?: React.ReactNode;
-  composerLeadingControls?: React.ReactNode;
-  composerTrailingControls?: React.ReactNode;
+  /** Agent and access settings; the dock adds its model and shows them as one picker. */
+  composerRuntimePicker?: Omit<ChatComposerRuntimePickerConfig, 'model'>;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -2102,17 +2103,27 @@ function NativeAssistantDock({
         }
       : undefined;
 
+  const nativeAgentControls = buildNativeAgentComposerControls({
+    thread: activeThread,
+    models: snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS,
+    defaultModel: snapshot?.defaultModel,
+    busy: defaultModelBusy,
+    onUpdate: (patch) => void updateThread(patch),
+    onSetDefault: () => void setActiveModelAsDefault(),
+  });
+  const nativeModelPicker = composerRuntimePicker
+    ? nativeAgentControls.controls.find((control) => control.kind === 'model-picker')
+    : undefined;
   const nativeComposerControls = {
-    ...buildNativeAgentComposerControls({
-      thread: activeThread,
-      models: snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS,
-      defaultModel: snapshot?.defaultModel,
-      busy: defaultModelBusy,
-      onUpdate: (patch) => void updateThread(patch),
-      onSetDefault: () => void setActiveModelAsDefault(),
-    }),
+    ...nativeAgentControls,
+    controls: nativeModelPicker
+      ? nativeAgentControls.controls.filter((control) => control !== nativeModelPicker)
+      : nativeAgentControls.controls,
     menuActions: composerMenuActions,
   };
+  const nativeComposerLeadingControls = composerRuntimePicker ? (
+    <ChatComposerRuntimePicker config={{ ...composerRuntimePicker, model: nativeModelPicker }} />
+  ) : undefined;
 
   const toolActivityVisible = chatSurfaceAdapter.capabilities.toolActivity === 'visible';
   const nativeTranscriptItems: AgentChatTranscriptItem[] = [];
@@ -2709,8 +2720,7 @@ function NativeAssistantDock({
               composerTopAction={composerTopAction}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
-              composerLeadingControls={composerLeadingControls}
-              composerTrailingControls={composerTrailingControls}
+              composerLeadingControls={nativeComposerLeadingControls}
               composerStatus={
                 blipSession.contextUsage ? (
                   <AssistantContextUsageIndicator usage={blipSession.contextUsage} />

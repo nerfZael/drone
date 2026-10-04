@@ -5,7 +5,7 @@ import type { StartupSeedState } from './app-types';
 
 export const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: ChatAgentConfig }> = [
   { key: 'native', label: 'Built-in', agent: { kind: 'native' } },
-  { key: 'builtin:cursor', label: 'Cursor Agent', agent: { kind: 'builtin', id: 'cursor' } },
+  { key: 'builtin:cursor', label: 'Cursor', agent: { kind: 'builtin', id: 'cursor' } },
   { key: 'builtin:codex', label: 'Codex', agent: { kind: 'builtin', id: 'codex' } },
   { key: 'builtin:claude', label: 'Claude Code', agent: { kind: 'builtin', id: 'claude' } },
   { key: 'builtin:opencode', label: 'OpenCode', agent: { kind: 'builtin', id: 'opencode' } },

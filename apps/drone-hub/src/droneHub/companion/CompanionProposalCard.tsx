@@ -21,7 +21,7 @@ import type { DesktopNewDronePreferences } from '../app/new-drone-preferences';
 
 const BUILTIN_AGENT_LABELS: Readonly<Record<string, string>> = {
   native: 'Built-in',
-  'builtin:cursor': 'Cursor Agent',
+  'builtin:cursor': 'Cursor',
   'builtin:codex': 'Codex',
   'builtin:claude': 'Claude Code',
   'builtin:opencode': 'OpenCode',

@@ -5,8 +5,6 @@ import { describe, expect, test } from 'bun:test';
 import { NewDroneSetupPanel } from '../src/droneHub/app/NewDroneSetupPanel';
 import { NewDroneTargetControls } from '../src/droneHub/app/NewDroneTargetControls';
 import { DroneRuntimeIndicator } from '../src/droneHub/app/DroneRuntimeIndicator';
-import { AgentComposerPicker } from '../src/droneHub/app/AgentComposerPicker';
-import { NewDroneAccessPicker } from '../src/droneHub/app/NewDroneAccessPicker';
 
 const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   createRuntime: 'container',
@@ -64,57 +62,11 @@ describe('new drone setup panel', () => {
     expect(html).not.toContain('role="group" aria-label="Approvals"');
   });
 
-  test('renders agent and access controls for the composer control rows', () => {
-    const html = renderToStaticMarkup(
-      <>
-        <AgentComposerPicker
-          value="builtin:codex"
-          label="Codex"
-          entries={[{ value: 'builtin:codex', label: 'Codex' }]}
-          onChange={() => {}}
-        />
-        <NewDroneAccessPicker
-          permissionMode="write"
-          onPermissionModeChange={() => {}}
-          approvalPolicy="auto"
-          onApprovalPolicyChange={() => {}}
-          readOnlySupported
-          approvalsSupported
-          agentIsCodex
-        />
-      </>,
-    );
-
-    expect(html).toContain('Choose agent');
-    expect(html).toContain('Codex');
-    expect(html).toContain('Choose chat access and approvals');
-    expect(html).toContain('Write · Auto');
-  });
-
   test('renders runtime and branch in the upper target row', () => {
     const html = renderToStaticMarkup(<NewDroneTargetControls {...targetProps} />);
 
     expect(html).toContain('Execution target: Container');
     expect(html).toContain('Branch: main');
-  });
-
-  test('shows access and approval labels without timing qualifiers', () => {
-    const html = renderToStaticMarkup(
-      <NewDroneAccessPicker
-        permissionMode="execute"
-        onPermissionModeChange={() => {}}
-        approvalPolicy="none"
-        onApprovalPolicyChange={() => {}}
-        readOnlySupported
-        approvalsSupported
-        agentIsCodex
-      />,
-    );
-
-    expect(html).toContain('Execute · Never ask');
-    expect(html).not.toContain('next turn');
-    expect(html).not.toContain('Never ask now');
-    expect(html).not.toContain('disabled=""');
   });
 
   test('renders an existing drone runtime as a read-only indicator', () => {

@@ -16,6 +16,6 @@ describe('External agent model settings', () => {
 
     expect(html).toContain('External agent model lists');
     expect(html).toContain('Refresh model lists');
-    expect(html).toContain('Cursor Agent, Codex, Claude Code, OpenCode, Pi, and Blip');
+    expect(html).toContain('Cursor, Codex, Claude Code, OpenCode, Pi, and Blip');
   });
 });

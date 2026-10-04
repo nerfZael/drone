@@ -102,7 +102,6 @@ export function buildExternalAgentComposerControls(opts: {
   }`;
 
   return {
-    onboardingId: 'chat.composer.model',
     controls: [
       {
         kind: 'model-picker',

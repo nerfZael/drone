@@ -1,7 +1,7 @@
 import { chatAgentSupportsReasoning, formatModelDisplayLabel, formatReasoningLabel } from '@drone/assistant-chat';
 import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import { BUILTIN_AGENT_OPTIONS } from '../app/app-config';
-import { newDroneAccessLabel, newDroneApprovalLabel } from '../app/NewDroneAccessPicker';
+import { newDroneAccessLabel, newDroneApprovalLabel } from '../app/agent-access-choice-groups';
 import { repoPathLabel } from '../app/repo-path-label';
 
 /** What a double-click on the canvas creates next: a drone on the global board, a chat on a drone's. */
