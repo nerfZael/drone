@@ -1,5 +1,6 @@
 import type { ChatModelOverrides } from '../chat/selected-chat-model-overrides';
 import type { ChatSendContext, ChatSendPayload } from '../chat/ChatInput';
+import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
 
 export type CanvasChatTarget = { droneId: string; chatName: string };
 export type CanvasSendPrompt = (
@@ -18,6 +19,8 @@ export type CanvasDraftCreation = {
     agentKey: string;
     model: string;
     reasoning?: string;
+    permissionMode?: AgentPermissionMode;
+    approvalPolicy?: AgentApprovalPolicy;
     repoPath: string;
     group: string;
   };

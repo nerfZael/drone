@@ -22,7 +22,8 @@ export type ChatComposerRuntimeChoiceGroup = {
   id: string;
   title: string;
   value: string;
-  options: Array<{ value: string; label: string; title?: string; disabled?: boolean }>;
+  /** An option's icon stands for it in the picker's button, so every setting fits on one line. */
+  options: Array<{ value: string; label: string; title?: string; disabled?: boolean; icon?: React.ReactNode }>;
   onValueChange: (value: string) => void;
   disabled?: boolean;
 };
@@ -184,6 +185,7 @@ function ChoiceGroupSection({ group }: { group: ChatComposerRuntimeChoiceGroup }
                   : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
               }`}
             >
+              {option.icon ? <span className="flex-shrink-0 opacity-80">{option.icon}</span> : null}
               {option.label}
               {active ? <span className="text-[var(--accent)]"><CheckIcon /></span> : null}
             </button>
@@ -230,13 +232,11 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
   const modelLabel = model ? resolveChatComposerModelSelection(model).triggerLabel : '';
   if (!agent && !model && choiceGroups.length === 0) return null;
 
-  const groupSummary = choiceGroups
-    .map((group) => {
-      const option = group.options.find((candidate) => candidate.value === group.value);
-      return option ? `${group.title}: ${option.label}` : null;
-    })
-    .filter(Boolean)
-    .join(', ');
+  const activeChoices = choiceGroups.flatMap((group) => {
+    const option = group.options.find((candidate) => candidate.value === group.value);
+    return option ? [{ group, option }] : [];
+  });
+  const groupSummary = activeChoices.map(({ group, option }) => `${group.title}: ${option.label}`).join(', ');
   const title = [
     'Choose agent, model, and access',
     triggerLabel,
@@ -276,6 +276,17 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
                 triggerLabel || 'Agent settings'
               )}
             </span>
+            {activeChoices.map(({ group, option }) => (
+              <span
+                key={group.id}
+                data-chat-composer-runtime-choice={group.id}
+                className="flex flex-shrink-0 items-center"
+                title={`${group.title}: ${option.label}`}
+                aria-label={`${group.title}: ${option.label}`}
+              >
+                {option.icon}
+              </span>
+            ))}
             <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
           </button>
         </Popover.Trigger>

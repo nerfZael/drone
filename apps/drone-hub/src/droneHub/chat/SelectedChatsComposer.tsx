@@ -46,23 +46,19 @@ type SelectedChatsComposerProps = {
   onReferencesChange: (next: ComposerReference[]) => void;
   /** Set while the host drags its own cards over the composer. */
   referenceDropActive?: boolean;
+  /** For a new drone: its repository, beside the recipient line. */
+  draftControls?: { meta?: React.ReactNode } | null;
   /**
-   * For a new drone or chat: its agent and repository beside the recipient line (`meta`), and its model picker in the
-   * toolbar in place of the per-send model override (`trailing`).
+   * The settings new drones and chats start with, in the toolbar where an agent chat keeps its picker. While set, it
+   * takes the place of the per-send model override.
    */
-  draftControls?: { meta?: React.ReactNode; trailing?: React.ReactNode } | null;
+  runtimePicker?: React.ReactNode;
 };
 
 export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
   const surface = props.surface ?? 'canvas';
-  const [voiceRecordingActive, setVoiceRecordingActive] = React.useState(false);
-  // Clearing canvas selection hides the current composition; it is not a switch
-  // from a new-drone draft to the regular broadcast draft.
-  const draftPropsRef = React.useRef(props);
-  if (surface !== 'canvas' || props.selectedCount > 0) draftPropsRef.current = props;
-  const draftProps = draftPropsRef.current;
   const [overrides, setOverrides] = React.useState<ChatModelOverrides>({});
-  React.useEffect(() => setOverrides({}), [draftProps.selectionKey]);
+  React.useEffect(() => setOverrides({}), [props.selectionKey]);
   const targetLabel = props.selectedLabel?.trim() || `${props.selectedCount} chats`;
   const rootRef = React.useRef<HTMLDivElement>(null);
   const referencesRef = React.useRef(props.references);
@@ -131,7 +127,6 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
         setPastedDroneNames((current) => ({ ...current, ...pasted.droneNames }));
         addReferences(pasted.references);
       }}
-      hidden={props.selectedCount <= 0 && surface === 'canvas' && !voiceRecordingActive}
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
@@ -149,10 +144,12 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
           event.stopPropagation();
         }
       }}>
-      <ChatInput resetKey={draftProps.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${draftProps.selectionKey}`}
-        onVoiceRecordingActiveChange={setVoiceRecordingActive}
-        draftValue={draftProps.draft} onDraftValueChange={draftProps.onDraftChange} onDraftContentChange={draftProps.onDraftContentChange}
+      <ChatInput resetKey={props.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${props.selectionKey}`}
+        draftValue={props.draft} onDraftValueChange={props.onDraftChange} onDraftContentChange={props.onDraftContentChange}
         promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
+        placeholder={props.selectedCount === 0 ? 'Select chats to message' : undefined}
+        // The canvas's settings for new cards sit in the toolbar, so it stays open.
+        alwaysExpanded={Boolean(props.runtimePicker)}
         onSend={async (payload, context) => {
           if (props.selectedCount === 0) return false;
           const references = props.references;
@@ -162,15 +159,21 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
             props.onReferencesChange(referencesRef.current.filter((reference) => !references.includes(reference)));
           }
           return sent;
-        }} referenceTiles={referenceTiles} referenceDropActive={dropActive} composerTrailingControls={
+        }} referenceTiles={referenceTiles} referenceDropActive={dropActive}
+        composerLeadingControls={props.runtimePicker}
+        composerTrailingControls={
           // In the toolbar, where the agent chat keeps its model picker.
-          props.draftControls?.trailing ?? <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
+          props.runtimePicker ? null : <SelectedChatsModelOverrides targets={props.targets} droneById={props.droneById}
             draftAgentKey={props.hasDrafts ? props.spawnAgentKey : undefined}
             value={overrides} onChange={setOverrides} disabled={props.sending || props.selectedCount === 0} />
         } composerTopAction={
-          // One line of context above the composer, like the agent chat's runtime/branch row.
+          // One line of context above the composer, like the agent chat's runtime/branch row. On the canvas the
+          // selected cards already show the recipients, so the line is only there for a new drone's settings.
+          surface !== 'canvas' || props.draftControls?.meta || props.spawnCountEnabled ? (
           <div data-selected-chats-composer-meta="true" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-11 text-[var(--muted)]">
-            <span className="min-w-0 flex-1 truncate" title={targetLabel}>{props.selectedCount ? `To ${targetLabel}` : 'Select chats to message'}</span>
+            {surface !== 'canvas' ? (
+              <span className="min-w-0 flex-1 truncate" title={targetLabel}>{props.selectedCount ? `To ${targetLabel}` : 'Select chats to message'}</span>
+            ) : null}
             {props.draftControls?.meta ?? null}
             {props.spawnCountEnabled ? <label className="flex flex-shrink-0 items-center gap-1">Spawn
               <input aria-label="Number of drones" value={props.spawnCount ?? '1'} inputMode="numeric" pattern="[0-9]*"
@@ -178,6 +181,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
                 className="h-5 w-9 rounded border border-[var(--border)] bg-[var(--panel)] px-1 text-[var(--fg)]" />
             </label> : null}
           </div>
+          ) : null
         } />
     </div>
   );

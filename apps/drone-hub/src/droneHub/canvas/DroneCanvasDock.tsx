@@ -45,13 +45,17 @@ import {
 } from './detailed-card-model';
 import { useCanvasChatActivity } from './use-canvas-chat-activity';
 import { ChatStepsControl } from './ChatStepsControl';
-import { DraftAgentAndRepo, DraftChatAgentSelect, DraftModelPicker } from './CanvasDraftControls';
-import { describeNewCardDefaults, type NewCardDefaults } from './new-card-defaults';
-import type { NewChatConfiguration } from '../app/new-chat-creation';
+import { DraftRepoSelect, useCanvasModelPicker } from './CanvasDraftControls';
+import { canvasSettingsForAgent, type CanvasNewCardSettings } from './canvas-new-card-settings';
+import { agentAccessChoiceGroups, agentAccessSupport } from '../app/agent-access-choice-groups';
+import { ChatComposerRuntimePicker } from '../chat/ChatComposerRuntimePicker';
+import { requestJson } from '../http';
+import { newChatConfigurationForAgent } from '../app/new-chat-creation';
 import type { DroneDeleteMode } from '../app/settings-types';
 import { Dot, STATE_COLOR, Steps } from '../entity/EntityWork';
 import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
+  BUILTIN_AGENT_OPTIONS,
   createCanvasChatNodeId,
   createCanvasDroneNodeId,
   parseCanvasChatNodeId,
@@ -68,7 +72,6 @@ import {
 } from '../app/drone-hub-dnd';
 import { isShortcutMatch } from '../app/shortcuts';
 import { repoPathLabel } from '../app/repo-path-label';
-import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from '../app/spawn-model-history';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
@@ -346,9 +349,12 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
       aria-busy={deleting || undefined}
       title={deleting ? 'Deleting…' : undefined}
       className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
+        // One thin border says it all: full accent when selected, a softer one for the chat that is open.
         selected || dragging || inlineEditing || assignmentHoverTarget
           ? 'border-[var(--accent)]'
-          : detail.state === 'need'
+          : isActiveSidebarChat
+            ? 'border-[color-mix(in_srgb,var(--accent)_60%,var(--border))]'
+            : detail.state === 'need'
             ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
             : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
       } ${detail.state === 'done' && !detail.unread && !selected ? 'opacity-80 hover:opacity-100' : ''}` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
@@ -372,7 +378,6 @@ const CanvasNodeCard = React.memo(function CanvasNodeCard({
         ...(detail
           ? {
               padding: '0.4375rem 0.625rem',
-              boxShadow: isActiveSidebarChat ? '0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--work-shadow)' : undefined,
             }
           : { paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding)' : '0.625rem' }),
         width: nodeWidth,
@@ -822,17 +827,14 @@ export function DroneCanvasDock({
   onCreateChat,
   spawnAgentMenuEntries,
   spawnAgentKey,
-  onSpawnAgentKeyChange,
   onOpenCustomAgentModal,
-  spawnAgentConfig,
+  resolveAgentKey,
   spawnModel,
-  onSpawnModelChange,
   createRepoMenuEntries,
   createRepoPath,
   onCreateRepoPathChange,
   createGroup,
   onCreateGroupChange,
-  resolveNewChatDefaults,
   onDeleteDrones,
   droneDeleteMode,
   onDeleteDronesConfirmed,
@@ -872,21 +874,19 @@ export function DroneCanvasDock({
   onCloneDrone?: (
     drone: DroneSummary,
   ) => Promise<{ ok: boolean; droneId?: string; droneName?: string }> | { ok: boolean; droneId?: string; droneName?: string };
-  onCreateChat?: (droneId: string) => Promise<boolean>;
+  /** Makes a new chat on a drone's board, with the canvas's settings. */
+  onCreateChat?: (droneId: string, settings: CanvasNewCardSettings) => Promise<boolean>;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
+  /** The app's new-drone agent and model: where the canvas's own settings start, the first time. */
   spawnAgentKey: string;
-  onSpawnAgentKeyChange: (next: string) => void;
   onOpenCustomAgentModal: () => void;
-  spawnAgentConfig: ChatAgentConfig;
+  resolveAgentKey: (key: string) => ChatAgentConfig;
   spawnModel: string;
-  onSpawnModelChange: (next: string) => void;
   createRepoMenuEntries: UiMenuSelectEntry[];
   createRepoPath: string;
   onCreateRepoPathChange: (next: string) => void;
   createGroup: string;
   onCreateGroupChange: (next: string) => void;
-  /** The settings a new chat of this drone starts with, for the canvas's new-card hint. */
-  resolveNewChatDefaults?: (drone: DroneSummary) => NewChatConfiguration | null;
   /** Deletes drones, behind the app's own confirmation. Shift+Delete on a topic's drone card. */
   onDeleteDrones?: (droneIds: string[]) => void;
   /** Whether deleting drones archives or deletes them, from the app's delete setting. */
@@ -1427,6 +1427,13 @@ export function DroneCanvasDock({
     ? String(draftPromptByNodeId[selectedDraftNodeId] ?? '')
     : '';
   const selectedMessageDraft = selectedDraftNodeId ? selectedDraftPrompt : messageDraft;
+  // What the composer edits: the selected draft card's message, or the message for the selected chats. With nothing
+  // selected it keeps editing the last one, so its text and attachments stay until something else is selected.
+  const composerDraftNodeIdRef = React.useRef<string | null>(null);
+  if (selectedDroneIds.length > 0) composerDraftNodeIdRef.current = selectedDraftNodeId;
+  else if (composerDraftNodeIdRef.current && !nodesByDroneId[composerDraftNodeIdRef.current]) composerDraftNodeIdRef.current = null;
+  const composerDraftNodeId = composerDraftNodeIdRef.current;
+  const composerDraft = composerDraftNodeId ? String(draftPromptByNodeId[composerDraftNodeId] ?? '') : messageDraft;
   // A drone card sends to one of its chats: resolve it here so the composer names that chat.
   const selectedMessageTargets = React.useMemo(
     () => collectUniqueChatTargets(selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id)), droneById),
@@ -1443,20 +1450,100 @@ export function DroneCanvasDock({
     return formatMessageTargetLabel([...chatLabels, ...draftLabels]);
   }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds, selectedMessageTargets]);
   const controlsDisabled = messageSending;
-  const spawnReasoning = useDroneHubUiStore((s) => s.spawnReasoning);
-  const spawnAgentPermissionMode = useDroneHubUiStore((s) => s.spawnAgentPermissionMode);
-  const spawnApprovalPolicy = useDroneHubUiStore((s) => s.spawnApprovalPolicy);
-  // A chat's agent picked on this canvas becomes its repository's default: the hint follows it.
-  const spawnContextByRepoKey = useDroneHubUiStore((s) => s.spawnContextByRepoKey);
   // A new drone (a draft card) or a new chat on a drone's canvas is set up from the composer.
   const selectedDraftChat = React.useMemo(() => {
     if (!autoMembers || selectedMessageTargets.length !== 1 || selectedDroneIds.length !== 1) return null;
     const target = selectedMessageTargets[0];
     const drone = droneById[target.droneId];
-    return drone?.draftChats?.[target.chatName] === true ? { ...target, repoPath: String(drone.repoPath ?? '').trim() } : null;
+    return drone?.draftChats?.[target.chatName] === true ? target : null;
   }, [autoMembers, droneById, selectedDroneIds.length, selectedMessageTargets]);
-  const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
-  const normalizedSpawnModel = String(spawnModel ?? '');
+  // The canvas keeps its own settings for new drones and chats. The first time, they start from the app's.
+  const storedNewCardSettings = useDroneCanvasStore((s) => s.newCardSettings);
+  const newCardSettings = React.useMemo((): CanvasNewCardSettings => {
+    if (storedNewCardSettings) return storedNewCardSettings;
+    const ui = useDroneHubUiStore.getState();
+    return {
+      agentKey: String(spawnAgentKey ?? '').trim() || 'builtin:cursor',
+      model: String(spawnModel ?? '').trim(),
+      reasoning: String(ui.spawnReasoning ?? '').trim(),
+      permissionMode: ui.spawnAgentPermissionMode,
+      approvalPolicy: ui.spawnApprovalPolicy,
+    };
+  }, [spawnAgentKey, spawnModel, storedNewCardSettings]);
+  React.useEffect(() => {
+    if (!storedNewCardSettings) useDroneCanvasStore.getState().setNewCardSettings(newCardSettings);
+  }, [newCardSettings, storedNewCardSettings]);
+  const newCardAgent = React.useMemo(
+    () => resolveAgentKey(newCardSettings.agentKey),
+    [newCardSettings.agentKey, resolveAgentKey],
+  );
+  const newCardConfiguration = React.useMemo(
+    () => newChatConfigurationForAgent(newCardAgent, newCardSettings),
+    [newCardAgent, newCardSettings],
+  );
+  const newCardAgentLabel = React.useMemo(() => {
+    for (const entry of spawnAgentMenuEntries) {
+      if (entry.kind !== 'separator' && entry.value === newCardSettings.agentKey && typeof entry.label === 'string') {
+        return entry.label;
+      }
+    }
+    if (newCardAgent.kind === 'custom') return newCardAgent.label || newCardAgent.id;
+    return BUILTIN_AGENT_OPTIONS.find((option) => option.key === newCardSettings.agentKey)?.label ?? newCardSettings.agentKey;
+  }, [newCardAgent, newCardSettings.agentKey, spawnAgentMenuEntries]);
+  // A new chat that has had no message yet follows the settings as they change, as in its own composer.
+  const applyNewCardSettings = React.useCallback((next: CanvasNewCardSettings) => {
+    useDroneCanvasStore.getState().setNewCardSettings(next);
+    if (!selectedDraftChat) return;
+    const { droneId, chatName } = selectedDraftChat;
+    const configuration = newChatConfigurationForAgent(resolveAgentKey(next.agentKey), next);
+    void requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: configuration.agent,
+        model: configuration.model ?? null,
+        reasoning: configuration.reasoning ?? null,
+        agentPermissionMode: configuration.agentPermissionMode,
+        ...(configuration.approvalPolicy ? { approvalPolicy: configuration.approvalPolicy } : {}),
+      }),
+    }).then(() => {
+      window.dispatchEvent(new CustomEvent('drone-hub:chat-model-settings-changed', { detail: { droneId, chatName, settings: {} } }));
+    }).catch((error: unknown) => {
+      setMessageError(`Could not update "${chatName}": ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, [resolveAgentKey, selectedDraftChat]);
+  const newCardModelPicker = useCanvasModelPicker({
+    agent: newCardAgent,
+    agentKey: newCardSettings.agentKey,
+    model: newCardSettings.model,
+    reasoning: newCardSettings.reasoning,
+    onChange: (patch) => applyNewCardSettings({ ...newCardSettings, ...patch }),
+    disabled: controlsDisabled,
+  });
+  // Messages to chats that already exist keep their own settings, with a one-off override instead of this picker.
+  const messagingExistingChats = selectedMessageTargets.some(
+    (target) => droneById[target.droneId]?.draftChats?.[target.chatName] !== true,
+  );
+  const newCardRuntimePicker = messagingExistingChats ? null : (
+    <ChatComposerRuntimePicker config={{
+      agent: {
+        value: newCardSettings.agentKey,
+        label: newCardAgentLabel,
+        entries: spawnAgentMenuEntries,
+        onChange: (key) => applyNewCardSettings(canvasSettingsForAgent(newCardSettings, key, resolveAgentKey(key))),
+        disabled: controlsDisabled,
+      },
+      model: newCardModelPicker,
+      choiceGroups: agentAccessChoiceGroups({
+        permissionMode: newCardSettings.permissionMode,
+        onPermissionModeChange: (permissionMode) => applyNewCardSettings({ ...newCardSettings, permissionMode }),
+        approvalPolicy: newCardSettings.approvalPolicy,
+        onApprovalPolicyChange: (approvalPolicy) => applyNewCardSettings({ ...newCardSettings, approvalPolicy }),
+        ...agentAccessSupport(newCardAgent),
+        disabled: controlsDisabled,
+      }),
+    }} />
+  );
   // A topic keeps its own repository for new drones; the global board uses the app's.
   const normalizedCreateRepoPath = String((activeTopic ? activeTopic.repoPath || createRepoPath : createRepoPath) ?? '').trim();
   const changeCreateRepoPath = React.useCallback((next: string) => {
@@ -1468,65 +1555,6 @@ export function DroneCanvasDock({
     () => String(draftRepoLabel ?? '').trim(),
     [draftRepoLabel],
   );
-  // What a double-click makes next, shown at all times so it is never a surprise.
-  const newCardDefaultParts = React.useMemo((): string[] | null => {
-    void spawnContextByRepoKey;
-    let defaults: NewCardDefaults | null = null;
-    if (droneScope) {
-      const config = boardDrone && resolveNewChatDefaults ? resolveNewChatDefaults(boardDrone) : null;
-      if (config) {
-        defaults = { kind: 'chat', agent: config.agent, model: config.model, reasoning: config.reasoning,
-          permissionMode: config.agentPermissionMode, approvalPolicy: config.approvalPolicy };
-      }
-    } else {
-      defaults = {
-        kind: 'drone',
-        agent: spawnAgentConfig,
-        model: normalizedSpawnModel,
-        reasoning: spawnReasoning,
-        permissionMode: spawnAgentPermissionMode,
-        approvalPolicy: spawnApprovalPolicy,
-        runtime: 'container',
-        repoPath: normalizedCreateRepoPath,
-      };
-    }
-    return defaults ? describeNewCardDefaults(defaults) : null;
-  }, [
-    boardDrone,
-    droneScope,
-    normalizedCreateRepoPath,
-    normalizedSpawnModel,
-    resolveNewChatDefaults,
-    spawnAgentConfig,
-    spawnAgentPermissionMode,
-    spawnApprovalPolicy,
-    spawnContextByRepoKey,
-    spawnReasoning,
-  ]);
-  const newCardHintRef = React.useRef<HTMLDivElement | null>(null);
-  const [newCardHintBottomPx, setNewCardHintBottomPx] = React.useState(8);
-  React.useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    const bar = viewport?.querySelector<HTMLElement>('[data-canvas-message-bar]');
-    const hint = newCardHintRef.current;
-    if (!viewport || !bar || !hint) return;
-    // Above the composer when a narrow canvas puts the two side by side.
-    const place = () => {
-      const area = viewport.getBoundingClientRect();
-      const rect = bar.getBoundingClientRect();
-      const hintWidth = hint.getBoundingClientRect().width;
-      const overlaps = !bar.hidden && rect.height > 0 && rect.right > area.right - 8 - hintWidth - 8;
-      setNewCardHintBottomPx(overlaps ? Math.round(area.bottom - rect.top) + 8 : 8);
-    };
-    place();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    observer?.observe(viewport);
-    observer?.observe(bar);
-    observer?.observe(hint);
-    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(place);
-    mutations?.observe(bar, { attributes: true, attributeFilter: ['hidden'], subtree: true });
-    return () => { observer?.disconnect(); mutations?.disconnect(); };
-  }, [newCardDefaultParts]);
   const {
     createDraftShortcutBinding,
     focusPrimaryChatInputShortcutBinding,
@@ -1534,7 +1562,6 @@ export function DroneCanvasDock({
     setShowCanvasLastMessagePreviews,
     hideSideChatWindowsWithCanvas,
     setHideSideChatWindowsWithCanvas,
-    seenModelIds,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       createDraftShortcutBinding: s.shortcutBindings.createDraftDrone,
@@ -1543,18 +1570,8 @@ export function DroneCanvasDock({
       setShowCanvasLastMessagePreviews: s.setShowCanvasLastMessagePreviews,
       hideSideChatWindowsWithCanvas: s.hideSideChatWindowsWithCanvas,
       setHideSideChatWindowsWithCanvas: s.setHideSideChatWindowsWithCanvas,
-      seenModelIds: s.seenModelIds,
     })),
   );
-  const spawnModelMenuEntries = React.useMemo(
-    () => buildSpawnModelMenuEntries(seenModelIds, normalizedSpawnModel),
-    [normalizedSpawnModel, seenModelIds],
-  );
-  const spawnModelTriggerLabel = React.useMemo(
-    () => getSpawnModelTriggerLabel(seenModelIds, normalizedSpawnModel),
-    [normalizedSpawnModel, seenModelIds],
-  );
-  const spawnModelMenuDisabled = controlsDisabled || spawnModelMenuEntries.length <= 1;
 
   React.useEffect(() => {
     const known = new Set(nodeOrder);
@@ -1897,11 +1914,11 @@ export function DroneCanvasDock({
         x: Math.round(worldX - NODE_MIN_WIDTH_PX / 2),
         y: Math.round(worldY - CHAT_NODE_HEIGHT_PX / 2),
       };
-      void onCreateChat(boardDroneId).then((ok) => {
+      void onCreateChat(boardDroneId, newCardSettings).then((ok) => {
         if (!ok) pendingChatPlacementRef.current = null;
       });
     },
-    [boardDroneId, onCreateChat],
+    [boardDroneId, newCardSettings, onCreateChat],
   );
 
   const requestNewNodeNearViewportCenter = React.useCallback(() => {
@@ -2457,9 +2474,12 @@ export function DroneCanvasDock({
                   attachments: payload.attachments,
                   label: node.label,
                   overrides: {
-                    agentKey: normalizedSpawnAgentKey,
-                    model: overrides.model !== undefined ? overrides.model ?? '' : normalizedSpawnModel,
-                    reasoning: overrides.reasoning !== undefined ? overrides.reasoning ?? '' : useDroneHubUiStore.getState().spawnReasoning,
+                    agentKey: newCardSettings.agentKey,
+                    model: overrides.model !== undefined ? overrides.model ?? '' : newCardSettings.model,
+                    reasoning: overrides.reasoning !== undefined ? overrides.reasoning ?? '' : newCardSettings.reasoning,
+                    // Only what the agent takes: other access or approvals would be refused.
+                    permissionMode: newCardConfiguration.agentPermissionMode,
+                    approvalPolicy: newCardConfiguration.approvalPolicy ?? 'ask',
                     repoPath: normalizedCreateRepoPath,
                     group: normalizedCreateGroup,
                   },
@@ -2609,8 +2629,8 @@ export function DroneCanvasDock({
     normalizedCreateGroup,
     normalizedCreateRepoPath,
     activeTopicId,
-    normalizedSpawnAgentKey,
-    normalizedSpawnModel,
+    newCardConfiguration,
+    newCardSettings,
     onCreateCanvasDroneFromDraft,
     onSendCanvasPrompt,
     panning,
@@ -3356,68 +3376,14 @@ export function DroneCanvasDock({
             aria-label="Canvas creation defaults"
             className="flex-wrap overflow-visible px-3 py-2"
           >
-            <div className="flex items-center gap-1.5">
-              <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Agent
-              </span>
-              <UiMenuSelect
-                variant="toolbar"
-                value={normalizedSpawnAgentKey}
-                onValueChange={onSpawnAgentKeyChange}
-                entries={spawnAgentMenuEntries}
-                disabled={controlsDisabled}
-                triggerClassName="min-w-[140px] max-w-[210px]"
-                panelClassName="w-[300px]"
-                title="Choose agent for canvas-created drones."
-              />
-              <UiToolbarButton
-                onClick={onOpenCustomAgentModal}
-                disabled={controlsDisabled}
-                title="Manage custom agents"
-              >
-                Custom
-              </UiToolbarButton>
-            </div>
-            {spawnAgentConfig.kind === 'builtin' ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                  Model
-                </span>
-                <UiMenuSelect
-                  variant="toolbar"
-                  value={normalizedSpawnModel}
-                  onValueChange={onSpawnModelChange}
-                  entries={spawnModelMenuEntries}
-                  disabled={spawnModelMenuDisabled}
-                  triggerClassName="min-w-[130px] max-w-[180px]"
-                  panelClassName="w-[320px]"
-                  menuClassName="max-h-[220px] overflow-y-auto"
-                  title="Choose from models already seen in existing drones."
-                  triggerLabel={spawnModelTriggerLabel}
-                  triggerLabelClassName="font-mono"
-                  searchable
-                  searchPlaceholder="Search models"
-                />
-                <UiToolbarInput
-                  value={normalizedSpawnModel}
-                  onChange={(event) => onSpawnModelChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') event.currentTarget.blur();
-                  }}
-                  disabled={controlsDisabled}
-                  placeholder="Default model"
-                  className="w-[150px]"
-                  title="Set default model for canvas-created drones."
-                />
-                <UiToolbarButton
-                  onClick={() => onSpawnModelChange('')}
-                  disabled={controlsDisabled || !normalizedSpawnModel.trim()}
-                  title="Clear model override"
-                >
-                  Clear
-                </UiToolbarButton>
-              </div>
-            ) : null}
+            {/* The agent, model, and access for new drones are in the composer's picker. */}
+            <UiToolbarButton
+              onClick={onOpenCustomAgentModal}
+              disabled={controlsDisabled}
+              title="Manage custom agents"
+            >
+              Custom agents
+            </UiToolbarButton>
             <div className="flex items-center gap-1.5">
               <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Repo
@@ -3644,28 +3610,19 @@ export function DroneCanvasDock({
         </CanvasWorldLayer>
 
         {(() => {
-          // Only the card under the pointer: its steps in full, off the cards. A selected card shows nothing here.
+          // Only the card under the pointer: its steps in full, off the cards. A selected card shows nothing here,
+          // and neither does a draft, which has no steps yet.
           const focusId = hoveredCardId && detailByNodeId?.[hoveredCardId] ? hoveredCardId : null;
           const focus = focusId ? detailByNodeId?.[focusId] : null;
-          if (!focusId || !focus) return null;
+          if (!focusId || !focus || isCanvasDraftNodeId(focusId)) return null;
+          const focusChat = parseCanvasChatNodeId(focusId);
+          if (focusChat && droneById[focusChat.droneId]?.draftChats?.[focusChat.chatName] === true) return null;
           const focusDroneId = parseCanvasDroneNodeId(focusId);
           const title = focusDroneId
             ? String(effectiveDroneNameById[focusDroneId] ?? '').trim() || focusDroneId
             : parseCanvasChatNodeId(focusId)?.chatName ?? nodesByDroneId[focusId]?.label ?? '';
           return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
         })()}
-
-        {newCardDefaultParts ? (
-          <div
-            ref={newCardHintRef}
-            data-canvas-new-card-defaults=""
-            style={{ bottom: newCardHintBottomPx }}
-            className="pointer-events-none absolute right-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1.5 truncate rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
-          >
-            <span className="flex-shrink-0 font-medium text-[var(--fg)]">New {droneScope ? 'chat' : 'drone'}</span>
-            <span className="min-w-0 truncate">{newCardDefaultParts.join(' · ')}</span>
-          </div>
-        ) : null}
 
         {selectionBox ? (
           <div
@@ -3680,24 +3637,24 @@ export function DroneCanvasDock({
         ) : null}
 
         <CanvasMessageBar
-          selectionKey={`canvas:${boardKey ?? 'global'}:${selectedDraftNodeId ?? 'messages'}`}
+          selectionKey={`canvas:${boardKey ?? 'global'}:${composerDraftNodeId ?? 'messages'}`}
           targets={selectedMessageTargets}
           droneById={droneById}
           hasDrafts={selectedDroneIds.some(isCanvasDraftNodeId)}
-          spawnAgentKey={normalizedSpawnAgentKey}
+          spawnAgentKey={newCardSettings.agentKey}
           onDraftContentChange={(content) => { composerHasAttachmentsRef.current = content.attachments.length > 0; }}
           selectedCount={selectedDroneIds.length}
           selectedLabel={selectedMessageLabel}
           sending={messageSending}
-          draft={selectedMessageDraft}
+          draft={composerDraft}
           spawnCountEnabled={Boolean(selectedDraftNodeId)}
           spawnCount={draftSpawnCount}
           error={messageError}
           onSpawnCountChange={onDraftSpawnCountChange}
           onSpawnCountBlur={onDraftSpawnCountBlur}
           onDraftChange={(next) => {
-            if (selectedDraftNodeId) {
-              setDraftPromptForNode(selectedDraftNodeId, next);
+            if (composerDraftNodeId) {
+              setDraftPromptForNode(composerDraftNodeId, next);
             } else {
               setMessageDraft(next);
             }
@@ -3705,22 +3662,11 @@ export function DroneCanvasDock({
           }}
           onSend={sendCanvasPrompt}
           draftControls={selectedDraftNodeId ? {
-            // Above the input, so they can be set before typing or recording.
-            meta: (
-              <>
-                <DraftAgentAndRepo agentKey={normalizedSpawnAgentKey} agentEntries={spawnAgentMenuEntries} onAgentChange={onSpawnAgentKeyChange}
-                  repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries} onRepoChange={changeCreateRepoPath} disabled={controlsDisabled} />
-                <DraftModelPicker agent={spawnAgentConfig} agentKey={normalizedSpawnAgentKey} model={normalizedSpawnModel} reasoning={spawnReasoning}
-                  onModelChange={onSpawnModelChange} onReasoningChange={(next) => useDroneHubUiStore.getState().setSpawnReasoning(next)} disabled={controlsDisabled} />
-              </>
-            ),
-            // The draft's model is picked above; no per-send override beside it.
-            trailing: <></>,
-          } : selectedDraftChat ? {
-            meta: <DraftChatAgentSelect droneId={selectedDraftChat.droneId} chatName={selectedDraftChat.chatName} disabled={controlsDisabled}
-              // The next new chat of a drone in this repository starts with this agent too.
-              onRemember={(key) => useDroneHubUiStore.getState().updateSpawnContextForRepo(selectedDraftChat.repoPath, { spawnAgentKey: key, spawnModel: '', spawnReasoning: '' })} />,
+            // Above the input, so it can be set before typing or recording.
+            meta: <DraftRepoSelect repoPath={normalizedCreateRepoPath} repoEntries={createRepoMenuEntries}
+              onRepoChange={changeCreateRepoPath} disabled={controlsDisabled} />,
           } : null}
+          runtimePicker={newCardRuntimePicker}
           references={messageReferences}
           onReferencesChange={setMessageReferences}
           referenceDropActive={composerDropHover}

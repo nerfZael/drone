@@ -34,25 +34,42 @@ export function buildNewChatConfiguration(
   preferences: DesktopNewDronePreferences,
   resolveAgent: (key: string) => ChatAgentConfig,
 ): NewChatConfiguration {
-  const agent = resolveAgent(preferences.spawnAgentKey);
+  return newChatConfigurationForAgent(resolveAgent(preferences.spawnAgentKey), {
+    model: preferences.spawnModel,
+    reasoning: preferences.spawnReasoning,
+    permissionMode: preferences.spawnAgentPermissionMode,
+    approvalPolicy: preferences.spawnApprovalPolicy,
+  });
+}
+
+/** A new chat's settings for this agent, leaving out what the agent cannot take. */
+export function newChatConfigurationForAgent(
+  agent: ChatAgentConfig,
+  settings: {
+    model?: string | null;
+    reasoning?: string | null;
+    permissionMode: NewChatConfiguration['agentPermissionMode'];
+    approvalPolicy: NonNullable<NewChatConfiguration['approvalPolicy']>;
+  },
+): NewChatConfiguration {
   const supportsAccessControls =
     agent.kind === 'native' ||
     (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip'));
   const supportsApprovalPolicy =
     agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
-  const model = agent.kind === 'custom' ? '' : String(preferences.spawnModel ?? '').trim();
+  const model = agent.kind === 'custom' ? '' : String(settings.model ?? '').trim();
   const reasoning = chatAgentSupportsReasoning(agent)
-    ? String(preferences.spawnReasoning ?? '').trim()
+    ? String(settings.reasoning ?? '').trim()
     : '';
   const agentPermissionMode = supportsAccessControls
-    ? preferences.spawnAgentPermissionMode
+    ? settings.permissionMode
     : 'execute';
   const approvalPolicy =
     !supportsApprovalPolicy ||
-    (preferences.spawnApprovalPolicy === 'auto' &&
+    (settings.approvalPolicy === 'auto' &&
       !(agent.kind === 'builtin' && agent.id === 'codex'))
       ? 'ask'
-      : preferences.spawnApprovalPolicy;
+      : settings.approvalPolicy;
 
   return {
     agent,

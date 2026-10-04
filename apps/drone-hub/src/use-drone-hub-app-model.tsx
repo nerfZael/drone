@@ -179,6 +179,7 @@ import {
 } from './droneHub/app/new-drone-preferences';
 import {
   buildNewChatConfiguration,
+  newChatConfigurationForAgent,
   newChatPreferencesRepoPath,
   buildNewChatCreatePayload,
   type NewChatConfiguration,
@@ -4135,8 +4136,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
           const resolvedChat = resolveChatNameForDrone(drone, chatName);
-          // A new draft chat (a double-click on a drone's canvas) is published by its first message, as from its own
-          // composer; otherwise leaving it would clean it up as abandoned.
+          // A draft chat (a double-click on a drone's canvas) is published by its first message, as from its own
+          // composer. That holds for a draft the app no longer tracks too, such as one kept on the canvas after
+          // another chat was opened: the canvas has no Publish button of its own.
           const draftKey = droneChatQueueKey(drone.id, resolvedChat);
           const tracked = newDraftChatsRef.current.get(draftKey);
           if (tracked) tracked.submissionInFlight = true;
@@ -4144,7 +4146,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (tracked) tracked.submissionInFlight = false;
             throw new Error('Chat creation failed.');
           }
-          if (tracked) {
+          if (tracked || drone.draftChats?.[resolvedChat] === true) {
             try {
               await requestJson<{ ok: true }>(
                 `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/publish`,
@@ -4152,8 +4154,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               );
               newDraftChatsRef.current.delete(draftKey);
             } catch (error) {
-              tracked.submissionInFlight = false;
-              tracked.preserveOnLeave = true;
+              if (tracked) {
+                tracked.submissionInFlight = false;
+                tracked.preserveOnLeave = true;
+              }
               throw error;
             }
           }
@@ -4232,10 +4236,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         seedAgent.kind !== 'custom'
           ? String(overrides.model ?? spawnModel ?? '').trim() || null
           : null;
-      const seedAgentPermissionMode: AgentPermissionMode = seedAgent
-        ? spawnAgentPermissionMode
-        : 'execute';
-      const seedApprovalPolicy: AgentApprovalPolicy = spawnApprovalPolicy;
+      const seedAgentPermissionMode: AgentPermissionMode = overrides.permissionMode ?? spawnAgentPermissionMode;
+      const seedApprovalPolicy: AgentApprovalPolicy = overrides.approvalPolicy ?? spawnApprovalPolicy;
       if (
         seedAgentPermissionMode !== 'execute' &&
         !(
@@ -4521,13 +4523,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [resolveAgentKeyToConfig],
   );
-  const resolveCanvasNewChatDefaults = React.useCallback((drone: DroneSummary): NewChatConfiguration | null => {
-    try {
-      return resolveNewChatConfiguration(drone);
-    } catch {
-      return null;
-    }
-  }, [resolveNewChatConfiguration]);
   const createDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -4844,14 +4839,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [promotingNewChatActionById, requestJson, selectDroneChat, selectedChat, selectedDrone],
   );
-  const createDraftDroneChat = React.useCallback(async (drone: DroneSummary): Promise<boolean> => {
+  const createDraftDroneChat = React.useCallback(async (
+    drone: DroneSummary,
+    requestedConfiguration?: NewChatConfiguration,
+    opts?: {
+      /** Keep the chat when it is left without a message, as a card placed on the canvas is kept. */
+      keepWhenLeft?: boolean;
+    },
+  ): Promise<boolean> => {
     const latestDrone = droneByIdRef.current[drone.id] ?? drone;
     const chatName = suggestNextDroneChatName(reserveUntitledChatNames(latestDrone).unavailable);
     // Before the chat is listed, so the canvas places it fresh (where it was double-clicked).
     forgetStaleChatCard(latestDrone.id, chatName);
     let configuration: NewChatConfiguration;
     try {
-      configuration = resolveNewChatConfiguration(latestDrone);
+      configuration = requestedConfiguration ?? resolveNewChatConfiguration(latestDrone);
     } catch (error: unknown) {
       showShortcutToast(
         error instanceof Error ? error.message : String(error),
@@ -4869,7 +4871,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       chatName,
       wasActivated: true,
       submissionInFlight: false,
-      preserveOnLeave: false,
+      preserveOnLeave: opts?.keepWhenLeft === true,
       serverCreated: false,
       abandoned: false,
       cleanupInFlight: false,
@@ -4936,9 +4938,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     showShortcutToast,
     unhideOptimisticallyRemovedDraftChat,
   ]);
-  const createChatForTarget = React.useCallback(async ({ droneId }: { droneId: string }): Promise<boolean> => {
+  const createChatForTarget = React.useCallback(async ({ droneId, configuration, keepWhenLeft }: {
+    droneId: string;
+    /** Settings the new chat starts with in place of the drone's repository defaults, as the canvas has its own. */
+    configuration?: NewChatConfiguration;
+    keepWhenLeft?: boolean;
+  }): Promise<boolean> => {
     const drone = droneByIdRef.current[droneId];
-    return drone ? createDraftDroneChat(drone) : false;
+    return drone ? createDraftDroneChat(drone, configuration, { keepWhenLeft }) : false;
   }, [createDraftDroneChat]);
   const cloneChatForTarget = React.useCallback(async ({ droneId, chatName }: { droneId: string; chatName: string }): Promise<boolean> => {
     const result = await cloneDroneChat(droneId, chatName);
@@ -5719,20 +5726,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onDeleteCanvasChats={deleteCanvasChats}
           onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
-          onCreateCanvasChat={(droneId) => createChatForTarget({ droneId })}
+          onCreateCanvasChat={(droneId, settings) => createChatForTarget({
+            droneId,
+            // A card made on the canvas stays there until it is deleted, message or not.
+            keepWhenLeft: true,
+            configuration: newChatConfigurationForAgent(resolveAgentKeyToConfig(settings.agentKey), settings),
+          })}
           canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
           canvasSpawnAgentKey={spawnAgentKey}
-          onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
           onOpenCanvasCustomAgentModal={() => setCustomAgentModalOpen(true)}
-          canvasSpawnAgentConfig={spawnAgentConfig}
+          resolveAgentKey={resolveAgentKeyToConfig}
           canvasSpawnModel={spawnModel}
-          onCanvasSpawnModelChange={setSpawnModel}
           canvasCreateRepoMenuEntries={createRepoMenuEntries}
           canvasCreateRepoPath={chatHeaderRepoPath}
           onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
           canvasCreateGroup={draftCreateGroup}
           onCanvasCreateGroupChange={setDraftCreateGroup}
-          resolveCanvasNewChatDefaults={resolveCanvasNewChatDefaults}
           onDeleteCanvasDrones={(droneIds) => { requestDeleteDrones(droneIds); }}
           canvasDroneDeleteMode={deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent'}
           onDeleteCanvasDronesConfirmed={(droneIds) => {

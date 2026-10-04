@@ -1,6 +1,3 @@
-import type { UiMenuSelectEntry } from '../../ui/components';
-import { formatModelDisplayLabel } from './chat-model-runtime';
-
 export const SEEN_SPAWN_MODEL_LIMIT = 40;
 
 export function normalizeSeenModelIds(value: unknown, limit = SEEN_SPAWN_MODEL_LIMIT): string[] {
@@ -39,31 +36,4 @@ export function mergeSeenModelIds(
     if (next.length >= limit) break;
   }
   return next;
-}
-
-export function buildSpawnModelMenuEntries(
-  seenModelIds: string[],
-  currentModel: string | null | undefined,
-): UiMenuSelectEntry[] {
-  const activeModel = String(currentModel ?? '').trim();
-  const options = mergeSeenModelIds(normalizeSeenModelIds(seenModelIds), activeModel ? [activeModel] : []);
-  return [
-    { value: '', label: 'Auto' },
-    ...options.map((id) => ({
-      value: id,
-      label: formatModelDisplayLabel(id),
-      title: id,
-      searchText: id,
-      className: 'font-mono truncate',
-    })),
-  ];
-}
-
-export function getSpawnModelTriggerLabel(
-  seenModelIds: string[],
-  currentModel: string | null | undefined,
-): string {
-  const activeModel = String(currentModel ?? '').trim();
-  if (activeModel) return formatModelDisplayLabel(activeModel);
-  return normalizeSeenModelIds(seenModelIds).length > 0 ? 'Seen models' : 'No models seen';
 }

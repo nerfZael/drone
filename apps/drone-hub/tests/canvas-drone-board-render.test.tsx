@@ -3,7 +3,11 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
-import { expect, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
+
+// Radix decides whether a DOM exists when it is first imported, before these tests make one, and then never opens a
+// popover. Its layout effect is React's own here, so the model pickers open as in the app.
+mock.module('@radix-ui/react-use-layout-effect', () => ({ useLayoutEffect: React.useLayoutEffect }));
 import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId, createCanvasDroneNodeId, parseCanvasChatNodeId, parseCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
@@ -40,6 +44,25 @@ function makeDrone(
 }
 
 type DockProps = React.ComponentProps<typeof DroneCanvasDock>;
+
+/** What Radix popovers need of a DOM, beyond what each test sets up. */
+function popoverGlobals(dom: Window) {
+  return {
+    getComputedStyle: dom.getComputedStyle.bind(dom),
+    NodeFilter: dom.NodeFilter,
+    ShadowRoot: dom.ShadowRoot,
+    HTMLInputElement: dom.HTMLInputElement,
+    FocusEvent: dom.FocusEvent,
+    KeyboardEvent: dom.KeyboardEvent,
+    MouseEvent: dom.MouseEvent,
+    PointerEvent: dom.PointerEvent,
+    ResizeObserver: dom.ResizeObserver,
+    MutationObserver: dom.MutationObserver,
+  };
+}
+
+const resolveAgentKey = (key: string) =>
+  (key === 'native' ? { kind: 'native' } : { kind: 'builtin', id: key.replace(/^builtin:/, '') }) as never;
 type CloneChat = NonNullable<DockProps['onCloneChat']>;
 
 function Dock({
@@ -55,12 +78,11 @@ function Dock({
   chatNodeStateById = {},
   droneRepoById = {},
   onRenameDrone,
-  resolveNewChatDefaults,
   onDeleteDrones,
 }: {
   children?: React.ReactNode;
   drone: DroneSummary;
-  onCreateChat?: (droneId: string) => Promise<boolean>;
+  onCreateChat?: DockProps['onCreateChat'];
   onCloneChat?: CloneChat;
   onDeleteChats?: DockProps['onDeleteChats'];
   onRenameChat?: DockProps['onRenameChat'];
@@ -70,7 +92,6 @@ function Dock({
   chatNodeStateById?: DockProps['chatNodeStateById'];
   droneRepoById?: DockProps['droneRepoById'];
   onRenameDrone?: DockProps['onRenameDrone'];
-  resolveNewChatDefaults?: DockProps['resolveNewChatDefaults'];
   onDeleteDrones?: DockProps['onDeleteDrones'];
 }) {
   const noop = () => {};
@@ -93,19 +114,16 @@ function Dock({
         onActivateChat={onActivateChat}
         onSendCanvasPrompt={onSendCanvasPrompt}
         onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
-        spawnAgentMenuEntries={[]}
+        spawnAgentMenuEntries={[{ value: 'builtin:codex', label: 'Codex' }, { value: 'builtin:claude', label: 'Claude Code' }]}
         spawnAgentKey=""
-        onSpawnAgentKeyChange={noop}
         onOpenCustomAgentModal={noop}
-        spawnAgentConfig={agent as never}
+        resolveAgentKey={resolveAgentKey}
         spawnModel=""
-        onSpawnModelChange={noop}
         createRepoMenuEntries={[]}
         createRepoPath=""
         onCreateRepoPathChange={noop}
         createGroup=""
         onCreateGroupChange={noop}
-        resolveNewChatDefaults={resolveNewChatDefaults}
         onDeleteDrones={onDeleteDrones}
       />
     </DndContext></ActiveComposerProvider>
@@ -615,7 +633,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
     HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
-    FileReader: dom.FileReader, File: dom.File, MediaRecorder: Recorder,
+    FileReader: dom.FileReader, File: dom.File, MediaRecorder: Recorder, ...popoverGlobals(dom),
     navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
     requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
     cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
@@ -664,7 +682,12 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await act(async () => Simulate.change(fileInput as unknown as Element));
     await type('Keep my attachment');
     await act(async () => getCanvasBoardActions('alpha').clearSelection());
-    expect(container.querySelector('[data-canvas-message-bar]')?.hasAttribute('hidden')).toBe(true);
+    // The composer stays, with the settings for new cards, but sends to no one.
+    expect(container.querySelector('[data-canvas-message-bar]')?.hasAttribute('hidden')).toBe(false);
+    expect(input().getAttribute('placeholder')).toBe('Select chats to message');
+    // The selected cards show who a message goes to: no recipient line above the composer.
+    expect(container.querySelector('[data-selected-chats-composer-meta]')).toBeNull();
+    expect(container.querySelector('[data-canvas-message-bar] [data-chat-composer-runtime-picker]')).not.toBeNull();
     for (const shortcut of ['q', 's', 'Tab']) {
       const event = new dom.KeyboardEvent('keydown', { key: shortcut, bubbles: true, cancelable: true });
       await act(async () => { viewport().dispatchEvent(event); });
@@ -709,7 +732,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expectRecordingVisible('Pause recording');
     await act(async () => getCanvasBoardActions('alpha').clearSelection());
     expectRecordingVisible('Stop recording and transcribe');
-    expect(container.textContent).toContain('Select chats to message');
+    expect(container.querySelector('[data-selected-chats-composer-meta]')).toBeNull();
     const sendRecording = recordingControl('Transcribe and send recording') ?? recordingControl('Send');
     expect((sendRecording as unknown as HTMLButtonElement).disabled).toBe(true);
     await act(async () => Simulate.click(recordingControl('Pause recording') as unknown as Element));
@@ -750,7 +773,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect(configs).toEqual([]);
     const modelTrigger = container.querySelector('[data-chat-composer-model-picker] > button')!;
     await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
-    const dialogButton = (text: string) => Array.from(container.querySelectorAll('[data-chat-composer-model-picker] [role="dialog"] button'))
+    const dialogButton = (text: string) => Array.from(dom.document.querySelectorAll('[role="dialog"] button'))
       .find((button) => button.textContent?.trim() === text) as unknown as HTMLButtonElement;
     await act(async () => dialogButton('High').click());
     expect(modelTrigger.textContent).toBe('Saved model (High)');
@@ -760,23 +783,30 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect(sends).toHaveLength(beforeMenuKeys);
     await act(async () => (modelTrigger as unknown as HTMLButtonElement).click());
     await act(async () => dialogButton('Saved model').click());
-    await key(container.querySelector('button[title="other-model"]') as unknown as Element, 's');
-    await key(container.querySelector('button[title="other-model"]') as unknown as Element, 'Tab');
+    await key(dom.document.querySelector('button[title="other-model"]') as unknown as Element, 's');
+    await key(dom.document.querySelector('button[title="other-model"]') as unknown as Element, 'Tab');
     expect(sends).toHaveLength(beforeMenuKeys);
-    await act(async () => (container.querySelector('button[title="other-model"]') as unknown as HTMLButtonElement).click());
+    await act(async () => (dom.document.querySelector('button[title="other-model"]') as unknown as HTMLButtonElement).click());
     expect(configs).toEqual([]); // Choices are staged; they never rewrite a selected chat just by clicking.
     await type('With overrides');
     await key(input() as unknown as Element, 'Enter');
     expect((sends.at(-1) as any).overrides).toEqual({ model: 'other-model', reasoning: 'high' });
     expect(modelTrigger.textContent).toBe('Saved model (Low)');
+    // While chats that exist are selected, the one-off override stands in for the canvas's own settings.
+    expect(container.querySelector('[data-chat-composer-runtime-picker]')).toBeNull();
     // Global-board drafts use the same attachments and retain the spawn-count control.
+    await act(async () => useDroneCanvasStore.getState().setNewCardSettings({
+      agentKey: 'builtin:codex', model: 'saved-model', reasoning: 'high', permissionMode: 'write', approvalPolicy: 'none',
+    }));
     await act(async () => (Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Global') as unknown as HTMLButtonElement).click());
     await act(async () => { Simulate.doubleClick(viewport() as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); await settle(); });
     // The keyboard stays on the canvas, so Q records into the new draft at once.
     expect(dom.document.activeElement).toBe(viewport());
-    // The new drone is set up from the composer, before typing: its agent, repository and model beside the recipient line.
-    expect(container.querySelector('[data-canvas-draft-controls]')).not.toBeNull();
-    expect(container.querySelector('[data-selected-chats-composer-meta] [data-canvas-draft-model] [data-chat-composer-model-picker]')).not.toBeNull();
+    // The new drone is set up from the composer, before typing: its repository beside the recipient line, and the
+    // canvas's agent, model, and access in the toolbar's picker.
+    expect(container.querySelector('[data-selected-chats-composer-meta] [data-canvas-draft-controls]')).not.toBeNull();
+    expect(container.querySelector('[data-chat-composer-runtime-picker] > button')?.textContent).toBe('Codex · Saved model (High)');
+    expect(container.querySelector('[data-chat-composer-model-picker]')).toBeNull();
     const recordingsBeforeDraft = recordings;
     await key(viewport() as unknown as Element, 'q');
     expect(recordings).toBe(recordingsBeforeDraft + 1);
@@ -794,11 +824,14 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await act(async () => Simulate.change(container.querySelector('[aria-label="Number of drones"]') as unknown as Element, { target: { value: '2' } } as never));
     await key(input() as unknown as Element, 'Enter');
     expect(created).toHaveLength(2);
-    expect(created[0]).toMatchObject({ prompt: 'Create with notes', attachments: [{ name: 'notes.txt', dataBase64: 'aGVsbG8=' }] });
+    expect(created[0]).toMatchObject({ prompt: 'Create with notes', attachments: [{ name: 'notes.txt', dataBase64: 'aGVsbG8=' }],
+      overrides: { agentKey: 'builtin:codex', model: 'saved-model', reasoning: 'high', permissionMode: 'write', approvalPolicy: 'none' } });
     expect(created[1].attachments).toEqual(created[0].attachments);
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -919,9 +952,10 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(card(droneCard).textContent).toContain('frontier');
     expect(card(droneCard).textContent).toContain('dvm/work');
     expect(card(chatCard).textContent).toBe('default');
-    // A selected drone card names the chat the composer sends to, then the drone.
+    // A selected drone card sends to its default chat; the composer's input is named for it.
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([droneCard]));
-    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).toContain('To default (Alpha)');
+    expect(container.querySelector('[data-selected-chats-composer] textarea')?.getAttribute('aria-label')).toBe('Message default (Alpha)');
+    expect(container.querySelector('[data-selected-chats-composer]')?.textContent).not.toContain('To default');
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
 
     // The global canvas draws a copy's line to its original, not to the drone.
@@ -1047,6 +1081,14 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([chatCard]));
     expect(panel()).toBeNull();
     await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
+    // A chat that has had no message yet has no steps, so hovering it shows no panel.
+    const chatState = { [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: true, lastAgentSnippet: 'Refactoring the parser' } };
+    await act(async () => root.render(<Dock drone={{ ...makeDrone(['default']), draftChats: { default: true } } as unknown as DroneSummary}
+      chatNodeStateById={chatState} />));
+    await act(async () => Simulate.mouseEnter(card()));
+    expect(panel()).toBeNull();
+    await act(async () => Simulate.mouseLeave(card()));
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={chatState} />));
     // Dragging moves the stored position by the pointer's distance in compact space.
     await act(async () => Simulate.mouseDown(card(), { button: 0, clientX: 300, clientY: 400 }));
     await act(async () => {
@@ -1070,47 +1112,79 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
   }
 });
 
-test('a new draft chat on a drone canvas can change its agent from the composer', async () => {
+test('the canvas keeps its own settings for new cards, and a new chat follows changes made while it is selected', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const configs: unknown[] = [];
+  const createdChats: unknown[] = [];
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
     HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
     requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
-    IS_REACT_ACT_ENVIRONMENT: true,
+    IS_REACT_ACT_ENVIRONMENT: true, ...popoverGlobals(dom),
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).includes('/config')) configs.push(JSON.parse(String(init?.body)));
-      return Response.json({ ok: true, name: 'Alpha', chat: 'Untitled', agent: { kind: 'builtin', id: 'codex' }, models: [] });
+      return Response.json({ ok: true, models: [] });
     },
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: {
+    agentKey: 'builtin:codex', model: '', reasoning: '', permissionMode: 'write', approvalPolicy: 'auto',
+  } });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 15));
   const drone = { ...makeDrone(['default', 'Untitled']), draftChats: { Untitled: true } } as unknown as DroneSummary;
+  const picker = () => container.querySelector('[data-chat-composer-runtime-picker] > button') as unknown as HTMLButtonElement | null;
+  // No layout here: nothing covers the point a double-click lands on.
+  const originalRect = dom.HTMLElement.prototype.getBoundingClientRect;
+  dom.HTMLElement.prototype.getBoundingClientRect = () => new dom.DOMRect(0, 0, 0, 0);
+  const panelButton = (text: string) => Array.from(dom.document.querySelectorAll('[role="dialog"] button'))
+    .find((button) => button.textContent?.trim() === text) as unknown as HTMLButtonElement;
   try {
-    await act(async () => { root.render(<Dock drone={drone} />); await settle(); });
+    await act(async () => { root.render(<Dock drone={drone} onCreateChat={async (droneId, settings) => {
+      createdChats.push({ droneId, settings });
+      return true;
+    }} />); await settle(); });
+    // With nothing selected, the composer still shows what new cards start with.
+    expect(picker()?.textContent).toBe('Codex · Auto');
+    // Access and approvals show as small icons beside the model, so every setting fits on the one button.
+    const choiceIcons = () => Array.from(picker()?.querySelectorAll('[data-chat-composer-runtime-choice]') ?? [])
+      .map((icon) => icon.getAttribute('aria-label'));
+    expect(choiceIcons()).toEqual(['Access: Write', 'Approvals: Auto']);
+    // A double-click makes a chat with those settings, whichever chat was selected last.
+    await act(async () => { Simulate.doubleClick(container.querySelector('[data-drone-canvas-viewport]') as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); await settle(); });
+    expect(createdChats).toEqual([{ droneId: 'alpha', settings: {
+      agentKey: 'builtin:codex', model: '', reasoning: '', permissionMode: 'write', approvalPolicy: 'auto',
+    } }]);
+
+    // A new chat that has had no message follows the picker; another agent keeps only the access it can use.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('Untitled')]); await settle(); });
-    await act(async () => { await settle(); });
-    const select = () => container.querySelector('[data-canvas-draft-chat-agent]');
-    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:codex');
-    await act(async () => (select()!.querySelector('button') as unknown as HTMLButtonElement).click());
-    const claude = Array.from(container.querySelectorAll('[role="option"], [role="listbox"] button, li button'))
-      .find((option) => option.textContent?.includes('Claude')) as unknown as HTMLElement;
-    await act(async () => { claude.click(); await settle(); });
-    expect(configs).toEqual([{ agent: { kind: 'builtin', id: 'claude' } }]);
-    expect(select()?.getAttribute('data-canvas-draft-chat-agent')).toBe('builtin:claude');
-    // A chat that has had its first message offers no agent choice.
+    await act(async () => picker()!.click());
+    await act(async () => panelButton('Codex').click());
+    await act(async () => { panelButton('Claude Code').click(); await settle(); });
+    const claude = { agentKey: 'builtin:claude', model: '', reasoning: '', permissionMode: 'execute', approvalPolicy: 'ask' };
+    expect(useDroneCanvasStore.getState().newCardSettings).toEqual(claude as never);
+    // Claude Code has neither setting, so neither icon.
+    expect(choiceIcons()).toEqual([]);
+    // No approval policy at all: the server refuses one, even the default, for an agent without approvals.
+    expect(configs).toEqual([{ agent: { kind: 'builtin', id: 'claude' }, model: null, reasoning: null,
+      agentPermissionMode: 'execute' }]);
+
+    // A chat that has had its first message keeps its own settings, with a one-off override instead.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]); await settle(); });
-    expect(select()).toBeNull();
+    expect(picker()).toBeNull();
+    expect(configs).toHaveLength(1);
+    expect(useDroneCanvasStore.getState().newCardSettings).toEqual(claude as never);
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1380,16 +1454,15 @@ test('back and forward switch between the global and this drone boards, and a do
   const viewport = () => container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
   try {
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'fork'])}
-      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)}
-      resolveNewChatDefaults={() => ({ agent: { kind: 'builtin', id: 'codex' }, model: 'gpt-6-luna', reasoning: 'high', agentPermissionMode: 'execute', approvalPolicy: 'none' })} />));
-    // What a double-click makes next is always shown: a chat on this drone's board, a drone on the global one.
-    const newCardHint = () => container.querySelector('[data-canvas-new-card-defaults]')?.textContent;
-    expect(newCardHint()).toBe('New chatCodex · GPT-6 Luna · High · Execute · Never ask');
+      onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
+    // What a double-click makes next is in the composer's picker, the same on every board.
+    const picker = () => container.querySelector('[data-chat-composer-runtime-picker] > button')?.textContent;
+    const pickerOnDroneBoard = picker();
+    expect(pickerOnDroneBoard).toBe('Cursor · Auto');
     // Backspace goes back to the global board, Shift+Backspace forward to this drone's; so do Alt+Left and Alt+Right.
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');
-    expect(newCardHint()).toStartWith('New drone');
-    expect(newCardHint()).toContain('Container');
+    expect(picker()).toBe(pickerOnDroneBoard);
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace', shiftKey: true }));
@@ -1442,7 +1515,7 @@ test('a topic shows its drones with all of their chats; Delete takes a drone off
     HTMLTextAreaElement: dom.HTMLTextAreaElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node, Event: dom.Event,
     CustomEvent: dom.CustomEvent,
     requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
-    IS_REACT_ACT_ENVIRONMENT: true,
+    IS_REACT_ACT_ENVIRONMENT: true, ...popoverGlobals(dom),
     fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -1509,7 +1582,7 @@ test('a topic shows its drones with all of their chats; Delete takes a drone off
     await act(async () => Simulate.doubleClick(viewport(), { button: 0, clientX: 200, clientY: 200 }));
     expect(shown()).toHaveLength(1);
     expect(shown()[0]?.startsWith('draft:')).toBe(true);
-    expect(container.querySelector('[data-canvas-new-card-defaults]')?.textContent).toStartWith('New drone');
+    expect(container.querySelector('[data-canvas-new-card-defaults]')).toBeNull();
 
     // Delete topic… asks first (the dialog itself is covered in canvas-topics.test.tsx); nothing goes yet.
     await act(async () => Simulate.click(container.querySelector('[data-canvas-topic-switcher] button') as unknown as Element));
@@ -1518,7 +1591,73 @@ test('a topic shows its drones with all of their chats; Delete takes a drone off
     expect(useDroneCanvasStore.getState().topics.map((topic) => topic.id)).toEqual([topicId]);
   } finally {
     await act(async () => root.unmount());
+    // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', topics: [], activeTopicId: null });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('pasting the same text twice in the canvas composer puts it in the message instead of attaching it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true, ...popoverGlobals(dom),
+    fetch: async () => Response.json({ ok: true, models: [] }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const input = () => container.querySelector('[data-canvas-message-bar] textarea')! as unknown as HTMLTextAreaElement;
+  const attachments = () => container.querySelector('[data-canvas-message-bar] [aria-label="Attachments"]')?.textContent ?? '';
+  const paste = async (text: string) => {
+    let prevented = false;
+    const clipboardData = { files: [], items: [], types: ['text/plain'], getData: (type: string) => type === 'text/plain' ? text : '' };
+    await act(async () => Simulate.paste(input() as unknown as Element, { clipboardData, preventDefault: () => { prevented = true; } } as never));
+    return prevented;
+  };
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} />));
+    // To a chat on the canvas, as in the agent chat: the first paste attaches, the same paste again goes in the text.
+    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]));
+    expect(await paste('stack trace line 1\nline 2')).toBe(true);
+    expect(attachments()).toContain('stack trace line 1');
+    expect(await paste('stack trace line 1\nline 2')).toBe(false);
+    expect(attachments()).toBe('');
+
+    // With nothing selected the composer still edits that message: the second paste's text stays in it.
+    await act(async () => getCanvasBoardActions('alpha').clearSelection());
+    expect(await paste('kept text')).toBe(true);
+    expect(await paste('kept text')).toBe(false);
+    expect(attachments()).toBe('');
+    await act(async () => Simulate.change(input() as unknown as Element, { target: { value: 'kept text' } } as never));
+    expect(input().value).toBe('kept text');
+    await act(async () => getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]));
+    expect(input().value).toBe('kept text');
+
+    // And for a new drone on the global board.
+    await act(async () => useDroneCanvasStore.getState().setScope('global'));
+    await act(async () => { Simulate.doubleClick(container.querySelector('[data-drone-canvas-viewport]') as unknown as Element, { button: 0, clientX: 200, clientY: 200 }); });
+    expect(useDroneCanvasStore.getState().selectedDroneIds[0]?.startsWith('draft:')).toBe(true);
+    expect(await paste('notes for the new drone')).toBe(true);
+    expect(attachments()).toContain('notes for the new drone');
+    expect(await paste('notes for the new drone')).toBe(false);
+    expect(attachments()).toBe('');
+  } finally {
+    await act(async () => root.unmount());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

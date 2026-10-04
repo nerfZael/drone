@@ -1,7 +1,7 @@
 import type { CanvasSendPrompt, CanvasDraftCreation } from '../canvas/canvas-messaging';
 import React from 'react';
 import type { DroneChatsPaneOptions } from './DroneChatsDock';
-import type { NewChatConfiguration } from './new-chat-creation';
+import type { CanvasNewCardSettings } from '../canvas/canvas-new-card-settings';
 import type { DroneDeleteMode } from './settings-types';
 import type { PaneKey } from './pane-key';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
@@ -158,20 +158,17 @@ type RightPanelTabContentProps = {
     chatName: string,
     opts?: { select?: boolean; boardPosition?: { x: number; y: number } },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onCreateCanvasChat: (droneId: string) => Promise<boolean>;
+  onCreateCanvasChat: (droneId: string, settings: CanvasNewCardSettings) => Promise<boolean>;
   canvasSpawnAgentMenuEntries: UiMenuSelectEntry[];
   canvasSpawnAgentKey: string;
-  onCanvasSpawnAgentKeyChange: (next: string) => void;
   onOpenCanvasCustomAgentModal: () => void;
-  canvasSpawnAgentConfig: ChatAgentConfig;
+  resolveAgentKey: (key: string) => ChatAgentConfig;
   canvasSpawnModel: string;
-  onCanvasSpawnModelChange: (next: string) => void;
   canvasCreateRepoMenuEntries: UiMenuSelectEntry[];
   canvasCreateRepoPath: string;
   onCanvasCreateRepoPathChange: (next: string) => void;
   canvasCreateGroup: string;
   onCanvasCreateGroupChange: (next: string) => void;
-  resolveCanvasNewChatDefaults?: (drone: DroneSummary) => NewChatConfiguration | null;
   onDeleteCanvasDrones?: (droneIds: string[]) => void;
   canvasDroneDeleteMode?: DroneDeleteMode;
   onDeleteCanvasDronesConfirmed?: (droneIds: string[]) => void;
@@ -287,17 +284,14 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   onCreateCanvasChat,
   canvasSpawnAgentMenuEntries,
   canvasSpawnAgentKey,
-  onCanvasSpawnAgentKeyChange,
   onOpenCanvasCustomAgentModal,
-  canvasSpawnAgentConfig,
+  resolveAgentKey,
   canvasSpawnModel,
-  onCanvasSpawnModelChange,
   canvasCreateRepoMenuEntries,
   canvasCreateRepoPath,
   onCanvasCreateRepoPathChange,
   canvasCreateGroup,
   onCanvasCreateGroupChange,
-  resolveCanvasNewChatDefaults,
   onDeleteCanvasDrones,
   canvasDroneDeleteMode,
   onDeleteCanvasDronesConfirmed,
@@ -413,17 +407,14 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               onCreateChat={onCreateCanvasChat}
               spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
               spawnAgentKey={canvasSpawnAgentKey}
-              onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}
               onOpenCustomAgentModal={onOpenCanvasCustomAgentModal}
-              spawnAgentConfig={canvasSpawnAgentConfig}
+              resolveAgentKey={resolveAgentKey}
               spawnModel={canvasSpawnModel}
-              onSpawnModelChange={onCanvasSpawnModelChange}
               createRepoMenuEntries={canvasCreateRepoMenuEntries}
               createRepoPath={canvasCreateRepoPath}
               onCreateRepoPathChange={onCanvasCreateRepoPathChange}
               createGroup={canvasCreateGroup}
               onCreateGroupChange={onCanvasCreateGroupChange}
-              resolveNewChatDefaults={resolveCanvasNewChatDefaults}
               onDeleteDrones={onDeleteCanvasDrones}
               droneDeleteMode={canvasDroneDeleteMode}
               onDeleteDronesConfirmed={onDeleteCanvasDronesConfirmed}

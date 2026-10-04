@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import { profileStorageKey } from '../../profile-storage';
+import { normalizeCanvasNewCardSettings, type CanvasNewCardSettings } from './canvas-new-card-settings';
 
 const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
@@ -107,6 +108,9 @@ type DroneCanvasState = DroneCanvasBoard &
     addDronesToTopic: (topicId: string, droneIds: string[]) => void;
     removeDronesFromTopic: (topicId: string, droneIds: string[]) => void;
     setTopicRepoPath: (topicId: string, repoPath: string) => void;
+    /** Null until the canvas first takes the app's defaults; after that only the canvas composer changes it. */
+    newCardSettings: CanvasNewCardSettings | null;
+    setNewCardSettings: (settings: CanvasNewCardSettings) => void;
   };
 
 type DroneCanvasPersistedBoard = Omit<DroneCanvasBoard, 'selectedDroneIds'>;
@@ -115,6 +119,7 @@ type DroneCanvasPersistedState = DroneCanvasPersistedBoard & {
   scope: DroneCanvasScope;
   topics: CanvasTopic[];
   activeTopicId: string | null;
+  newCardSettings: CanvasNewCardSettings | null;
 };
 
 const BOARD_KEYS = [
@@ -270,7 +275,14 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
   const scope: DroneCanvasScope = raw.scope === 'global'
     ? 'global'
     : raw.scope === 'topic' && activeTopicId ? 'topic' : 'drone';
-  return { ...normalizePersistedBoard(raw), droneBoards, scope, topics, activeTopicId };
+  return {
+    ...normalizePersistedBoard(raw),
+    droneBoards,
+    scope,
+    topics,
+    activeTopicId,
+    newCardSettings: normalizeCanvasNewCardSettings(raw.newCardSettings),
+  };
 }
 
 function uniqueIds(ids: readonly unknown[]): string[] {
@@ -423,6 +435,7 @@ function toPersistedState(state: DroneCanvasState): DroneCanvasPersistedState {
     scope: state.scope,
     topics: state.topics,
     activeTopicId: state.activeTopicId,
+    newCardSettings: state.newCardSettings,
     droneBoards: Object.fromEntries(
       Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
     ),
@@ -709,6 +722,8 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
         scope: 'drone',
         topics: [],
         activeTopicId: null,
+        newCardSettings: null,
+        setNewCardSettings: (settings) => set((state) => ({ ...state, newCardSettings: settings })),
         createTopic: (input) => {
           const id = createTopicId();
           set((state) => ({

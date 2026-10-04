@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { ChatAgentConfig } from '../src/domain';
 import {
   buildNewChatConfiguration,
+  newChatConfigurationForAgent,
   newChatPreferencesRepoPath,
   buildNewChatCreatePayload,
 } from '../src/droneHub/app/new-chat-creation';
@@ -110,6 +111,16 @@ describe('new chat creation defaults', () => {
     }
   });
 
+  test('the canvas sends only the access and approvals its agent takes', () => {
+    // Settings first taken from another agent's: Cursor runs with Execute access and has no reasoning or approvals.
+    expect(newChatConfigurationForAgent({ kind: 'builtin', id: 'cursor' }, {
+      model: 'composer-2', reasoning: 'high', permissionMode: 'read', approvalPolicy: 'none',
+    })).toEqual({ agent: { kind: 'builtin', id: 'cursor' }, model: 'composer-2', agentPermissionMode: 'execute' });
+    expect(newChatConfigurationForAgent({ kind: 'builtin', id: 'codex' }, {
+      model: '', reasoning: '', permissionMode: 'write', approvalPolicy: 'none',
+    })).toEqual({ agent: { kind: 'builtin', id: 'codex' }, agentPermissionMode: 'write', approvalPolicy: 'none' });
+  });
+
   test('uses one immediate draft flow for the shortcut and drone context menu', () => {
     const modelSource = readFileSync(
       new URL('../src/use-drone-hub-app-model.tsx', import.meta.url),
@@ -153,7 +164,22 @@ describe('new chat creation defaults', () => {
     );
     // The shortcut targets the focused chat's drone, and still creates through the one draft flow.
     expect(shortcutCreator).toContain('return target ? createChatForTarget(target) : false;');
-    expect(modelSource).toContain('return drone ? createDraftDroneChat(drone) : false;');
+    expect(modelSource).toContain('return drone ? createDraftDroneChat(drone, configuration, { keepWhenLeft }) : false;');
+    // A chat made from the shortcut goes when left empty; one placed on the canvas stays with its card.
+    expect(modelSource).toContain('preserveOnLeave: opts?.keepWhenLeft === true,');
+    const canvasCreator = modelSource.slice(
+      modelSource.indexOf('onCreateCanvasChat={'),
+      modelSource.indexOf('canvasSpawnAgentMenuEntries='),
+    );
+    expect(canvasCreator).toContain('keepWhenLeft: true');
+    expect(shortcutCreator).not.toContain('keepWhenLeft');
+    // The canvas has no Publish button: its send publishes a draft chat even once the app stops tracking it.
+    const canvasSend = modelSource.slice(
+      modelSource.indexOf('const sendCanvasPrompt'),
+      modelSource.indexOf('const publishSelectedDraft'),
+    );
+    expect(canvasSend).toContain('if (tracked || drone.draftChats?.[resolvedChat] === true) {');
+    expect(canvasSend.indexOf('/publish')).toBeLessThan(canvasSend.indexOf('sendDroneChatPrompt('));
 
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/use-sidebar-interactions.ts', import.meta.url),

@@ -952,13 +952,8 @@ code, pre {
     gap: .25rem;
   }
 
-  [data-chat-composer-toolbar='true'] [data-chat-composer-leading-controls='true'],
-  [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-picker='true'] {
-    max-width: 10.5rem;
-  }
-
+  /* The agent picker takes what space is left and truncates its label itself. */
   [data-chat-composer-toolbar='true'] [data-chat-composer-runtime-picker='true'] > button {
-    max-width: min(10.5rem, 100%);
     padding-inline: .375rem;
   }
 
