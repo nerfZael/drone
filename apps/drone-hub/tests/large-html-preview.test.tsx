@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { readLargeHtmlSource } from '../src/droneHub/files/use-large-html-source';
+import { HTML_PREVIEW_MAX_BYTES } from '../src/droneHub/files/html-preview-limits';
 
 function chunk(bytes: Uint8Array, offset: number, eof: boolean) {
   return Response.json({ ok: true, dataBase64: Buffer.from(bytes).toString('base64'), offset, nextOffset: offset + bytes.length, eof });
@@ -20,6 +21,23 @@ test('loads every HTML chunk and preserves UTF-8 split across byte boundaries', 
   try {
     expect(await readLargeHtmlSource('drone', '/index.html', new AbortController().signal)).toBe('<h1>Ž🙂</h1>');
     expect(offsets).toEqual([0, 5, 10]);
+  } finally { globalThis.fetch = original; }
+});
+
+test('rejects oversized metadata before fetching and enforces the byte limit when metadata is stale', async () => {
+  const original = globalThis.fetch;
+  let requests = 0;
+  const payload = new Uint8Array(512 * 1024);
+  globalThis.fetch = (async (url: string) => {
+    requests++;
+    const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'));
+    return chunk(payload, offset, false);
+  }) as typeof fetch;
+  try {
+    await expect(readLargeHtmlSource('drone', '/huge.html', new AbortController().signal, 145766804)).rejects.toThrow('20 MiB');
+    expect(requests).toBe(0);
+    await expect(readLargeHtmlSource('drone', '/growing.html', new AbortController().signal, 1)).rejects.toThrow('20 MiB');
+    expect(requests).toBe(HTML_PREVIEW_MAX_BYTES / payload.length + 1);
   } finally { globalThis.fetch = original; }
 });
 
@@ -53,8 +71,10 @@ test('large HTML opens as an isolated preview, switches to source, and retries f
   dom.document.body.append(host);
   const root = createRoot(host as unknown as HTMLElement);
   let fail = true;
+  let htmlRequests = 0;
   globalThis.fetch = (async (url: string) => {
     if (url.includes('/fs/chunk?')) {
+      htmlRequests++;
       if (fail) return Response.json({ ok: false, error: 'Temporary read failure' });
       return chunk(new TextEncoder().encode('<h1>Complete page</h1>'), 0, true);
     }
@@ -78,6 +98,20 @@ test('large HTML opens as an isolated preview, switches to source, and retries f
     const preview = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Preview');
     await act(async () => { preview!.click(); });
     expect(host.querySelector('iframe')?.getAttribute('srcdoc')).toContain('<h1>Complete page</h1>');
+    const previousRequests = htmlRequests;
+    let opened: unknown = null;
+    (dom as any).droneHubDesktop = { openHtmlPreview: async (input: unknown) => { opened = input; } };
+    await act(async () => {
+      root.render(<OpenedDroneFilePanel droneId="test" droneName="test" file={{ ...file, path: '/huge.html', size: 145766804 }} />);
+    });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('20 MiB');
+    expect(host.querySelector('iframe')).toBeNull();
+    expect(htmlRequests).toBe(previousRequests);
+    const separate = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Open separate preview');
+    await act(async () => { separate!.click(); });
+    expect(opened).toEqual({ droneId: 'test', path: '/huge.html' });
+    await act(async () => { Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'View source')!.click(); });
+    expect(host.textContent).toContain('Large file');
   } finally {
     await act(async () => root.unmount());
     await dom.happyDOM.close();

@@ -152,6 +152,8 @@ async function copyDroneHubElectronMain(root) {
     'hub-x11-backquote.cjs',
     'hub-x11-backquote.py',
     'hub-electron-diagnostics.cjs',
+    'hub-electron-recovery.cjs',
+    'hub-electron-html-preview.cjs',
     'hub-electron-launch.cjs',
     'hub-electron-static-server.cjs',
     'hub-electron-preload.cjs',

@@ -31,6 +31,8 @@ interface Window {
     readonly directApiToken?: string;
   };
   readonly droneHubDesktop?: {
+    recoverRenderer?(): void;
+    openHtmlPreview?(input: { droneId: string; path: string }): Promise<void>;
     desktopRecording?(action: 'status' | 'start' | 'stop', options?: { title: string; keepAudio: boolean; liveTranscription: boolean }): Promise<import('@drone/hub-model').DesktopRecordingStatus>;
     captureCompanion?(mode: 'region' | 'screen'): Promise<import('@drone/assistant-chat').CompanionImageAttachment | null>;
     setChatWindowAlwaysOnTop?(name: string, enabled: boolean): Promise<boolean>;

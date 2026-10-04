@@ -62,6 +62,16 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  recoverRenderer: () => ipcRenderer.send('drone-hub:renderer-recover'),
+  async openHtmlPreview(input) {
+    try { return await ipcRenderer.invoke('drone-hub:html-preview-open', input); }
+    catch (error) {
+      if (String(error?.message || error).includes("No handler registered for 'drone-hub:html-preview-open'")) {
+        throw new Error('Separate HTML previews need the updated desktop app. Fully quit and reopen Drone Hub.');
+      }
+      throw error;
+    }
+  },
   async desktopRecording(action, options) {
     try { return await ipcRenderer.invoke('drone-hub:desktop-recording', action, options); }
     catch (error) {

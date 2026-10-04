@@ -1,4 +1,7 @@
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
+import { checkHtmlPreviewSize, HtmlPreviewTooLargeError } from './html-preview-limits';
+
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
 /** Resolve file URLs only; the parent never fetches a URL supplied by preview code. */
 export function resolveHtmlPreviewImagePath(filePath: string, href: string): string | null {
@@ -15,6 +18,9 @@ export async function embedHtmlPreviewImages(
   filePath: string,
   readImage: (path: string) => Promise<string>,
 ): Promise<{ source: string; failed: number }> {
+  checkHtmlPreviewSize(source.length);
+  let embeddedBytes = new TextEncoder().encode(source).byteLength;
+  checkHtmlPreviewSize(embeddedBytes);
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const images = Array.from(parsed.querySelectorAll('img[src]'));
   const reads = new Map<string, Promise<string | null>>();
@@ -28,11 +34,18 @@ export async function embedHtmlPreviewImages(
       if (!path) continue;
       let read = reads.get(path);
       if (!read) {
-        read = readImage(path).catch(() => { failed += 1; return null; });
+        read = readImage(path).catch(error => {
+          if (error instanceof HtmlPreviewTooLargeError) throw error;
+          failed += 1; return null;
+        });
         reads.set(path, read);
       }
       const dataUrl = await read;
-      if (dataUrl) image.setAttribute('src', dataUrl);
+      if (dataUrl) {
+        embeddedBytes += dataUrl.length;
+        checkHtmlPreviewSize(embeddedBytes);
+        image.setAttribute('src', dataUrl);
+      }
     }
   }));
   // Preserve the original text when no local images need rewriting.
@@ -41,12 +54,31 @@ export async function embedHtmlPreviewImages(
 
 export async function readHtmlPreviewImage(droneId: string, path: string, signal: AbortSignal): Promise<string> {
   const response = await fetch(
-    `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(path)}`,
+    `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(path)}&maxBytes=${IMAGE_MAX_BYTES}`,
     { signal },
   );
+  if (response.status === 413) throw new HtmlPreviewTooLargeError();
   if (!response.ok) throw new Error('Could not load local image');
-  const blob = await response.blob();
-  if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+  const mime = response.headers.get('content-type') ?? '';
+  if (!mime.startsWith('image/')) { await response.body?.cancel(); throw new Error('Not an image'); }
+  if (Number(response.headers.get('content-length')) > IMAGE_MAX_BYTES) {
+    await response.body?.cancel(); throw new HtmlPreviewTooLargeError();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('Could not load local image');
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > IMAGE_MAX_BYTES) throw new HtmlPreviewTooLargeError();
+      parts.push(value as Uint8Array<ArrayBuffer>);
+    }
+  } finally { await reader.cancel(); reader.releaseLock(); }
+  const blob = new Blob(parts, { type: mime });
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));

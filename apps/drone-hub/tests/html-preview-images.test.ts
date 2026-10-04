@@ -2,6 +2,33 @@ import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { embedHtmlPreviewImages, resolveHtmlPreviewImagePath, readHtmlPreviewImage, htmlPreviewImageBridge, HTML_PREVIEW_IMAGE_RESPONSE } from '../src/droneHub/files/html-preview-images';
 import { buildIsolatedHtmlPreviewDocument } from '../src/droneHub/files/html-preview-security';
+import { HTML_PREVIEW_MAX_BYTES } from '../src/droneHub/files/html-preview-limits';
+
+test('local image expansion cannot exceed the inline document budget', async () => {
+  const dom = new Window();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'DOMParser');
+  Object.defineProperty(globalThis, 'DOMParser', { configurable: true, value: dom.DOMParser });
+  try {
+    await expect(embedHtmlPreviewImages('<img src="image.png"><img src="image.png">', '/index.html', async () => 'data:image/png;base64,' + 'a'.repeat(HTML_PREVIEW_MAX_BYTES / 2))).rejects.toThrow('20 MiB');
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'DOMParser', original);
+    else delete (globalThis as any).DOMParser;
+    await dom.happyDOM.close();
+  }
+});
+
+test('oversized local image streams are cancelled before base64 expansion', async () => {
+  const original = globalThis.fetch;
+  let cancelled = false;
+  globalThis.fetch = (async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(new Uint8Array(1024 * 1024)); },
+    cancel() { cancelled = true; },
+  }), { headers: { 'Content-Type': 'image/png' } })) as typeof fetch;
+  try {
+    await expect(readHtmlPreviewImage('drone', '/image.png', new AbortController().signal)).rejects.toThrow('5 MiB');
+    expect(cancelled).toBe(true);
+  } finally { globalThis.fetch = original; }
+});
 
 test('resolves images relative to the HTML file without treating URLs as filesystem requests', () => {
   expect(resolveHtmlPreviewImagePath('/reviews/index.html', '01-hud-desktop/desktop-combat.png')).toBe('/reviews/01-hud-desktop/desktop-combat.png');
@@ -53,7 +80,7 @@ test('reads only the drone media endpoint and rejects non-image files', async ()
   }) as typeof fetch;
   try {
     await expect(readHtmlPreviewImage('drone/one', '/reviews/combat.png', controller.signal)).rejects.toThrow('Not an image');
-    expect(requested).toBe('/api/drones/drone%2Fone/fs/media?path=%2Freviews%2Fcombat.png');
+    expect(requested).toBe('/api/drones/drone%2Fone/fs/media?path=%2Freviews%2Fcombat.png&maxBytes=5242880');
   } finally {
     globalThis.fetch = original;
   }

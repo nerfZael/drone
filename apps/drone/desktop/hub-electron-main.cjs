@@ -1,5 +1,5 @@
 const { installChatWindows } = require('./hub-electron-chat-windows.cjs');
-const { app, BrowserWindow, clipboard, desktopCapturer, nativeImage, Menu, screen, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, session, clipboard, desktopCapturer, nativeImage, Menu, screen, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,12 +19,14 @@ const { installCompanionWindow, installCompanionClipboard } = require('./hub-ele
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 const { connectDesktopGlobalShortcuts } = require('./hub-electron-global-shortcuts.cjs');
 const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
+const { installRendererRecovery } = require('./hub-electron-recovery.cjs');
 
 const APP_NAME = 'Drone Hub';
 const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
 const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 
 let mainWindow = null;
+let rendererRecovery = null;
 let recordingConnection = null;
 const desktopRecordings = require('./hub-desktop-recordings.cjs').installDesktopRecordings({
   ipcMain, getWindow: () => mainWindow, getConnection: () => recordingConnection,
@@ -69,6 +71,10 @@ if (process.platform === 'win32') {
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const diagnostics = createDesktopDiagnostics({
   logPath: path.join(app.getPath('userData'), 'logs', 'desktop.jsonl'),
+});
+require('./hub-electron-html-preview.cjs').installHtmlPreviewWindows({
+  ipcMain, BrowserWindow, session, diagnostics,
+  getWindow: () => mainWindow, getConnection: () => recordingConnection,
 });
 
 if (hasSingleInstanceLock) {
@@ -412,6 +418,11 @@ function createWindow() {
   });
 
   observeWindowDiagnostics(mainWindow, diagnostics);
+  rendererRecovery = installRendererRecovery({
+    window: mainWindow, ipcMain, diagnostics, isQuitting: () => isQuitting,
+    markerPath: path.join(app.getPath('userData'), 'renderer-recovery'),
+    getUiUrl: () => desktopStaticUiServer?.url,
+  });
   mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
   mainWindow.webContents.setZoomFactor(1);
   mainWindow.webContents.on('did-finish-load', () => {
@@ -624,7 +635,7 @@ function startHub() {
         });
         uiUrl = desktopStaticUiServer.url;
         if (mainWindow && !mainWindow.isDestroyed()) {
-          await mainWindow.loadURL(uiUrl);
+          await mainWindow.loadURL(rendererRecovery.startupUrl(uiUrl));
           await startPerformanceTraceAfterLoad();
         }
       } catch (error) {

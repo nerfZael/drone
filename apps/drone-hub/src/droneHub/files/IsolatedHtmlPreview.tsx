@@ -1,6 +1,8 @@
 import React from 'react';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { UiButton } from '../../ui/components';
+import { HTML_PREVIEW_MAX_BYTES, HTML_PREVIEW_LIMIT_MESSAGE, checkHtmlPreviewSize, HtmlPreviewTooLargeError } from './html-preview-limits';
+import { LargeHtmlPreviewNotice } from './LargeHtmlPreviewNotice';
 import {
   embedHtmlPreviewImages,
   readHtmlPreviewImage,
@@ -30,7 +32,18 @@ export function IsolatedHtmlPreview({
   droneId?: string;
   filePath?: string;
 }) {
-  return <HtmlPreviewSession key={JSON.stringify([droneId, filePath, fileName, source])} source={source} fileName={fileName} droneId={droneId} filePath={filePath} />;
+  // A key is an identity, never a serialization of the document. Keep the source
+  // reference only, and reset consent whenever the accepted document changes.
+  const [session, setSession] = React.useState({ droneId, filePath, fileName, source, id: 0 });
+  let current = session;
+  if (session.droneId !== droneId || session.filePath !== filePath || session.fileName !== fileName || session.source !== source) {
+    current = { droneId, filePath, fileName, source, id: session.id + 1 };
+    setSession(current);
+  }
+  // This component also has callers which already have an in-memory source.
+  const tooLarge = React.useMemo(() => source.length > HTML_PREVIEW_MAX_BYTES || new TextEncoder().encode(source).byteLength > HTML_PREVIEW_MAX_BYTES, [source]);
+  if (tooLarge) return <div role="alert" className="p-3 text-12">{HTML_PREVIEW_LIMIT_MESSAGE}</div>;
+  return <HtmlPreviewSession key={current.id} source={source} fileName={fileName} droneId={droneId} filePath={filePath} />;
 }
 
 function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: string; fileName?: string | null; droneId?: string; filePath?: string }) {
@@ -40,6 +53,7 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [imageToken] = React.useState(() => crypto.randomUUID());
   const [dynamicFailures, setDynamicFailures] = React.useState(0);
+  const [imagesTooLarge, setImagesTooLarge] = React.useState(false);
   const [images, setImages] = React.useState<{ source: string; failed: number } | null>(
     droneId && filePath ? null : { source, failed: 0 },
   );
@@ -48,13 +62,18 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
     const controller = new AbortController();
     void embedHtmlPreviewImages(source, filePath, path => readHtmlPreviewImage(droneId, path, controller.signal))
       .then(result => { if (!controller.signal.aborted) setImages(result); })
-      .catch(() => { if (!controller.signal.aborted) setImages({ source, failed: 1 }); });
+      .catch(error => {
+        if (controller.signal.aborted) return;
+        if (error instanceof HtmlPreviewTooLargeError) { setImagesTooLarge(true); controller.abort(); }
+        else setImages({ source, failed: 1 });
+      });
     return () => controller.abort();
   }, [source, droneId, filePath]);
   React.useEffect(() => {
     if (!droneId || !filePath) return;
     const controller = new AbortController();
     const reads = new Map<string, Promise<string | null>>();
+    let imageBytes = new TextEncoder().encode(images?.source ?? source).byteLength;
     const receive = (event: MessageEvent) => {
       const frame = iframeRef.current?.contentWindow;
       const data = event.data;
@@ -69,7 +88,14 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
         return;
       }
       if (!read) {
-        read = readHtmlPreviewImage(droneId, path, controller.signal).catch(() => {
+        read = readHtmlPreviewImage(droneId, path, controller.signal).then(dataUrl => {
+          imageBytes += dataUrl.length;
+          checkHtmlPreviewSize(imageBytes);
+          return dataUrl;
+        }).catch(error => {
+          if (error instanceof HtmlPreviewTooLargeError && !controller.signal.aborted) {
+            setImagesTooLarge(true); controller.abort();
+          }
           if (!controller.signal.aborted) setDynamicFailures(count => count + 1);
           return null;
         });
@@ -83,7 +109,7 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
     };
     window.addEventListener('message', receive);
     return () => { controller.abort(); window.removeEventListener('message', receive); };
-  }, [droneId, filePath, imageToken, allowExternalResources]);
+  }, [droneId, filePath, imageToken, allowExternalResources, images, source]);
   const document = React.useMemo(
     () => buildIsolatedHtmlPreviewDocument(
       (droneId && filePath ? htmlPreviewImageBridge(imageToken) : '') + (images?.source ?? ''),
@@ -106,6 +132,8 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
       setConfirming(false);
     }
   }
+
+  if (imagesTooLarge && droneId && filePath) return <LargeHtmlPreviewNotice droneId={droneId} path={filePath} />;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
