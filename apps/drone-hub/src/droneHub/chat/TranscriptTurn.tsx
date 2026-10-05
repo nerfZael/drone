@@ -301,7 +301,7 @@ export const TranscriptTurn = React.memo(
           </button>
         ) : null;
     return (
-      <div className="group/turn animate-fade-in">
+      <div className="group/turn animate-fade-in" data-chat-message-id={item.id || undefined}>
         {isSubscriptionEvent ? (
           <SubscriptionEventMessage
             prompt={item.prompt}

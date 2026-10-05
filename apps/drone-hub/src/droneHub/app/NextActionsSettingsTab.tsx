@@ -2,7 +2,7 @@ import React from 'react';
 
 import { UiSegmentedControl, UiSwitch } from '../../ui/components';
 import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
-import type { NextActionsProvider } from '../chat/next-actions';
+import { describeNextActionsCost, formatNextActionsCost, type NextAction, type NextActionsProvider } from '../chat/next-actions';
 import type { UseNextActionsSettingsDraftResult } from './use-next-actions-settings';
 
 const PROVIDER_LABELS: Record<NextActionsProvider, string> = {
@@ -18,11 +18,12 @@ const SECONDARY_BUTTON_CLASS = 'rounded border border-[var(--border-subtle)] px-
 
 export function NextActionsSettingsTab({ settings }: { settings: UseNextActionsSettingsDraftResult }) {
   const { data, draft, setDraft, loading, loadError, saving, saveError, saved, dirty, save, reset } = settings;
-  const actionInputs = React.useRef<Array<HTMLInputElement | null>>([]);
+  const nameInputs = React.useRef<Array<HTMLInputElement | null>>([]);
+  const textInputs = React.useRef<Array<HTMLTextAreaElement | null>>([]);
   const focusActionIndex = React.useRef<number | null>(null);
   React.useEffect(() => {
     if (focusActionIndex.current === null) return;
-    actionInputs.current[focusActionIndex.current]?.focus();
+    nameInputs.current[focusActionIndex.current]?.focus();
     focusActionIndex.current = null;
   });
 
@@ -46,17 +47,18 @@ export function NextActionsSettingsTab({ settings }: { settings: UseNextActionsS
     );
     setDraft({ ...draft, provider, ...(keep ? {} : { model: '', thinkingLevel: '' }) });
   };
-  const setAction = (index: number, value: string) =>
-    setDraft({ ...draft, actions: draft.actions.map((action, current) => (current === index ? value : action)) });
+  const setAction = (index: number, patch: Partial<NextAction>) =>
+    setDraft({ ...draft, actions: draft.actions.map((action, current) => (current === index ? { ...action, ...patch } : action)) });
   const removeAction = (index: number) =>
     setDraft({ ...draft, actions: draft.actions.filter((_, current) => current !== index) });
   const canAddAction = draft.actions.length < data.limits.maxActions;
   const addAction = (index = draft.actions.length) => {
     if (!canAddAction) return;
     focusActionIndex.current = index;
-    setDraft({ ...draft, actions: [...draft.actions.slice(0, index), '', ...draft.actions.slice(index)] });
+    setDraft({ ...draft, actions: [...draft.actions.slice(0, index), { name: '', text: '' }, ...draft.actions.slice(index)] });
   };
-  const filledActions = draft.actions.filter((action) => action.trim()).length;
+  const filledActions = draft.actions.filter((action) => action.name.trim() || action.text.trim()).length;
+  const fieldClass = 'rounded border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]';
   const actionsMatchDefaults = JSON.stringify(draft.actions) === JSON.stringify(data.defaults.actions);
 
   return (
@@ -126,41 +128,64 @@ export function NextActionsSettingsTab({ settings }: { settings: UseNextActionsS
           <div>
             <h3 className="text-sm font-semibold text-[var(--fg)]">Actions</h3>
             <p className="mt-1 text-xs text-[var(--muted)]">
-              One line each, sent exactly as written. The model only picks from this list and may pick none.
+              The name is the button's label; the text is the message it sends, exactly as written. The model only picks from this list and may pick none.
             </p>
           </div>
           <button
             type="button"
             disabled={saving || actionsMatchDefaults}
-            onClick={() => setDraft({ ...draft, actions: [...data.defaults.actions] })}
+            onClick={() => setDraft({ ...draft, actions: data.defaults.actions.map((action) => ({ ...action })) })}
             className={`shrink-0 ${SECONDARY_BUTTON_CLASS}`}
           >
             Restore defaults
           </button>
         </div>
-        <ul className="mt-3 space-y-1.5">
+        <div className="mt-3 hidden gap-1.5 px-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-dim)] sm:flex">
+          <span className="w-40 shrink-0">Button</span>
+          <span className="flex-1">Sends</span>
+          <span className="w-7 shrink-0" />
+        </div>
+        <ul className="mt-1.5 space-y-1.5">
           {draft.actions.map((action, index) => (
-            <li key={index} className="flex items-center gap-1.5">
+            <li key={index} className="flex flex-wrap items-start gap-1.5 sm:flex-nowrap">
               <input
-                ref={(node) => { actionInputs.current[index] = node; }}
+                ref={(node) => { nameInputs.current[index] = node; }}
                 type="text"
-                aria-label={`Action ${index + 1}`}
-                value={action}
-                maxLength={data.limits.maxActionChars}
+                aria-label={`Action ${index + 1} button name`}
+                value={action.name}
+                maxLength={data.limits.maxActionNameChars}
                 disabled={saving}
-                placeholder="e.g. Commit the changes"
-                onChange={(event) => setAction(index, event.target.value)}
+                placeholder="Commit"
+                onChange={(event) => setAction(index, { name: event.target.value })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
-                    addAction(index + 1);
-                  } else if (event.key === 'Backspace' && !action && draft.actions.length > 1) {
+                    textInputs.current[index]?.focus();
+                  } else if (event.key === 'Backspace' && !action.name && !action.text && draft.actions.length > 1) {
                     event.preventDefault();
                     focusActionIndex.current = Math.max(0, index - 1);
                     removeAction(index);
                   }
                 }}
-                className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 text-xs text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]"
+                className={`min-w-0 flex-1 sm:w-40 sm:flex-none ${fieldClass}`}
+              />
+              <textarea
+                ref={(node) => { textInputs.current[index] = node; }}
+                aria-label={`Action ${index + 1} message`}
+                value={action.text}
+                maxLength={data.limits.maxActionChars}
+                disabled={saving}
+                rows={Math.min(4, Math.max(1, action.text.split('\n').length))}
+                placeholder="Commit the changes"
+                onChange={(event) => setAction(index, { text: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    addAction(index + 1);
+                  }
+                }}
+                title="Ctrl/Cmd+Enter adds another action"
+                className={`order-last min-w-0 basis-full resize-y sm:order-none sm:basis-auto sm:flex-1 ${fieldClass}`}
               />
               <button
                 type="button"
@@ -183,6 +208,41 @@ export function NextActionsSettingsTab({ settings }: { settings: UseNextActionsS
         </div>
         {draft.enabled && filledActions === 0 ? (
           <p className="mt-2 text-xs text-[var(--red)]">Add at least one action; with none, nothing is suggested.</p>
+        ) : null}
+      </section>
+
+      <section className={SECTION_CLASS}>
+        <h3 className="text-sm font-semibold text-[var(--fg)]">Cost</h3>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          {data.totalCost.calls === 0
+            ? 'Nothing yet.'
+            : <>All chats so far: <span className="font-mono text-[var(--fg-secondary)]">{formatNextActionsCost(data.totalCost)}</span>. {describeNextActionsCost(data.totalCost, 'across all chats')}</>}
+          {' '}Usage lists it under the purpose "next-actions", and each chat shows its own cost when you hover its suggestions.
+        </p>
+        {data.costByChat.length ? (
+          <table className="mt-3 w-full text-xs">
+            <caption className="sr-only">Next actions cost by chat</caption>
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted-dim)]">
+                <th className="pb-1 font-medium">Chat</th>
+                <th className="pb-1 text-right font-medium">Calls</th>
+                <th className="pb-1 text-right font-medium">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.costByChat.map((row) => (
+                <tr key={`${row.droneId}\n${row.chatName}`} className="border-t border-[var(--border-subtle)]">
+                  <td className="max-w-0 truncate py-1 pr-3 text-[var(--fg-secondary)]" title={`${row.droneName ?? row.droneId} / ${row.chatName}`}>
+                    {row.droneName ?? row.droneId} <span className="text-[var(--muted-dim)]">/</span> {row.chatName}
+                  </td>
+                  <td className="py-1 pr-3 text-right font-mono text-[var(--muted)]">{row.calls}</td>
+                  <td className="py-1 text-right font-mono text-[var(--fg-secondary)]" title={describeNextActionsCost(row, 'in this chat')}>
+                    {formatNextActionsCost(row)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         ) : null}
       </section>
 

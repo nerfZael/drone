@@ -2,28 +2,18 @@ import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import {
-  NEXT_ACTIONS_SETTINGS_QUERY_KEY,
-  useNextActionsSettings,
-  type NextActionsSettings,
-  type NextActionsSettingsResponse,
-} from '../chat/next-actions';
+  CHAT_ASKS_SETTINGS_QUERY_KEY,
+  useChatAsksSettings,
+  type ChatAsksSettings,
+  type ChatAsksSettingsResponse,
+} from '../chat/chat-asks';
 import { settingsErrorMessage, type SettingsRequestJson } from './settings-query';
 
-/** What a save would send: trimmed, without blank rows. */
-function savedForm(draft: NextActionsSettings): NextActionsSettings {
-  return {
-    ...draft,
-    actions: draft.actions
-      .map((action) => ({ name: action.name.trim(), text: action.text.trim() }))
-      .filter((action) => action.name || action.text),
-  };
-}
-
-export function useNextActionsSettingsDraft(requestJson: SettingsRequestJson, enabled: boolean) {
+export function useChatAsksSettingsDraft(requestJson: SettingsRequestJson, enabled: boolean) {
   const queryClient = useQueryClient();
-  const query = useNextActionsSettings(enabled);
+  const query = useChatAsksSettings(enabled);
   const data = query.data ?? null;
-  const [draft, setDraft] = React.useState<NextActionsSettings | null>(null);
+  const [draft, setDraft] = React.useState<ChatAsksSettings | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
   const [saved, setSaved] = React.useState(false);
@@ -32,13 +22,13 @@ export function useNextActionsSettingsDraft(requestJson: SettingsRequestJson, en
     if (data && !draft) setDraft(data.settings);
   }, [data, draft]);
 
-  // Costs change between visits; refresh them without touching the draft.
+  // Costs change while the tab is open; refresh them without touching the draft.
   const { refetch } = query;
   React.useEffect(() => {
     if (enabled) void refetch();
   }, [enabled, refetch]);
 
-  const dirty = Boolean(data && draft && JSON.stringify(savedForm(draft)) !== JSON.stringify(data.settings));
+  const dirty = Boolean(data && draft && JSON.stringify(draft) !== JSON.stringify(data.settings));
 
   const save = React.useCallback(async () => {
     if (!draft || saving) return false;
@@ -46,12 +36,13 @@ export function useNextActionsSettingsDraft(requestJson: SettingsRequestJson, en
     setSaved(false);
     setSaveError('');
     try {
-      const response = await requestJson<NextActionsSettingsResponse>('/api/settings/next-actions', {
+      const response = await requestJson<ChatAsksSettingsResponse>('/api/settings/chat-asks', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(savedForm(draft)),
+        body: JSON.stringify(draft),
       });
-      queryClient.setQueryData(NEXT_ACTIONS_SETTINGS_QUERY_KEY, response);
+      queryClient.setQueryData(CHAT_ASKS_SETTINGS_QUERY_KEY, response);
+      void queryClient.invalidateQueries({ queryKey: ['chat-asks', 'chat'] });
       setDraft(response.settings);
       setSaved(true);
       return true;
@@ -71,7 +62,7 @@ export function useNextActionsSettingsDraft(requestJson: SettingsRequestJson, en
     await query.refetch();
   }, [query]);
 
-  const edit = React.useCallback((next: NextActionsSettings) => {
+  const edit = React.useCallback((next: ChatAsksSettings) => {
     setDraft(next);
     setSaved(false);
   }, []);
@@ -91,4 +82,4 @@ export function useNextActionsSettingsDraft(requestJson: SettingsRequestJson, en
   };
 }
 
-export type UseNextActionsSettingsDraftResult = ReturnType<typeof useNextActionsSettingsDraft>;
+export type UseChatAsksSettingsDraftResult = ReturnType<typeof useChatAsksSettingsDraft>;

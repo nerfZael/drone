@@ -303,6 +303,11 @@ export function AssistantDock(props: React.ComponentProps<typeof NativeAssistant
   return <NativeAssistantDock key={JSON.stringify([props.nativeChat.droneId, props.nativeChat.chatName])} {...props} />;
 }
 
+/** Marks a user message so lists such as Asks can scroll to it. */
+function withChatMessageId(id: string | undefined, row: React.ReactNode): React.ReactNode {
+  return id ? <div data-chat-message-id={id}>{row}</div> : row;
+}
+
 function NativeAssistantDock({
   autoFocus = false,
   focusTargetId = 'assistant-chat',
@@ -2278,7 +2283,8 @@ function NativeAssistantDock({
         key: item.key,
         kind: 'message',
         latestActivityEligible,
-        content: ({ isLatestActivity }) => (
+        content: ({ isLatestActivity }) => withChatMessageId(
+          item.message.role === 'user' ? item.message.id : undefined,
           <AssistantMessageRow
             message={item.message}
             forkCheckpointId={nativeChat ? latestNativeCheckpointId([item.message]) : undefined}
@@ -2300,7 +2306,7 @@ function NativeAssistantDock({
             onOpenDroneMention={openDroneMention}
             showToolCalls={toolActivityVisible && item.showToolCalls}
             showReasoning={running && isLatestActivity}
-          />
+          />,
         ),
       });
       if (item.message.role === 'user') {
@@ -2718,6 +2724,7 @@ function NativeAssistantDock({
               waiting={running}
               disabled={!activeThread || scopeSyncBusy}
               composerTopAction={composerTopAction}
+              asksChat={{ droneId: nativeDroneId, chatName: nativeChatName }}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               composerLeadingControls={nativeComposerLeadingControls}

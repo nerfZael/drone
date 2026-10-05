@@ -2,8 +2,11 @@ import React from 'react';
 
 import { IconSpinner } from './icons';
 import {
+  describeNextActionsCost,
+  formatNextActionsCost,
   useNextActionsSettings,
   useNextActionsSuggestions,
+  type NextAction,
   type NextActionsAnchor,
 } from './next-actions';
 
@@ -52,30 +55,41 @@ export function NextActionsRow({ droneId, chatName, anchor, onSend }: NextAction
       </div>
     );
   }
-  if (!Array.isArray(suggestions.data) || suggestions.data.length === 0) return null;
+  const actions = suggestions.data?.actions ?? [];
+  if (actions.length === 0) return null;
+  const cost = suggestions.data.cost;
+  const actionKey = (action: NextAction) => `${action.name}\n${action.text}`;
 
-  const send = async (prompt: string) => {
+  const send = async (action: NextAction) => {
     if (sending) return;
-    setSending(prompt);
+    setSending(actionKey(action));
     // On success the row unmounts once the new prompt shows up; stay disabled until then.
-    if (!(await onSend(prompt).catch(() => false))) setSending(null);
+    if (!(await onSend(action.text).catch(() => false))) setSending(null);
   };
 
   return (
-    <div data-next-actions="ready" aria-label="Suggested next actions" className="-mt-3 flex flex-wrap items-center gap-1.5">
-      {suggestions.data.map((action) => (
+    <div data-next-actions="ready" aria-label="Suggested next actions" className="group/next-actions -mt-3 flex flex-wrap items-center gap-1.5">
+      {actions.map((action) => (
         <button
-          key={action}
+          key={actionKey(action)}
           type="button"
           disabled={Boolean(sending)}
           onClick={() => void send(action)}
-          title={`Send “${action}”`}
+          title={`Send: ${action.text}`}
           className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2.5 py-1 text-11 text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-default disabled:opacity-50 disabled:hover:border-[var(--border-subtle)] disabled:hover:bg-[var(--surface-inset)] disabled:hover:text-[var(--fg-secondary)]"
         >
-          {sending === action ? <IconSpinner className="h-3 w-3 shrink-0" /> : null}
-          <span className="truncate">{action}</span>
+          {sending === actionKey(action) ? <IconSpinner className="h-3 w-3 shrink-0" /> : null}
+          <span className="truncate">{action.name}</span>
         </button>
       ))}
+      {cost ? (
+        <span
+          className="font-mono text-10 text-[var(--muted-dim)] opacity-0 transition-opacity group-hover/next-actions:opacity-100"
+          title={describeNextActionsCost(cost, 'in this chat')}
+        >
+          {formatNextActionsCost(cost)} in this chat
+        </span>
+      ) : null}
     </div>
   );
 }

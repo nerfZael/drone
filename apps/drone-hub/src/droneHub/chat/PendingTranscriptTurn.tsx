@@ -212,6 +212,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     <div
       data-chat-working={!isFailed && !isWaiting ? 'true' : undefined}
       data-pending-prompt-id={item.id}
+      data-chat-message-id={item.id || undefined}
       className={`group/turn animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
       {isSubscriptionEvent ? (

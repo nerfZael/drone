@@ -1,4 +1,4 @@
-export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'next-actions' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'next-actions' | 'asks' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -19,6 +19,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Next actions',
     title: 'Next actions',
     description: 'Suggest one-click follow-up replies under finished agent messages.',
+  },
+  {
+    id: 'asks',
+    label: 'Asks',
+    title: 'Asks',
+    description: 'Keep a list of what you asked in each chat, and whether it was done or answered.',
   },
   {
     id: 'companion',

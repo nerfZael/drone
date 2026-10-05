@@ -68,12 +68,27 @@ import {
   nextChatComposerEditorView,
 } from './chat-composer-editor-mode-shortcut';
 import { ChatVoiceSendCoordinator } from './chat-voice-send-coordinator';
+import { useChatAsks, type AskChat } from './chat-asks';
+import { ChatAsksBadge } from './ChatAsksControl';
 
 const useLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
 
 type ChatSubmissionSnapshot = ChatComposerDraftSnapshot<DraftChatAttachment>;
+
+function AsksIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m3 6 1.5 1.5L7 5" />
+      <path d="m3 13 1.5 1.5L7 12" />
+      <path d="M11 6h10" />
+      <path d="M11 13h10" />
+      <path d="M11 20h10" />
+      <path d="M4 20h2" />
+    </svg>
+  );
+}
 
 function CodeEditorIcon() {
   return (
@@ -220,6 +235,8 @@ export type ChatInputProps = {
   composerTrailingControls?: React.ReactNode;
   composerControls?: ChatComposerControlsConfig;
   composerTopAction?: React.ReactNode;
+  /** The chat this composer sends to, for tracking what the user asked in it (Asks). */
+  asksChat?: AskChat | null;
   composerStatus?: React.ReactNode;
   composerFooter?: React.ReactNode;
   alwaysExpanded?: boolean;
@@ -288,6 +305,7 @@ export function ChatInput({
   composerTrailingControls,
   composerControls,
   composerTopAction,
+  asksChat,
   composerStatus,
   composerFooter,
   alwaysExpanded = false,
@@ -661,7 +679,9 @@ export function ChatInput({
     voiceActionInFlight ||
     voiceRecordingActive ||
     microphoneOwnedElsewhere;
-  // Editor mode and continuous voice steering start from the composer's options menu.
+  const asks = useChatAsks(asksChat);
+  const asksBadgeVisible = Boolean(asks.featureOn && asks.data && (asks.data.tracking || asks.data.asks.length > 0));
+  // Editor mode, continuous voice steering and ask tracking start from the composer's options menu.
   const composerMenuActions: ChatComposerMenuAction[] = [
     {
       id: 'editor-mode',
@@ -686,6 +706,21 @@ export function ChatInput({
             icon: <ContinuousVoiceIcon />,
             disabled: continuousVoiceButtonDisabled,
             onSelect: () => void continuousVoice.start(),
+          },
+        ]
+      : []),
+    ...(asks.featureOn && asks.data
+      ? [
+          {
+            id: 'track-asks',
+            label: asks.data.tracking ? 'Stop tracking asks' : 'Track asks',
+            title: asks.data.tracking
+              ? 'Stop updating the list of what you asked in this chat; the list is kept'
+              : 'Keep a list of what you ask in this chat and whether it was done',
+            icon: <AsksIcon />,
+            active: asks.data.tracking,
+            disabled: asks.tracking.isPending,
+            onSelect: () => asks.tracking.mutate(!asks.data!.tracking),
           },
         ]
       : []),
@@ -1374,9 +1409,14 @@ export function ChatInput({
             {promptError || attachmentError}
           </div>
         )}
-        {composerTopAction ? (
-          <div className="mb-1 flex min-h-7 items-center justify-start empty:hidden">
-            {composerTopAction}
+        {composerTopAction || asksBadgeVisible ? (
+          <div className="mb-1 flex min-h-7 items-center justify-start gap-2 empty:hidden">
+            {asksBadgeVisible ? (
+              <>
+                <ChatAsksBadge state={asks} />
+                {composerTopAction ? <div className="flex min-w-0 flex-1 items-center">{composerTopAction}</div> : null}
+              </>
+            ) : composerTopAction}
           </div>
         ) : null}
         <div

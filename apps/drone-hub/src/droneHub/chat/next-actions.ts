@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { requestJson } from '../http';
+import { describeHelperCost, formatHelperCost, type HelperCost } from './helper-cost';
 import type { TranscriptItem } from '../types';
 
 export type NextActionsProvider = 'openai' | 'codex' | 'gemini' | 'openrouter' | 'cerebras';
@@ -10,19 +11,27 @@ export type NextActionsSettings = {
   provider: NextActionsProvider;
   model: string;
   thinkingLevel: string;
-  actions: string[];
+  actions: NextAction[];
   instructions: string;
 };
+
+/** A button's label and the message it sends. */
+export type NextAction = { name: string; text: string };
+export type NextActionsCost = HelperCost;
 
 export type NextActionsSettingsResponse = {
   ok: true;
   settings: NextActionsSettings;
   revision: string;
-  defaults: { actions: string[]; instructions: string };
-  limits: { maxActions: number; maxActionChars: number; maxInstructionsChars: number; maxTurns: number };
+  defaults: { actions: NextAction[]; instructions: string };
+  limits: { maxActions: number; maxActionNameChars: number; maxActionChars: number; maxInstructionsChars: number; maxTurns: number };
   models: Array<{ provider: NextActionsProvider; id: string; name: string; thinkingLevel: string }>;
   credentials: Record<NextActionsProvider, boolean>;
+  totalCost: NextActionsCost;
+  costByChat: Array<NextActionsCost & { droneId: string; chatName: string; droneName: string | null }>;
 };
+
+export type NextActionsSuggestions = { actions: NextAction[]; cost: NextActionsCost | null };
 
 export type NextActionsTurn = { prompt: string; response: string };
 
@@ -41,21 +50,29 @@ export function useNextActionsSettings(enabled = true) {
   });
 }
 
+export const formatNextActionsCost = formatHelperCost;
+
+export function describeNextActionsCost(cost: NextActionsCost, where: string): string {
+  return describeHelperCost(cost, 'Next actions', where, 'have');
+}
+
 export function useNextActionsSuggestions(
   chat: { droneId: string; chatName: string },
   anchor: NextActionsAnchor | null,
   revision: string | null,
 ) {
-  return useQuery<string[], Error>({
+  return useQuery<NextActionsSuggestions, Error>({
     queryKey: ['next-actions', 'suggest', chat.droneId, chat.chatName, anchor?.turnId ?? '', revision ?? ''],
     queryFn: async ({ signal }) => {
-      const response = await requestJson<{ ok: true; actions: string[] }>('/api/next-actions/suggest', {
+      const response = await requestJson<{ ok: true; actions: NextAction[]; cost?: NextActionsCost | null }>('/api/next-actions/suggest', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ droneId: chat.droneId, chatName: chat.chatName, turnId: anchor!.turnId, turns: anchor!.turns }),
         signal,
       });
-      return response.actions;
+      const actions = (Array.isArray(response.actions) ? response.actions : [])
+        .filter((action) => action && typeof action.name === 'string' && typeof action.text === 'string');
+      return { actions, cost: response.cost ?? null };
     },
     enabled: Boolean(anchor && revision),
     staleTime: Infinity,

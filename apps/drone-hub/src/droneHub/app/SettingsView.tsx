@@ -19,6 +19,8 @@ import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
 import { NextActionsSettingsTab } from './NextActionsSettingsTab';
 import { useNextActionsSettingsDraft } from './use-next-actions-settings';
+import { ChatAsksSettingsTab } from './ChatAsksSettingsTab';
+import { useChatAsksSettingsDraft } from './use-chat-asks-settings';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentsSettings } from './use-agents-settings';
@@ -99,6 +101,7 @@ export function SettingsView({
   const subscriptions = useResourceSubscriptionSettings(requestJson, generalEnabled);
   const companion = useCompanionSettings(requestJson, activeTab === 'companion');
   const nextActions = useNextActionsSettingsDraft(requestJson, activeTab === 'next-actions');
+  const chatAsks = useChatAsksSettingsDraft(requestJson, activeTab === 'asks');
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
@@ -115,6 +118,7 @@ export function SettingsView({
     companion.loading ||
     companion.saving ||
     nextActions.saving ||
+    chatAsks.saving ||
     deleteAction.archivedDronesLoading ||
     deleteAction.archivedChatsLoading ||
     llm.savingOpenAiSettings ||
@@ -176,13 +180,17 @@ export function SettingsView({
         if (!(await confirmDiscardDialog('Discard unsaved Next actions settings?'))) return;
         void nextActions.reset();
       }
+      if (activeTab === 'asks' && tabId !== 'asks' && chatAsks.dirty) {
+        if (!(await confirmDiscardDialog('Discard unsaved Asks settings?'))) return;
+        void chatAsks.reset();
+      }
       onSelectTab(tabId);
       if (tabId === 'archive') {
         void deleteAction.loadArchivedDrones();
         void deleteAction.loadArchivedChats();
       }
     },
-    [activeTab, companion, deleteAction, nextActions, onSelectTab],
+    [activeTab, chatAsks, companion, deleteAction, nextActions, onSelectTab],
   );
 
   const handleBackToWorkspace = React.useCallback(async () => {
@@ -194,11 +202,15 @@ export function SettingsView({
       if (!(await confirmDiscardDialog('Discard unsaved Next actions settings?'))) return;
       void nextActions.reset();
     }
+    if (activeTab === 'asks' && chatAsks.dirty) {
+      if (!(await confirmDiscardDialog('Discard unsaved Asks settings?'))) return;
+      void chatAsks.reset();
+    }
     if (skillLibrary.draftDirty) {
       if (!(await confirmDiscardDialog('Discard unsaved skill edits?'))) return;
     }
     onBackToWorkspace();
-  }, [activeTab, companion, nextActions, onBackToWorkspace, skillLibrary.draftDirty]);
+  }, [activeTab, chatAsks, companion, nextActions, onBackToWorkspace, skillLibrary.draftDirty]);
 
   const handleRefreshAll = React.useCallback(async () => {
     if (skillLibrary.draftDirty) {
@@ -221,6 +233,10 @@ export function SettingsView({
       const ok = await confirmDiscardDialog('Discard unsaved Next actions settings and refresh all settings?');
       if (!ok) return;
     }
+    if (chatAsks.dirty) {
+      const ok = await confirmDiscardDialog('Discard unsaved Asks settings and refresh all settings?');
+      if (!ok) return;
+    }
     void llm.loadLlmSettings();
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
@@ -240,7 +256,8 @@ export function SettingsView({
     void mcpServers.loadMcpServers();
     void companion.load();
     void nextActions.reset();
-  }, [agents, agentsDraftDirty, backups.loadBackupSettings, companion, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, nextActions, profile, skillLibrary, speech, subscriptions.load, syncSets]);
+    void chatAsks.reset();
+  }, [agents, agentsDraftDirty, backups.loadBackupSettings, chatAsks, companion, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, nextActions, profile, skillLibrary, speech, subscriptions.load, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -260,6 +277,7 @@ export function SettingsView({
     if (activeTab === 'notifications') return <NotificationsSettingsTab />;
     if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} speech={speech} />;
     if (activeTab === 'next-actions') return <NextActionsSettingsTab settings={nextActions} />;
+    if (activeTab === 'asks') return <ChatAsksSettingsTab settings={chatAsks} />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;

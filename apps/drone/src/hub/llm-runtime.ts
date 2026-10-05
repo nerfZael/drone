@@ -1,4 +1,4 @@
-import { trackHubGeneration } from './usage/trackHubGeneration';
+import { trackHubGeneration, type HubGenerationAttribution } from './usage/trackHubGeneration';
 import {
   parseLlmProvider,
   providerDisplayName,
@@ -18,6 +18,8 @@ type GenerateObjectInput = {
   maxRetries?: number;
   reasoning?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   providerOptions?: Record<string, Record<string, unknown>>;
+  /** Who the request works for, so its usage counts toward that chat under its own purpose. */
+  attribution?: HubGenerationAttribution;
 };
 
 export type HubLlmRuntime = {
@@ -126,7 +128,7 @@ async function generateCodexObject(apiKey: string, z: any, input: GenerateObject
       reasoning: input.reasoning,
       maxRetries: input.maxRetries,
     }),
-  ).result(), true);
+  ).result(), true, input.attribution);
 
   if (response?.stopReason === 'error' || response?.stopReason === 'aborted') {
     throw new Error(
@@ -163,7 +165,7 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
     return {
       provider,
       z,
-      generateObject: ({ reasoning: _reasoning, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input)),
+      generateObject: ({ reasoning: _reasoning, attribution, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input), false, attribution),
       modelFactory: google,
     };
   }
@@ -177,7 +179,7 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
   return {
     provider,
     z,
-    generateObject: ({ reasoning: _reasoning, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input)),
+    generateObject: ({ reasoning: _reasoning, attribution, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input), false, attribution),
     modelFactory: provider === 'cerebras' ? (modelId) => openai.chat(modelId) : openai,
   };
 }

@@ -9,6 +9,8 @@ import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
 import { registerChatStepsRoutes } from './routes/chat-steps-routes';
 import { startChatStepService } from './chat-steps/chat-step-service';
+import { startChatAskService } from './chat-asks/chat-ask-service';
+import { registerChatAsksRoutes } from './chat-asks/chat-asks-routes';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -5764,6 +5766,8 @@ async function startDroneHubApiServerWithLifecycle(
     onChange: (steps) => scheduleDroneChatEventRefresh(0, { droneId: steps.droneId, chatName: steps.chatName }),
     log: (message) => hubLog('warn', 'chat steps', { message }),
   });
+  startChatAskService({ log: (message) => hubLog('warn', 'chat asks', { message }) });
+  registerChatAsksRoutes(apiRouter);
   registerCatalogRoutes(apiRouter, {
     mcpToken,
     upsertDroneHubMcpServerPreset,

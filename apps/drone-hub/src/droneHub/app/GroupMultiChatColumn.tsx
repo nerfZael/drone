@@ -1312,6 +1312,7 @@ export function GroupMultiChatColumn({
       />
       <ChatInput
         resetKey={`group:${drone.id}:${chatName}`}
+        asksChat={onPublish ? null : { droneId: drone.id, chatName }}
         draftPersistenceKey={draftKey}
         droneName={drone.name}
         promptError={modelControls.error || promptError}

@@ -2810,6 +2810,7 @@ export function SelectedDroneWorkspace({
                   droneName={currentDrone.name}
                   focusTargetId="primary-chat"
                   promptError={stopResponseError || promptError}
+                  asksChat={currentChatIsDraft ? null : { droneId: currentDrone.id, chatName: activeChatName }}
                   publishing={publishingDraft}
                   waiting={chatInputWaiting}
                   composerTopAction={

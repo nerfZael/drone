@@ -17,7 +17,7 @@ async function withRow(
   const fetch = async (url: string, init?: RequestInit) => {
     requests.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
     if (url === '/api/settings/next-actions') {
-      return Response.json({ ok: true, revision: 'r1', settings: { enabled: options.enabled, actions: ['Commit', 'Review', 'Continue'] } });
+      return Response.json({ ok: true, revision: 'r1', settings: { enabled: options.enabled, actions: [{ name: 'Commit', text: 'Commit the changes' }] } });
     }
     return options.suggest();
   };
@@ -60,13 +60,22 @@ test('shows an indicator while loading, then sends the clicked action once', asy
     expect(element.textContent).toContain('Next actions');
     await until(() => requests.some((request) => request.url === '/api/next-actions/suggest'));
     expect(requests.find((request) => request.url === '/api/next-actions/suggest')?.body).toEqual({ droneId: 'd1', chatName: 'chat-1', ...anchor });
-    await act(async () => { respond(Response.json({ ok: true, actions: ['Review', 'Commit'] })); await flush(); });
+    await act(async () => {
+      respond(Response.json({
+        ok: true,
+        actions: [{ name: 'Review', text: 'Review your changes for bugs' }, { name: 'Commit', text: 'Commit the changes' }],
+        cost: { cost: 0.004, calls: 3, unpriced: 0 },
+      }));
+      await flush();
+    });
     await until(() => element.querySelectorAll('button').length === 2);
     const buttons = Array.from(element.querySelectorAll('button'));
     expect(buttons.map((button) => button.textContent)).toEqual(['Review', 'Commit']);
+    expect(buttons[1]!.getAttribute('title')).toBe('Send: Commit the changes');
+    expect(element.textContent).toContain('<$0.01 in this chat');
     await act(async () => { buttons[1]!.click(); await flush(); });
     await act(async () => { buttons[0]!.click(); await flush(); });
-    expect(sent).toEqual(['Commit']);
+    expect(sent).toEqual(['Commit the changes']);
     expect(buttons.every((button) => button.disabled)).toBe(true);
     // A failed send makes the actions available again.
     await act(async () => { resolveSend(false); await flush(); });
@@ -75,7 +84,7 @@ test('shows an indicator while loading, then sends the clicked action once', asy
 });
 
 test('renders nothing when off or when nothing fits, and offers a retry on failure', async () => {
-  await withRow({ enabled: false, suggest: async () => Response.json({ ok: true, actions: ['Commit'] }) }, async ({ element, until, requests }) => {
+  await withRow({ enabled: false, suggest: async () => Response.json({ ok: true, actions: [{ name: 'Commit', text: 'Commit' }] }) }, async ({ element, until, requests }) => {
     await until(() => requests.length > 0);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(element.innerHTML).toBe('');

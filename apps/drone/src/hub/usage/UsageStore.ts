@@ -5,6 +5,10 @@ import { openUsageDatabase } from './helpers/openUsageDatabase';
 import { USAGE_SCHEMA } from './usage-schema';
 import { applyBundledAnthropicPrices } from './bundledPrices';
 
+/** Hub helpers that run beside a chat's agent: they cost the chat money but never make it look busy. */
+export const HELPER_USAGE_PURPOSES = ['steps', 'asks', 'next-actions'] as const;
+const HELPER_PURPOSES_SQL = `(${HELPER_USAGE_PURPOSES.map((purpose) => `'${purpose}'`).join(',')})`;
+
 export type UsageExecution = {
   id: string; chatId?: string; droneId?: string; chatName?: string; repo?: string;
   agent: string; purpose?: string; startedAt: string; status: string; observedAt?: string; snapshotAt?: string;
@@ -183,8 +187,8 @@ export class UsageStore {
       COALESCE(SUM(u.cost),0) AS estimatedCost, COALESCE(SUM(u.tokens),0) AS tokens, SUM(u.unpriced) AS unpriced,
       COALESCE(SUM(u.reported),0) AS reported,
       COALESCE(SUM(CASE WHEN e.purpose='steps' THEN u.cost END),0) AS stepsCost,
-      MIN(CASE WHEN e.status='running' AND e.purpose<>'steps' THEN e.started_at END) AS runningSince,
-      MAX(CASE WHEN e.status NOT IN ('running','queued','recovering') AND e.purpose<>'steps' THEN e.updated_at END) AS lastEndedAt
+      MIN(CASE WHEN e.status='running' AND e.purpose NOT IN ${HELPER_PURPOSES_SQL} THEN e.started_at END) AS runningSince,
+      MAX(CASE WHEN e.status NOT IN ('running','queued','recovering') AND e.purpose NOT IN ${HELPER_PURPOSES_SQL} THEN e.updated_at END) AS lastEndedAt
       FROM executions e LEFT JOIN chats c ON c.id=e.chat_id
       LEFT JOIN (SELECT execution_id, SUM(COALESCE(estimated_cost, reported_cost)) AS cost,
         SUM(COALESCE(input,0)+COALESCE(output,0)+COALESCE(cache_read,0)+COALESCE(cache_write,0)) AS tokens,
@@ -196,12 +200,33 @@ export class UsageStore {
       .map((row) => ({ ...row, unpriced: row.unpriced ?? 0, reported: row.reported ?? 0 }));
   }
 
+  /** What one helper purpose (such as asks) has cost, in one chat or across all of them. */
+  purposeCost(purpose: string, filter: { chatId?: string } = {}): { cost: number; calls: number; unpriced: number } {
+    const row = this.db.prepare(`SELECT COUNT(DISTINCT e.id) AS calls,
+      COALESCE(SUM(COALESCE(o.estimated_cost, o.reported_cost)),0) AS cost,
+      COUNT(CASE WHEN o.id IS NOT NULL AND o.estimated_cost IS NULL AND o.reported_cost IS NULL THEN 1 END) AS unpriced
+      FROM executions e LEFT JOIN observations o ON o.execution_id=e.id
+      WHERE e.purpose=? ${filter.chatId ? 'AND e.chat_id=?' : ''}`).get(...[purpose, ...(filter.chatId ? [filter.chatId] : [])]) as any;
+    return { cost: Number(row?.cost ?? 0), calls: Number(row?.calls ?? 0), unpriced: Number(row?.unpriced ?? 0) };
+  }
+
+  /** One helper purpose's cost per chat, most expensive first; chats are named by their current names. */
+  purposeCostByChat(purpose: string, limit = 20): Array<{ droneId: string; chatName: string; cost: number; calls: number; unpriced: number }> {
+    return (this.db.prepare(`SELECT COALESCE(c.drone_id,e.drone_id) AS droneId, COALESCE(c.name,e.chat_name) AS chatName,
+      COUNT(DISTINCT e.id) AS calls, COALESCE(SUM(COALESCE(o.estimated_cost, o.reported_cost)),0) AS cost,
+      COUNT(CASE WHEN o.id IS NOT NULL AND o.estimated_cost IS NULL AND o.reported_cost IS NULL THEN 1 END) AS unpriced
+      FROM executions e LEFT JOIN chats c ON c.id=e.chat_id LEFT JOIN observations o ON o.execution_id=e.id
+      WHERE e.purpose=? GROUP BY 1, 2 HAVING droneId IS NOT NULL AND chatName IS NOT NULL
+      ORDER BY cost DESC, calls DESC LIMIT ?`).all(purpose, limit) as any[])
+      .map((row) => ({ ...row, cost: Number(row.cost ?? 0), calls: Number(row.calls ?? 0), unpriced: Number(row.unpriced ?? 0) }));
+  }
+
   /** Chats with agent work running now, by their current names. */
   runningChats(): Array<{ droneId: string; chatName: string; chatId: string | null; startedAt: string }> {
     return this.db.prepare(`SELECT COALESCE(c.drone_id,e.drone_id) AS droneId, COALESCE(c.name,e.chat_name) AS chatName,
       e.chat_id AS chatId, MIN(e.started_at) AS startedAt
       FROM executions e LEFT JOIN chats c ON c.id=e.chat_id
-      WHERE e.status='running' AND e.purpose<>'steps'
+      WHERE e.status='running' AND e.purpose NOT IN ${HELPER_PURPOSES_SQL}
       GROUP BY 1, 2 HAVING droneId IS NOT NULL AND chatName IS NOT NULL`).all() as any[];
   }
 
