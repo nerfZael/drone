@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  nextChatComposerEditorView,
   selectChatComposerEditorModeTarget,
   type ChatComposerEditorModeTarget,
 } from '../src/droneHub/chat/chat-composer-editor-mode-shortcut';
@@ -44,5 +45,18 @@ describe('full-editor shortcut composer targeting', () => {
 
   test('does not guess when several non-primary composers are visible', () => {
     expect(selectChatComposerEditorModeTarget([target('left'), target('right')], null)).toBeNull();
+  });
+});
+
+describe('full-editor shortcut steps', () => {
+  test('a chat pane goes composer, editor, full height, then back to the composer', () => {
+    expect(nextChatComposerEditorView('composer', true)).toBe('editor');
+    expect(nextChatComposerEditorView('editor', true)).toBe('full-height');
+    expect(nextChatComposerEditorView('full-height', true)).toBe('composer');
+  });
+
+  test('a composer that cannot fill its pane, like the canvas, toggles', () => {
+    expect(nextChatComposerEditorView('composer', false)).toBe('editor');
+    expect(nextChatComposerEditorView('editor', false)).toBe('composer');
   });
 });

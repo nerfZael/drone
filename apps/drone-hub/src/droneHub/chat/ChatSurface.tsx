@@ -74,7 +74,7 @@ export function ChatSurfaceTranscript({
 
 export type ChatSurfaceComposerProps = Omit<
   ChatInputProps,
-  'attachmentsEnabled' | 'attachmentMode' | 'allowSendWhileWaiting'
+  'attachmentsEnabled' | 'attachmentMode' | 'allowSendWhileWaiting' | 'fullHeightEditor'
 > & {
   overlay?: React.ReactNode;
 };
@@ -107,6 +107,8 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
         // A native chat hands files to the model or its artifacts as bytes, so they stay inline-sized.
         uploadAttachmentFile={adapter.agentType === 'external' ? composer.uploadAttachmentFile : undefined}
         allowSendWhileWaiting={sendWhileWaiting}
+        // The surface is the size container the full-height editor fills.
+        fullHeightEditor
       />
     </div>
   );

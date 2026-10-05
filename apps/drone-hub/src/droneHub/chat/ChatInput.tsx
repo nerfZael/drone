@@ -65,6 +65,7 @@ import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 import {
   markCurrentChatComposerEditorModeTarget,
   registerChatComposerEditorModeTarget,
+  nextChatComposerEditorView,
 } from './chat-composer-editor-mode-shortcut';
 import { ChatVoiceSendCoordinator } from './chat-voice-send-coordinator';
 
@@ -222,6 +223,11 @@ export type ChatInputProps = {
   composerStatus?: React.ReactNode;
   composerFooter?: React.ReactNode;
   alwaysExpanded?: boolean;
+  /**
+   * The editor shortcut steps on from the editor to one filling the chat pane before closing.
+   * The pane must be the nearest size container.
+   */
+  fullHeightEditor?: boolean;
   allowSendWhileWaiting?: boolean;
   continuousVoiceEnabled?: boolean;
   editorCtrlEnterBehavior?: ChatEditorCtrlEnterBehavior;
@@ -285,6 +291,7 @@ export function ChatInput({
   composerStatus,
   composerFooter,
   alwaysExpanded = false,
+  fullHeightEditor = false,
   allowSendWhileWaiting = false,
   continuousVoiceEnabled = true,
   editorCtrlEnterBehavior = 'queue',
@@ -304,6 +311,7 @@ export function ChatInput({
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [composerFocused, setComposerFocused] = React.useState(false);
   const [uncontrolledEditorMode, setUncontrolledEditorMode] = React.useState(false);
+  const [editorFullHeightRequested, setEditorFullHeightRequested] = React.useState(false);
   const composerRootRef = React.useRef<HTMLDivElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
@@ -349,6 +357,9 @@ export function ChatInput({
       ? persistedDraft
       : uncontrolledDraft;
   const editorMode = persistenceKey ? persistedEditorMode : uncontrolledEditorMode;
+  const editorFullHeight = fullHeightEditor && editorMode && editorFullHeightRequested;
+  // Another chat in the same composer opens its editor at the usual height.
+  React.useEffect(() => setEditorFullHeightRequested(false), [resetKey]);
   const draftRef = React.useRef(draft);
   const composerSelectionRef = React.useRef<ChatComposerSelection>({
     start: draft.length,
@@ -663,7 +674,7 @@ export function ChatInput({
       active: editorMode,
       onSelect: () => {
         preloadMonacoEditor();
-        toggleEditorMode();
+        setEditorModeOpen(!editorMode);
       },
     },
     ...(continuousVoiceEnabled
@@ -801,16 +812,32 @@ export function ChatInput({
     if (editorMode) event.preventDefault();
   }
 
-  function toggleEditorMode() {
+  function setEditorModeOpen(open: boolean) {
     readComposerSelection();
     focusAfterModeChangeRef.current = true;
+    setEditorFullHeightRequested(false);
     if (persistenceKey) {
-      setChatInputEditorMode(persistenceKey, !editorMode);
+      setChatInputEditorMode(persistenceKey, open);
     } else {
-      setUncontrolledEditorMode((current) => !current);
+      setUncontrolledEditorMode(open);
     }
   }
-  toggleEditorModeRef.current = toggleEditorMode;
+
+  /** The shortcut: composer, editor, the editor at full height where it can fill the pane, then back. */
+  function stepEditorMode() {
+    const next = nextChatComposerEditorView(
+      editorFullHeight ? 'full-height' : editorMode ? 'editor' : 'composer',
+      fullHeightEditor,
+    );
+    if (next !== 'full-height') {
+      setEditorModeOpen(next === 'editor');
+      return;
+    }
+    readComposerSelection();
+    focusAfterModeChangeRef.current = true;
+    setEditorFullHeightRequested(true);
+  }
+  toggleEditorModeRef.current = stepEditorMode;
 
   React.useEffect(
     () =>
@@ -837,7 +864,7 @@ export function ChatInput({
     focusAfterModeChangeRef.current = false;
     const id = requestAnimationFrame(() => focusComposerAtSelection());
     return () => cancelAnimationFrame(id);
-  }, [editorMode]);
+  }, [editorMode, editorFullHeight]);
 
   function openPicker() {
     if (!attachmentsOn) return;
@@ -1303,7 +1330,11 @@ export function ChatInput({
       data-editor-mode-target-id={editorModeShortcutTargetId}
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
-      className="dh-chat-composer flex-shrink-0 bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)]"
+      data-editor-full-height={editorFullHeight ? 'true' : undefined}
+      className={`dh-chat-composer bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)] ${
+        // Covers the pane from its bottom edge: the transcript keeps its place underneath.
+        editorFullHeight ? 'absolute inset-x-0 bottom-0 z-30 flex h-[100cqh] flex-col' : 'flex-shrink-0'
+      }`}
       onPointerDownCapture={() => {
         markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
       }}
@@ -1313,7 +1344,7 @@ export function ChatInput({
         event.preventDefault();
         event.stopPropagation();
         markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
-        toggleEditorMode();
+        stepEditorMode();
       }}
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
@@ -1337,7 +1368,7 @@ export function ChatInput({
         addFiles(e.dataTransfer?.files ?? null, { source: 'file' });
       }}
     >
-      <div className="mx-auto max-w-[73.125rem]">
+      <div className={`mx-auto max-w-[73.125rem] ${editorFullHeight ? 'flex min-h-0 w-full flex-1 flex-col' : ''}`}>
         {(promptError || attachmentError) && (
           <div className="mb-2 text-11 text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
             {promptError || attachmentError}
@@ -1365,7 +1396,7 @@ export function ChatInput({
             if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
             setComposerFocused(false);
           }}
-          className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
+          className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible ${editorFullHeight ? 'flex flex-1 flex-col' : ''} rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
           } ${referenceDropActive ? 'ring-1 ring-[var(--accent)]' : ''} ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
             continuousDictationTargeted
@@ -1440,7 +1471,7 @@ export function ChatInput({
             />
           ) : null}
 
-          <div className={`dh-chat-composer-row relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'dh-chat-composer-row--collapsed min-h-[3.125rem] px-[.5625rem]'}`}>
+          <div className={`dh-chat-composer-row relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${editorFullHeight ? 'min-h-0 flex-1' : ''} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'dh-chat-composer-row--collapsed min-h-[3.125rem] px-[.5625rem]'}`}>
             {!composerExpanded && voiceRecordingActive ? (
               <>
                 <button
@@ -1564,7 +1595,7 @@ export function ChatInput({
               </button>
             ) : null}
             {!composerExpanded && !voiceRecordingActive ? (
-              <ChatComposerEditorToggle onToggle={toggleEditorMode} />
+              <ChatComposerEditorToggle onToggle={() => setEditorModeOpen(true)} />
             ) : null}
             {editorMode ? (
               <div
@@ -1584,6 +1615,7 @@ export function ChatInput({
                 <ChatComposerEditor
                   key={resetKey}
                   ref={editorRef}
+                  fillHeight={editorFullHeight}
                   value={draft}
                   disabled={composerLocked}
                   autoFocus={autoFocus}

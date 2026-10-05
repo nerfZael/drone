@@ -45,6 +45,8 @@ type ChatComposerEditorProps = {
   onSendQueued: () => void;
   ariaLabel: string;
   maxHeight?: string;
+  /** Fills its container's height instead of growing with the text. */
+  fillHeight?: boolean;
   /** Keep input and keyboard focus scoped to an editor that can move between windows. */
   portable?: boolean;
 };
@@ -72,6 +74,7 @@ export const ChatComposerEditor = React.forwardRef<
     onSendQueued,
     ariaLabel,
     maxHeight,
+    fillHeight,
     portable,
   },
   forwardedRef,
@@ -329,9 +332,9 @@ export const ChatComposerEditor = React.forwardRef<
       }}
       className="relative w-full overflow-hidden bg-[var(--chat-composer-input)]"
       style={{
-        height: editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
+        height: fillHeight ? '100%' : editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
         minHeight: CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
-        maxHeight: maxHeight ?? CHAT_COMPOSER_EDITOR_MAX_HEIGHT,
+        maxHeight: fillHeight ? 'none' : maxHeight ?? CHAT_COMPOSER_EDITOR_MAX_HEIGHT,
       }}
     >
       <MonacoEditorErrorBoundary fallback={fallback}>

@@ -113,7 +113,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleChatComposerEditorMode',
     label: 'Toggle full text editor',
-    description: 'Toggles full text editor mode for the chat composer that currently has focus.',
+    description: 'Opens full text editor mode for the chat composer that currently has focus. In a chat pane, pressing it again fills the pane and a third press closes it.',
   },
   {
     id: 'toggleChatVoiceRecording',

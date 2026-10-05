@@ -45,3 +45,15 @@ export function toggleCurrentChatComposerEditorMode(): boolean {
   target.toggle();
   return true;
 }
+
+export type ChatComposerEditorView = 'composer' | 'editor' | 'full-height';
+
+/** Where the shortcut goes next: on to the full-height editor where the composer can fill its pane, then back. */
+export function nextChatComposerEditorView(
+  current: ChatComposerEditorView,
+  fullHeightAvailable: boolean,
+): ChatComposerEditorView {
+  if (current === 'composer') return 'editor';
+  if (current === 'editor' && fullHeightAvailable) return 'full-height';
+  return 'composer';
+}
