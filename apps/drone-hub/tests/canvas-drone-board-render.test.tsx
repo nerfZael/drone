@@ -30,6 +30,15 @@ import type { DroneSummary } from '../src/droneHub/types';
 const agent = { kind: 'builtin', id: 'claude' };
 const alpha = (chatName: string) => createCanvasChatNodeId('alpha', chatName);
 
+const openComposer = (container: { querySelector: (selector: string) => unknown }) => act(async () => {
+  // Folded to one line while empty, the canvas composer opens when clicked, which focuses it. Blurred first, as a
+  // click from elsewhere would, so a composer that kept focus through a board switch still sees it arrive.
+  const textarea = container.querySelector('[data-canvas-message-bar] textarea') as unknown as HTMLTextAreaElement;
+  textarea.blur();
+  textarea.focus();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
 function makeDrone(
   chats: string[],
   sideChats: Array<[string, string]> = [],
@@ -804,10 +813,14 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     // The keyboard stays on the canvas, so Q records into the new draft at once.
     expect(dom.document.activeElement).toBe(viewport());
     // The new drone is set up from the composer, before typing: its repository beside the recipient line, and the
-    // canvas's agent, model, and access in the toolbar's picker.
+    // canvas's agent, model, and access in the picker, on the folded line and in the open composer's toolbar alike.
     expect(container.querySelector('[data-selected-chats-composer-meta] [data-canvas-draft-controls]')).not.toBeNull();
+    expect(container.querySelector('[data-chat-composer-collapsed-controls] [data-chat-composer-runtime-picker] > button')?.textContent).toBe('Codex · Saved model (High)');
+    await openComposer(container);
+    expect(container.querySelector('[data-chat-composer-collapsed-controls]')).toBeNull();
     expect(container.querySelector('[data-chat-composer-runtime-picker] > button')?.textContent).toBe('Codex · Saved model (High)');
     expect(container.querySelector('[data-chat-composer-model-picker]')).toBeNull();
+    await act(async () => (viewport() as unknown as HTMLElement).focus());
     const recordingsBeforeDraft = recordings;
     await key(viewport() as unknown as Element, 'q');
     expect(recordings).toBe(recordingsBeforeDraft + 1);
@@ -1159,7 +1172,15 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
       createdChats.push({ droneId, settings });
       return true;
     }} />); await settle(); });
-    // With nothing selected, the composer still shows what new cards start with.
+    // Empty, the composer is one slim line that still shows what new cards start with, even with nothing selected.
+    const foldedPicker = container.querySelector('[data-chat-composer-collapsed-controls] [data-chat-composer-runtime-picker] > button') as unknown as HTMLButtonElement;
+    expect(foldedPicker.textContent).toBe('Codex · Auto');
+    // It changes from there too, and the composer stays folded while its menu is open.
+    await act(async () => { foldedPicker.focus(); foldedPicker.click(); await settle(); });
+    expect(panelButton('Codex')).toBeDefined();
+    expect(container.querySelector('[data-chat-composer-expanded]')?.getAttribute('data-chat-composer-expanded')).toBe('false');
+    await act(async () => { foldedPicker.click(); await settle(); });
+    await openComposer(container);
     expect(picker()?.textContent).toBe('Codex · Auto');
     // Access and approvals show as small icons beside the model, so every setting fits on the one button.
     const choiceIcons = () => Array.from(picker()?.querySelectorAll('[data-chat-composer-runtime-choice]') ?? [])
@@ -1173,6 +1194,8 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
 
     // A new chat that has had no message follows the picker; another agent keeps only the access it can use.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('Untitled')]); await settle(); });
+    await openComposer(container);
+    // Its menu opens outside the composer, which stays open meanwhile.
     await act(async () => picker()!.click());
     await act(async () => panelButton('Codex').click());
     await act(async () => { panelButton('Claude Code').click(); await settle(); });
@@ -1186,6 +1209,7 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
 
     // A chat that has had its first message keeps its own settings, with a one-off override instead.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]); await settle(); });
+    await openComposer(container);
     expect(picker()).toBeNull();
     expect(configs).toHaveLength(1);
     expect(useDroneCanvasStore.getState().newCardSettings).toEqual(claude as never);
@@ -1496,11 +1520,13 @@ test('back and forward switch between the global and this drone boards, and a do
       onActivateChat={(id, chat) => opened.push(`${id}:${chat}`)} />));
     // What a double-click makes next is in the composer's picker, the same on every board.
     const picker = () => container.querySelector('[data-chat-composer-runtime-picker] > button')?.textContent;
+    await openComposer(container);
     const pickerOnDroneBoard = picker();
     expect(pickerOnDroneBoard).toBe('Cursor · Auto');
     // Backspace goes back to the global board, Shift+Backspace forward to this drone's; so do Alt+Left and Alt+Right.
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');
+    await openComposer(container);
     expect(picker()).toBe(pickerOnDroneBoard);
     await act(async () => Simulate.keyDown(viewport(), { key: 'Backspace' }));
     expect(scope()).toBe('global');

@@ -236,12 +236,6 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
     const option = group.options.find((candidate) => candidate.value === group.value);
     return option ? [{ group, option }] : [];
   });
-  const groupSummary = activeChoices.map(({ group, option }) => `${group.title}: ${option.label}`).join(', ');
-  const title = [
-    'Choose agent, model, and access',
-    triggerLabel,
-    groupSummary,
-  ].filter(Boolean).join('\n');
   // Nothing here is changeable, so the trigger only shows the current settings.
   const disabled =
     (!agent || agent.disabled) &&
@@ -262,7 +256,6 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
             aria-label="Choose agent, model, and access"
             aria-haspopup="dialog"
             aria-expanded={open}
-            title={title}
             className="inline-flex h-8 max-w-[min(20rem,100%)] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <span className="min-w-0 truncate">
@@ -281,7 +274,6 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
                 key={group.id}
                 data-chat-composer-runtime-choice={group.id}
                 className="flex flex-shrink-0 items-center"
-                title={`${group.title}: ${option.label}`}
                 aria-label={`${group.title}: ${option.label}`}
               >
                 {option.icon}

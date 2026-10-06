@@ -154,20 +154,17 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
             : detail.state === 'need'
             ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
             : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
-      }` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_2px_4px_var(--shadow-color)] transition-[border-color,background-color] duration-100 flex items-center ${
-        dragging
-          ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_2px_4px_var(--shadow-color)]'
-          : assignmentHoverTarget
-            ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_2px_4px_var(--shadow-color)]'
-            : selected || inlineEditing
-              ? 'border-[var(--accent-muted)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-subtle),0_2px_4px_var(--shadow-color)]'
-              : draftNode
-                ? 'border-[var(--user-border)] bg-[var(--panel-overlay-soft)] hover:border-[var(--muted)]'
-                : droneNode
-                  ? runtime === 'host'
-                    ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel-overlay)_58%)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_2px_4px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
-                    : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel-overlay)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_2px_4px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
-                  : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
+      }` : `group/canvas-node absolute overflow-visible rounded-[9px] border text-left shadow-[0_1px_2px_rgba(0,0,0,.3),0_2px_4px_rgba(0,0,0,.25)] transition-[border-color,background-color] duration-100 flex items-center ${
+        // The detailed card's look: one fill, and the border says the rest.
+        dragging || assignmentHoverTarget || selected || inlineEditing
+          ? 'border-[var(--accent)] bg-[var(--panel-alt)]'
+          : draftNode
+            ? 'border-dashed border-[var(--user-border)] bg-[var(--panel)] hover:border-[var(--muted)]'
+            : droneNode
+              ? runtime === 'host'
+                ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel)_58%)] hover:border-[var(--canvas-chat-owner)]'
+                : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel)] hover:border-[var(--canvas-chat-owner)]'
+              : 'border-[var(--border)] bg-[var(--panel)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
       }`}
       style={{
         left: 0,
@@ -182,7 +179,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       }}
     >
       {isActiveSidebarChat && !detail ? (
-        <span className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-md bg-[var(--accent)] z-[2]" />
+        <span className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-[9px] bg-[var(--accent)] z-[2]" />
       ) : null}
       {/* A detailed card says all of this inside it. */}
       {indicator && !detail ? (
@@ -212,7 +209,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
         // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
           className={`pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap ${
-            droneNode || draftNode || selected ? '' : 'invisible group-hover/canvas-node:visible'
+            draftNode || selected ? '' : 'invisible group-hover/canvas-node:visible'
           }`}
           data-canvas-card-repo
         >

@@ -149,7 +149,6 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
             <div
               key={control.id}
               className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 px-1 text-caption"
-              title={control.title ?? accessibleLabel}
               aria-label={accessibleLabel}
             >
               {control.label ? (
@@ -177,7 +176,6 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               entries={control.entries}
               disabled={control.disabled}
               triggerClassName={`!h-8 justify-start !gap-1 !border-transparent !bg-transparent px-2 text-compact !font-medium normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70 ${controlWidthClass(control.width)}`}
-              title={control.title}
               triggerLabel={control.label}
               chevron={() => (
                 <svg
@@ -217,7 +215,6 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
                   ? 'cursor-not-allowed opacity-40'
                   : 'hover:opacity-70'
               }`}
-              title={control.title}
               aria-label={control.title}
             />
           );
@@ -258,7 +255,6 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
             disabled={control.disabled}
             aria-pressed={control.active}
             aria-label={control.title}
-            title={control.title}
             onClick={control.onSelect}
             className={`inline-flex h-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-caption font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${
               iconOnly ? 'w-8' : 'px-2'

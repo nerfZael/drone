@@ -43,7 +43,6 @@ export function ChatComposerMenu({
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-label={label}
-        title={label}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity ${

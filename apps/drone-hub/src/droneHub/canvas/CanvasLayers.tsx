@@ -99,9 +99,10 @@ export function CanvasWorldLayer({ boardDroneId, children }: {
         className="absolute left-0 top-0"
         style={{ transform: `translate(${snapToDevicePixels(panX)}px, ${snapToDevicePixels(panY)}px)` }}
       >
+        {/* The board's own palette (the work canvas's): cards, lines and their states, in either card style. */}
         <div
           data-canvas-world="1"
-          className="absolute left-0 top-0"
+          className="dh-canvas-work absolute left-0 top-0"
           style={{ transform: `scale(${scale})`, transformOrigin: '0 0' }}
         >
           {children}

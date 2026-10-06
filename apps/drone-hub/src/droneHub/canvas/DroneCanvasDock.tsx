@@ -2968,7 +2968,7 @@ export function DroneCanvasDock({
         tabIndex={0}
         data-shortcut-capture="true"
         data-drone-canvas-viewport="1"
-        className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${canvasDetailedCards ? 'dh-canvas-work-ground' : ''} ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
+        className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none dh-canvas-work-ground ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onKeyDown={onViewportKeyDown}
         onMouseDown={onCanvasMouseDown}
         onMouseUp={onCanvasMouseUp}

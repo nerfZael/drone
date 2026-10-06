@@ -130,7 +130,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
       data-canvas-message-bar={surface === 'canvas' ? '1' : undefined}
       data-canvas-message-input={surface === 'canvas' ? '1' : undefined}
       className={surface === 'canvas'
-        ? 'absolute bottom-2 left-1/2 z-20 w-[min(26rem,calc(100%-1rem))] -translate-x-1/2'
+        ? 'dh-canvas-composer absolute bottom-2 left-1/2 z-20 w-[min(26rem,calc(100%-1rem))] -translate-x-1/2'
         : 'flex-shrink-0 px-2 pb-2 pt-1'}
       onMouseDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -147,9 +147,10 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
       <ChatInput resetKey={props.selectionKey} droneName={targetLabel} focusTargetId={`${surface}:${props.selectionKey}`}
         draftValue={props.draft} onDraftValueChange={props.onDraftChange} onDraftContentChange={props.onDraftContentChange}
         promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
-        placeholder={props.selectedCount === 0 ? 'Select chats to message' : undefined}
-        // The canvas's settings for new cards sit in the toolbar, so it stays open.
-        alwaysExpanded={Boolean(props.runtimePicker)}
+        // On the canvas the empty composer folds to one slim line, and opens when clicked or typed in: the board
+        // stays clear. The line keeps the agent and model in sight, and widens to fit them beside the placeholder.
+        placeholder={props.selectedCount === 0 ? 'Select chats to message' : surface === 'canvas' ? 'Ask the agent' : undefined}
+        alwaysExpanded={surface !== 'canvas' && Boolean(props.runtimePicker)}
         onSend={async (payload, context) => {
           if (props.selectedCount === 0) return false;
           const references = props.references;

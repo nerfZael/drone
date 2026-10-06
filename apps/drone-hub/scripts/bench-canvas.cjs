@@ -27,6 +27,9 @@ const esbuild = require('esbuild');
 //   --panx=20 --pany=20     starting pan; a fraction of a pixel shows whether text stays sharp
 //   --still                 only save a screenshot of the board at rest (still.png), e.g. to compare sharpness
 //   --zoomin=10 --settle=1500  with --still: first zoom in with that many wheel notches, then wait
+//   --full --select         with --still: capture the whole window; select a chat card first
+//   --theme=catppuccin-mocha  with --still: show the board in that app theme
+//   --editor               with --still: open the composer's editor mode first
 //   --nolayer               draw the pan as a plain 2D transform with no GPU layer, as the canvas once did
 //   --fraclayer             move the pan layer by the exact fractional pan, as before it snapped to pixels
 //   --out=result.json       write the raw summaries
@@ -189,6 +192,7 @@ async function main() {
       }
       if (options.still) {
         await new Promise((resolve) => setTimeout(resolve, 2500));
+        if (options.theme) await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(options.theme)}; 0`);
         if (options.zoomIn) {
           // Arrive at the zoom with the wheel, as a person does, rather than loading at it.
           const at = await win.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-drone-canvas-viewport]').getBoundingClientRect(); return { x: Math.round(r.x + 150), y: Math.round(r.y + 120) }; })()`);
@@ -200,7 +204,16 @@ async function main() {
           await new Promise((resolve) => setTimeout(resolve, options.settleMs));
           console.log('ZOOMED ' + await win.webContents.executeJavaScript(`document.querySelector('[data-canvas-pan]').style.transform + ' ' + document.querySelector('[data-canvas-world]').style.transform`));
         }
-        const image = await win.webContents.capturePage({ x: 0, y: 60, width: 700, height: 260 });
+        if (options.select) {
+          await win.webContents.executeJavaScript(`document.querySelector('[data-canvas-node-kind="chat"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); 0`);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+        if (options.editor) {
+          await win.webContents.executeJavaScript(`document.querySelector('[data-canvas-message-bar] [aria-label="Open editor mode"]').click(); 0`);
+          await win.webContents.executeJavaScript(`new Promise((resolve) => setTimeout(() => { document.querySelector('[data-canvas-message-bar] textarea, [data-canvas-message-bar] .monaco-editor textarea')?.focus(); resolve(0); }, 2500))`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        const image = await win.webContents.capturePage(options.full ? undefined : { x: 0, y: 60, width: 700, height: 260 });
         fs.writeFileSync(path.join(__dirname, 'still.png'), image.toPNG());
         console.log('STILL ' + path.join(__dirname, 'still.png'));
         app.exit(0);
@@ -324,7 +337,7 @@ async function main() {
   fs.writeFileSync(path.join(dir, 'runner.cjs'), `(${desktopRunner.toString()})()`);
   const env = { ...process.env, CANVAS_BENCH_OPTIONS: JSON.stringify({
     trace: args.trace ?? '', wheel: Number(args.wheel ?? 60), width: Number(args.width ?? 1400), height: Number(args.height ?? 900), shots: Boolean(args.shots),
-    noshadow: Boolean(args.noshadow), shadow: args.shadow ?? '', nogrid: Boolean(args.nogrid), nolayer: Boolean(args.nolayer), fraclayer: Boolean(args.fraclayer), still: Boolean(args.still), zoomIn: Number(args.zoomin ?? 0), settleMs: Number(args.settle ?? 1500), probeblur: Boolean(args.probeblur), panX: Number(args.panx ?? 20), panY: Number(args.pany ?? 20),
+    noshadow: Boolean(args.noshadow), shadow: args.shadow ?? '', nogrid: Boolean(args.nogrid), nolayer: Boolean(args.nolayer), fraclayer: Boolean(args.fraclayer), still: Boolean(args.still), full: Boolean(args.full), select: Boolean(args.select), theme: String(args.theme ?? ''), editor: Boolean(args.editor), zoomIn: Number(args.zoomin ?? 0), settleMs: Number(args.settle ?? 1500), probeblur: Boolean(args.probeblur), panX: Number(args.panx ?? 20), panY: Number(args.pany ?? 20),
   }) };
   delete env.ELECTRON_RUN_AS_NODE;
   const output = execFileSync(require('electron'), [path.join(dir, 'runner.cjs')], {

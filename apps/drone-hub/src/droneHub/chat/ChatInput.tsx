@@ -125,7 +125,6 @@ function ChatComposerEditorToggle({ onToggle }: { onToggle: () => void }) {
       aria-pressed={false}
       aria-label="Open editor mode"
       className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70"
-      title="Use a full text editor; queue with the button or Ctrl/Command+Enter"
     >
       <CodeEditorIcon />
     </button>
@@ -450,7 +449,7 @@ export function ChatInput({
   ]);
   const ownsActiveComposer = activeComposer.activeComposerId === activeComposerTargetId;
   const continuousDictationTargeted = Boolean(
-    ownsActiveComposer && continuousDictation?.status !== 'idle',
+    ownsActiveComposer && continuousDictation != null && continuousDictation.status !== 'idle',
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -752,6 +751,23 @@ export function ChatInput({
     Boolean(promptError || attachmentError) ||
     continuousDictationTargeted ||
     continuousVoiceActive;
+  // On the folded line the agent and model picker sits beside the text. The placeholder keeps room for all of
+  // itself and a gap before the picker: the picker gives way first, and a composer sized to its content grows.
+  const collapsedControlsShown = !composerExpanded && Boolean(composerLeadingControls ?? composerTrailingControls);
+  const [placeholderMinWidth, setPlaceholderMinWidth] = React.useState<number | undefined>(undefined);
+  React.useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!collapsedControlsShown || !placeholder || !textarea) {
+      setPlaceholderMinWidth(undefined);
+      return;
+    }
+    const style = textarea.ownerDocument.defaultView?.getComputedStyle(textarea);
+    const context = textarea.ownerDocument.createElement('canvas').getContext?.('2d');
+    if (!style || !context) return;
+    context.font = style.font || `${style.fontSize} ${style.fontFamily}`;
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    setPlaceholderMinWidth(Math.ceil(context.measureText(placeholder).width + padding + 16));
+  }, [collapsedControlsShown, placeholder]);
   // Expanding and collapsing swap the textarea's padding; keep its height in step.
   React.useEffect(() => {
     resizeTextarea();
@@ -1421,19 +1437,26 @@ export function ChatInput({
         ) : null}
         <div
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
+          data-chat-composer-editor={editorMode ? 'true' : undefined}
           onFocusCapture={(event) => {
             markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
             focusActiveComposer();
             const target = event.target;
             if (
               target instanceof Element &&
-              target.closest('[data-chat-composer-collapsed-action="true"]')
+              target.closest('[data-chat-composer-collapsed-action="true"], [data-chat-composer-collapsed-controls="true"]')
             ) return;
+            // A picker's menu is portalled out to the end of the page, but React still passes its focus up here.
+            // Choosing an agent or model from the folded line leaves the composer folded.
+            if (target instanceof Node && !event.currentTarget.contains(target)) return;
             setComposerFocused(true);
           }}
           onBlurCapture={(event) => {
             const nextTarget = event.relatedTarget;
             if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+            // A picker's menu (agent, model) opens at the end of the page, outside the composer. Moving into it is
+            // still using the composer: folded, the composer would take the picker, and its open menu, away.
+            if (nextTarget instanceof Element && nextTarget.closest('[data-radix-popper-content-wrapper]')) return;
             setComposerFocused(false);
           }}
           className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible ${editorFullHeight ? 'flex flex-1 flex-col' : ''} rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
@@ -1521,7 +1544,6 @@ export function ChatInput({
                   onClick={() => void discardVoiceRecording()}
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
                   className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Discard recording"
                   aria-label="Discard recording"
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -1535,7 +1557,7 @@ export function ChatInput({
                     setComposerFocused(true);
                     window.requestAnimationFrame(() => textareaRef.current?.focus());
                   }}
-                  title="Type a message while recording"
+                  aria-label="Type a message while recording"
                   className="flex min-w-0 flex-1 cursor-text items-center gap-[.4375rem] self-stretch px-3 text-left text-[.625rem] font-medium tracking-[.015625rem] outline-none"
                 >
                   <span
@@ -1565,7 +1587,6 @@ export function ChatInput({
                         ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
                     }`}
-                    title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                     aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                   >
                     {voiceRecordingStatus === 'paused' ? (
@@ -1586,7 +1607,6 @@ export function ChatInput({
                     onClick={() => void stopVoiceRecordingAndFillDraft()}
                     disabled={voiceStopButtonDisabled}
                     className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                    title="Stop recording and transcribe"
                     aria-label="Stop recording and transcribe"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1605,7 +1625,6 @@ export function ChatInput({
                     }
                     disabled={sendDisabled}
                     className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                    title={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
                     aria-label={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1625,7 +1644,6 @@ export function ChatInput({
                 onClick={openPicker}
                 disabled={attachmentControlsLocked}
                 className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                title={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
                 aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
               >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -1752,6 +1770,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder={placeholder}
+              style={placeholderMinWidth ? { minWidth: placeholderMinWidth } : undefined}
               className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
@@ -1766,6 +1785,13 @@ export function ChatInput({
             )}
             {!composerExpanded ? (
               <>
+                {/* The agent, model and reasoning stay in sight on the single line, and change from here without
+                    opening the composer: the toolbar that holds them is only there when it is open. */}
+                {composerLeadingControls ?? composerTrailingControls ? (
+                  <div data-chat-composer-collapsed-controls="true" className="flex min-w-0 max-w-[55%] flex-shrink items-center">
+                    {composerLeadingControls ?? composerTrailingControls}
+                  </div>
+                ) : null}
                 {!voiceRecordingActive && composerStatus ? (
                   <div
                     data-chat-composer-collapsed-action="true"
@@ -1784,7 +1810,6 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1801,7 +1826,6 @@ export function ChatInput({
                     onClick={() => void onStop?.()}
                     disabled={stopping}
                     className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={stopping ? 'Stopping response' : 'Stop response'}
                     aria-label={stopping ? 'Stopping response' : 'Stop response'}
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1829,7 +1853,6 @@ export function ChatInput({
                   onClick={() => void discardVoiceRecording()}
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
                   className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Discard recording"
                   aria-label="Discard recording"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -1843,7 +1866,6 @@ export function ChatInput({
                   onMouseDown={preserveEditorFocus}
                   onClick={() => void continuousVoice.cancel()}
                   className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70"
-                  title="Cancel continuous voice and discard unsent audio"
                   aria-label="Cancel continuous voice and discard unsent audio"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -1857,7 +1879,6 @@ export function ChatInput({
                   onClick={openPicker}
                   disabled={attachmentControlsLocked}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
                   aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -1949,7 +1970,7 @@ export function ChatInput({
                     ? 'cursor-not-allowed border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] opacity-40'
                     : 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-70'
                 }`}
-                title="Publish this draft and send queued messages"
+                aria-label="Publish this draft and send queued messages"
               >
                 {publishing ? 'Publishing...' : 'Publish'}
               </button>
@@ -1971,7 +1992,6 @@ export function ChatInput({
                         ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
                     }`}
-                    title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                     aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                   >
                     {voiceRecordingStatus === 'paused' ? (
@@ -1991,7 +2011,6 @@ export function ChatInput({
                     onClick={() => void stopVoiceRecordingAndFillDraft()}
                     disabled={voiceStopButtonDisabled}
                     className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                    title="Stop recording and transcribe"
                     aria-label="Stop recording and transcribe"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2007,7 +2026,6 @@ export function ChatInput({
                     onClick={continuousVoice.togglePause}
                     disabled={continuousVoice.status === 'starting' || continuousVoice.status === 'stopping'}
                     className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                    title={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
                     aria-label={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
                   >
                     {continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? (
@@ -2027,7 +2045,6 @@ export function ChatInput({
                     onClick={() => void continuousVoice.stop()}
                     disabled={continuousVoice.status === 'starting' || continuousVoice.status === 'stopping' || continuousVoice.status === 'error'}
                     className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                    title="Stop continuous voice after pending thoughts are sent"
                     aria-label="Stop continuous voice after pending thoughts are sent"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2045,7 +2062,6 @@ export function ChatInput({
                   }}
                   disabled={voiceRecordButtonDisabled}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title={voiceRecordDisabledReason ?? 'Record voice message'}
                   aria-label="Record voice message"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2063,7 +2079,6 @@ export function ChatInput({
                 onClick={() => void onStop?.()}
                 disabled={stopping}
                 className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
-                title={stopping ? 'Stopping response' : 'Stop response'}
                 aria-label={stopping ? 'Stopping response' : 'Stop response'}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2093,15 +2108,6 @@ export function ChatInput({
                     ? 'cursor-not-allowed border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] opacity-40'
                     : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
               }`}
-              title={
-                showStopAction && !showSeparateStopAction
-                  ? 'Stop response'
-                  : editorMode
-                    ? 'Queue message. You can also queue with Ctrl/Command+Enter.'
-                  : onSendInNewChat
-                    ? 'Queue message (Enter). Send ASAP with Tab. Send in a new chat with Ctrl/Command+Enter.'
-                    : 'Queue message (Enter). Send ASAP with Tab.'
-              }
               aria-label={sendButtonLabel}
             >
                 {showStopAction && !showSeparateStopAction ? (

@@ -206,6 +206,9 @@
   --chat-composer-input: var(--surface-inset);
   --chat-composer-input-border: var(--border-subtle);
   --chat-composer-input-focus-border: var(--user-muted);
+  /* Editor mode: the editor, its gutter and the row below it on one surface, the composer's own, so turning the
+     editor on does not change the composer's colour. */
+  --chat-composer-editor-surface: var(--chat-composer-surface);
 
   /* ── Typography ── */
   --ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -482,7 +485,7 @@
   --chat-user-message-time: #bac2de;
   --chat-composer-border: rgba(69, 71, 90, .56);
   --chat-composer-focus-border: rgba(203, 166, 247, .38);
-  --chat-composer-surface: #313244;
+  --chat-composer-surface: #262637;
   --chat-composer-fg: #e6e9ff;
   --chat-composer-placeholder: #a6adc8;
   --chat-composer-control-bg: rgba(69, 71, 90, .34);
@@ -500,7 +503,7 @@
   --chat-composer-radius: .75rem;
   --chat-composer-control-radius: .5rem;
   --chat-composer-shadow: 0 .25rem .875rem rgba(17, 17, 27, .18);
-  --chat-composer-input: #313244;
+  --chat-composer-input: #262637;
   --chat-composer-input-border: transparent;
   --chat-composer-input-focus-border: transparent;
   --link: #89b4fa;
@@ -859,6 +862,24 @@ code, pre {
    board costs, and the board is redrawn at every step of a zoom to keep its text sharp. */
 .dh-canvas-work.work-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 4px rgba(0, 0, 0, .25); }
 .dh-canvas-work-ground { background: #0f1116; }
+/* The canvas composer floats on that ground in the slate of the default theme, whichever theme the app is in:
+   it belongs to the board, like the cards. */
+.dh-canvas-composer {
+  --fg: #e5e9f0; --fg-secondary: #c7cdda; --muted: #a2aabc; --muted-dim: #858ea3;
+  --panel: #11161e; --panel-alt: #171d27; --panel-raised: #1c2330; --border: #3b4557; --border-subtle: #293241;
+  --surface-softest: rgba(255, 255, 255, .02); --surface-strong: rgba(255, 255, 255, .06); --surface-inset: rgba(0, 0, 0, .14);
+  --accent: #9ea2ff; --accent-fg: #0f1116; --accent-border: rgba(158, 162, 255, .34); --accent-subtle: rgba(158, 162, 255, .12);
+  --chat-composer-border: #3b4557; --chat-composer-focus-border: #4a5568; --chat-composer-surface: #1c2330;
+  --chat-composer-fg: #e5e9f0; --chat-composer-placeholder: #a2aabc;
+  --chat-composer-control-bg: rgba(255, 255, 255, .02); --chat-composer-control-border: #293241;
+  --chat-composer-control-fg: #c7cdda; --chat-composer-model-fg: #a2aabc; --chat-composer-context-track: #293241;
+  --chat-composer-expanded-placeholder: #a2aabc; --chat-composer-expanded-control-bg: rgba(255, 255, 255, .06);
+  --chat-composer-expanded-control-border: #3b4557; --chat-composer-expanded-control-fg: #e5e9f0;
+  --chat-composer-expanded-model-fg: #c7cdda; --chat-composer-expanded-context-track: #3b4557;
+  --chat-composer-input: rgba(0, 0, 0, .14); --chat-composer-input-border: #293241; --chat-composer-input-focus-border: #3b4557;
+  --chat-composer-editor-surface: #1c2330;
+  --chat-composer-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .48);
+}
 /* Drone canvas: while panning or drawing a selection, a shield covers the cards, so content moving under the
    pointer hit-tests one element and restyles no card's hover. Only the shield restyles when this toggles. */
 [data-canvas-gesture] > [data-canvas-gesture-shield] { display: block; }
@@ -2059,19 +2080,24 @@ code, pre {
   outline-offset: 2px;
 }
 
-/* Monaco has one theme per page, and Mocha's is tuned for the file editor's darker
-   well. The chat composer is a raised field, so it keeps the composer's colours. */
-:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor {
-  --vscode-editor-background: var(--chat-composer-input);
-  --vscode-editorGutter-background: var(--chat-composer-input);
-  --vscode-editor-foreground: var(--fg-secondary);
+/* Monaco has one theme per page, tuned for the file editor's well. In the chat composer the editor sits on the
+   composer's editor surface instead, gutter included, so the editor and the row below it read as one field. */
+.dh-chat-composer-box[data-chat-composer-editor='true'] {
+  background: var(--chat-composer-editor-surface);
 }
-:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .mtk1 {
-  color: var(--fg-secondary);
+[data-editor-zoom-surface='chat-composer-editor'] .monaco-editor {
+  --vscode-editor-background: var(--chat-composer-editor-surface);
+  --vscode-editorGutter-background: var(--chat-composer-editor-surface);
+  --vscode-editor-foreground: var(--chat-composer-fg);
+  --vscode-editorLineNumber-foreground: var(--muted-dim);
+  --vscode-editorLineNumber-activeForeground: var(--fg-secondary);
 }
-:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .view-overlays .current-line,
-:root[data-theme='catppuccin-mocha'] [data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .margin-view-overlays .current-line-margin {
-  background-color: #cdd6f40d;
+[data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .mtk1 {
+  color: var(--chat-composer-fg);
+}
+[data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .view-overlays .current-line,
+[data-editor-zoom-surface='chat-composer-editor'] .monaco-editor .margin-view-overlays .current-line-margin {
+  background-color: rgba(255, 255, 255, .03);
 }
 
 .monaco-editor .dh-editor-target-line-highlight {
@@ -4192,6 +4218,12 @@ select:disabled optgroup {
   padding-right: .625rem;
 }
 
+/* The editor runs edge to edge, like the agent chat's. */
+[data-selected-chats-composer] [data-chat-composer-editor='true'] .dh-chat-composer-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 [data-selected-chats-composer] .dh-chat-composer-row--collapsed {
   min-height: 2.25rem;
   padding-left: .25rem;
@@ -4212,4 +4244,43 @@ select:disabled optgroup {
 [data-selected-chats-composer] .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
   width: 1.875rem;
   height: 1.875rem;
+}
+
+/* On the canvas, folded, the composer is one slim line over the board. */
+/* Folded, it is as wide as the placeholder and the picker need, and never narrower than when open. */
+.dh-canvas-composer:has([data-chat-composer-expanded="false"]) {
+  width: max-content;
+  min-width: min(26rem, calc(100% - 1rem));
+  max-width: calc(100% - 1rem);
+}
+
+.dh-canvas-composer [data-chat-composer-collapsed-controls="true"] {
+  max-width: none;
+}
+
+.dh-canvas-composer .dh-chat-composer-row--collapsed {
+  min-height: 2rem;
+  padding-left: .1875rem;
+  padding-right: .1875rem;
+}
+
+.dh-canvas-composer .dh-chat-composer-row--collapsed textarea {
+  min-height: 2rem;
+  padding: .3125rem .375rem;
+  font-size: .8125rem;
+  line-height: 1.375rem;
+}
+
+.dh-canvas-composer .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
+  width: 1.625rem;
+  height: 1.625rem;
+}
+
+.dh-canvas-composer .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] svg {
+  width: .9375rem;
+  height: .9375rem;
+}
+
+.dh-canvas-composer .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-controls="true"] button {
+  height: 1.625rem;
 }
