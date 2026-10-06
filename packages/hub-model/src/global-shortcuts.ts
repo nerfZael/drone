@@ -41,6 +41,8 @@ export const DRONE_HUB_SHORTCUT_ACTION_IDS = [
   'openFilesTab',
   'openQuickOpen',
   'openTerminalTab',
+  'canvasBack',
+  'canvasForward',
 ] as const;
 
 export type DroneHubShortcutActionId = (typeof DRONE_HUB_SHORTCUT_ACTION_IDS)[number];

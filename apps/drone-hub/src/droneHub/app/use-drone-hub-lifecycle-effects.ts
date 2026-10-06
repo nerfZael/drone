@@ -536,6 +536,9 @@ export function useDroneHubLifecycleEffects({
         openRightPanelTabFromShortcut('terminal');
         return true;
       },
+      // The canvas handles these while it has focus.
+      canvasBack: () => false,
+      canvasForward: () => false,
     };
 
     quickActionHandlerRef.current = (actionId) => {

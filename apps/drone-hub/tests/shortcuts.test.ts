@@ -14,6 +14,23 @@ import {
 } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
+  test('Z and C step back and forward on the canvas without taking those keys elsewhere', () => {
+    const defaults = cloneDefaultShortcutBindings();
+    expect(formatShortcutBinding(defaults.canvasBack)).toBe(formatShortcutBinding(defaults.markSelectedDronesUnread));
+    expect(formatShortcutBinding(defaults.canvasForward)).toBe(formatShortcutBinding(defaults.openChangesTab));
+    expect(defaults.canvasBack?.key).toBe('z');
+    expect(defaults.canvasForward?.key).toBe('c');
+    // Outside the canvas the first matching definition runs, which must stay the app-wide action.
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id);
+    const firstMatch = (key: string) =>
+      SHORTCUT_DEFINITIONS.find((definition) =>
+        isShortcutMatch(defaults[definition.id], { key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }),
+      )?.id;
+    expect(firstMatch('z')).toBe('markSelectedDronesUnread');
+    expect(firstMatch('c')).toBe('openChangesTab');
+    expect(ids).toEqual([...DRONE_HUB_SHORTCUT_ACTION_IDS]);
+  });
+
   test('retains the historical D migration to fork promotion and moves default file dictation to Shift+D without taking custom bindings', () => {
     const defaults = cloneDefaultShortcutBindings();
     defaults.toggleSideChatMain = { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false };

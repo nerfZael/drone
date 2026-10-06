@@ -231,6 +231,18 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: 'Open Terminal tab',
     description: 'Opens the Terminal workspace pane.',
   },
+  // Canvas actions come last: where a key is shared, the app-wide action wins
+  // outside the canvas, and the canvas claims it only when it can act.
+  {
+    id: 'canvasBack',
+    label: 'Canvas: back to board',
+    description: 'On a drone\'s canvas board, returns to the board it was opened from, like the mouse back button. Elsewhere the key keeps its other action.',
+  },
+  {
+    id: 'canvasForward',
+    label: 'Canvas: open drone board',
+    description: 'On the canvas, opens the selected drone\'s board again, like the mouse forward button. Elsewhere the key keeps its other action.',
+  },
 ];
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
@@ -276,6 +288,8 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openFilesTab: null,
   openQuickOpen: { key: 'p', mod: true, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: null,
+  canvasBack: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  canvasForward: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
 };
 
 type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'> & Partial<Pick<KeyboardEvent, 'code'>>;
@@ -563,6 +577,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openFilesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFilesTab),
     openQuickOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openQuickOpen),
     openTerminalTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openTerminalTab),
+    canvasBack: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.canvasBack),
+    canvasForward: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.canvasForward),
   };
 }
 

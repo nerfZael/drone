@@ -3161,6 +3161,18 @@ export function DroneCanvasDock({
         return;
       }
 
+      // Keyboard twins of the mouse back and forward buttons. When there is nowhere to
+      // go, the key falls through to whatever else it is bound to.
+      if (
+        !event.repeat &&
+        ((isShortcutMatch(bindings.canvasBack, event.nativeEvent) && canvasBack()) ||
+          (isShortcutMatch(bindings.canvasForward, event.nativeEvent) && canvasForward()))
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       // On a drone board the create-drone shortcut keeps its app-wide meaning.
       if (!droneScope && isShortcutMatch(createDraftShortcutBinding, event.nativeEvent)) {
         event.preventDefault();
