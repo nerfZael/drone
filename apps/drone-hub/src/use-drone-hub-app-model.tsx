@@ -20,6 +20,7 @@ import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
 import { useDesktopChatRequests } from './droneHub/app/desktop-chat-requests';
+import { renameChatId } from './droneHub/app/chat-identity';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -501,6 +502,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, []);
   /** Moves everything this client keeps under a chat's name, so open views stay warm across a rename. */
   const followChatRename = React.useCallback((droneId: string, oldName: string, newName: string) => {
+    // First, so state keyed by the chat's ID is found under either name.
+    renameChatId(droneId, oldName, newName);
     renameChatRuntimeCache(droneId, oldName, newName);
     rememberOptimisticChatRename(droneId, oldName, newName);
     useDetachedChatStore.getState().rename(droneId, oldName, newName);

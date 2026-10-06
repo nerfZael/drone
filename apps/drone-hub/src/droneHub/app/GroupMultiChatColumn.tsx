@@ -1,4 +1,6 @@
 import { chatExecutionOrder } from './chat-execution-order';
+import { chatSelectionKey } from './chat-selection-model';
+import { continuesChat } from './chat-identity';
 import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
@@ -143,7 +145,13 @@ export function GroupMultiChatColumn({
   );
   // Drafts have no agent to ask anything; published chats poll for questionnaires.
   const questions = useExternalQuestionRequests(drone.id, chatName, !onPublish);
-  const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
+  const stableChatId = drone.chatIds?.[chatName];
+  // Keyed by the chat's ID, so a rename keeps what this column shows.
+  const chatCacheKey = React.useMemo(
+    () => chatSelectionKey(drone.id, chatName),
+    [stableChatId, chatName, drone.id],
+  );
+  const shownChatKeyRef = React.useRef('');
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
   const loadTranscriptActivity = React.useCallback(
     (turnId: string, signal: AbortSignal) =>
@@ -286,17 +294,22 @@ export function GroupMultiChatColumn({
       timer = null;
     };
 
-    setTranscripts(null);
-    setChatId(null);
-    setChatSubscriptions([]);
-    setInitialPendingResp(null);
-    transcriptEtagRef.current = null;
-    fullTranscriptLoadedRef.current = false;
-    setHasOlder(false);
-    setOlderLoading(false);
-    setOlderError(null);
-    setError(null);
-    setLoading(true);
+    // The same chat under a new name keeps showing while it reloads; another chat starts over.
+    const sameChat = continuesChat(shownChatKeyRef.current, chatCacheKey);
+    shownChatKeyRef.current = chatCacheKey;
+    if (!sameChat) {
+      setTranscripts(null);
+      setChatId(null);
+      setChatSubscriptions([]);
+      setInitialPendingResp(null);
+      transcriptEtagRef.current = null;
+      fullTranscriptLoadedRef.current = false;
+      setHasOlder(false);
+      setOlderLoading(false);
+      setOlderError(null);
+      setError(null);
+      setLoading(true);
+    }
     let olderHistoryAvailable = false;
 
     const loadFullTranscript = async (): Promise<void> => {

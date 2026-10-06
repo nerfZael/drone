@@ -17,6 +17,17 @@ export function resolveChatCreatedAt(chats: unknown): Record<string, string> {
   return out;
 }
 
+/** Chat name -> its stable ID. A rename changes the name but never the ID, so clients key chats by it. */
+export function resolveChatIds(chats: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!chats || typeof chats !== 'object') return out;
+  for (const [chatName, entry] of Object.entries(chats as Record<string, any>)) {
+    const id = String(entry?.id ?? '').trim();
+    if (id) out[chatName] = id;
+  }
+  return out;
+}
+
 /**
  * Chat name -> the chat it was cloned from. The stored source ID wins over the
  * stored name so a renamed source keeps its clones; a deleted source drops out.

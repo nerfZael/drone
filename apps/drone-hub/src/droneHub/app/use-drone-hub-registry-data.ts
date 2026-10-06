@@ -7,6 +7,7 @@ import { compareDronesByNewestFirst } from './helpers';
 import { fetchJson, usePoll } from './hooks';
 import { subscribeDesktopEvents } from './desktop-events';
 import { applyOptimisticChatRenames, type OptimisticChatRenames } from './optimistic-chat-renames';
+import { publishChatIds } from './chat-identity';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -463,8 +464,12 @@ export function useDroneHubRegistryData({
   const allDrones = React.useMemo(() => {
     const hiddenNames = Object.keys(optimisticallyDeletedDrones);
     const visible = hiddenNames.length === 0 ? polledDrones : polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
-    if (!optimisticChatRenames || Object.keys(optimisticChatRenames).length === 0) return visible;
-    return visible.map((drone) => applyOptimisticChatRenames(drone, optimisticChatRenames[drone.id]));
+    const renamed = !optimisticChatRenames || Object.keys(optimisticChatRenames).length === 0
+      ? visible
+      : visible.map((drone) => applyOptimisticChatRenames(drone, optimisticChatRenames[drone.id]));
+    // Published while rendering, so every view below resolves chat IDs from these summaries.
+    publishChatIds(renamed);
+    return renamed;
   }, [optimisticChatRenames, optimisticallyDeletedDrones, polledDrones]);
   const drones = React.useMemo(
     () => allDrones.filter((drone) => !isWorkflowChildDrone(drone)),

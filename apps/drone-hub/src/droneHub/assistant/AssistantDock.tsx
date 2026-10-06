@@ -1,4 +1,6 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
+import { chatSelectionKey } from '../app/chat-selection-model';
+import { continuesChat } from '../app/chat-identity';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import React from 'react';
 import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
@@ -300,7 +302,8 @@ export type AssistantMessageFeatures = {
 };
 
 export function AssistantDock(props: React.ComponentProps<typeof NativeAssistantDock>) {
-  return <NativeAssistantDock key={JSON.stringify([props.nativeChat.droneId, props.nativeChat.chatName])} {...props} />;
+  // Keyed by the chat's ID, so a renamed chat keeps its dock.
+  return <NativeAssistantDock key={chatSelectionKey(props.nativeChat.droneId, props.nativeChat.chatName)} {...props} />;
 }
 
 /** Marks a user message so lists such as Asks can scroll to it. */
@@ -946,8 +949,20 @@ function NativeAssistantDock({
     }
   }, [loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
 
+  const shownChatKeyRef = React.useRef('');
   React.useEffect(() => {
     const controller = new AbortController();
+    // A rename keeps this dock and what it shows; it only refreshes under the new name.
+    const chatKey = chatSelectionKey(nativeDroneId, nativeChatName);
+    const sameChat = Boolean(shownChatKeyRef.current) && continuesChat(shownChatKeyRef.current, chatKey);
+    shownChatKeyRef.current = chatKey;
+    if (sameChat) {
+      void refresh({ silent: true, signal: controller.signal });
+      return () => {
+        snapshotRequestSeqRef.current += 1;
+        controller.abort();
+      };
+    }
     const cached = readNativeChatSnapshot(nativeDroneId, nativeChatName);
     if (cached) markChatLoadCacheHit(
       { droneId: nativeDroneId, chatName: nativeChatName }, 'native', cached.initialHistory?.entries.length ?? 0,

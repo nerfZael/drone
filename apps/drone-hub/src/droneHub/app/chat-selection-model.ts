@@ -1,4 +1,5 @@
 import type { ChatInfo } from '../../domain';
+import { chatIdentity } from './chat-identity';
 
 export function chatNamesForConfigSelection(input: {
   chats?: readonly string[] | null;
@@ -20,7 +21,8 @@ export function chatSelectionKey(
 ): string {
   const droneId = String(droneIdRaw ?? '').trim();
   if (!droneId) return '';
-  return `${droneId}\u0000${String(chatNameRaw ?? '').trim() || 'default'}`;
+  // Keyed by the chat's ID once known, so a renamed chat keeps what is cached for it.
+  return `${droneId}\u0000${chatIdentity(droneId, chatNameRaw)}`;
 }
 
 export function chatInfoForSelection(

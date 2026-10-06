@@ -603,6 +603,7 @@ import {
   isDraftDroneEntry,
   resolveChatCloneSources,
   resolveChatCreatedAt,
+  resolveChatIds,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
 import { mergeNativeBusyChatNames } from './native-drone-summary';
@@ -2722,6 +2723,8 @@ function parseChatNameForMutation(raw: any, fieldName = 'chat name'): string {
   if (text.length > CHAT_NAME_MAX_LEN)
     throw new Error(`${fieldName} is too long (max ${CHAT_NAME_MAX_LEN} chars)`);
   if (/[\r\n\t]/.test(text)) throw new Error(`${fieldName} contains invalid whitespace`);
+  // Clients key chats by name or by ID; a control character never appears in either.
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw new Error(`${fieldName} contains control characters`);
   if (/[\\/]/.test(text)) throw new Error(`${fieldName} cannot include / or \\`);
   return text;
 }
@@ -5367,6 +5370,7 @@ async function startDroneHubApiServerWithLifecycle(
       sideChats,
       chatCloneSources,
       chatCreatedAt: resolveChatCreatedAt(d.chats),
+      chatIds: resolveChatIds(d.chats),
       unreadChats,
       chatReadStates,
       draftChats,

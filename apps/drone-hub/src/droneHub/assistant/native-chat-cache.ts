@@ -55,7 +55,11 @@ export function writeNativeChatHistory(page: BlipHistoryPage): void {
 }
 
 export function deleteNativeChatSnapshot(droneId: string, chatName: string): void {
-  const key = chatSelectionKey(droneId, chatName);
+  deleteNativeChatSnapshotByKey(chatSelectionKey(droneId, chatName));
+}
+
+/** Takes the same key as the chat runtime cache. */
+export function deleteNativeChatSnapshotByKey(key: string): void {
   const threadId = snapshots.get(key)?.value.threads[0]?.id;
   snapshots.delete(key);
   if (threadId) histories.delete(threadId);
@@ -77,7 +81,7 @@ if (typeof window !== 'undefined') {
     const id = disposedDroneIdFromEvent(event);
     if (!id) return;
     for (const key of snapshots.keys()) {
-      if (key.startsWith(`${id}\u0000`)) deleteNativeChatSnapshot(id, key.slice(id.length + 1));
+      if (key.startsWith(`${id}\u0000`)) deleteNativeChatSnapshotByKey(key);
     }
   });
 }
