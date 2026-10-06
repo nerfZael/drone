@@ -1020,9 +1020,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          requireDroneHubMcp
-            ? "exec codex app-server -c 'mcp_servers.drone-hub.required=true' -c 'mcp_servers.drone-hub.startup_timeout_sec=10'"
-            : 'exec codex app-server',
+          // Goals make Codex start turns on its own, which DroneHub cannot show
+          // yet. A Codex without the feature ignores the setting.
+          `exec codex app-server -c 'features.goals=false'${
+            requireDroneHubMcp
+              ? " -c 'mcp_servers.drone-hub.required=true' -c 'mcp_servers.drone-hub.startup_timeout_sec=10'"
+              : ''
+          }`,
         ].join('\n');
         await enqueueCodexTranscriptPrompt({
           usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
