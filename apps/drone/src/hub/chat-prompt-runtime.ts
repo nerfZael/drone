@@ -1081,6 +1081,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude', flag: 'effort' })
           : false;
         const effortArg = chatEffort && supportsEffort ? ` --effort ${bashQuote(chatEffort)}` : '';
+        // Headless runs skip Claude in Chrome unless asked; the extension bridge
+        // reaches the user's browser from host and container drones alike.
+        const supportsChrome = await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude', flag: 'chrome' });
+        const chromeArg = supportsChrome ? ' --chrome' : '';
         const checkpointArg = forkMessageId ? ` --resume-session-at=${bashQuote(forkMessageId)}` : '';
         const sessionArg =
           sessionLaunch.mode === 'fork'
@@ -1102,9 +1106,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           // Older daemons retain one-shot delivery until upgraded. The stream
           // wrapper sets this flag only when it owns Claude's stdin.
           'if [ "${DRONE_CLAUDE_STREAM:-}" = "1" ]; then',
-          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${effortArg}${sessionArg}`,
+          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${sessionArg}`,
           'else',
-          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${effortArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
           'fi',
         ].join('\n');
         await enqueueTranscriptPrompt({
