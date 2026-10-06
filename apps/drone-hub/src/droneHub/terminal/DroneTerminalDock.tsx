@@ -274,6 +274,25 @@ export function DroneTerminalDock(props: DroneTerminalDockProps) {
 }
 
 /**
+ * How far a collapsed terminal moves down so its cursor line sits at the bottom
+ * of the strip. Never past its top meeting the strip's top: a cursor near the
+ * top would otherwise sink to the bottom under empty space. Heights ignore the
+ * transform, so this holds while an offset is applied.
+ */
+export function collapsedFollowOffset(input: {
+  /** Scrolled back into history: show the strip as it is. */
+  atBottom: boolean;
+  cursorBottomFromPanelBottom: number;
+  panelHeight: number;
+  stripHeight: number;
+}): number {
+  if (!input.atBottom) return 0;
+  const offset = input.cursorBottomFromPanelBottom - 4;
+  const maxOffset = Math.max(0, input.panelHeight - input.stripHeight);
+  return Math.max(0, Math.round(Math.min(offset, maxOffset)));
+}
+
+/**
  * With expand on focus, a collapsed terminal keeps its full size and shows
  * only a strip. Output starts at the top, so the strip is moved to the
  * cursor's line rather than the terminal's last row (see styles.css).
@@ -287,20 +306,29 @@ function followCursorWhenCollapsed(host: HTMLElement, terminal: Terminal, elemen
     if (!panel || !screen || !terminal.rows) return;
     const buffer = terminal.buffer.active;
     const screenRect = screen.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
     const rowHeight = screenRect.height / terminal.rows;
-    // Scrolled back into history: show the strip as it is.
-    const offset = buffer.viewportY === buffer.baseY
-      ? panel.getBoundingClientRect().bottom - (screenRect.top + (buffer.cursorY + 1) * rowHeight) - 4
-      : 0;
-    panel.style.setProperty('--dh-collapsed-follow-offset', `${Math.max(0, Math.round(offset))}px`);
+    const strip = panel.closest<HTMLElement>('.dv-content-container');
+    const offset = collapsedFollowOffset({
+      atBottom: buffer.viewportY === buffer.baseY,
+      cursorBottomFromPanelBottom: panelRect.bottom - (screenRect.top + (buffer.cursorY + 1) * rowHeight),
+      panelHeight: panelRect.height,
+      stripHeight: strip?.getBoundingClientRect().height ?? panelRect.height,
+    });
+    panel.style.setProperty('--dh-collapsed-follow-offset', `${offset}px`);
   };
   const schedule = () => {
     if (frame == null) frame = requestAnimationFrame(update);
   };
   const disposables = [terminal.onCursorMove(schedule), terminal.onScroll(schedule), terminal.onResize(schedule)];
+  // Collapsing changes only the strip, not the terminal, so watch the strip too.
+  const strip = host.closest<HTMLElement>('.dv-content-container');
+  const stripObserver = strip ? new ResizeObserver(schedule) : null;
+  if (strip) stripObserver?.observe(strip);
   schedule();
   return () => {
     if (frame != null) cancelAnimationFrame(frame);
+    stripObserver?.disconnect();
     for (const disposable of disposables) disposable.dispose();
   };
 }
