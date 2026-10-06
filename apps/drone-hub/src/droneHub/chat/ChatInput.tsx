@@ -1461,7 +1461,7 @@ export function ChatInput({
           }}
           className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible ${editorFullHeight ? 'flex flex-1 flex-col' : ''} rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
-          } ${referenceDropActive ? 'ring-1 ring-[var(--accent)]' : ''} ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
+          } ${referenceDropActive ? 'ring-1 ring-[var(--accent)]' : ''} ${
             continuousDictationTargeted
               ? 'ring-1 ring-[var(--accent-muted)] ring-offset-1 ring-offset-[var(--chat-background)]'
               : ''

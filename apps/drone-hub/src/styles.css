@@ -184,7 +184,6 @@
   --chat-message-time: var(--muted-dim);
   --chat-user-message-time: var(--muted-dim);
   --chat-composer-border: var(--border);
-  --chat-composer-focus-border: var(--border);
   --chat-composer-surface: var(--panel-raised);
   --chat-composer-fg: var(--fg);
   --chat-composer-placeholder: var(--muted);
@@ -484,7 +483,6 @@
   --chat-message-time: #a6adc8;
   --chat-user-message-time: #bac2de;
   --chat-composer-border: rgba(69, 71, 90, .56);
-  --chat-composer-focus-border: rgba(203, 166, 247, .38);
   --chat-composer-surface: #262637;
   --chat-composer-fg: #e6e9ff;
   --chat-composer-placeholder: #a6adc8;
@@ -862,14 +860,23 @@ code, pre {
    board costs, and the board is redrawn at every step of a zoom to keep its text sharp. */
 .dh-canvas-work.work-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 4px rgba(0, 0, 0, .25); }
 .dh-canvas-work-ground { background: #0f1116; }
-/* The canvas composer floats on that ground in the slate of the default theme, whichever theme the app is in:
-   it belongs to the board, like the cards. */
-.dh-canvas-composer {
+/* In Mocha the board keeps its shape (a ground darker than the chat, cards a step above it) in Mocha's own
+   tones, so it reads as part of the app beside the agent chat. */
+:root[data-theme='catppuccin-mocha'] .dh-canvas-work {
+  --panel: #181825; --panel-alt: #1e1e2e; --hover: #1e1e2e; --border: #313244;
+  --fg: #cdd6f4; --fg-secondary: #bac2de; --muted: #9399b2; --accent: #b4befe; --act: #89b4fa;
+  --green: #a6e3a1; --orange: #fab387; --yellow: #f9e2af; --red: #f38ba8;
+  --work-ground: #11111b;
+}
+:root[data-theme='catppuccin-mocha'] .dh-canvas-work-ground { background: #11111b; }
+/* The canvas composer floats on that ground in the default theme's slate. In Mocha it is the agent chat's own
+   composer. */
+:root:not([data-theme='catppuccin-mocha']) .dh-canvas-composer {
   --fg: #e5e9f0; --fg-secondary: #c7cdda; --muted: #a2aabc; --muted-dim: #858ea3;
   --panel: #11161e; --panel-alt: #171d27; --panel-raised: #1c2330; --border: #3b4557; --border-subtle: #293241;
   --surface-softest: rgba(255, 255, 255, .02); --surface-strong: rgba(255, 255, 255, .06); --surface-inset: rgba(0, 0, 0, .14);
   --accent: #9ea2ff; --accent-fg: #0f1116; --accent-border: rgba(158, 162, 255, .34); --accent-subtle: rgba(158, 162, 255, .12);
-  --chat-composer-border: #3b4557; --chat-composer-focus-border: #4a5568; --chat-composer-surface: #1c2330;
+  --chat-composer-border: #3b4557; --chat-composer-surface: #1c2330;
   --chat-composer-fg: #e5e9f0; --chat-composer-placeholder: #a2aabc;
   --chat-composer-control-bg: rgba(255, 255, 255, .02); --chat-composer-control-border: #293241;
   --chat-composer-control-fg: #c7cdda; --chat-composer-model-fg: #a2aabc; --chat-composer-context-track: #293241;
