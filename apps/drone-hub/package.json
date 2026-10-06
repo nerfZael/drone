@@ -16,7 +16,8 @@
     "smoke": "node scripts/smoke-cli.cjs",
     "smoke:chat": "node scripts/smoke-chat-navigation.cjs",
     "smoke:resize": "node scripts/smoke-workspace-resize.cjs",
-    "smoke:terminal": "node scripts/smoke-terminal.cjs"
+    "smoke:terminal": "node scripts/smoke-terminal.cjs",
+    "bench:canvas": "node scripts/bench-canvas.cjs"
   },
   "dependencies": {
     "@entity/core": "workspace:*",

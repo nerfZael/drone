@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { fitViewportToBounds } from '../src/droneHub/canvas/DroneCanvasDock';
+import { fitViewportToBounds } from '../src/droneHub/canvas/canvas-geometry';
 import { MIN_CANVAS_SCALE, clampCanvasScale } from '../src/droneHub/canvas/use-drone-canvas-store';
 
 test('fit centres a small board at 1:1 instead of zooming in', () => {

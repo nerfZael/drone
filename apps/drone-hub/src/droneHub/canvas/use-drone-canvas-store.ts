@@ -1,3 +1,4 @@
+import React from 'react';
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import { profileStorageKey } from '../../profile-storage';
@@ -857,6 +858,37 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
     },
   ),
 );
+
+/** A card without its position: what membership, labels and sizes depend on. */
+export type DroneCanvasNodeMeta = { droneId: string; label: string };
+
+/**
+ * The board's cards by id, without positions: the same object while cards only move, so a
+ * component that lays cards out by name and size does not render on every drag frame.
+ */
+export function useCanvasBoardNodeMeta(boardKey: string | null): Record<string, DroneCanvasNodeMeta> {
+  const cacheRef = React.useRef<{ byId: Record<string, DroneCanvasNode> | null; meta: Record<string, DroneCanvasNodeMeta> }>({
+    byId: null,
+    meta: {},
+  });
+  return useDroneCanvasStore((state) => {
+    const byId = selectCanvasBoard(state, boardKey).nodesByDroneId;
+    const cache = cacheRef.current;
+    if (cache.byId === byId) return cache.meta;
+    const ids = Object.keys(byId);
+    let same = ids.length === Object.keys(cache.meta).length;
+    for (let i = 0; same && i < ids.length; i += 1) {
+      if (cache.meta[ids[i]]?.label !== byId[ids[i]].label) same = false;
+    }
+    cache.byId = byId;
+    if (!same) {
+      const meta: Record<string, DroneCanvasNodeMeta> = {};
+      for (const id of ids) meta[id] = { droneId: id, label: byId[id].label };
+      cache.meta = meta;
+    }
+    return cache.meta;
+  });
+}
 
 export function getCanvasBoardActions(boardDroneIdRaw: string | null): DroneCanvasBoardActions {
   const boardDroneId = String(boardDroneIdRaw ?? '').trim();

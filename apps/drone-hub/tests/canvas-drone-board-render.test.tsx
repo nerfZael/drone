@@ -14,6 +14,7 @@ import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub
 import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
+import { ZOOM_GESTURE_IDLE_MS } from '../src/droneHub/canvas/zoom-gesture';
 import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
 import { beginChatDeletion, markChatsDeleted, useChatDeletionStore } from '../src/droneHub/app/chat-deletion-store';
@@ -1058,7 +1059,8 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     // An unread reply is flagged once the chat is idle, as in the sidebar; while it works on, no corner dot.
     expect(card().querySelector('[data-canvas-card-unread]')).toBeNull();
     expect(card().querySelector('[data-canvas-detailed-card]')?.textContent).not.toContain('$0.42');
-    expect(card().style.transform).toContain('translate3d(225px, 250px, 0)');
+    // Positioned by its slot, so moving it does not render the card.
+    expect((card().parentElement as unknown as HTMLElement).style.translate).toBe('225px 250px');
     // It looks like the Entity's cards and sits on their darker ground.
     expect(card().classList.contains('dh-canvas-work')).toBe(true);
     expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
@@ -1099,7 +1101,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toMatchObject({ x: 120, y: 220 });
     await act(async () => useDroneHubUiStore.getState().setCanvasDetailedCards(false));
     expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
-    expect(card().style.transform).toContain('translate3d(120px, 220px, 0)');
+    expect((card().parentElement as unknown as HTMLElement).style.translate).toBe('120px 220px');
   } finally {
     await act(async () => root.unmount());
     useDroneHubUiStore.getState().setCanvasDetailedCards(false);
@@ -1337,23 +1339,63 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     expect(layoutReads).toBe(0);
     expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe('translate(109px, 209px) scale(1)');
 
-    // Wheel samples before the next React render must compound, anchored under the pointer.
+    // Wheel samples within a frame compound into one zoom, anchored under the pointer.
     const anchor = { x: 400, y: 300 };
-    await act(async () => {
-      Simulate.wheel(viewport, { deltaY: -100, clientX: anchor.x, clientY: anchor.y });
-      Simulate.wheel(viewport, { deltaY: -100, clientX: anchor.x, clientY: anchor.y });
+    const wheel = (deltaY: number, ctrlKey = false) => {
+      const event = new dom.WheelEvent('wheel', { deltaY, ctrlKey, bubbles: true, cancelable: true });
+      // happy-dom's WheelEvent drops the pointer position from its init.
+      Object.defineProperties(event, { clientX: { value: anchor.x }, clientY: { value: anchor.y } });
+      viewport.dispatchEvent(event as never);
+      return event;
+    };
+    let zoomUpdates = 0;
+    unsubscribe = useDroneCanvasStore.subscribe((next, prev) => {
+      if (next.droneBoards.alpha?.scale !== prev.droneBoards.alpha?.scale) zoomUpdates++;
     });
+    let pinch: { defaultPrevented: boolean } | null = null;
+    await act(async () => {
+      wheel(-100);
+      pinch = wheel(-100, true);
+    });
+    // A pinch arrives as Ctrl+wheel: it zooms the canvas, not the whole window.
+    expect(pinch!.defaultPrevented).toBe(true);
+    expect(zoomUpdates).toBe(0);
+    await flushFrames();
+    expect(zoomUpdates).toBe(1);
+    unsubscribe();
     expect(board().scale).toBeCloseTo(Math.exp(0.3), 8);
     expect((anchor.x - board().panX) / board().scale).toBeCloseTo(anchor.x - 109, 0);
     expect(renders.size).toBe(0); // At these scales cards keep the same local geometry.
     expect(layoutReads).toBe(0);
 
+    const slot = (name: string) => card(name).parentElement as unknown as HTMLElement;
+    const wheelStops = () => act(async () => new Promise((resolve) => setTimeout(resolve, ZOOM_GESTURE_IDLE_MS + 20)));
+    await wheelStops();
     await act(async () => actions.setScale(0.5));
-    expect(renders.size).toBe(0); // Inherited CSS updates readability without rendering or measuring cards.
+    expect(renders.size).toBe(0); // Slots scale cards up for readability without rendering or measuring them.
     expect(layoutReads).toBe(0);
+    expect(slot('default').style.scale).toBe('1.4');
+
+    // While the wheel turns, the boost holds so the GPU can scale what is drawn; it settles once the wheel stops.
+    await act(async () => wheel(100));
+    await flushFrames();
+    expect(board().scale).toBeLessThan(0.5);
+    expect(slot('default').style.scale).toBe('1.4');
+    await act(async () => wheel(-600));
+    await flushFrames();
+    expect(board().scale).toBeGreaterThan(0.85);
+    expect(slot('default').style.scale).toBe('1.4');
+    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.willChange).toBe('transform');
+    await wheelStops();
+    expect(slot('default').style.scale).toBe('1');
+    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.willChange).toBe('');
+    expect(renders.size).toBe(0);
+    await act(async () => actions.setScale(0.5));
+
     renders.clear();
     await act(async () => actions.moveNode(alpha('default'), 750, 300));
-    expect([...renders.keys()]).toEqual(['default']);
+    expect(renders.size).toBe(0); // Only its slot moves.
+    expect(slot('default').style.translate).toBe('750px 300px');
     expect(layoutReads).toBe(0);
 
     await renameCard(card('chat-0'));

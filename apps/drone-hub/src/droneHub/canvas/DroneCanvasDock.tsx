@@ -4,6 +4,8 @@ import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './canvas-messaging';
 import React from 'react';
 import { createFrameBatch } from './frame-batch';
+import { canvasPerf } from './canvas-perf';
+import { createZoomGesture } from './zoom-gesture';
 import { flushSync } from 'react-dom';
 import '@xyflow/react/dist/style.css';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
@@ -12,14 +14,12 @@ import type { ChatAgentConfig } from '../../domain';
 import {
   UiMenuSelect,
   type UiMenuSelectEntry,
-  UiPaneState,
   UiPanel,
   UiPanelBody,
   UiPanelToolbar,
   UiToolbarButton,
   UiToolbarIconButton,
   UiToolbarInput,
-  UiSpinner,
 } from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { selectSidebarChatNodes } from '../app/sidebar-chat-selection';
@@ -31,12 +31,10 @@ import {
   type ComposerReference,
 } from '../chat/composer-references';
 import { IconTune } from '../app/icons';
-import { DroneRuntimeIcon } from '../app/DroneRuntimeIndicator';
 import {
   DETAILED_CARD_HEIGHT_PX,
   DETAILED_CARD_SPREAD,
   DETAILED_CARD_WIDTH_PX,
-  WORKER_STATE_OF,
   detailedCardWidthPx,
   combineDetailedCards,
   costText,
@@ -52,8 +50,6 @@ import { ChatComposerRuntimePicker } from '../chat/ChatComposerRuntimePicker';
 import { requestJson } from '../http';
 import { newChatConfigurationForAgent } from '../app/new-chat-creation';
 import type { DroneDeleteMode } from '../app/settings-types';
-import { Dot, STATE_COLOR, Steps } from '../entity/EntityWork';
-import { SidebarItemStateIndicator } from '../overview/DroneCard';
 import {
   BUILTIN_AGENT_OPTIONS,
   createCanvasChatNodeId,
@@ -73,7 +69,6 @@ import {
 import { isShortcutMatch } from '../app/shortcuts';
 import { repoPathLabel } from '../app/repo-path-label';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
-import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
 import {
   collectUniqueChatTargets,
@@ -88,13 +83,11 @@ import {
 } from './clone-shortcuts';
 import {
   DRAFT_CANVAS_NODE_PREFIX,
-  MAX_CANVAS_SCALE,
-  MIN_CANVAS_SCALE,
-  clampCanvasScale,
   getCanvasBoardActions,
   isCanvasDraftNodeId,
   selectCanvasBoard,
   topicBoardKey,
+  useCanvasBoardNodeMeta,
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
 import {
@@ -110,9 +103,6 @@ import {
   type CanvasRect,
 } from './lineage-geometry';
 import {
-  buildCanvasRelationshipEdges,
-} from './relationship-edges';
-import {
   CHAT_NODE_HEIGHT_PX,
   DRONE_NODE_CHROME_WIDTH_PX,
   NODE_HEIGHT_PX,
@@ -122,25 +112,32 @@ import {
   getNodeWidthPx,
   nodeLabelWidthPx,
 } from './node-metrics';
+import { CanvasNodeCard, type CanvasNodeActions, type DroneCanvasIndicatorState } from './CanvasNodeCard';
+import { CANVAS_STEPS_PANEL_WIDTH_PX, CanvasStepsPanel } from './CanvasStepsPanel';
+import {
+  CanvasCardsLayer,
+  CanvasEdgesLayer,
+  CanvasWorldLayer,
+  CanvasZoomLabel,
+  NO_CARD_SPREAD,
+  nodeReadabilityBoostAt,
+  setCanvasGesture,
+  viewBoundsOf,
+  type CanvasNodeSize,
+} from './CanvasLayers';
+import {
+  buildSelectionBox,
+  fitViewportToBounds,
+  rectIntersects,
+  screenToWorldPoint,
+  type SelectionBox,
+} from './canvas-geometry';
+import { useStableRecordValues } from './use-stable-record-values';
+import { useCanvasWheelZoom } from './use-canvas-wheel-zoom';
+import { CanvasEmptyState } from './CanvasEmptyState';
 
 const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
-const DOT_GRID_BASE_SPACING_PX = 32;
-const DOT_GRID_RADIUS_PX = 1.05;
-const DOT_GRID_MAX_OPACITY = 0.34;
-// Zoomed out, the dots are as bright as node outlines and read as noise; they are gone by this scale.
-const DOT_GRID_FADE_OUT_SCALE = 0.55;
-// Nodes counter-scale so they never render smaller than this fraction of their natural size...
-const NODE_LEGIBLE_SCALE = 0.85;
-// ...up to this factor, which keeps sibling chat nodes on a drone board from touching.
-const NODE_MAX_READABILITY_BOOST = 1.4;
-// Arrowheads shrink with the zoom like the nodes used to, but never below a visible size.
-const EDGE_MARKER_SCREEN_PX = 14;
-const EDGE_PLUG_MARKER_SCREEN_PX = 10;
-// Every chat has one of these lines, so they stay quieter than lineage and copy lines.
-const CHAT_OWNER_EDGE_COLOR = 'color-mix(in srgb, var(--canvas-chat-owner-muted) 65%, transparent)';
-const EDGE_MARKER_MIN_SCREEN_PX = 6;
-const FIT_VIEWPORT_PADDING_PX = 48;
 const MIN_DRAFT_SPAWN_COUNT = 1;
 const MAX_DRAFT_SPAWN_COUNT = 24;
 const SPAWN_COLLISION_MARGIN_PX = 12;
@@ -148,13 +145,6 @@ const SPAWN_OFFSET_RINGS = 7;
 const CLONE_OFFSET_X_PX = 44;
 const CLONE_OFFSET_Y_PX = 34;
 const CHAT_PASTE_CONCURRENCY = 4;
-
-type SelectionBox = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
 
 type NodeDragState = {
   droneIds: string[];
@@ -180,17 +170,6 @@ type MarqueeDragState = {
   additive: boolean;
   baseSelectedIds: string[];
   moved: boolean;
-};
-
-type DroneCanvasIndicatorState = {
-  statusOk: boolean;
-  statusError: string | null;
-  statusChecking?: boolean;
-  hubPhase?: DroneSummary['hubPhase'];
-  hubMessage?: DroneSummary['hubMessage'];
-  busy: boolean;
-  unreadAgentMessage: boolean;
-  lastAgentSnippet: string | null;
 };
 
 function resolveCanvasAssignmentDropTarget(
@@ -222,375 +201,11 @@ function resolveCanvasAssignmentDropTarget(
   };
 }
 
-type CanvasNodeActions = {
-  onNodeMouseDown: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
-  onNodeClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
-  /** Double click: on the global board, opens the card's drone on its own board. F2 renames. */
-  onNodeDoubleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
-  /** The pointer is over a card (an id) or left it (null): the steps panel follows it. */
-  hoverCard: (id: string | null) => void;
-  setInlineRenameDraft: (value: string) => void;
-  submitInlineRename: () => Promise<void>;
-  cancelInlineRename: () => void;
-  focusViewportElement: () => void;
-};
-
-type CanvasNodeCardProps = {
-  node: { droneId: string; label: string; x: number; y: number };
-  /** Where the card is drawn: its stored position, spread apart for detailed cards. */
-  viewX: number;
-  viewY: number;
-  /** Set when detailed cards are on: state, what is going on, time and cost. */
-  detail: DetailedCard | null;
-  draftNode: boolean;
-  droneNode: boolean;
-  canvasDroneId: string | null;
-  nodeDroneId: string | null;
-  selected: boolean;
-  dragging: boolean;
-  inlineEditing: boolean;
-  assignmentHoverTarget: boolean;
-  assignmentHoverTargetCount: number;
-  isActiveSidebarChat: boolean;
-  indicatorState: DroneCanvasIndicatorState | null;
-  deleting: boolean;
-  nodeWidth: number;
-  nodeHeight: number;
-  repoLabel: string;
-  repoBranch: string;
-  primaryLabel: string;
-  labelTextBoostLimit: number;
-  showCanvasLastMessagePreviews: boolean;
-  inlineRenameDraft: string;
-  inlineRenameBusy: boolean;
-  runtime: string | undefined;
-  actions: React.MutableRefObject<CanvasNodeActions>;
-  nodeElementByDroneIdRef: React.MutableRefObject<Record<string, HTMLButtonElement | null>>;
-  inlineRenameInputRef: React.MutableRefObject<HTMLInputElement | null>;
-  inlineRenameSettledRef: React.MutableRefObject<boolean>;
-};
-
-const CanvasNodeCard = React.memo(function CanvasNodeCard({
-  node,
-  viewX,
-  viewY,
-  detail,
-  draftNode,
-  droneNode,
-  canvasDroneId,
-  nodeDroneId,
-  selected,
-  dragging,
-  inlineEditing,
-  assignmentHoverTarget,
-  assignmentHoverTargetCount,
-  isActiveSidebarChat,
-  indicatorState,
-  deleting,
-  nodeWidth,
-  nodeHeight,
-  repoLabel,
-  repoBranch,
-  primaryLabel,
-  labelTextBoostLimit,
-  showCanvasLastMessagePreviews,
-  inlineRenameDraft,
-  inlineRenameBusy,
-  runtime,
-  actions,
-  nodeElementByDroneIdRef,
-  inlineRenameInputRef,
-  inlineRenameSettledRef,
-}: CanvasNodeCardProps) {
-  // A button would treat Space typed in the title field as a click on the card.
-  const CardElement = (inlineEditing ? 'div' : 'button') as 'button';
-  const lastAgentSnippet = indicatorState?.lastAgentSnippet ?? null;
-  const indicator = deleting ? (
-    <span
-      className="inline-flex items-center gap-1 rounded-[4px] border border-[var(--red-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
-      style={{ fontFamily: 'var(--display)' }}
-    >
-      <UiSpinner size="small" label={null} inheritColor className="[&>span]:h-2.5 [&>span]:w-2.5" />
-      Deleting
-    </span>
-  ) : (
-    renderNodeIndicator(indicatorState)
-  );
-  // As in the sidebar, a new reply is flagged once the chat is idle, not while it works on.
-  const unread = detail ? detail.unread && detail.icon === 'idle' : hasUnreadAgentMessage(indicatorState);
-  // The green frame says drone; the icon says where it runs.
-  const runtimeIcon = droneNode ? (
-    <span
-      className="flex h-3.5 w-3.5 flex-shrink-0 text-[var(--canvas-chat-owner)]"
-      data-canvas-drone-runtime={runtime === 'host' ? 'host' : 'container'}
-      title={runtime === 'host' ? 'Drone on the host' : 'Drone in a container'}
-    >
-      <DroneRuntimeIcon runtime={runtime === 'host' ? 'host' : 'container'} className="h-3.5 w-3.5" />
-    </span>
-  ) : null;
-  return (
-    <CardElement
-      key={node.droneId}
-      type={inlineEditing ? undefined : 'button'}
-      data-canvas-node="1"
-      data-drone-id={node.droneId}
-      data-canvas-node-kind={draftNode ? 'draft' : droneNode ? 'drone' : 'chat'}
-      data-fleet-assignment-owner-id={!draftNode && nodeDroneId ? nodeDroneId : undefined}
-      ref={(el) => {
-        if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
-        else delete nodeElementByDroneIdRef.current[node.droneId];
-      }}
-      onMouseDown={(event) => actions.current.onNodeMouseDown(node.droneId, event)}
-      onClick={(event) => actions.current.onNodeClick(node.droneId, event)}
-      onDoubleClick={(event) => actions.current.onNodeDoubleClick(node.droneId, event)}
-      onMouseEnter={detail ? () => actions.current.hoverCard(node.droneId) : undefined}
-      onMouseLeave={detail ? () => actions.current.hoverCard(null) : undefined}
-      aria-pressed={selected}
-      aria-busy={deleting || undefined}
-      title={deleting ? 'Deleting…' : undefined}
-      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
-        // One thin border says it all: full accent when selected, a softer one for the chat that is open.
-        selected || dragging || inlineEditing || assignmentHoverTarget
-          ? 'border-[var(--accent)]'
-          : isActiveSidebarChat
-            ? 'border-[color-mix(in_srgb,var(--accent)_60%,var(--border))]'
-            : detail.state === 'need'
-            ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
-            : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
-      } ${detail.state === 'done' && !detail.unread && !selected ? 'opacity-80 hover:opacity-100' : ''}` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
-        dragging
-          ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_14px_26px_var(--shadow-color)]'
-          : assignmentHoverTarget
-            ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_16px_28px_var(--shadow-color)]'
-            : selected || inlineEditing
-              ? 'border-[var(--accent-muted)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-subtle),0_10px_20px_var(--shadow-color)]'
-              : draftNode
-                ? 'border-[var(--user-border)] bg-[var(--panel-overlay-soft)] hover:border-[var(--muted)]'
-                : droneNode
-                  ? runtime === 'host'
-                    ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel-overlay)_58%)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
-                    : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel-overlay)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
-                  : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
-      }`}
-      style={{
-        left: 0,
-        top: 0,
-        ...(detail
-          ? {
-              padding: '0.4375rem 0.625rem',
-            }
-          : { paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding)' : '0.625rem' }),
-        width: nodeWidth,
-        height: nodeHeight,
-        transform: `translate3d(${viewX}px, ${viewY}px, 0) scale(var(--canvas-node-boost))`,
-        transformOrigin: '0 50%',
-        willChange: dragging ? 'transform' : undefined,
-      }}
-    >
-      {isActiveSidebarChat && !detail ? (
-        <span className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-md bg-[var(--accent)] z-[2]" />
-      ) : null}
-      {/* A detailed card says all of this inside it. */}
-      {indicator && !detail ? (
-        <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">{indicator}</span>
-      ) : null}
-      {/* A new reply: a dot on the card's corner, in either card mode. */}
-      {unread ? (
-        <span className="pointer-events-none absolute -right-[3px] -top-[3px] z-[3] flex" data-canvas-card-unread>
-          <span className="h-2 w-2 rounded-full bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]" title="Unread agent message" aria-label="Unread agent message" />
-        </span>
-      ) : null}
-      {showCanvasLastMessagePreviews && lastAgentSnippet && !detail ? (
-        <span
-          className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-10 leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
-          title={lastAgentSnippet}
-        >
-          <span className="line-clamp-2 break-words whitespace-pre-wrap">{lastAgentSnippet}</span>
-        </span>
-      ) : null}
-      {draftNode ? (
-        <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted)]">
-          Draft
-        </span>
-      ) : null}
-      {repoLabel || repoBranch ? (
-        // One row centred under the card: at least as wide as the card, and wider when the two
-        // chips need it, so the repository and the branch spread apart instead of overlapping.
-        <span
-          className={`pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap transition-opacity ${
-            droneNode || draftNode || selected ? '' : 'opacity-0 group-hover/canvas-node:opacity-100'
-          }`}
-          data-canvas-card-repo
-        >
-          {repoLabel ? (
-            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[260px]`} title={repoLabel}>
-              <span className="truncate">{repoLabel}</span>
-            </span>
-          ) : <span />}
-          {repoBranch ? (
-            <span className={`${CANVAS_NODE_META_CHIP_CLASS} max-w-[180px]`} title={repoBranch}>
-              <span className="truncate">{repoBranch}</span>
-            </span>
-          ) : null}
-        </span>
-      ) : null}
-      {/* The title fades while the chat is being deleted; the Deleting badge above says why. */}
-      <span className={`min-w-0 flex-1 transition-opacity ${deleting ? 'opacity-45' : ''} ${inlineEditing && droneNode ? 'flex items-center gap-1.5' : ''}`}>
-        {inlineEditing && droneNode ? runtimeIcon : null}
-        {inlineEditing ? (
-          <input
-            ref={inlineRenameInputRef}
-            value={inlineRenameDraft}
-            disabled={inlineRenameBusy}
-            onChange={(event) => actions.current.setInlineRenameDraft(event.target.value)}
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
-            onDragStart={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-            }}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-            }}
-            // Clicking away keeps what was typed, as in a file explorer; only Escape discards it.
-            onBlur={() => {
-              if (inlineRenameBusy || inlineRenameSettledRef.current) return;
-              inlineRenameSettledRef.current = true;
-              void actions.current.submitInlineRename();
-            }}
-            onKeyDown={(event) => {
-              if ((event.nativeEvent as any)?.isComposing) return;
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                event.stopPropagation();
-                inlineRenameSettledRef.current = true;
-                void actions.current.submitInlineRename();
-                // Canvas keys (Q, Delete, arrows) keep working once the field closes.
-                actions.current.focusViewportElement();
-                return;
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                inlineRenameSettledRef.current = true;
-                actions.current.cancelInlineRename();
-                actions.current.focusViewportElement();
-              }
-            }}
-            // Looks like the title it replaces: the card's own border already says it is being edited.
-            className={`block w-full min-w-0 border-0 bg-transparent p-0 text-12-5 font-[var(--weight-semibold)] leading-[inherit] text-[var(--fg-secondary)] caret-[var(--accent)] outline-none focus:outline-none focus-visible:outline-none ${droneNode ? '' : 'text-center'}`}
-            style={
-              labelTextBoostLimit > 1
-                ? {
-                    fontSize: `calc(var(--text-12-5) * min(var(--canvas-node-boost), ${labelTextBoostLimit.toFixed(3)}))`,
-                  }
-                : undefined
-            }
-          />
-        ) : assignmentHoverTarget ? (
-          <span className="block">
-            <span className="block truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-              Release to choose action
-            </span>
-            <span className="block truncate text-10 text-[var(--muted-dim)]">
-              {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} dropped into this chat
-            </span>
-          </span>
-        ) : detail ? (
-          <span className="grid min-w-0" data-canvas-detailed-card={detail.state}>
-            <span className="flex min-w-0 items-center gap-1.5">
-              {runtimeIcon}
-              <span className="min-w-0 truncate text-[13px] font-semibold" title={`${primaryLabel}\n${detail.text}`}>{primaryLabel}</span>
-              {detail.workingSince !== null ? (
-                <span className="ml-auto flex-shrink-0 font-mono text-[11px] tabular-nums text-[var(--muted)]" title="How long it has been working"
-                  data-canvas-card-clock>
-                  {detail.clock}
-                </span>
-              ) : null}
-              {detail.showState ? (
-                // The sidebar's icon for the same state; a new reply is the dot on the card's corner.
-                <span className={`${detail.workingSince !== null ? '' : 'ml-auto'} inline-flex flex-shrink-0`} title={detail.unread ? `${detail.label} · new reply` : detail.label}
-                  data-canvas-card-state={detail.icon}>
-                  <SidebarItemStateIndicator state={detail.icon} unread={false} showReadyAnchor={detail.state === 'idle'} />
-                </span>
-              ) : null}
-            </span>
-          </span>
-        ) : (
-          <span className={`flex min-w-0 items-center ${droneNode ? 'gap-1.5' : ''}`}>
-            {runtimeIcon}
-            <span
-              className={`min-w-0 flex-1 truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)] ${droneNode ? '' : 'text-center'}`}
-              style={
-                labelTextBoostLimit > 1
-                  ? {
-                      fontSize: `calc(var(--text-12-5) * min(var(--canvas-node-boost), ${labelTextBoostLimit.toFixed(3)}))`,
-                    }
-                  : undefined
-              }
-            >
-              {primaryLabel}
-            </span>
-          </span>
-        )}
-      </span>
-    </CardElement>
-  );
-});
-
 /** A drone's chats, main and side; a drone without any still has its default chat. */
 function droneChatNames(drone: { chats?: string[]; sideChats?: Array<{ name: string }> } | null | undefined): string[] {
   const names = [...(drone?.chats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
   return names.length ? names : ['default'];
 }
-
-/** One card in full at the canvas's bottom left: every step, its last reply, time and cost. */
-export const CANVAS_STEPS_PANEL_WIDTH_PX = 320;
-
-function CanvasStepsPanel({ title, card, bottomPx }: { title: string; card: DetailedCard; bottomPx: number }) {
-  // Nothing spent yet reads as no line, not a dash.
-  const cost = card.cost === '—' ? '' : card.cost;
-  // The line under the steps is the last reply; while working it is the current step, already listed above.
-  const listed = card.steps ? [...card.steps.done, ...card.steps.doing, ...card.steps.next, card.steps.blocker].includes(card.text)
-    || card.text === `Blocked: ${card.steps.blocker}` : false;
-  return (
-    <div data-canvas-steps-panel="" aria-live="polite" style={{ bottom: bottomPx, width: `min(${CANVAS_STEPS_PANEL_WIDTH_PX}px, calc(100% - 1rem))` }}
-      className="dh-canvas-work work-card pointer-events-none absolute left-2 z-10 grid gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--panel)] py-2 pl-3.5 pr-2.5 text-[12px] text-[var(--fg)]">
-      <span className="absolute -left-px bottom-2.5 top-2.5 w-[3px] rounded-r" style={{ background: detailTone(card) }} />
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate text-[13px] font-semibold">{title}</span>
-        <span className="ml-auto inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap" style={{ color: detailTone(card) }}>
-          <Dot pulse={card.state === 'working'} />{card.label}
-        </span>
-      </div>
-      {card.clock || cost ? (
-        <div className="flex gap-1.5 font-mono text-[11px] tabular-nums text-[var(--muted)]" data-canvas-steps-panel-usage>
-          {card.clock ? <span title={card.workingSince !== null ? 'How long it has been working' : 'Since it last stopped'}>{card.clock}</span> : null}
-          {card.clock && cost ? <span aria-hidden="true">·</span> : null}
-          {cost ? <span title={card.costTitle}>{cost}</span> : null}
-        </div>
-      ) : null}
-      {card.steps ? <Steps w={{ steps: card.steps, state: WORKER_STATE_OF[card.state] }} /> : null}
-      {card.stepsStale ? <div className="text-[11px] text-[var(--muted)]">Summarized while it was working; it stopped before a final summary.</div> : null}
-      {card.text && !listed ? (
-        <div className={`line-clamp-4 break-words ${card.steps ? 'border-t border-[var(--border)] pt-1.5 text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}>{card.text}</div>
-      ) : null}
-    </div>
-  );
-}
-
-/** The Entity's colour for the same state; working and thinking are one colour, as on its canvas. */
-function detailTone(detail: DetailedCard): string {
-  const state = WORKER_STATE_OF[detail.state];
-  return STATE_COLOR[state === 'think' ? 'act' : state];
-}
-
-const CANVAS_NODE_META_CHIP_CLASS =
-  'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]';
 
 /** "plan (Alpha)", "plan (Alpha), default (Beta)", or the first two and how many more. */
 function formatMessageTargetLabel(labels: string[]): string | null {
@@ -599,89 +214,7 @@ function formatMessageTargetLabel(labels: string[]): string | null {
   return `${labels.slice(0, 2).join(', ')} +${labels.length - 2} more`;
 }
 
-function CanvasWorldLayer({ boardDroneId, children }: { boardDroneId: string | null; children: React.ReactNode }) {
-  const { panX, panY, scale } = useDroneCanvasStore(
-    useShallow((state) => {
-      const board = selectCanvasBoard(state, boardDroneId);
-      return { panX: board.panX, panY: board.panY, scale: board.scale };
-    }),
-  );
-  const dotVisibility = Math.max(0, Math.min(1, (scale - DOT_GRID_FADE_OUT_SCALE) / (1 - DOT_GRID_FADE_OUT_SCALE)));
-  const dotOpacity = DOT_GRID_MAX_OPACITY * Math.pow(dotVisibility, 1.2);
-  const boost = Math.min(NODE_MAX_READABILITY_BOOST, Math.max(1, NODE_LEGIBLE_SCALE / scale));
-  return (
-    <>
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            dotOpacity > 0
-              ? `radial-gradient(circle, rgba(var(--canvas-dot-rgb), ${dotOpacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`
-              : 'none',
-          backgroundSize: `${DOT_GRID_BASE_SPACING_PX * scale}px ${DOT_GRID_BASE_SPACING_PX * scale}px`,
-          backgroundPosition: `${panX}px ${panY}px`,
-        }}
-      />
-      <div
-        data-canvas-world="1"
-        className="absolute left-0 top-0"
-        style={
-          {
-            transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
-            transformOrigin: '0 0',
-            '--canvas-node-boost': boost.toFixed(3),
-            '--canvas-node-padding': boost > 1 ? '0.5rem' : '0.625rem',
-          } as React.CSSProperties
-        }
-      >
-        {children}
-      </div>
-    </>
-  );
-}
-
-const NO_CARD_SPREAD = { x: 1, y: 1 } as const;
-
-function screenToWorldPoint(
-  clientX: number,
-  clientY: number,
-  rect: DOMRect,
-  panX: number,
-  panY: number,
-  scale: number,
-): { x: number; y: number } {
-  return {
-    x: (clientX - rect.left - panX) / scale,
-    y: (clientY - rect.top - panY) / scale,
-  };
-}
-
-function buildSelectionBox(
-  startClientX: number,
-  startClientY: number,
-  endClientX: number,
-  endClientY: number,
-  rect: DOMRect,
-): SelectionBox {
-  const left = Math.min(startClientX, endClientX) - rect.left;
-  const top = Math.min(startClientY, endClientY) - rect.top;
-  const width = Math.abs(endClientX - startClientX);
-  const height = Math.abs(endClientY - startClientY);
-  return { left, top, width, height };
-}
-
-function rectIntersects(
-  ax: number,
-  ay: number,
-  aw: number,
-  ah: number,
-  bx: number,
-  by: number,
-  bw: number,
-  bh: number,
-): boolean {
-  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-}
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
 
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -721,90 +254,6 @@ function buildSpawnOffsets(maxRings: number): Array<{ x: number; y: number }> {
 
 const SPAWN_OFFSETS = buildSpawnOffsets(SPAWN_OFFSET_RINGS);
 
-function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
-  if (!state) return null;
-
-  const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
-  if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) {
-    if (isStarting) {
-      const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
-      return (
-        <span
-          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
-          style={{ fontFamily: 'var(--display)' }}
-          title={String(state.hubMessage ?? label)}
-        >
-          {label}
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center" title="Active">
-        <TypingDots color="var(--yellow)" />
-      </span>
-    );
-  }
-
-  if (state.statusChecking) {
-    return (
-      <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
-        style={{ fontFamily: 'var(--display)' }}
-        title={String(state.statusError ?? 'Checking status')}
-      >
-        Chk
-      </span>
-    );
-  }
-
-  if (state.hubPhase === 'error' || !state.statusOk) {
-    const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
-    return (
-      <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
-        style={{ fontFamily: 'var(--display)' }}
-        title={String(state.hubMessage ?? state.statusError ?? label)}
-      >
-        {state.hubPhase === 'error' ? 'Err' : 'Off'}
-      </span>
-    );
-  }
-
-  return null;
-}
-
-function hasUnreadAgentMessage(state: DroneCanvasIndicatorState | null): boolean {
-  if (!state || !state.unreadAgentMessage) return false;
-  const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
-  return !isStarting && !(state.busy && state.statusOk && state.hubPhase !== 'error');
-}
-
-/** Pans and zooms so every rect is inside the viewport, never zooming in past 1:1. */
-export function fitViewportToBounds(
-  bounds: ReadonlyArray<CanvasRect>,
-  viewportWidth: number,
-  viewportHeight: number,
-): { panX: number; panY: number; scale: number } | null {
-  if (bounds.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) return null;
-  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
-  for (const rect of bounds) {
-    minX = Math.min(minX, rect.x);
-    minY = Math.min(minY, rect.y);
-    maxX = Math.max(maxX, rect.x + rect.width);
-    maxY = Math.max(maxY, rect.y + rect.height);
-  }
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  const innerWidth = Math.max(1, viewportWidth - FIT_VIEWPORT_PADDING_PX * 2);
-  const innerHeight = Math.max(1, viewportHeight - FIT_VIEWPORT_PADDING_PX * 2);
-  const scale = clampCanvasScale(Math.min(1, innerWidth / width, innerHeight / height));
-  return {
-    panX: Math.round((viewportWidth - width * scale) / 2 - minX * scale),
-    panY: Math.round((viewportHeight - height * scale) / 2 - minY * scale),
-    scale,
-  };
-}
-
 export function DroneCanvasDock({
   boardDrone,
   droneById,
@@ -814,7 +263,7 @@ export function DroneCanvasDock({
   fleetParentIdByDroneId,
   fleetAssignedIdsByDroneId,
   draftRepoLabel,
-  chatNodeStateById,
+  chatNodeStateById: chatNodeStateByIdProp,
   onActivateChat,
   onAssignDronesToOwner,
   onSendCanvasPrompt,
@@ -894,6 +343,11 @@ export function DroneCanvasDock({
   /** Deletes drones without asking again, for a question already asked here (deleting a topic with its drones). */
   onDeleteDronesConfirmed?: (droneIds: string[]) => void;
 }) {
+  const perfStart = canvasPerf.renderStart();
+  React.useLayoutEffect(() => canvasPerf.renderEnd('dock', perfStart));
+  // Each summary refresh rebuilds every chat's state; keep the objects whose fields did not change,
+  // so a refresh re-renders only the cards it changed.
+  const chatNodeStateById = useStableRecordValues(chatNodeStateByIdProp);
   const { scope, setScope } = useDroneCanvasStore(
     useShallow((s) => ({ scope: s.scope, setScope: s.setScope })),
   );
@@ -912,26 +366,25 @@ export function DroneCanvasDock({
     [activeTopic, droneById],
   );
   const autoMembers = droneScope || topicScope;
+  // Positions and zoom are left out: the layers that draw them follow them, and handlers read them
+  // from the store when they run, so dragging, panning and zooming do not render the dock.
   const {
-    nodesByDroneId,
     nodeOrder: storedNodeOrder,
     selectedDroneIds: storedSelectedDroneIds,
     draftPromptByNodeId,
     draftRepoLabelByNodeId,
-    scale,
   } = useDroneCanvasStore(
     useShallow((s) => {
       const board = selectCanvasBoard(s, boardKey);
       return {
-        nodesByDroneId: board.nodesByDroneId,
         nodeOrder: board.nodeOrder,
         selectedDroneIds: board.selectedDroneIds,
         draftPromptByNodeId: board.draftPromptByNodeId,
         draftRepoLabelByNodeId: board.draftRepoLabelByNodeId,
-        scale: board.scale,
       };
     }),
   );
+  const nodeMetaById = useCanvasBoardNodeMeta(boardKey);
   const {
     upsertNodes,
     moveNodes,
@@ -1076,9 +529,6 @@ export function DroneCanvasDock({
     const rect = composer.getBoundingClientRect();
     return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
   }, []);
-  const lineageMarkerId = React.useId();
-  const assignedMarkerId = React.useId();
-  const chatOwnerMarkerId = React.useId();
   const nodeDragRef = React.useRef<NodeDragState | null>(null);
   const panDragRef = React.useRef<PanDragState | null>(null);
   const marqueeDragRef = React.useRef<MarqueeDragState | null>(null);
@@ -1093,9 +543,12 @@ export function DroneCanvasDock({
   const pendingClonesRef = React.useRef(new Map<string, Promise<boolean>>());
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
   const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardKey), [boardKey]);
+  const zoomGesture = React.useMemo(() => createZoomGesture(), []);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
+  // Set once a card drag has moved past the threshold, not on a plain click: promoting cards to layers costs a frame.
+  const [movingNodeIds, setMovingNodeIds] = React.useState<ReadonlySet<string>>(EMPTY_ID_SET);
   const [panning, setPanning] = React.useState(false);
   const [selectionBox, setSelectionBox] = React.useState<SelectionBox | null>(null);
   const [inlineRenamingDroneId, setInlineRenamingDroneId] = React.useState<string | null>(null);
@@ -1141,8 +594,8 @@ export function DroneCanvasDock({
     return { x: point.x / cardSpreadRef.current.x, y: point.y / cardSpreadRef.current.y };
   }, []);
   const nodes = React.useMemo(
-    () => nodeOrder.map((droneId) => nodesByDroneId[droneId]).filter(Boolean),
-    [nodeOrder, nodesByDroneId],
+    () => nodeOrder.map((droneId) => nodeMetaById[droneId]).filter(Boolean),
+    [nodeOrder, nodeMetaById],
   );
   const nodeWidthByDroneId = React.useMemo(() => {
     const out: Record<string, number> = {};
@@ -1175,20 +628,6 @@ export function DroneCanvasDock({
     for (const node of nodes) out[node.droneId] = getNodeHeightPx(node.droneId);
     return out;
   }, [nodes]);
-  // Match the card's CSS scale and its left/vertical-center transform origin.
-  const nodeReadabilityBoost = Math.min(NODE_MAX_READABILITY_BOOST, Math.max(1, NODE_LEGIBLE_SCALE / scale));
-  const fallbackNodeBoundsById = React.useMemo(() => {
-    const out: Record<string, CanvasRect> = {};
-    for (const node of nodes) {
-      out[node.droneId] = {
-        x: node.x,
-        y: node.y,
-        width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX,
-        height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX,
-      };
-    }
-    return out;
-  }, [nodeHeightByDroneId, nodeWidthByDroneId, nodes]);
   // Where cards are drawn before the zoom boost: stored positions and compact sizes, or detailed cards spread apart.
   // Detailed cards: cost and timing from the Hub, a clock that ticks while anything works.
   const busyChatKey = React.useMemo(
@@ -1227,25 +666,31 @@ export function DroneCanvasDock({
     const total = [...chatIds].reduce((sum, id) => sum + (chatActivityByNodeId[id]?.estimatedCost ?? 0), 0);
     return total > 0 ? costText({ estimatedCost: total }) : null;
   }, [canvasDetailedCards, chatActivityByNodeId, droneById, nodes]);
-  const viewNodeBoundsById = React.useMemo(() => {
-    if (!detailedWidthByNodeId) return fallbackNodeBoundsById;
-    const out: Record<string, CanvasRect> = {};
+  // Card sizes as drawn: compact, or detailed cards' own.
+  const viewSizeById = React.useMemo(() => {
+    const out: Record<string, CanvasNodeSize> = {};
     for (const node of nodes) {
-      out[node.droneId] = {
-        x: node.x * DETAILED_CARD_SPREAD.x,
-        y: node.y * DETAILED_CARD_SPREAD.y,
-        width: detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX,
-        height: DETAILED_CARD_HEIGHT_PX,
-      };
+      out[node.droneId] = detailedWidthByNodeId
+        ? { width: detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX, height: DETAILED_CARD_HEIGHT_PX }
+        : { width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX, height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX };
     }
     return out;
-  }, [detailedWidthByNodeId, fallbackNodeBoundsById, nodes]);
-  const renderedNodeBoundsById = React.useMemo(() => {
-    const boost = Number(nodeReadabilityBoost.toFixed(3));
-    return Object.fromEntries(Object.entries(viewNodeBoundsById).map(([id, rect]) => [id, scaleCanvasRect(rect, boost)]));
-  }, [viewNodeBoundsById, nodeReadabilityBoost]);
-  const nodeBoundsRef = React.useRef(renderedNodeBoundsById);
-  React.useLayoutEffect(() => { nodeBoundsRef.current = renderedNodeBoundsById; }, [renderedNodeBoundsById]);
+  }, [detailedWidthByNodeId, nodeHeightByDroneId, nodeWidthByDroneId, nodes]);
+  const viewSizeByIdRef = React.useRef(viewSizeById);
+  viewSizeByIdRef.current = viewSizeById;
+  const shownNodeIdsRef = React.useRef(nodeOrder);
+  shownNodeIdsRef.current = nodeOrder;
+  /** Compact bounds at the stored positions, read when needed: positions change without rendering the dock. */
+  const readCompactNodeBounds = React.useCallback((): Record<string, CanvasRect> => {
+    const sizeById: Record<string, CanvasNodeSize> = {};
+    for (const node of nodes) {
+      sizeById[node.droneId] = {
+        width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX,
+        height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX,
+      };
+    }
+    return viewBoundsOf(getView().nodesByDroneId, nodeOrder, sizeById, NO_CARD_SPREAD);
+  }, [getView, nodeHeightByDroneId, nodeOrder, nodeWidthByDroneId, nodes]);
   const droneNodeByDroneId = React.useMemo(() => {
     const out: Record<string, (typeof nodes)[number]> = {};
     for (const node of nodes) {
@@ -1300,27 +745,6 @@ export function DroneCanvasDock({
     }
     return out;
   }, [chatNodesByDroneId, droneById, droneScope, forkSourceNodeIdByNodeId]);
-  const relationshipEdges = React.useMemo(() => {
-    return buildCanvasRelationshipEdges({
-      preferredNodeByDroneId,
-      droneNodeByDroneId,
-      chatNodesByDroneId,
-      renderedNodeBoundsById,
-      fallbackNodeBoundsById: viewNodeBoundsById,
-      fleetParentIdByDroneId,
-      fleetAssignedIdsByDroneId,
-      forkSourceNodeIdByNodeId: edgeForkSourceNodeIdByNodeId,
-    });
-  }, [
-    edgeForkSourceNodeIdByNodeId,
-    viewNodeBoundsById,
-    chatNodesByDroneId,
-    droneNodeByDroneId,
-    fleetAssignedIdsByDroneId,
-    fleetParentIdByDroneId,
-    preferredNodeByDroneId,
-    renderedNodeBoundsById,
-  ]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
   const busySeenAtRef = React.useRef<Record<string, number>>({});
   const busySeenAt = React.useMemo(() => {
@@ -1431,7 +855,7 @@ export function DroneCanvasDock({
   // selected it keeps editing the last one, so its text and attachments stay until something else is selected.
   const composerDraftNodeIdRef = React.useRef<string | null>(null);
   if (selectedDroneIds.length > 0) composerDraftNodeIdRef.current = selectedDraftNodeId;
-  else if (composerDraftNodeIdRef.current && !nodesByDroneId[composerDraftNodeIdRef.current]) composerDraftNodeIdRef.current = null;
+  else if (composerDraftNodeIdRef.current && !nodeMetaById[composerDraftNodeIdRef.current]) composerDraftNodeIdRef.current = null;
   const composerDraftNodeId = composerDraftNodeIdRef.current;
   const composerDraft = composerDraftNodeId ? String(draftPromptByNodeId[composerDraftNodeId] ?? '') : messageDraft;
   // A drone card sends to one of its chats: resolve it here so the composer names that chat.
@@ -1442,13 +866,13 @@ export function DroneCanvasDock({
   const selectedMessageLabel = React.useMemo(() => {
     const draftLabels = selectedDroneIds
       .filter(isCanvasDraftNodeId)
-      .map((id) => String(nodesByDroneId[id]?.label ?? '').trim() || 'Untitled');
+      .map((id) => String(nodeMetaById[id]?.label ?? '').trim() || 'Untitled');
     const chatLabels = selectedMessageTargets.map((target) => {
       const droneName = String(effectiveDroneNameById[target.droneId] ?? '').trim() || target.droneId;
       return `${target.chatName} (${droneName})`;
     });
     return formatMessageTargetLabel([...chatLabels, ...draftLabels]);
-  }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds, selectedMessageTargets]);
+  }, [effectiveDroneNameById, nodeMetaById, selectedDroneIds, selectedMessageTargets]);
   const controlsDisabled = messageSending;
   // A new drone (a draft card) or a new chat on a drone's canvas is set up from the composer.
   const selectedDraftChat = React.useMemo(() => {
@@ -1617,7 +1041,7 @@ export function DroneCanvasDock({
         if (!chatRef) return;
         if (chatRef.chatName === 'default') return;
       }
-      const node = nodesByDroneId[droneId];
+      const node = nodeMetaById[droneId];
       if (!node) return;
       setSelectedDroneIds([droneId]);
       inlineRenameSettledRef.current = false;
@@ -1628,7 +1052,7 @@ export function DroneCanvasDock({
         : String(node.label ?? droneId));
       setMessageError(null);
     },
-    [effectiveDroneNameById, nodesByDroneId, onRenameDrone, setSelectedDroneIds],
+    [effectiveDroneNameById, nodeMetaById, onRenameDrone, setSelectedDroneIds],
   );
 
   const submitInlineRename = React.useCallback(async () => {
@@ -1638,7 +1062,7 @@ export function DroneCanvasDock({
     const renamingDroneId = parseCanvasDroneNodeId(droneId);
     const currentName = renamingDroneId
       ? String(effectiveDroneNameById[renamingDroneId] ?? '').trim() || renamingDroneId
-      : String(nodesByDroneId[droneId]?.label ?? '').trim();
+      : String(nodeMetaById[droneId]?.label ?? '').trim();
     if (!newName || newName === currentName) {
       cancelInlineRename();
       return;
@@ -1668,7 +1092,7 @@ export function DroneCanvasDock({
       return;
     }
     if (isCanvasDraftNodeId(droneId)) {
-      const node = nodesByDroneId[droneId];
+      const node = getView().nodesByDroneId[droneId];
       if (!node) {
         cancelInlineRename();
         return;
@@ -1702,7 +1126,7 @@ export function DroneCanvasDock({
             getCanvasBoardActions(chatRef.droneId).replaceNodeId(droneId, nextNodeId, nextChatName);
           });
         } else {
-          const node = nodesByDroneId[droneId];
+          const node = getView().nodesByDroneId[droneId];
           if (node) upsertNodes([{ droneId, label: nextChatName, x: node.x, y: node.y }]);
         }
         cancelInlineRename();
@@ -1721,8 +1145,9 @@ export function DroneCanvasDock({
     cancelInlineRename,
     effectiveDroneNameById,
     inlineRenameDraft,
+    getView,
     inlineRenamingDroneId,
-    nodesByDroneId,
+    nodeMetaById,
     onRenameChat,
     onRenameDrone,
     setMessageError,
@@ -1827,8 +1252,11 @@ export function DroneCanvasDock({
         }
       }
 
+      const positions = getView().nodesByDroneId;
       const collides = (x: number, y: number): boolean => {
-        for (const node of nodes) {
+        for (const meta of nodes) {
+          const node = positions[meta.droneId];
+          if (!node) continue;
           const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
           if (
             rectIntersects(
@@ -1855,7 +1283,7 @@ export function DroneCanvasDock({
       }
       return roundedBase;
     },
-    [nodeWidthByDroneId, nodes],
+    [getView, nodeWidthByDroneId, nodes],
   );
 
   const createDraftAtWorldPoint = React.useCallback(
@@ -1965,16 +1393,17 @@ export function DroneCanvasDock({
           members: boardMembers.filter((member) => parseCanvasChatNodeId(member.nodeId)?.droneId === drone.id),
         };
       }),
-      nodesById: nodesByDroneId,
+      // Positions as they are now; the effect reruns when cards come or go, not when they move.
+      nodesById: getView().nodesByDroneId,
       anchor: { x: anchor.x - NODE_MIN_WIDTH_PX / 2, y: anchor.y - CHAT_NODE_HEIGHT_PX / 2 },
       widthOf: (nodeId, label) => getNodeWidthPx(label, parseCanvasDroneNodeId(nodeId) ? DRONE_NODE_CHROME_WIDTH_PX : 0),
     });
     if (planned.length > 0) upsertNodes(planned);
-  }, [boardMembers, effectiveDroneNameById, getView, nodesByDroneId, topicDrones, topicScope, upsertNodes]);
+  }, [boardMembers, effectiveDroneNameById, getView, nodeMetaById, topicDrones, topicScope, upsertNodes]);
 
   React.useEffect(() => {
     if (!droneScope) return;
-    const anyPlaced = boardMembers.some((member) => nodesByDroneId[member.nodeId]);
+    const anyPlaced = boardMembers.some((member) => nodeMetaById[member.nodeId]);
     let rootAnchor = pendingChatPlacementRef.current;
     const viewport = viewportRef.current;
     if (!rootAnchor && anyPlaced && viewport) {
@@ -1991,11 +1420,11 @@ export function DroneCanvasDock({
       );
       rootAnchor = { x: center.x - NODE_MIN_WIDTH_PX / 2, y: center.y - CHAT_NODE_HEIGHT_PX / 2 };
     }
-    const planned = planDroneBoardPlacements({ members: boardMembers, nodesById: nodesByDroneId, rootAnchor });
+    const planned = planDroneBoardPlacements({ members: boardMembers, nodesById: getView().nodesByDroneId, rootAnchor });
     if (planned.length === 0) return;
     if (planned.some((node) => !forkSourceNodeIdByNodeId[node.droneId])) pendingChatPlacementRef.current = null;
     upsertNodes(planned);
-  }, [boardMembers, droneScope, forkSourceNodeIdByNodeId, getView, nodesByDroneId, upsertNodes]);
+  }, [boardMembers, droneScope, forkSourceNodeIdByNodeId, getView, nodeMetaById, upsertNodes]);
 
   React.useEffect(() => {
     if (selectedDroneIds.length > 0) return;
@@ -2022,8 +1451,10 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     const updates: Array<{ droneId: string; label: string; x: number; y: number }> = [];
-    for (const node of nodes) {
-      if (isCanvasDraftNodeId(node.droneId)) continue;
+    const positions = getView().nodesByDroneId;
+    for (const meta of nodes) {
+      const node = positions[meta.droneId];
+      if (!node || isCanvasDraftNodeId(node.droneId)) continue;
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
       if (canvasDroneId) {
         const label = String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
@@ -2039,7 +1470,7 @@ export function DroneCanvasDock({
     }
     if (updates.length === 0) return;
     upsertNodes(updates);
-  }, [effectiveDroneNameById, nodes, upsertNodes]);
+  }, [effectiveDroneNameById, getView, nodes, upsertNodes]);
 
   React.useEffect(() => {
     setRenamedDroneNameById((prev) => {
@@ -2074,7 +1505,7 @@ export function DroneCanvasDock({
       return;
     }
     if (lastSyncedSidebarSelectionRef.current === sidebarId) return;
-    if (!nodesByDroneId[sidebarId]) return;
+    if (!nodeMetaById[sidebarId]) return;
     lastSyncedSidebarSelectionRef.current = sidebarId;
     if (selectedDroneIds.length === 1 && selectedDroneIds[0] === sidebarId) return;
     if (selectedDroneIds.length === 1) {
@@ -2085,7 +1516,7 @@ export function DroneCanvasDock({
     setSelectedDroneIds([sidebarId]);
   }, [
     draggingNodeId,
-    nodesByDroneId,
+    nodeMetaById,
     panning,
     selectedDroneIds,
     selectionBox,
@@ -2101,9 +1532,9 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     if (!inlineRenamingDroneId) return;
-    if (nodesByDroneId[inlineRenamingDroneId]) return;
+    if (nodeMetaById[inlineRenamingDroneId]) return;
     cancelInlineRename();
-  }, [cancelInlineRename, inlineRenamingDroneId, nodesByDroneId]);
+  }, [cancelInlineRename, inlineRenamingDroneId, nodeMetaById]);
 
   React.useEffect(() => {
     if (!inlineRenamingDroneId) return;
@@ -2143,6 +1574,7 @@ export function DroneCanvasDock({
       const drag = nodeDragRef.current ?? marqueeDragRef.current;
       if (drag && !drag.moved && Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) >= DRAG_MOVE_THRESHOLD_PX) {
         drag.moved = true;
+        if (drag === nodeDragRef.current) setMovingNodeIds(new Set(nodeDragRef.current.droneIds));
       }
       if (nodeDragRef.current || panDragRef.current || marqueeDragRef.current) moves.push(event);
     };
@@ -2213,7 +1645,10 @@ export function DroneCanvasDock({
 
       const hits: string[] = [];
       const view = getView();
-      for (const [droneId, bounds] of Object.entries(nodeBoundsRef.current)) {
+      const boost = nodeReadabilityBoostAt(zoomGesture.frozenScale() ?? view.scale);
+      const viewBounds = viewBoundsOf(view.nodesByDroneId, shownNodeIdsRef.current, viewSizeByIdRef.current, cardSpreadRef.current);
+      for (const [droneId, rect] of Object.entries(viewBounds)) {
+        const bounds = scaleCanvasRect(rect, boost);
         if (rectIntersects(box.left, box.top, box.width, box.height,
           bounds.x * view.scale + view.panX, bounds.y * view.scale + view.panY,
           bounds.width * view.scale, bounds.height * view.scale)) hits.push(droneId);
@@ -2232,6 +1667,10 @@ export function DroneCanvasDock({
 
     const onWindowMouseUp = (event: MouseEvent) => {
       moves.flush();
+      if (nodeDragRef.current) canvasPerf.gestureEnd('drag');
+      if (panDragRef.current) canvasPerf.gestureEnd('pan');
+      if (marqueeDragRef.current) canvasPerf.gestureEnd('marquee');
+      if (panDragRef.current || marqueeDragRef.current) setCanvasGesture(viewportRef.current, false);
       const nodeDrag = nodeDragRef.current;
       setComposerDropHover(false);
       if (nodeDrag?.moved && isOverMessageComposer(event.clientX, event.clientY)) {
@@ -2283,6 +1722,7 @@ export function DroneCanvasDock({
       setAssignmentHoverTargetCount(0);
       nodeDragRef.current = null;
       setDraggingNodeId(null);
+      setMovingNodeIds(EMPTY_ID_SET);
 
       panDragRef.current = null;
       setPanning(false);
@@ -2307,6 +1747,7 @@ export function DroneCanvasDock({
     const onWindowBlur = () => {
       moves.flush();
       if (!nodeDragRef.current && !panDragRef.current && !marqueeDragRef.current) return;
+      setCanvasGesture(viewportRef.current, false);
       const nodeDrag = nodeDragRef.current;
       if (nodeDrag?.moved) suppressNodeClickRef.current = true;
       setComposerDropHover(false);
@@ -2315,6 +1756,7 @@ export function DroneCanvasDock({
       setAssignmentHoverTargetCount(0);
       nodeDragRef.current = null;
       setDraggingNodeId(null);
+      setMovingNodeIds(EMPTY_ID_SET);
       panDragRef.current = null;
       setPanning(false);
       marqueeDragRef.current = null;
@@ -2334,35 +1776,18 @@ export function DroneCanvasDock({
       window.removeEventListener('mouseup', onWindowMouseUp, true);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
+  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds, zoomGesture]);
 
-  const applyZoomAt = React.useCallback(
-    (nextScaleRaw: number, anchorClientX: number, anchorClientY: number) => {
-      const { panX, panY, scale } = getView();
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      const rect = viewport.getBoundingClientRect();
-      const anchorX = anchorClientX - rect.left;
-      const anchorY = anchorClientY - rect.top;
-      const nextScale = clampCanvasScale(nextScaleRaw);
-      const worldX = (anchorX - panX) / scale;
-      const worldY = (anchorY - panY) / scale;
-      const nextPanX = anchorX - worldX * nextScale;
-      const nextPanY = anchorY - worldY * nextScale;
-      setViewport(nextPanX, nextPanY, nextScale);
-    },
-    [getView, setViewport],
-  );
   const fitViewportToNodes = React.useCallback(() => {
     const viewport = viewportRef.current;
-    const bounds = Object.values(viewNodeBoundsById);
+    const bounds = Object.values(viewBoundsOf(getView().nodesByDroneId, nodeOrder, viewSizeById, cardSpread));
     if (!viewport || bounds.length === 0) {
       resetViewport();
       return;
     }
     const fit = fitViewportToBounds(bounds, viewport.clientWidth, viewport.clientHeight);
     if (fit) setViewport(fit.panX, fit.panY, fit.scale);
-  }, [viewNodeBoundsById, resetViewport, setViewport]);
+  }, [cardSpread, getView, nodeOrder, resetViewport, setViewport, viewSizeById]);
 
   const openMessageBar = React.useCallback(() => {
     if (selectedDroneIds.length === 0) return;
@@ -2401,7 +1826,9 @@ export function DroneCanvasDock({
       let draftCreateHadErrors = false;
 
       const draftNodeIdSet = new Set(draftNodeIds);
+      const positions = getView().nodesByDroneId;
       const occupiedRects = nodes
+        .flatMap((meta) => positions[meta.droneId] ?? [])
         .filter((node) => !draftNodeIdSet.has(node.droneId))
         .map((node) => ({
           x: node.x,
@@ -2445,7 +1872,7 @@ export function DroneCanvasDock({
           draftCreateHadErrors = true;
         } else {
           for (const draftNodeId of draftNodeIds) {
-            const node = nodesByDroneId[draftNodeId];
+            const node = getView().nodesByDroneId[draftNodeId];
             if (!node) continue;
             if (draftCreateInFlightRef.current.has(draftNodeId)) {
               errors.push(`"${node.label}" is still being created.`);
@@ -2625,7 +2052,7 @@ export function DroneCanvasDock({
     nodeWidthByDroneId,
     nodes,
     setDraftPromptForNode,
-    nodesByDroneId,
+    getView,
     normalizedCreateGroup,
     normalizedCreateRepoPath,
     activeTopicId,
@@ -2658,16 +2085,16 @@ export function DroneCanvasDock({
       event.preventDefault();
       event.stopPropagation();
 
-      const node = nodesByDroneId[droneId];
-      if (!node) return;
+      const view = getView();
+      if (!view.nodesByDroneId[droneId]) return;
       const selectedSet = new Set(selectedDroneIds);
       const dragIds =
         selectedSet.has(droneId) && selectedDroneIds.length > 1
-          ? selectedDroneIds.filter((id) => Boolean(nodesByDroneId[id]))
+          ? selectedDroneIds.filter((id) => Boolean(view.nodesByDroneId[id]))
           : [droneId];
       const startPositionsById: Record<string, { x: number; y: number }> = {};
       for (const id of dragIds) {
-        const dragNode = nodesByDroneId[id];
+        const dragNode = view.nodesByDroneId[id];
         if (!dragNode) continue;
         startPositionsById[id] = { x: dragNode.x, y: dragNode.y };
       }
@@ -2676,12 +2103,13 @@ export function DroneCanvasDock({
         setSelectedDroneIds([droneId]);
       }
 
+      canvasPerf.gestureStart('drag');
       nodeDragRef.current = {
         droneIds: dragIds,
         startClientX: event.clientX,
         startClientY: event.clientY,
         startPositionsById,
-        scale,
+        scale: view.scale,
         moved: false,
         selectionBefore: selectedDroneIds,
       };
@@ -2689,7 +2117,7 @@ export function DroneCanvasDock({
       marqueeDragRef.current = null;
       setSelectionBox(null);
     },
-    [focusViewportElement, inlineRenamingDroneId, nodesByDroneId, scale, selectedDroneIds, setSelectedDroneIds],
+    [focusViewportElement, getView, inlineRenamingDroneId, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onNodeClick = React.useCallback(
@@ -2708,6 +2136,7 @@ export function DroneCanvasDock({
         return;
       }
       selectionAnchorRef.current = droneId;
+      canvasPerf.action('select');
       setSelectedDroneIds([droneId]);
       activateCanvasNode(droneId);
     },
@@ -2764,6 +2193,8 @@ export function DroneCanvasDock({
       viewportRef.current?.focus({ preventScroll: true });
       if (event.button === 2) {
         event.preventDefault();
+        canvasPerf.gestureStart('pan');
+        setCanvasGesture(viewportRef.current, true);
         panDragRef.current = {
           startClientX: event.clientX,
           startClientY: event.clientY,
@@ -2789,6 +2220,8 @@ export function DroneCanvasDock({
       if (!additive && selectedDroneIds.length > 0) {
         setSelectedDroneIds([]);
       }
+      canvasPerf.gestureStart('marquee');
+      setCanvasGesture(viewport, true);
       marqueeDragRef.current = {
         startClientX: event.clientX,
         startClientY: event.clientY,
@@ -2826,6 +2259,7 @@ export function DroneCanvasDock({
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const worldPoint = screenToStorePoint(event.clientX, event.clientY, rect, panX, panY, scale);
+      canvasPerf.action('create');
       // The new draft is selected and the keyboard stays on the canvas: Q records into it, S or Tab sends,
       // Enter starts typing.
       if (droneScope) {
@@ -2838,15 +2272,7 @@ export function DroneCanvasDock({
     [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, focusViewport, inlineRenamingDroneId, getView],
   );
 
-  const onWheel = React.useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const factor = Math.exp(-event.deltaY * 0.0015);
-      const nextScale = clampCanvasScale(getView().scale * factor);
-      applyZoomAt(nextScale, event.clientX, event.clientY);
-    },
-    [applyZoomAt, getView],
-  );
+  useCanvasWheelZoom(viewportRef, getView, setViewport, zoomGesture);
   const { setNodeRef: setCanvasDropNodeRef } = useDroppable({
     id: 'canvas-drop',
     data: { type: 'canvas-drop' },
@@ -2904,7 +2330,7 @@ export function DroneCanvasDock({
         const droneIds = [...new Set(ids.map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? parseCanvasDroneNodeId(nodeId) ?? ''))]
           .filter(Boolean);
         if (droneIds.length === 0) return;
-        const unplaced = droneIds.filter((droneId) => !nodesByDroneId[createCanvasDroneNodeId(droneId)]);
+        const unplaced = droneIds.filter((droneId) => !nodeMetaById[createCanvasDroneNodeId(droneId)]);
         upsertNodes(unplaced.map((droneId, idx) => {
           const label = String(effectiveDroneNameById[droneId] ?? '').trim() || droneId;
           const width = getNodeWidthPx(label, DRONE_NODE_CHROME_WIDTH_PX);
@@ -2940,7 +2366,7 @@ export function DroneCanvasDock({
       );
       setSelectedDroneIds(ids);
     },
-    [activeTopicId, droneScope, effectiveDroneNameById, isOverMessageComposer, getView, nodesByDroneId, setSelectedDroneIds, upsertNodes],
+    [activeTopicId, droneScope, effectiveDroneNameById, isOverMessageComposer, getView, nodeMetaById, setSelectedDroneIds, upsertNodes],
   );
 
   useDndMonitor({
@@ -2968,10 +2394,12 @@ export function DroneCanvasDock({
   );
 
   const cancelActivePointerInteractions = React.useCallback(() => {
+    setCanvasGesture(viewportRef.current, false);
     nodeDragRef.current = null;
     panDragRef.current = null;
     marqueeDragRef.current = null;
     setDraggingNodeId(null);
+    setMovingNodeIds(EMPTY_ID_SET);
     setPanning(false);
     setSelectionBox(null);
   }, []);
@@ -3037,7 +2465,7 @@ export function DroneCanvasDock({
       : null;
     const positionBySourceNodeId = planCanvasPastePositions({
       sourceNodeIds,
-      boundsById: fallbackNodeBoundsById,
+      boundsById: readCompactNodeBounds(),
       anchor: pasteAnchor,
       fallbackOffset: { x: CLONE_OFFSET_X_PX * (repeat + 1), y: CLONE_OFFSET_Y_PX * (repeat + 1) },
     });
@@ -3126,7 +2554,7 @@ export function DroneCanvasDock({
     activeTopicId,
     boardDroneId,
     droneById,
-    fallbackNodeBoundsById,
+    readCompactNodeBounds,
     onCloneChat,
     onCloneDrone,
     getView,
@@ -3194,6 +2622,7 @@ export function DroneCanvasDock({
       const isPrimaryMod = event.ctrlKey || event.metaKey;
 
       if (!event.repeat && isPrimaryMod && !event.altKey && !event.shiftKey && key === 'c') {
+        canvasPerf.action('copy');
         const copiedNodeCount = copyCanvasNodesForClone();
         if (copiedNodeCount > 0) {
           event.preventDefault();
@@ -3206,6 +2635,7 @@ export function DroneCanvasDock({
         if (chatClipboardHasContent(useChatClipboardStore.getState(), boardDroneId)) {
           event.preventDefault();
           event.stopPropagation();
+          canvasPerf.action('paste');
           pasteCopiedCanvasNodesAsClones();
         }
         return;
@@ -3214,6 +2644,7 @@ export function DroneCanvasDock({
       if (isPrimaryMod && !event.altKey && !event.shiftKey && key === 'a') {
         event.preventDefault();
         event.stopPropagation();
+        canvasPerf.action('select-all');
         setSelectedDroneIds(nodeOrder.slice());
         return;
       }
@@ -3221,6 +2652,7 @@ export function DroneCanvasDock({
       if (key === 'escape') {
         event.preventDefault();
         event.stopPropagation();
+        canvasPerf.action('clear-selection');
         clearSelection();
         return;
       }
@@ -3250,6 +2682,7 @@ export function DroneCanvasDock({
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         event.preventDefault();
         event.stopPropagation();
+        canvasPerf.action('delete');
         cancelActivePointerInteractions();
         setMessageError(null);
         setMessageDraft('');
@@ -3291,6 +2724,81 @@ export function DroneCanvasDock({
     ],
   );
 
+  const cardById: Record<string, React.ReactElement> = {};
+  for (const node of nodes) {
+    const draftNode = isCanvasDraftNodeId(node.droneId);
+    const canvasDroneId = draftNode ? null : parseCanvasDroneNodeId(node.droneId);
+    const droneNode = Boolean(canvasDroneId);
+    const chatRef = draftNode ? null : parseCanvasChatNodeId(node.droneId);
+    const nodeDroneId = canvasDroneId ?? chatRef?.droneId ?? null;
+    const selected = selectedDroneIdSet.has(node.droneId);
+    const dragging = draggingNodeId === node.droneId;
+    const inlineEditing = inlineRenamingDroneId === node.droneId;
+    const assignmentHoverTarget = assignmentHoverNodeId === node.droneId && assignmentHoverTargetCount > 0;
+    const isActiveSidebarChat = Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
+    const indicatorState = draftNode
+      ? null
+      : droneNode && canvasDroneId
+        ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
+        : chatNodeStateById[node.droneId] ?? null;
+    const deleting = Boolean(deletingChatNodeById[node.droneId]);
+    const detail = detailByNodeId?.[node.droneId] ?? null;
+    const nodeWidth = detail
+      ? detailedWidthByNodeId?.[node.droneId] ?? DETAILED_CARD_WIDTH_PX
+      : nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
+    const nodeHeight = detail ? DETAILED_CARD_HEIGHT_PX : nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
+    // A drone board is one drone's chats: its repository and branch are the same on every card.
+    // A chat linked to its drone's card on this canvas shows neither: the drone card does.
+    const repoFromDroneCard = Boolean(chatRef && droneNodeByDroneId[chatRef.droneId]);
+    const showRepo = Boolean(nodeDroneId) && !droneScope && !repoFromDroneCard;
+    const repoLabel = draftNode
+      ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
+      : showRepo
+        ? String(droneRepoById[nodeDroneId!] ?? '').trim()
+        : '';
+    const repoBranch = !draftNode && showRepo
+      ? String(droneById[nodeDroneId!]?.repoBranch ?? '').trim()
+      : '';
+    const canvasDroneLabel = canvasDroneId
+      ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
+      : '';
+    const primaryLabel = inlineEditing ? inlineRenameDraft : droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label;
+    // CanvasWorldLayer's zoom rule applies this limit without rerendering each card.
+    const labelTextBoostLimit = !droneNode
+      ? getChatLabelTextBoost(primaryLabel, nodeWidth)
+      : 1;
+    cardById[node.droneId] = <CanvasNodeCard
+      nodeId={node.droneId}
+      detail={detail}
+      draftNode={draftNode}
+      droneNode={droneNode}
+      canvasDroneId={canvasDroneId}
+      nodeDroneId={nodeDroneId}
+      selected={selected}
+      dragging={dragging}
+      inlineEditing={inlineEditing}
+      assignmentHoverTarget={assignmentHoverTarget}
+      assignmentHoverTargetCount={assignmentHoverTarget ? assignmentHoverTargetCount : 0}
+      isActiveSidebarChat={isActiveSidebarChat}
+      indicatorState={indicatorState}
+      deleting={deleting}
+      nodeWidth={nodeWidth}
+      nodeHeight={nodeHeight}
+      repoLabel={repoLabel}
+      repoBranch={repoBranch}
+      primaryLabel={primaryLabel}
+      labelTextBoostLimit={labelTextBoostLimit}
+      showCanvasLastMessagePreviews={showCanvasLastMessagePreviews}
+      inlineRenameDraft={inlineEditing ? inlineRenameDraft : ''}
+      inlineRenameBusy={inlineEditing && inlineRenameBusy}
+      runtime={droneById[canvasDroneId ?? '']?.runtime}
+      actions={nodeActionsRef}
+      nodeElementByDroneIdRef={nodeElementByDroneIdRef}
+      inlineRenameInputRef={inlineRenameInputRef}
+      inlineRenameSettledRef={inlineRenameSettledRef}
+    />;
+  }
+
   const cursorClassName = panning
     ? 'cursor-grabbing'
     : draggingNodeId
@@ -3298,8 +2806,6 @@ export function DroneCanvasDock({
       : selectionBox
         ? 'cursor-crosshair'
         : 'cursor-default';
-  const edgeMarkerWorldSize = (screenPx: number) =>
-    Math.max(EDGE_MARKER_MIN_SCREEN_PX, Math.min(screenPx, screenPx * scale)) / scale;
 
   return (
     <UiPanel
@@ -3378,9 +2884,7 @@ export function DroneCanvasDock({
             <UiToolbarButton size="xsmall" onClick={resetViewport} title="Reset canvas view">
               Reset
             </UiToolbarButton>
-            <span className="w-[48px] text-right text-10 font-mono text-[var(--muted-dim)]" title="Current zoom">
-              {Math.round(scale * 100)}%
-            </span>
+            <CanvasZoomLabel boardKey={boardKey} />
           </div>
         </UiPanelToolbar>
         {canvasControlsExpanded && !droneScope ? (
@@ -3458,168 +2962,30 @@ export function DroneCanvasDock({
         onDoubleClick={onCanvasDoubleClick}
         // Right-drag pans the canvas, so right-click opens no menu.
         onContextMenu={(event) => event.preventDefault()}
-        onWheel={onWheel}
       >
-        <CanvasWorldLayer boardDroneId={boardKey}>
-          {relationshipEdges.length > 0 ? (
-            <svg
-              width="1"
-              height="1"
-              className="absolute left-0 top-0 pointer-events-none overflow-visible"
-              style={{ overflow: 'visible' }}
-              aria-hidden="true"
-            >
-              <defs>
-                <marker
-                  id={lineageMarkerId}
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerUnits="userSpaceOnUse"
-                  markerWidth={edgeMarkerWorldSize(EDGE_MARKER_SCREEN_PX)}
-                  markerHeight={edgeMarkerWorldSize(EDGE_MARKER_SCREEN_PX)}
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--canvas-related)" />
-                </marker>
-                <marker
-                  id={assignedMarkerId}
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerUnits="userSpaceOnUse"
-                  markerWidth={edgeMarkerWorldSize(EDGE_MARKER_SCREEN_PX)}
-                  markerHeight={edgeMarkerWorldSize(EDGE_MARKER_SCREEN_PX)}
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--canvas-assigned)" />
-                </marker>
-                <marker
-                  id={chatOwnerMarkerId}
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerUnits="userSpaceOnUse"
-                  markerWidth={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
-                  markerHeight={edgeMarkerWorldSize(EDGE_PLUG_MARKER_SCREEN_PX)}
-                  orient="auto"
-                >
-                  <path d="M 1 5 H 9 M 9 2.5 V 7.5" fill="none" stroke={CHAT_OWNER_EDGE_COLOR} strokeWidth="1.6" strokeLinecap="round" />
-                </marker>
-              </defs>
-              {relationshipEdges.map((edge) => (
-                <path
-                  key={edge.key}
-                  d={edge.path}
-                  fill="none"
-                  stroke={
-                    edge.variant === 'chat-owner'
-                      ? CHAT_OWNER_EDGE_COLOR
-                      : edge.variant === 'assigned'
-                        ? 'var(--canvas-assigned-muted)'
-                        : 'var(--canvas-related-muted)'
-                  }
-                  strokeWidth={edge.variant === 'chat-owner' ? '2' : edge.variant === 'assigned' ? '1.5' : '1.8'}
-                  vectorEffect="non-scaling-stroke"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeDasharray={
-                    edge.variant === 'chat-owner'
-                      ? '2 5'
-                      : edge.variant === 'assigned'
-                        ? '7 5'
-                        : edge.variant === 'chat-fork'
-                          ? '4 4'
-                          : undefined
-                  }
-                  markerEnd={`url(#${
-                    edge.variant === 'chat-owner'
-                      ? chatOwnerMarkerId
-                      : edge.variant === 'assigned'
-                        ? assignedMarkerId
-                        : lineageMarkerId
-                  })`}
-                />
-              ))}
-            </svg>
-          ) : null}
-          {nodes.map((node) => {
-            const draftNode = isCanvasDraftNodeId(node.droneId);
-            const canvasDroneId = draftNode ? null : parseCanvasDroneNodeId(node.droneId);
-            const droneNode = Boolean(canvasDroneId);
-            const chatRef = draftNode ? null : parseCanvasChatNodeId(node.droneId);
-            const nodeDroneId = canvasDroneId ?? chatRef?.droneId ?? null;
-            const selected = selectedDroneIdSet.has(node.droneId);
-            const dragging = draggingNodeId === node.droneId;
-            const inlineEditing = inlineRenamingDroneId === node.droneId;
-            const assignmentHoverTarget = assignmentHoverNodeId === node.droneId && assignmentHoverTargetCount > 0;
-            const isActiveSidebarChat = Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
-            const indicatorState = draftNode
-              ? null
-              : droneNode && canvasDroneId
-                ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
-                : chatNodeStateById[node.droneId] ?? null;
-            const deleting = Boolean(deletingChatNodeById[node.droneId]);
-            const detail = detailByNodeId?.[node.droneId] ?? null;
-            const nodeWidth = detail
-              ? detailedWidthByNodeId?.[node.droneId] ?? DETAILED_CARD_WIDTH_PX
-              : nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
-            const nodeHeight = detail ? DETAILED_CARD_HEIGHT_PX : nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
-            // A drone board is one drone's chats: its repository and branch are the same on every card.
-            // A chat linked to its drone's card on this canvas shows neither: the drone card does.
-            const repoFromDroneCard = Boolean(chatRef && droneNodeByDroneId[chatRef.droneId]);
-            const showRepo = Boolean(nodeDroneId) && !droneScope && !repoFromDroneCard;
-            const repoLabel = draftNode
-              ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : showRepo
-                ? String(droneRepoById[nodeDroneId!] ?? '').trim()
-                : '';
-            const repoBranch = !draftNode && showRepo
-              ? String(droneById[nodeDroneId!]?.repoBranch ?? '').trim()
-              : '';
-            const canvasDroneLabel = canvasDroneId
-              ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
-              : '';
-            const primaryLabel = inlineEditing ? inlineRenameDraft : droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label;
-            // The inherited zoom variable applies this limit without rerendering each card.
-            const labelTextBoostLimit = !droneNode
-              ? getChatLabelTextBoost(primaryLabel, nodeWidth)
-              : 1;
-            return <CanvasNodeCard
-              key={node.droneId}
-              node={node}
-              viewX={node.x * cardSpread.x}
-              viewY={node.y * cardSpread.y}
-              detail={detail}
-              draftNode={draftNode}
-              droneNode={droneNode}
-              canvasDroneId={canvasDroneId}
-              nodeDroneId={nodeDroneId}
-              selected={selected}
-              dragging={dragging}
-              inlineEditing={inlineEditing}
-              assignmentHoverTarget={assignmentHoverTarget}
-              assignmentHoverTargetCount={assignmentHoverTarget ? assignmentHoverTargetCount : 0}
-              isActiveSidebarChat={isActiveSidebarChat}
-              indicatorState={indicatorState}
-              deleting={deleting}
-              nodeWidth={nodeWidth}
-              nodeHeight={nodeHeight}
-              repoLabel={repoLabel}
-              repoBranch={repoBranch}
-              primaryLabel={primaryLabel}
-              labelTextBoostLimit={labelTextBoostLimit}
-              showCanvasLastMessagePreviews={showCanvasLastMessagePreviews}
-              inlineRenameDraft={inlineEditing ? inlineRenameDraft : ''}
-              inlineRenameBusy={inlineEditing && inlineRenameBusy}
-              runtime={droneById[canvasDroneId ?? '']?.runtime}
-              actions={nodeActionsRef}
-              nodeElementByDroneIdRef={nodeElementByDroneIdRef}
-              inlineRenameInputRef={inlineRenameInputRef}
-              inlineRenameSettledRef={inlineRenameSettledRef}
-            />;
-          })}
+        <CanvasWorldLayer boardDroneId={boardKey} zoomGesture={zoomGesture}>
+          <CanvasEdgesLayer
+            boardKey={boardKey}
+            nodeIds={nodeOrder}
+            sizeById={viewSizeById}
+            cardSpread={cardSpread}
+            preferredNodeByDroneId={preferredNodeByDroneId}
+            droneNodeByDroneId={droneNodeByDroneId}
+            chatNodesByDroneId={chatNodesByDroneId}
+            fleetParentIdByDroneId={fleetParentIdByDroneId}
+            fleetAssignedIdsByDroneId={fleetAssignedIdsByDroneId}
+            forkSourceNodeIdByNodeId={edgeForkSourceNodeIdByNodeId}
+          />
+          <CanvasCardsLayer
+            boardKey={boardKey}
+            nodeIds={nodeOrder}
+            cardById={cardById}
+            sizeById={viewSizeById}
+            cardSpread={cardSpread}
+            movingNodeIds={movingNodeIds}
+          />
         </CanvasWorldLayer>
+        <div data-canvas-gesture-shield="" className="absolute inset-0 hidden" aria-hidden="true" />
 
         {(() => {
           // Only the card under the pointer: its steps in full, off the cards. A selected card shows nothing here,
@@ -3632,7 +2998,7 @@ export function DroneCanvasDock({
           const focusDroneId = parseCanvasDroneNodeId(focusId);
           const title = focusDroneId
             ? String(effectiveDroneNameById[focusDroneId] ?? '').trim() || focusDroneId
-            : parseCanvasChatNodeId(focusId)?.chatName ?? nodesByDroneId[focusId]?.label ?? '';
+            : parseCanvasChatNodeId(focusId)?.chatName ?? nodeMetaById[focusId]?.label ?? '';
           return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
         })()}
 
@@ -3685,41 +3051,7 @@ export function DroneCanvasDock({
         />
 
         {nodes.length === 0 ? (
-          <UiPaneState
-            kind="empty"
-            title={droneScope ? 'Drone board' : activeTopic ? activeTopic.name : 'Drone Canvas'}
-            description={droneScope ? (
-              <span className="block">This drone has no chats yet. Double-click to create one.</span>
-            ) : activeTopic ? (
-              <>
-                <span className="block">Drag drones or chats in from the sidebar: each brings its drone and all of its chats.</span>
-                <span className="mt-1 block">Double-click makes a new drone here.</span>
-                <span className="mt-1 block">
-                  Delete takes a drone off this topic; Shift+Delete deletes it. Either deletes a chat.
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="block">Drag drones or chats from the sidebar and drop them here.</span>
-                <span className="mt-1 block">
-                  Double-click creates a draft. Ctrl-click toggles selection; left drag selects.
-                </span>
-                <span className="mt-1 block">
-                  Esc clears selection. Delete removes cards. Shift+Delete deletes chats.
-                </span>
-                <span className="mt-1 block">
-                  Double-click a card to open its drone; F2 renames it.
-                </span>
-                <span className="mt-1 block">
-                  Ctrl/Cmd+A selects all nodes. Right-click drag pans; the wheel zooms.
-                </span>
-                <span className="mt-1 block">
-                  Copy/paste clones chat cards as chats and drone cards as drones.
-                </span>
-              </>
-            )}
-            className="pointer-events-none absolute inset-0"
-          />
+          <CanvasEmptyState droneScope={droneScope} topicName={activeTopic?.name ?? null} />
         ) : null}
 
         {dragOverCanvas ? (

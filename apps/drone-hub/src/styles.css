@@ -856,6 +856,9 @@ code, pre {
 .entity-work-canvas .react-flow { background: var(--work-ground); }
 .entity-work-canvas .work-card, .dh-canvas-work.work-card { box-shadow: var(--work-shadow); }
 .dh-canvas-work-ground { background: #0f1116; }
+/* Drone canvas: while panning or drawing a selection, a shield covers the cards, so content moving under the
+   pointer hit-tests one element and restyles no card's hover. Only the shield restyles when this toggles. */
+[data-canvas-gesture] > [data-canvas-gesture-shield] { display: block; }
 /* Markdown in the entity views, at the bench's size rather than the main chat's. */
 .dh-markdown.entity-md { font-size: 13px; line-height: 1.5; }
 .dh-markdown.entity-md > :first-child { margin-top: 0; }
