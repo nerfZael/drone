@@ -59,5 +59,6 @@ export const chatConfigBodySchema = z
     agentPermissionMode: z.unknown().optional(),
     approvalPolicy: z.unknown().optional(),
     dockerSnapshotAfterAgentMessageEnabled: z.boolean().optional(),
+    subagentsEnabled: z.boolean().optional(),
   })
   .passthrough();

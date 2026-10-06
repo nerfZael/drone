@@ -618,6 +618,34 @@ describeSocketSuite('chat management api', () => {
     ).toBeUndefined();
   });
 
+  test('keeps subagents off by default and stores an explicit choice per chat', async () => {
+    const droneId = 'drone-chat-subagents';
+    await seedDrone(droneId, { runtime: 'container', persistVolume: false });
+    const chatUrl = `/api/drones/${encodeURIComponent(droneId)}/chats/default`;
+    const setSubagents = (value: unknown) =>
+      apiFetch(`${chatUrl}/config`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ subagentsEnabled: value }),
+      });
+
+    expect((await apiFetch(chatUrl)).data?.subagentsEnabled).toBe(false);
+
+    const enabled = await setSubagents(true);
+    expect(enabled.r.status).toBe(200);
+    expect(enabled.data?.subagentsEnabled).toBe(true);
+    expect((await apiFetch(chatUrl)).data?.subagentsEnabled).toBe(true);
+    let regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.subagentsEnabled).toBe(true);
+
+    expect((await setSubagents('yes')).r.status).toBe(400);
+
+    expect((await setSubagents(false)).data?.subagentsEnabled).toBe(false);
+    expect((await apiFetch(chatUrl)).data?.subagentsEnabled).toBe(false);
+    regAny = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.subagentsEnabled).toBeUndefined();
+  });
+
   test('creates a chat from the implicit default on legacy drones without chats', async () => {
     const droneId = 'drone-chat-legacy-default';
     const now = new Date().toISOString();

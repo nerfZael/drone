@@ -158,6 +158,25 @@ test('same-provider turns reuse the process, but rotated credentials restart it 
   expect(session.credentialVersion).toBe('v2');
 });
 
+test('a changed launch command restarts the process without a provider switch', async () => {
+  const manager: any = new CodexPromptRunManager<any>({} as any);
+  let closed = 0;
+  const launchScript = "exec codex app-server -c 'features.multi_agent=false'";
+  const session: any = {
+    provider: 'default',
+    launchScript,
+    connection: { close: async () => { closed += 1; } },
+  };
+  manager.createConnection = () => ({ close: async () => { closed += 1; } });
+  await manager.switchProvider(session, { launchScript });
+  expect(closed).toBe(0);
+  // Turning subagents on for the chat changes only the launch flags.
+  await manager.switchProvider(session, { launchScript: 'exec codex app-server' });
+  expect(closed).toBe(1);
+  expect(session.launchScript).toBe('exec codex app-server');
+  expect(session.switchingProvider).toBeUndefined();
+});
+
 test('forking with Auto explicitly restores the configured provider and default model', async () => {
   const calls: any[] = [];
   const manager: any = new CodexPromptRunManager<any>({} as any);

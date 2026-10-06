@@ -1003,6 +1003,7 @@ export function createChatManagementRouteHandler(
               (chatEntry as any).agentPermissionMode,
             ),
             approvalPolicy: normalizeAgentApprovalPolicy((chatEntry as any).approvalPolicy),
+            subagentsEnabled: (chatEntry as any).subagentsEnabled === true,
             dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(
               drone,
               chatEntry,
@@ -1171,6 +1172,11 @@ export function createChatManagementRouteHandler(
           typeof body === 'object' &&
           Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'),
         );
+        const hasSubagentsField = Boolean(
+          body &&
+          typeof body === 'object' &&
+          Object.prototype.hasOwnProperty.call(body, 'subagentsEnabled'),
+        );
         let model: string | null = null;
         let provider: 'openai' | 'codex' | 'gemini' | 'openrouter' | 'cerebras' | null = null;
         let reasoning: string | null = null;
@@ -1237,6 +1243,11 @@ export function createChatManagementRouteHandler(
           dockerSnapshotAfterAgentMessageEnabled =
             body.dockerSnapshotAfterAgentMessageEnabled === true;
         }
+        if (hasSubagentsField && typeof body?.subagentsEnabled !== 'boolean') {
+          json(res, 400, { ok: false, error: 'subagentsEnabled must be a boolean' });
+          return;
+        }
+        const subagentsEnabled = body?.subagentsEnabled === true;
         try {
           await ensureChatEntry({ droneId, chatName });
           if (kind === 'native') {
@@ -1258,6 +1269,8 @@ export function createChatManagementRouteHandler(
               approvalPolicy,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setSubagentsEnabled: hasSubagentsField,
+              subagentsEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -1298,6 +1311,8 @@ export function createChatManagementRouteHandler(
               approvalPolicy,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setSubagentsEnabled: hasSubagentsField,
+              subagentsEnabled,
             });
             if (nativeChatIdToDelete) await deleteNativeChatSession(nativeChatIdToDelete);
             json(res, 200, {
@@ -1312,6 +1327,7 @@ export function createChatManagementRouteHandler(
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasApprovalPolicyField ? { approvalPolicy } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasSubagentsField ? { subagentsEnabled } : {}),
             });
             return;
           }
@@ -1345,6 +1361,8 @@ export function createChatManagementRouteHandler(
               approvalPolicy,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setSubagentsEnabled: hasSubagentsField,
+              subagentsEnabled,
             });
             if (nativeChatIdToDelete) await deleteNativeChatSession(nativeChatIdToDelete);
             json(res, 200, {
@@ -1359,6 +1377,7 @@ export function createChatManagementRouteHandler(
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasApprovalPolicyField ? { approvalPolicy } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasSubagentsField ? { subagentsEnabled } : {}),
             });
             return;
           }
@@ -1368,7 +1387,8 @@ export function createChatManagementRouteHandler(
             hasReasoningField ||
             hasAgentPermissionModeField ||
             hasApprovalPolicyField ||
-            hasDockerSnapshotField
+            hasDockerSnapshotField ||
+            hasSubagentsField
           ) {
             await setChatAgentConfig({
               droneId,
@@ -1385,6 +1405,8 @@ export function createChatManagementRouteHandler(
               approvalPolicy,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setSubagentsEnabled: hasSubagentsField,
+              subagentsEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -1397,6 +1419,7 @@ export function createChatManagementRouteHandler(
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasApprovalPolicyField ? { approvalPolicy } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasSubagentsField ? { subagentsEnabled } : {}),
             });
             return;
           }

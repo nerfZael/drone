@@ -5,6 +5,7 @@ import { fetchDroneChatStateCached } from './chat-api';
 import { useChatConfigState } from './use-chat-config-state';
 import { buildExternalAgentComposerControls } from './external-agent-composer-controls';
 import { isDroneStartingOrSeeding } from './helpers';
+import { subagentsMenuAction } from './subagents-menu-action';
 
 /** Use the main chat's configuration and model catalog for this window's chat. */
 export function useWindowChatModelControls(drone: DroneSummary, chatName: string, transcripts: TranscriptItem[] | null) {
@@ -43,5 +44,14 @@ export function useWindowChatModelControls(drone: DroneSummary, chatName: string
         .finally(() => setSaving(false));
     },
   });
-  return { controls, error: config.chatInfoError };
+  const menuActions = subagentsMenuAction({
+    agentKey: agent?.kind === 'builtin' ? `builtin:${agent.id}` : agent?.kind ?? '',
+    enabled: config.chatInfo?.subagentsEnabled === true,
+    disabled: config.loadingChatInfo || provisioning,
+    onToggle: (enabled) => {
+      void config.setChatSubagentsEnabled(enabled)
+        .catch(error => config.setChatInfoError(error instanceof Error ? error.message : String(error)));
+    },
+  });
+  return { controls, menuActions, error: config.chatInfoError };
 }

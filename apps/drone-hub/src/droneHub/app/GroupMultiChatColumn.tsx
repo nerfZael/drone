@@ -269,6 +269,7 @@ export function GroupMultiChatColumn({
         active: droneHubPermissionsOpen,
         onSelect: () => setDroneHubPermissionsOpen(true),
       },
+      ...modelControls.menuActions,
     ],
   };
 

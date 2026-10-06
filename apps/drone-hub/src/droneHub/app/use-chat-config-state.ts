@@ -345,6 +345,7 @@ export function useChatConfigState({
             : 'ask',
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        subagentsEnabled: prev?.subagentsEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -357,7 +358,7 @@ export function useChatConfigState({
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const onChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ droneId: string; chatName: string; settings: { model?: string | null; reasoning?: string | null } }>).detail;
+      const detail = (event as CustomEvent<{ droneId: string; chatName: string; settings: { model?: string | null; reasoning?: string | null; subagentsEnabled?: boolean } }>).detail;
       if (detail.droneId !== selectedDrone || detail.chatName !== selectedChat) return;
       setChatInfo(previous => previous ? { ...previous, ...detail.settings } : previous);
     };
@@ -404,6 +405,7 @@ export function useChatConfigState({
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        subagentsEnabled: prev?.subagentsEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -443,6 +445,7 @@ export function useChatConfigState({
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        subagentsEnabled: prev?.subagentsEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -479,6 +482,7 @@ export function useChatConfigState({
         approvalPolicy,
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        subagentsEnabled: prev?.subagentsEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -514,10 +518,35 @@ export function useChatConfigState({
         agentPermissionMode: prev?.agentPermissionMode ?? 'execute',
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled: enabled,
+        subagentsEnabled: prev?.subagentsEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
       setChatInfoError(null);
+    },
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
+  );
+
+  const setChatSubagentsEnabled = React.useCallback(
+    async (enabled: boolean) => {
+      if (!selectedDrone) return;
+      const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
+      await requestJson(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ subagentsEnabled: enabled }),
+        },
+      );
+      setChatInfo((prev) => (prev ? { ...prev, subagentsEnabled: enabled } : prev));
+      setChatInfoError(null);
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CHAT_MODEL_SETTINGS_CHANGED, {
+        detail: { droneId: selectedDrone, chatName: chat, settings: { subagentsEnabled: enabled } },
+      }));
     },
     [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
@@ -542,6 +571,7 @@ export function useChatConfigState({
     setChatAgentPermissionMode,
     setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
+    setChatSubagentsEnabled,
     handleSetAgentFailure,
     resolveChatInfoFromState,
     rejectChatInfoFromState,

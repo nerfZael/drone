@@ -25,6 +25,7 @@ export type ChatInfo = {
   agentPermissionMode: AgentPermissionMode;
   approvalPolicy: AgentApprovalPolicy;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
+  subagentsEnabled: boolean;
   sessionName: string;
   createdAt: string;
 };
@@ -134,6 +135,7 @@ function normalizeChatInfoPayloadBase(
       : 'ask';
   const dockerSnapshotAfterAgentMessageEnabled =
     data?.dockerSnapshotAfterAgentMessageEnabled === true;
+  const subagentsEnabled = data?.subagentsEnabled === true;
 
   const raw = data?.agent;
   if (raw?.kind === 'native') {
@@ -145,6 +147,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled: false,
+      subagentsEnabled: false,
       sessionName,
       createdAt,
       agent: { kind: 'native' },
@@ -180,6 +183,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: builtinId },
@@ -198,6 +202,7 @@ function normalizeChatInfoPayloadBase(
         agentPermissionMode,
         approvalPolicy,
         dockerSnapshotAfterAgentMessageEnabled,
+        subagentsEnabled,
         sessionName,
         createdAt,
         agent: { kind: 'custom', id, label, command },
@@ -214,6 +219,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'claude' },
@@ -231,6 +237,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'opencode' },
@@ -245,6 +252,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'pi' },
@@ -259,6 +267,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'blip' },
@@ -273,6 +282,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'codex' },
@@ -287,6 +297,7 @@ function normalizeChatInfoPayloadBase(
       agentPermissionMode,
       approvalPolicy,
       dockerSnapshotAfterAgentMessageEnabled,
+      subagentsEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'cursor' },
@@ -300,6 +311,7 @@ function normalizeChatInfoPayloadBase(
     agentPermissionMode,
     approvalPolicy,
     dockerSnapshotAfterAgentMessageEnabled,
+    subagentsEnabled,
     sessionName,
     createdAt,
     agent: { kind: 'builtin', id: 'cursor' },

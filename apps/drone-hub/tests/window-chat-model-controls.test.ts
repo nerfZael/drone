@@ -4,6 +4,7 @@ import ts from 'typescript';
 import * as selection from '../src/droneHub/app/chat-selection-model';
 import * as builder from '../src/droneHub/app/external-agent-composer-controls';
 import { isDroneStartingOrSeeding } from '../src/droneHub/app/helpers';
+import * as subagents from '../src/droneHub/app/subagents-menu-action';
 
 test('window model picker loads its own configuration and saves model/reasoning to that chat only', async () => {
   let cursor = 0;
@@ -29,9 +30,11 @@ test('window model picker loads its own configuration and saves model/reasoning 
   const dependencies: Record<string, any> = {
     react, './chat-selection-model': selection, './external-agent-composer-controls': builder,
     './helpers': { isDroneStartingOrSeeding }, './hooks': { isNotFoundError: () => false },
+    './subagents-menu-action': subagents,
     './chat-load-telemetry': { markChatLoadConfigResolved() {} },
     './chat-runtime-cache': {
       readFreshChatRuntimeCache: (key: string) => cache.get(key),
+      readChatRuntimeSnapshot: (key: string) => cache.get(key) ?? null,
       writeChatRuntimeCache: (key: string, value: any) => cache.set(key, value),
       deleteChatRuntimeCache: (key: string) => cache.delete(key),
     },
@@ -73,4 +76,12 @@ test('window model picker loads its own configuration and saves model/reasoning 
   for (let i = 0; i < 5; i++) await Promise.resolve();
   expect(calls).toEqual([{ url: '/api/drones/other-drone/chats/fork-A/config', body: { model: 'model-two', reasoning: 'high' } }]);
   expect(render().controls.controls[0].currentModel).toBe('model-two');
+
+  // Subagents are off until this chat turns them on.
+  const [toggle] = render().menuActions;
+  expect(toggle).toMatchObject({ id: 'subagents', active: false, badge: 'Off' });
+  toggle.onSelect();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  expect(calls.at(-1)).toEqual({ url: '/api/drones/other-drone/chats/fork-A/config', body: { subagentsEnabled: true } });
+  expect(render().menuActions[0]).toMatchObject({ active: true, badge: 'On' });
 });

@@ -1123,6 +1123,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatAgentPermissionMode,
     setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
+    setChatSubagentsEnabled,
     handleSetAgentFailure,
     resolveChatInfoFromState,
     rejectChatInfoFromState,
@@ -2995,6 +2996,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'execute',
           approvalPolicy: startupSeedForCurrentDrone.approvalPolicy ?? 'ask',
           dockerSnapshotAfterAgentMessageEnabled: false,
+          subagentsEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
         }
@@ -6342,6 +6344,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     dockerSnapshotAfterAgentMessageEnabled:
       effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
     setDockerSnapshotAfterAgentMessageEnabled,
+    subagentsEnabled: effectiveChatInfo?.subagentsEnabled === true,
+    setChatSubagentsEnabled,
     setChatInfoError,
     modelDisabled,
     loadingChatModels,

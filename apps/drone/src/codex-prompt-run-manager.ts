@@ -154,6 +154,8 @@ type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
 type CodexRunSession = {
   provider?: 'openrouter' | 'default';
   credentialVersion?: string;
+  /** The command the running App Server was started with. */
+  launchScript?: string;
   selection?: string;
   effort?: string;
   switchingProvider?: boolean;
@@ -426,6 +428,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const connection = this.createConnection(spec, () => session);
     session = {
       provider: codexModelRoute(spec.model).provider,
+      launchScript: codexProviderLaunchScript(spec.launchScript, spec.model),
       selection: spec.model,
       effort: spec.effort,
       credentialVersion: spec.openrouterCredentialVersion,
@@ -502,17 +505,25 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     return connection;
   }
 
+  /**
+   * Restarts the App Server when the next prompt needs a different provider or
+   * launch command (chat settings such as subagents are launch flags).
+   */
   private async switchProvider(session: CodexRunSession, spec: CodexPromptSpec): Promise<void> {
     const provider = codexModelRoute(spec.model).provider;
+    const launchScript = codexProviderLaunchScript(spec.launchScript, spec.model);
     const resetToAuto = provider === 'default' && session.selection !== undefined && spec.model === undefined;
-    if ((session.provider ?? 'default') === provider && !resetToAuto &&
-        (provider !== 'openrouter' || session.credentialVersion === spec.openrouterCredentialVersion)) return;
+    const providerChanged = (session.provider ?? 'default') !== provider || resetToAuto ||
+      (provider === 'openrouter' && session.credentialVersion !== spec.openrouterCredentialVersion);
+    const launchChanged = session.launchScript !== undefined && session.launchScript !== launchScript;
+    if (!providerChanged && !launchChanged) return;
     const previous = session.connection;
     session.connection = this.createConnection(spec, () => session);
+    session.launchScript = launchScript;
     session.provider = provider;
     session.credentialVersion = spec.openrouterCredentialVersion;
     session.usageTracker = new CodexUsageTracker();
-    session.switchingProvider = true;
+    if (providerChanged) session.switchingProvider = true;
     session.threadReady = false;
     session.verifiedMcpThreadId = null;
     await previous.close();

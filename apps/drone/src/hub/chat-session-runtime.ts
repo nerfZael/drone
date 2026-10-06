@@ -947,6 +947,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       reasoning: normalizeChatReasoning(chat?.reasoning),
       agentPermissionMode: normalizeAgentPermissionMode(chat?.agentPermissionMode),
       approvalPolicy: approvalPolicy as AgentApprovalPolicy,
+      subagentsEnabled: chat?.subagentsEnabled === true,
     };
   }
 
@@ -1579,6 +1580,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     approvalPolicy?: AgentApprovalPolicy;
     setDockerSnapshotAfterAgentMessageEnabled?: boolean;
     dockerSnapshotAfterAgentMessageEnabled?: boolean;
+    setSubagentsEnabled?: boolean;
+    subagentsEnabled?: boolean;
     setBlipClonesEnabled?: boolean;
     blipClonesEnabled?: boolean;
     setDroneHubMcpAccessScope?: boolean;
@@ -1704,6 +1707,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           assertApprovalPolicySupportedForAgent(policy, effectiveAgent);
           if (policy !== 'ask') cur.approvalPolicy = policy;
           else delete cur.approvalPolicy;
+        }
+        if (opts.setSubagentsEnabled) {
+          // Off unless chosen: subagents multiply cost and run outside the chat's view.
+          if (opts.subagentsEnabled) cur.subagentsEnabled = true;
+          else delete cur.subagentsEnabled;
         }
         if (opts.setDockerSnapshotAfterAgentMessageEnabled) {
           if (opts.dockerSnapshotAfterAgentMessageEnabled) {

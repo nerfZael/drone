@@ -157,6 +157,7 @@ import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 import { WorkspaceToolIcon } from './WorkspaceToolIcon';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 import { agentAccessChoiceGroups } from './agent-access-choice-groups';
+import { subagentsMenuAction } from './subagents-menu-action';
 import { ADD_CUSTOM_AGENT_MENU_VALUE } from './use-drone-hub-toolbar-menu-state';
 
 type LaunchHint = {
@@ -480,6 +481,8 @@ type SelectedDroneWorkspaceProps = {
   setChatApprovalPolicy: (policy: AgentApprovalPolicy) => Promise<void>;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
+  subagentsEnabled: boolean;
+  setChatSubagentsEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
   modelDisabled: boolean;
   loadingChatModels: boolean;
@@ -614,6 +617,8 @@ export function SelectedDroneWorkspace({
   setChatApprovalPolicy,
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
+  subagentsEnabled,
+  setChatSubagentsEnabled,
   setChatInfoError,
   modelDisabled,
   loadingChatModels,
@@ -1443,6 +1448,16 @@ export function SelectedDroneWorkspace({
       active: droneHubPermissionsOpen,
       onSelect: () => setDroneHubPermissionsOpen(true),
     },
+    ...subagentsMenuAction({
+      agentKey: currentAgentKey,
+      enabled: subagentsEnabled,
+      disabled: loadingChatInfo,
+      onToggle: (enabled) => {
+        void setChatSubagentsEnabled(enabled).catch((err: any) =>
+          setChatInfoError(err?.message ?? String(err)),
+        );
+      },
+    }),
   ];
   // The agent, model, and access settings share one picker in the composer.
   const externalModelPicker = externalModelComposerControls?.controls.find(

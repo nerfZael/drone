@@ -703,6 +703,29 @@ export function IconEyeOff({ className }: { className?: string }) {
   );
 }
 
+/** One agent handing work to two others. */
+export function IconSubagents({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="3.5" r="2" />
+      <circle cx="3.5" cy="12.5" r="2" />
+      <circle cx="12.5" cy="12.5" r="2" />
+      <path d="M8 5.5v2.5M8 8l-3.4 2.8M8 8l3.4 2.8" />
+    </svg>
+  );
+}
+
 export function IconMore({ className }: { className?: string }) {
   return (
     <svg

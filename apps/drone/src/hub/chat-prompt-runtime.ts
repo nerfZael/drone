@@ -1022,7 +1022,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           cdCommand,
           // Goals make Codex start turns on its own, which DroneHub cannot show
           // yet. A Codex without the feature ignores the setting.
+          // Subagents are off unless the chat turns them on. Current Codex reads
+          // agents.enabled; older builds read the multi_agent feature instead.
           `exec codex app-server -c 'features.goals=false'${
+            (chat as any)?.subagentsEnabled === true
+              ? ''
+              : " -c 'agents.enabled=false' -c 'features.multi_agent=false'"
+          }${
             requireDroneHubMcp
               ? " -c 'mcp_servers.drone-hub.required=true' -c 'mcp_servers.drone-hub.startup_timeout_sec=10'"
               : ''
@@ -1094,6 +1100,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         // reaches the user's browser from host and container drones alike.
         const supportsChrome = await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude', flag: 'chrome' });
         const chromeArg = supportsChrome ? ' --chrome' : '';
+        // Subagents are off unless the chat turns them on.
+        const subagentsEnabled = (chat as any)?.subagentsEnabled === true;
+        const subagentsArg = subagentsEnabled ? '' : ' --disallowedTools Agent';
         const checkpointArg = forkMessageId ? ` --resume-session-at=${bashQuote(forkMessageId)}` : '';
         const sessionArg =
           sessionLaunch.mode === 'fork'
@@ -1115,9 +1124,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           // Older daemons retain one-shot delivery until upgraded. The stream
           // wrapper sets this flag only when it owns Claude's stdin.
           'if [ "${DRONE_CLAUDE_STREAM:-}" = "1" ]; then',
-          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${sessionArg}`,
+          `  exec claude --print --dangerously-skip-permissions --input-format stream-json --replay-user-messages --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${subagentsArg}${sessionArg}`,
           'else',
-          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+          `  exec claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${effortArg}${chromeArg}${subagentsArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
           'fi',
         ].join('\n');
         await enqueueTranscriptPrompt({
@@ -1130,7 +1139,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           claudeStream: {
             sessionKey: `claude:${droneId}:${String(chat.id)}`,
-            compatibilityKey: JSON.stringify([cwd, chatModel ?? null, effortArg ? chatEffort : null]),
+            compatibilityKey: JSON.stringify([
+              cwd,
+              chatModel ?? null,
+              effortArg ? chatEffort : null,
+              subagentsEnabled,
+            ]),
             prompt: promptWithHistory,
           },
           deliveryMode: opts.deliveryMode,
