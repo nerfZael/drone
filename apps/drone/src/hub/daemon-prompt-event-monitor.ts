@@ -19,6 +19,11 @@ export class DaemonPromptEventMonitor {
       resolveClient: (droneId: string) => Promise<{ exists: boolean; client: DroneClient | null }>;
       onTerminalPrompt: (droneId: string, promptId: string) => Promise<void>;
       onApprovalPending?: (droneId: string, promptId: string) => Promise<void>;
+      /** A turn Claude started for a background task; the hub has no prompt for it yet. */
+      onClaudeBackgroundTurn?: (
+        droneId: string,
+        job: { id: string; chatKey: string; summaries: string[]; startedAt?: string },
+      ) => Promise<void>;
       sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     },
   ) {}
@@ -43,6 +48,28 @@ export class DaemonPromptEventMonitor {
     for (const job of jobs) {
       const promptId = String(job?.id ?? '').trim();
       if (!promptId) continue;
+      const chatKey = String(job?.chatKey ?? '').trim();
+      if (job?.origin === 'claude-background-task' && chatKey && this.deps.onClaudeBackgroundTurn) {
+        // Adopt before the terminal wake so reconciliation finds the prompt.
+        const summaries = Array.isArray(job.backgroundTaskSummaries)
+          ? job.backgroundTaskSummaries.map(String)
+          : [];
+        const startedAt = String(job.startedAt ?? job.createdAt ?? '').trim();
+        const adopt = this.deps.onClaudeBackgroundTurn(droneId, {
+          id: promptId,
+          chatKey,
+          summaries,
+          ...(startedAt ? { startedAt } : {}),
+        });
+        const wake =
+          daemonPromptEventWakeKind(job) === 'terminal'
+            ? adopt.then(() => this.deps.onTerminalPrompt(droneId, promptId))
+            : adopt;
+        const task = wake.catch(() => {});
+        this.wakeTasks.add(task);
+        void task.finally(() => this.wakeTasks.delete(task));
+        continue;
+      }
       const wakeKind = daemonPromptEventWakeKind(job);
       const handler =
         wakeKind === 'terminal'

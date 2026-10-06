@@ -1,3 +1,5 @@
+import { xmlDecode, xmlEscape } from './xml-text.js';
+
 export const EVENT_NOTIFICATION_ROOT = 'dronehub_event_notification';
 
 export type EventNotificationPromptEvent = {
@@ -42,17 +44,6 @@ export type EventNotificationChatTarget = {
   droneName: string;
   chatName: string;
 };
-
-function xmlEscape(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function xmlDecode(value: string): string {
-  return value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-}
 
 function boundedProviderContent(value: Record<string, unknown>, maxChars: number): string {
   const serialized = JSON.stringify(value, null, 2);

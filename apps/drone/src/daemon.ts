@@ -32,8 +32,10 @@ import { handleDaemonManagedStateRequest } from './daemon-managed-state';
 import { DRONE_DAEMON_CAPABILITIES } from './daemon-capabilities';
 import { promptJobBelongsToOtherChat, selectNextPromptJobId } from './prompt-job-scheduling';
 import {
+  claudeStreamOwnsOutput,
   claudeStreamPaths,
   claudeStreamRunnerScript,
+  claudeStreamTurnForJob,
   readClaudeStreamState,
   steerClaudeStream,
   type ClaudePromptStream,
@@ -168,34 +170,50 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
+type PromptStdoutRead = { text: string; bytes: number; truncated: boolean; start?: number };
+
+/** Reads the head of a file, or of the byte range `[start, end)` within it. */
 async function readTextSafeDetailed(
   p: string,
-  opts?: { maxBytes?: number },
-): Promise<{ text: string; bytes: number; truncated: boolean }> {
+  opts?: { maxBytes?: number; start?: number; end?: number },
+): Promise<PromptStdoutRead> {
   let handle: FileHandle | null = null;
   try {
     const maxBytes = Math.max(1, Math.floor(opts?.maxBytes ?? 2 * 1024 * 1024));
     handle = await fs.open(p, 'r');
     const stat = await handle.stat();
-    const bytes = Number.isFinite(stat.size) && stat.size > 0 ? Math.floor(stat.size) : 0;
+    const size = Number.isFinite(stat.size) && stat.size > 0 ? Math.floor(stat.size) : 0;
+    const from = Math.min(Math.max(0, opts?.start ?? 0), size);
+    const bytes = Math.max(0, Math.min(opts?.end ?? size, size) - from);
     const readBytes = Math.min(bytes, maxBytes);
     const buf = Buffer.alloc(readBytes);
-    const read = readBytes > 0 ? await handle.read(buf, 0, readBytes, 0) : { bytesRead: 0 };
+    const read = readBytes > 0 ? await handle.read(buf, 0, readBytes, from) : { bytesRead: 0 };
     const head = buf.subarray(0, read.bytesRead).toString('utf8');
     if (bytes <= maxBytes) {
-      return { text: head, bytes, truncated: false };
+      return { text: head, bytes, truncated: false, start: from };
     }
     const text = `${head}\n\n…(truncated)…`;
     return {
       text,
       bytes,
       truncated: true,
+      start: from,
     };
   } catch {
     return { text: '', bytes: 0, truncated: false };
   } finally {
     await handle?.close().catch(() => {});
   }
+}
+
+/** A Claude run's stdout holds several turns; each job reads only its own. */
+async function readPromptStdout(job: PromptJob): Promise<PromptStdoutRead> {
+  if (job.claudeStream?.runId) {
+    const state = await readClaudeStreamState(job.stdoutPath).catch(() => null);
+    const turn = claudeStreamTurnForJob(state, job.id);
+    if (turn) return await readTextSafeDetailed(job.stdoutPath, { start: turn.start, end: turn.end });
+  }
+  return await readTextSafeDetailed(job.stdoutPath);
 }
 
 async function readTextSafe(p: string, maxBytes = 2 * 1024 * 1024): Promise<string> {
@@ -274,6 +292,11 @@ function promptJobEventSummary(job: PromptJob, pendingApprovalCount = 0) {
     id: job.id,
     kind: job.kind,
     state: job.state,
+    ...(job.chatKey ? { chatKey: job.chatKey } : {}),
+    // Turns Claude starts on its own have no hub prompt until the hub adopts them.
+    ...(job.claudeStream?.wake
+      ? { origin: 'claude-background-task', backgroundTaskSummaries: job.claudeStream.wake.summaries }
+      : {}),
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     ...(job.startedAt ? { startedAt: job.startedAt } : {}),
@@ -624,7 +647,7 @@ function promptJobSupportsTranscript(kindRaw: unknown): boolean {
 
 async function parsePromptJobTranscriptFromFile(
   job: PromptJob,
-  stdoutRead: { bytes: number; truncated: boolean },
+  stdoutRead: { bytes: number; truncated: boolean; start?: number },
   parsedAt: string,
 ): Promise<BuiltinPromptJobTranscript | null> {
   if (!promptJobSupportsTranscript(job.kind)) return null;
@@ -638,10 +661,11 @@ async function parsePromptJobTranscriptFromFile(
   // Bound the stream to the file size we just observed. In Bun/Node a read
   // against a concurrently written file can otherwise wait for later writes,
   // which makes live transcript polling miss transient running states.
+  const start = stdoutRead.start ?? 0;
   const stream = createReadStream(job.stdoutPath, {
     encoding: 'utf8',
-    start: 0,
-    end: stdoutRead.bytes - 1,
+    start,
+    end: start + stdoutRead.bytes - 1,
   });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
   try {
@@ -841,7 +865,7 @@ async function finalizePromptJob(
       exitCodeFromWrapperState = true;
     }
   }
-  let stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+  let stdoutRead = await readPromptStdout(job);
   let stderrRead = await readTextSafeDetailed(job.stderrPath);
   let wrapperRead = await readTextSafeDetailed(
     job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
@@ -888,7 +912,7 @@ async function finalizePromptJob(
           exitCodeFromWrapperState = true;
         }
       }
-      stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+      stdoutRead = await readPromptStdout(job);
       stderrRead = await readTextSafeDetailed(job.stderrPath);
       wrapperRead = await readTextSafeDetailed(
         job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
@@ -965,7 +989,7 @@ async function finalizePromptJob(
 
 async function refreshPromptJobTranscript(job: PromptJob): Promise<PromptJob> {
   if (!promptJobSupportsTranscript(job.kind)) return job;
-  const stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+  const stdoutRead = await readPromptStdout(job);
   const stderrRead = await readTextSafeDetailed(job.stderrPath);
   const wrapperRead = await readTextSafeDetailed(
     job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
@@ -996,6 +1020,25 @@ function promptJobHasParsedTranscript(job: PromptJob): boolean {
   return Object.prototype.hasOwnProperty.call(transcript, 'message');
 }
 
+/** Interrupts the pane's process group first; killing the tmux session alone leaves it running. */
+async function stopPromptSession(session: string): Promise<void> {
+  try {
+    await tmux(['send-keys', '-t', `${session}:0.0`, 'C-c']);
+  } catch {
+    // ignore and fall back to killing the session below
+  }
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    if ((await probeSession(session)).status === 'missing') return;
+    await sleep(100);
+  }
+  try {
+    await killSession(session);
+  } catch {
+    // ignore
+  }
+}
+
 async function cancelPromptJob(job: PromptJob): Promise<PromptJob> {
   if (job.state === 'done' || job.state === 'failed' || job.state === 'canceled') return job;
 
@@ -1014,28 +1057,10 @@ async function cancelPromptJob(job: PromptJob): Promise<PromptJob> {
     return await finalizePromptJob(job);
   }
 
-  try {
-    await tmux(['send-keys', '-t', `${job.session}:0.0`, 'C-c']);
-  } catch {
-    // ignore and fall back to killing the session below
-  }
-
-  const deadline = Date.now() + 1500;
-  while (Date.now() < deadline) {
-    if ((await probeSession(job.session)).status === 'missing') break;
-    await sleep(100);
-  }
-
-  if ((await probeSession(job.session)).status !== 'missing') {
-    try {
-      await killSession(job.session);
-    } catch {
-      // ignore
-    }
-  }
+  await stopPromptSession(job.session);
 
   const exitCode = await readIntSafe(job.exitPath);
-  const stdout = await readTextSafe(job.stdoutPath);
+  const stdout = (await readPromptStdout(job)).text;
   const stderr = await readTextSafe(job.stderrPath);
   return {
     ...job,
@@ -1163,7 +1188,52 @@ function sameSessionProbe(
   return JSON.stringify(leftStable) === JSON.stringify(rightStable);
 }
 
+/** Completes a job when its turn ends, even though the run may continue. */
+async function finalizeClaudeTurnJob(job: PromptJob): Promise<PromptJob | null> {
+  if (!job.claudeStream?.runId) return null;
+  const state = await readClaudeStreamState(job.stdoutPath).catch(() => null);
+  const turn = claudeStreamTurnForJob(state, job.id);
+  if (!turn || turn.end === undefined) return null;
+  const stdoutRead = await readPromptStdout(job);
+  const stderrRead = await readTextSafeDetailed(job.stderrPath);
+  const wrapperRead = await readTextSafeDetailed(
+    job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
+  );
+  const finishedAt = nowIso();
+  const transcript = await parsePromptJobTranscriptFromFile(job, stdoutRead, finishedAt);
+  const diagnostics = buildPromptJobDiagnostics({ ...job, finishedAt }, transcript, wrapperRead.text);
+  const ok = turn.ok === true;
+  return {
+    ...job,
+    updatedAt: finishedAt,
+    finishedAt,
+    exitCode: ok ? 0 : 1,
+    exitStatusSource: 'transcript-terminal',
+    stdout: stdoutRead.text,
+    stderr: stderrRead.text,
+    wrapperLog: wrapperRead.text,
+    stdoutBytes: stdoutRead.bytes,
+    stderrBytes: stderrRead.bytes,
+    wrapperBytes: wrapperRead.bytes,
+    stdoutTruncated: stdoutRead.truncated,
+    stderrTruncated: stderrRead.truncated,
+    wrapperTruncated: wrapperRead.truncated,
+    ...(transcript ? { transcript } : {}),
+    ...(diagnostics ? { diagnostics } : {}),
+    sessionProbe: undefined,
+    terminalObservedAt: undefined,
+    terminalObservedStatus: undefined,
+    state: ok ? 'done' : 'failed',
+    failureReason: undefined,
+    error: ok
+      ? undefined
+      : String((transcript as any)?.error ?? '').trim() || stderrRead.text.trim() || 'Claude turn failed',
+  };
+}
+
 async function advanceRunningPromptJob(job: PromptJob): Promise<PromptJob> {
+  const turnFinished = await finalizeClaudeTurnJob(job);
+  if (turnFinished) return turnFinished;
   const exitCode = await readIntSafe(job.exitPath);
   const wrapperState = await readPromptWrapperState(job);
   const wrapperFinished =
@@ -1626,6 +1696,167 @@ async function main() {
   });
   let daemonShuttingDown = false;
 
+  function isClaudeRunOwner(job: PromptJob): boolean {
+    return Boolean(job.claudeStream?.runId && job.claudeStream.runId === job.id);
+  }
+
+  function claudeRunBusy(jobById: Map<string, PromptJob>, runId: string): boolean {
+    for (const job of jobById.values()) {
+      if (job.claudeStream?.runId === runId && job.state === 'running') return true;
+    }
+    return false;
+  }
+
+  /** The run whose process may still accept input for this Claude session. */
+  function liveClaudeRun(jobById: Map<string, PromptJob>, sessionKey: string): PromptJob | null {
+    let latest: PromptJob | null = null;
+    for (const job of jobById.values()) {
+      if (!isClaudeRunOwner(job) || job.claudeStream!.processEnded || job.state === 'queued') continue;
+      if (job.claudeStream!.sessionKey !== sessionKey) continue;
+      if (!latest || job.createdAt > latest.createdAt) latest = job;
+    }
+    return latest;
+  }
+
+  async function linkJobToClaudeRun(
+    jobById: Map<string, PromptJob>,
+    job: PromptJob,
+    run: PromptJob,
+  ): Promise<void> {
+    const startedAt = nowIso();
+    const linked: PromptJob = {
+      ...job,
+      state: 'running',
+      startedAt,
+      updatedAt: startedAt,
+      session: run.session,
+      stdoutPath: run.stdoutPath, stderrPath: run.stderrPath, exitPath: run.exitPath,
+      wrapperPath: run.wrapperPath, wrapperStatePath: run.wrapperStatePath, heartbeatPath: run.heartbeatPath,
+      claudeStream: { ...job.claudeStream!, runId: run.id },
+    };
+    await savePromptJob(promptsDir, linked);
+    jobById.set(job.id, linked);
+  }
+
+  /**
+   * A Claude process kept alive for background tasks owns the session, so the
+   * next message goes into it rather than into a second resumed process.
+   */
+  async function deliverToLiveClaudeRun(
+    jobById: Map<string, PromptJob>,
+    job: PromptJob,
+  ): Promise<'delivered' | 'start' | 'retry'> {
+    const run = liveClaudeRun(jobById, job.claudeStream!.sessionKey);
+    if (!run) return 'start';
+    if (run.claudeStream!.compatibilityKey !== job.claudeStream!.compatibilityKey) {
+      // A changed model or workspace needs a new process; this ends the
+      // previous run together with its background tasks.
+      await stopPromptSession(run.session);
+      return 'start';
+    }
+    let delivered: boolean;
+    try {
+      delivered = await steerClaudeStream(run.stdoutPath, job.id, job.claudeStream!.prompt);
+    } catch {
+      // An ambiguous delivery must be retried with the same id, never relaunched.
+      return 'retry';
+    }
+    if (!delivered) return 'start';
+    await linkJobToClaudeRun(jobById, job, run);
+    return 'delivered';
+  }
+
+  async function claudeRunProcessEnded(run: PromptJob): Promise<boolean> {
+    if ((await readIntSafe(run.exitPath)) != null) return true;
+    const wrapperState = await readPromptWrapperState(run);
+    if (wrapperState?.phase === 'finished' || wrapperState?.phase === 'exited') return true;
+    // A wrapper killed outright writes no exit. Its heartbeat stops, but so does
+    // every heartbeat while the machine sleeps, so tmux must confirm the loss.
+    const heartbeatAgeMs = await promptHeartbeatAgeMs(run);
+    if (heartbeatAgeMs == null || heartbeatAgeMs <= PROMPT_WRAPPER_HEARTBEAT_FRESH_MS) return false;
+    return (await probeSession(run.session)).status === 'missing';
+  }
+
+  /**
+   * Gives each turn Claude started on its own a job of its own, so the hub sees
+   * it like any other turn, and retires runs whose process has exited.
+   */
+  async function syncClaudeRuns(jobById: Map<string, PromptJob>): Promise<void> {
+    const created: string[] = [];
+    for (const run of Array.from(jobById.values())) {
+      if (!isClaudeRunOwner(run) || run.claudeStream!.processEnded || run.state === 'queued') continue;
+      const state = await readClaudeStreamState(run.stdoutPath).catch(() => null);
+      for (const turn of state?.turns ?? []) {
+        if (!turn.wake || jobById.has(turn.id) || (await loadPromptJob(promptsDir, turn.id))) continue;
+        const createdAt = nowIso();
+        const wakeJob: PromptJob = {
+          id: turn.id,
+          kind: run.kind,
+          cmd: run.cmd,
+          args: run.args,
+          ...(run.chatKey ? { chatKey: run.chatKey } : {}),
+          cwd: run.cwd,
+          createdAt,
+          updatedAt: createdAt,
+          startedAt: createdAt,
+          state: 'running',
+          deliveryMode: 'queue',
+          session: run.session,
+          stdoutPath: run.stdoutPath, stderrPath: run.stderrPath, exitPath: run.exitPath,
+          wrapperPath: run.wrapperPath, wrapperStatePath: run.wrapperStatePath, heartbeatPath: run.heartbeatPath,
+          claudeStream: {
+            sessionKey: run.claudeStream!.sessionKey,
+            compatibilityKey: run.claudeStream!.compatibilityKey,
+            prompt: turn.wake.summaries.join('\n') || 'Background task update',
+            runId: run.id,
+            wake: { summaries: turn.wake.summaries },
+          },
+        };
+        await savePromptJob(promptsDir, wakeJob);
+        jobById.set(wakeJob.id, wakeJob);
+        created.push(wakeJob.id);
+      }
+      if (await claudeRunProcessEnded(run)) {
+        const latest = jobById.get(run.id) ?? run;
+        const ended: PromptJob = {
+          ...latest,
+          updatedAt: nowIso(),
+          claudeStream: { ...latest.claudeStream!, processEnded: true },
+        };
+        await savePromptJob(promptsDir, ended);
+        jobById.set(run.id, ended);
+      }
+    }
+    if (created.length === 0) return;
+    const idx = await loadPromptIndex(promptsDir);
+    const order = Array.isArray(idx.order) ? idx.order.map(String) : [];
+    for (const id of created) if (!order.includes(id)) order.push(id);
+    idx.order = order.slice(-400);
+    await savePromptIndex(promptsDir, idx);
+  }
+
+  /** Live Claude runs that still hold background tasks, for the hub to show. */
+  async function listClaudeBackgroundTasks(chatKey?: string) {
+    const idx = await loadPromptIndex(promptsDir);
+    const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+    const runs = [];
+    for (const id of order) {
+      const run = await loadPromptJob(promptsDir, id);
+      if (!run || !isClaudeRunOwner(run) || run.claudeStream!.processEnded) continue;
+      if (chatKey && run.chatKey !== chatKey) continue;
+      const state = await readClaudeStreamState(run.stdoutPath).catch(() => null);
+      const tasks = state?.backgroundTasks ?? [];
+      if (tasks.length === 0 || (await claudeRunProcessEnded(run))) continue;
+      runs.push({
+        runId: run.id,
+        ...(run.chatKey ? { chatKey: run.chatKey } : {}),
+        resident: Boolean(state?.resident),
+        tasks,
+      });
+    }
+    return runs;
+  }
+
   async function pumpPromptsUnlocked(): Promise<void> {
     const idx = await loadPromptIndex(promptsDir);
     const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
@@ -1702,43 +1933,51 @@ async function main() {
       }
     }
 
+    await syncClaudeRuns(jobById);
+
     // Durable receipts make steering idempotent even if the daemon restarts
     // after stdin delivery but before persisting the follow-up's run linkage.
+    // Steering joins a turn in progress; an idle run takes the message as a
+    // new turn when the scheduler reaches it.
     for (const pending of jobById.values()) {
       if (pending.state !== 'queued' || pending.deliveryMode !== 'asap' || !pending.claudeStream) continue;
       for (const active of jobById.values()) {
         if (!active.claudeStream?.runId || active.claudeStream.runId !== active.id ||
             active.claudeStream.sessionKey !== pending.claudeStream.sessionKey ||
             active.claudeStream.compatibilityKey !== pending.claudeStream.compatibilityKey ||
-            (active.finishedAt && active.finishedAt < pending.createdAt)) continue;
+            (active.claudeStream.processEnded && active.updatedAt < pending.createdAt)) continue;
         const accepted = (await readClaudeStreamState(active.stdoutPath))?.messageIds.includes(pending.id) ||
-          (active.state === 'running' && await steerClaudeStream(active.stdoutPath, pending.id, pending.claudeStream.prompt));
+          (!active.claudeStream.processEnded && claudeRunBusy(jobById, active.id) &&
+            await steerClaudeStream(active.stdoutPath, pending.id, pending.claudeStream.prompt));
         if (!accepted) continue;
-        const linked: PromptJob = {
-          ...pending,
-          state: active.state,
-          startedAt: active.startedAt,
-          updatedAt: nowIso(),
-          session: active.session,
-          stdoutPath: active.stdoutPath, stderrPath: active.stderrPath, exitPath: active.exitPath,
-          wrapperPath: active.wrapperPath, wrapperStatePath: active.wrapperStatePath, heartbeatPath: active.heartbeatPath,
-          ...(active.finishedAt ? { finishedAt: active.finishedAt, exitCode: active.exitCode, error: active.error } : {}),
-          claudeStream: { ...pending.claudeStream, runId: active.id },
-        };
-        await savePromptJob(promptsDir, linked);
-        jobById.set(pending.id, linked);
+        await linkJobToClaudeRun(jobById, pending, active);
         break;
       }
     }
 
     // Reserve and start one job per chat. The durable running state also
     // preserves this boundary after daemon restarts and during cancellation.
+    // Chats whose next delivery is uncertain wait for the next pump as a
+    // whole, so a later message cannot overtake the one being retried.
+    const deferredChats = new Set<string>();
+    const chatKeysOf = (job: PromptJob) =>
+      [job.chatKey, job.claudeStream?.sessionKey].filter((key): key is string => Boolean(key));
     while (true) {
-      const candidates = Array.from(jobById.values()).filter((job) => !job.codexAppServer);
+      const candidates = Array.from(jobById.values()).filter(
+        (job) => !job.codexAppServer && !chatKeysOf(job).some((key) => deferredChats.has(key)),
+      );
       const startId = selectNextPromptJobId(candidates);
       if (!startId) return;
       const job = await loadPromptJob(promptsDir, startId);
       if (!job) return;
+      if (job.claudeStream) {
+        const delivery = await deliverToLiveClaudeRun(jobById, job);
+        if (delivery === 'delivered') continue;
+        if (delivery === 'retry') {
+          for (const key of chatKeysOf(job)) deferredChats.add(key);
+          continue;
+        }
+      }
       const startedAt = nowIso();
       const running: PromptJob = {
         ...job, state: 'running', startedAt, updatedAt: startedAt,
@@ -2055,6 +2294,31 @@ async function main() {
         return;
       }
 
+      if (method === 'GET' && pathname === '/v1/claude/background-tasks') {
+        const chatKey = String(u.searchParams.get('chatKey') ?? '').trim() || undefined;
+        json(res, 200, { ok: true, runs: await listClaudeBackgroundTasks(chatKey) });
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/v1/claude/background-tasks/stop') {
+        const body = await readJson(req);
+        const chatKey = String(body?.chatKey ?? '').trim();
+        if (!chatKey) {
+          json(res, 400, { error: 'missing chatKey' });
+          return;
+        }
+        // Background tasks live inside the Claude process; ending the run is
+        // the only way to stop them. A turn in progress fails with it.
+        const runs = await listClaudeBackgroundTasks(chatKey);
+        for (const run of runs) {
+          const job = await loadPromptJob(promptsDir, run.runId);
+          if (job) await stopPromptSession(job.session);
+        }
+        void pumpPrompts();
+        json(res, 200, { ok: true, stopped: runs.length });
+        return;
+      }
+
       if (method === 'GET' && pathname === '/v1/prompts/events') {
         res.statusCode = 200;
         res.setHeader('content-type', 'text/event-stream; charset=utf-8');
@@ -2180,9 +2444,11 @@ async function main() {
         }
         if (job.claudeStream) {
           const streamState = await readClaudeStreamState(job.stdoutPath);
+          const turnId = claudeStreamTurnForJob(streamState, job.id)?.id;
           job.claudeStream = {
             ...job.claudeStream,
-            outputOwner: !streamState || streamState.responseMessageId === job.id,
+            outputOwner: claudeStreamOwnsOutput(streamState, job.id),
+            ...(turnId ? { turnId } : {}),
           };
         }
         json(res, 200, { ok: true, job });

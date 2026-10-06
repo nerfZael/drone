@@ -29,6 +29,23 @@ test('Claude ASAP messages share one usage execution', () => {
   } finally { journal.close(); store.close(); }
 });
 
+test('each turn of a long-lived Claude run keeps its own usage', () => {
+  const store = new UsageStore(':memory:');
+  const journal = new UsageJournal(':memory:');
+  try {
+    const input = { droneId: 'drone', chatId: 'chat', chatName: 'default' };
+    const turn = (id: string, turnId: string) => ({ id, kind: 'claude', state: 'done',
+      startedAt: store.trackingSince, claudeStream: { runId: 'run', turnId }, transcript: { usage: [observation] } });
+    recordExternalUsage({ ...input, job: turn('run', 'run') }, journal, store);
+    // A message steered into the first turn reports that same turn.
+    recordExternalUsage({ ...input, job: turn('steered', 'run') }, journal, store);
+    // A turn Claude started for a background task adds to the run.
+    recordExternalUsage({ ...input, job: turn('run-wake-1', 'run-wake-1') }, journal, store);
+    expect(store.analytics().totals.executions).toBe(2);
+    expect(store.analytics().totals.total).toBe(40);
+  } finally { journal.close(); store.close(); }
+});
+
 test('steered Codex prompts share one usage execution despite different message start times', () => {
   const store = new UsageStore(':memory:');
   const journal = new UsageJournal(':memory:');

@@ -31,6 +31,7 @@ import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
+import { BackgroundTaskMessage, isBackgroundTaskPrompt } from './BackgroundTaskMessage';
 import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './SubscriptionEventBadge';
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
@@ -117,6 +118,7 @@ export const TranscriptTurn = React.memo(
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
+    const isBackgroundTask = isBackgroundTaskPrompt(item.prompt);
     const isSilentCompletion = item.silentCompletion === true;
     const isUserOnly = item.userOnly === true;
     const isStopped = !item.ok && isStoppedRunError(item.error);
@@ -302,7 +304,16 @@ export const TranscriptTurn = React.memo(
         ) : null;
     return (
       <div className="group/turn animate-fade-in" data-chat-message-id={item.id || undefined}>
-        {isSubscriptionEvent ? (
+        {isBackgroundTask ? (
+          <BackgroundTaskMessage
+            prompt={item.prompt}
+            at={promptIso}
+            followUps={followUps}
+            showRoleIcons={showRoleIcons}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+          />
+        ) : isSubscriptionEvent ? (
           <SubscriptionEventMessage
             prompt={item.prompt}
             at={promptIso}

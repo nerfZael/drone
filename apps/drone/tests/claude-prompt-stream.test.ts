@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  claudeStreamOwnsOutput,
   claudeStreamPaths,
   claudeStreamRunnerScript,
   readClaudeStreamState,
@@ -25,6 +26,7 @@ async function withRunner(
     output: () => string;
     exited: Promise<number | null>;
   }) => Promise<void>,
+  options: { idleCloseGraceMs?: number } = {},
 ) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-stream-test-'));
   const stdoutPath = path.join(directory, 'stdout');
@@ -38,6 +40,7 @@ async function withRunner(
         id: 'initial',
         prompt: 'initial',
         ...claudeStreamPaths(stdoutPath),
+        idleCloseGraceMs: options.idleCloseGraceMs,
       }),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
@@ -125,4 +128,148 @@ test('an exit before acknowledging an accepted prompt fails the run', async () =
       expect(await exited).toBe(1);
     },
   );
+});
+
+// Mirrors what headless Claude emits: a task list on every change, then a
+// notification and a self-started turn when a background task reports.
+const FAKE_BACKGROUND_CLAUDE = `
+  const lines = require('node:readline').createInterface({ input: process.stdin });
+  const emit = (event) => console.log(JSON.stringify(event));
+  const tasks = (list) => emit({ type: 'system', subtype: 'background_tasks_changed', tasks: list });
+  const task = { task_id: 't1', task_type: 'local_bash', description: 'npm run dev' };
+  lines.on('line', (line) => {
+    const event = JSON.parse(line);
+    emit({ type: 'system', subtype: 'init' });
+    emit(event);
+    const content = event.message.content;
+    if (content === 'initial') tasks([task]);
+    if (content === 'wake me') {
+      setTimeout(() => {
+        tasks([]);
+        emit({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'Background command "npm run dev" completed' });
+        emit({ type: 'system', subtype: 'init' });
+        emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'woke up' }] } });
+        emit({ type: 'result', subtype: 'success', result: 'woke up' });
+      }, 50);
+    }
+    if (content === 'quiet end') setTimeout(() => tasks([]), 50);
+    emit({ type: 'result', subtype: 'success', result: 'reply to ' + content });
+  });
+`;
+
+test('background tasks keep the run alive and a self-started turn is recorded', async () => {
+  await withRunner(FAKE_BACKGROUND_CLAUDE, async ({ stdoutPath, output, exited }) => {
+    await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+    const resident = await readClaudeStreamState(stdoutPath);
+    expect(resident?.backgroundTasks?.map((task) => task.description)).toEqual(['npm run dev']);
+    expect(resident?.turns?.map((turn) => [turn.id, turn.ok])).toEqual([['initial', true]]);
+
+    // A message sent to the idle run opens its own turn instead of a new process.
+    expect(await steerClaudeStream(stdoutPath, 'second', 'wake me')).toBe(true);
+    expect(await exited).toBe(0);
+
+    const state = await readClaudeStreamState(stdoutPath);
+    expect(state?.resident).toBe(false);
+    expect(state?.backgroundTasks).toEqual([]);
+    expect(state?.turns?.map((turn) => [turn.id, turn.messageIds, turn.wake?.summaries])).toEqual([
+      ['initial', ['initial'], undefined],
+      ['second', ['second'], undefined],
+      ['initial-wake-1', [], ['Background command "npm run dev" completed']],
+    ]);
+    const bytes = Buffer.from(output(), 'utf8');
+    const slice = (index: number) => {
+      const turn = state!.turns![index]!;
+      return bytes.subarray(turn.start, turn.end).toString('utf8');
+    };
+    expect(slice(0)).toContain('reply to initial');
+    expect(slice(0)).not.toContain('reply to wake me');
+    expect(slice(1)).toContain('reply to wake me');
+    expect(slice(1)).not.toContain('woke up');
+    expect(slice(2)).toContain('woke up');
+    expect(slice(2).startsWith('{"type":"system","subtype":"init"}')).toBe(true);
+    expect(claudeStreamOwnsOutput(state, 'second')).toBe(true);
+    expect(claudeStreamOwnsOutput(state, 'initial-wake-1')).toBe(true);
+  });
+});
+
+test('a run whose tasks end without waking Claude closes after the grace period', async () => {
+  await withRunner(
+    FAKE_BACKGROUND_CLAUDE,
+    async ({ stdoutPath, exited }) => {
+      await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+      expect(await steerClaudeStream(stdoutPath, 'second', 'quiet end')).toBe(true);
+      expect(await exited).toBe(0);
+      const state = await readClaudeStreamState(stdoutPath);
+      expect(state?.turns?.map((turn) => turn.id)).toEqual(['initial', 'second']);
+      expect(await steerClaudeStream(stdoutPath, 'late', 'too late')).toBe(false);
+    },
+    { idleCloseGraceMs: 100 },
+  );
+});
+
+// Mid-turn reports and Monitor-style wake-ups, as observed from headless Claude.
+const FAKE_MID_TURN_CLAUDE = `
+  const lines = require('node:readline').createInterface({ input: process.stdin });
+  const emit = (event) => console.log(JSON.stringify(event));
+  const tasks = (list) => emit({ type: 'system', subtype: 'background_tasks_changed', tasks: list });
+  const dev = { task_id: 'dev', task_type: 'local_bash', description: 'npm run dev' };
+  const quick = { task_id: 'quick', task_type: 'local_bash', description: 'npm test' };
+  const notify = (summary) => emit({ type: 'system', subtype: 'task_notification', summary });
+  lines.on('line', (line) => {
+    const event = JSON.parse(line);
+    const content = event.message.content;
+    emit({ type: 'system', subtype: 'init' });
+    emit(event);
+    if (content === 'initial') {
+      // A quick task reports while the turn runs, and the turn handles it.
+      tasks([dev, quick]);
+      notify('npm test completed');
+      tasks([dev]);
+      emit({ type: 'result', subtype: 'success', result: 'handled npm test' });
+      // Later a watch event wakes Claude with no report of its own.
+      setTimeout(() => {
+        emit({ type: 'system', subtype: 'init' });
+        emit({ type: 'result', subtype: 'success', result: 'saw dev output' });
+        tasks([]);
+      }, 50);
+      return;
+    }
+    // A task ends during the turn, but Claude only wakes for it afterwards.
+    tasks([quick]);
+    notify('npm test completed');
+    tasks([]);
+    emit({ type: 'result', subtype: 'success', result: 'reply' });
+    setTimeout(() => {
+      emit({ type: 'system', subtype: 'init' });
+      emit({ type: 'result', subtype: 'success', result: 'late wake' });
+    }, 50);
+  });
+`;
+
+test('a report handled mid-turn does not label a later wake-up, which names its task instead', async () => {
+  await withRunner(
+    FAKE_MID_TURN_CLAUDE,
+    async ({ stdoutPath, exited }) => {
+      await waitUntil(async () => ((await readClaudeStreamState(stdoutPath))?.turns?.length ?? 0) >= 2);
+      const state = await readClaudeStreamState(stdoutPath);
+      expect(state?.turns?.map((turn) => [turn.id, turn.wake?.summaries])).toEqual([
+        ['initial', undefined],
+        ['initial-wake-1', ['"npm run dev" reported']],
+      ]);
+      expect(await exited).toBe(0);
+    },
+    { idleCloseGraceMs: 100 },
+  );
+});
+
+test('a wake-up right after a turn whose task ended in it is still recorded', async () => {
+  const fake = FAKE_MID_TURN_CLAUDE.replace("content === 'initial'", "content === 'never'");
+  await withRunner(fake, async ({ stdoutPath, exited }) => {
+    expect(await exited).toBe(0);
+    const state = await readClaudeStreamState(stdoutPath);
+    expect(state?.turns?.map((turn) => [turn.id, turn.ok, turn.wake?.summaries])).toEqual([
+      ['initial', true, undefined],
+      ['initial-wake-1', true, ['npm test completed']],
+    ]);
+  });
 });

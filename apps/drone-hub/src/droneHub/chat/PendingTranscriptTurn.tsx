@@ -30,6 +30,7 @@ import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
+import { BackgroundTaskMessage, isBackgroundTaskPrompt } from './BackgroundTaskMessage';
 import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './SubscriptionEventBadge';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
@@ -83,6 +84,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
+  const isBackgroundTask = isBackgroundTaskPrompt(item.prompt);
   const isFailed = item.state === 'failed';
   const isWaiting = pendingPromptIsWaiting(item);
   const observability =
@@ -215,7 +217,17 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       data-chat-message-id={item.id || undefined}
       className={`group/turn animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
-      {isSubscriptionEvent ? (
+      {isBackgroundTask ? (
+        <BackgroundTaskMessage
+          prompt={item.prompt}
+          at={item.at}
+          followUps={followUps}
+          showRoleIcons={showRoleIcons}
+          onOpenFileReference={onOpenFileReference}
+          onOpenLink={onOpenLink}
+          footer={queuedFooter}
+        />
+      ) : isSubscriptionEvent ? (
         <SubscriptionEventMessage
           prompt={item.prompt}
           at={item.at}

@@ -384,6 +384,129 @@ lines.on('close', () => { clearInterval(timer); });
     await fetch(`${baseUrl}/v1/prompts/${independent}/cancel`, { method: 'POST', headers });
   }, 30_000);
 
+  test('Claude background tasks keep the session alive, wake it into its own turns, and can be stopped', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `claude-background-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(dataDir, 'fake-claude.cjs');
+    const receivedPath = path.join(dataDir, 'received.jsonl');
+    const releasePath = path.join(dataDir, 'release');
+    // Mirrors headless Claude: a task list on every change, then a notification
+    // and a self-started turn once the background task reports.
+    fs.writeFileSync(scriptPath, `
+const fs = require('node:fs');
+const lines = require('node:readline').createInterface({ input: process.stdin });
+const emit = (event) => console.log(JSON.stringify(event));
+const session_id = 'claude-background-session';
+const tasks = (list) => emit({ type: 'system', subtype: 'background_tasks_changed', tasks: list, session_id });
+lines.on('line', (line) => {
+  const event = JSON.parse(line);
+  const content = event.message.content;
+  fs.appendFileSync(${JSON.stringify(receivedPath)}, JSON.stringify({ pid: process.pid, prompt: content }) + '\\n');
+  emit({ type: 'system', subtype: 'init', session_id });
+  emit(event);
+  if (content === 'start a dev server') tasks([{ task_id: 'dev', task_type: 'local_bash', description: 'npm run dev' }]);
+  emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'reply to ' + content }] }, session_id });
+  emit({ type: 'result', subtype: 'success', result: 'reply to ' + content, session_id });
+});
+const timer = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(releasePath)})) return;
+  clearInterval(timer);
+  tasks([]);
+  emit({ type: 'system', subtype: 'task_notification', task_id: 'dev', status: 'completed', summary: 'Background command "npm run dev" completed (exit code 0)', session_id });
+  emit({ type: 'system', subtype: 'init', session_id });
+  emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'The dev server exited.' }] }, session_id });
+  emit({ type: 'result', subtype: 'success', result: 'The dev server exited.', session_id });
+}, 20);
+lines.on('close', () => clearInterval(timer));
+`);
+    const token = 'claude-background-token';
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const daemon = Bun.spawn([
+      process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port),
+      '--data-dir', dataDir, '--token', token,
+    ], { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' });
+    processes.push(daemon);
+    await waitForHealth(baseUrl, token, daemon);
+    const chatKey = 'chat:drone-1:chat-1';
+    const enqueue = async (id: string, prompt: string) => {
+      const response = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          id, chatKey, kind: 'claude', cmd: 'node', args: [scriptPath], deliveryMode: 'queue',
+          claudeStream: { sessionKey: chatKey, compatibilityKey: 'same-model-and-cwd', prompt },
+        }),
+      });
+      expect(response.ok).toBe(true);
+    };
+    const backgroundTasks = async () =>
+      ((await (await fetch(`${baseUrl}/v1/claude/background-tasks?chatKey=${encodeURIComponent(chatKey)}`, { headers })).json()) as any).runs;
+    const received = () =>
+      fs.readFileSync(receivedPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+
+    const initial = `claude-bg-initial-${port}`;
+    await enqueue(initial, 'start a dev server');
+    // The turn completes although its process stays up for the dev server.
+    const first = await waitForPromptJob(baseUrl, token, initial);
+    expect(first.transcript.message).toBe('reply to start a dev server');
+    expect(first.claudeStream.outputOwner).toBe(true);
+    const runs = await backgroundTasks();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ runId: initial, chatKey, resident: true });
+    expect(runs[0].tasks.map((task: any) => task.description)).toEqual(['npm run dev']);
+
+    // The next message joins the live process as a turn of its own.
+    const followUp = `claude-bg-follow-up-${port}`;
+    await enqueue(followUp, 'how is it going?');
+    const second = await waitForPromptJob(baseUrl, token, followUp);
+    expect(second.transcript.message).toBe('reply to how is it going?');
+    expect(second.claudeStream).toMatchObject({ runId: initial, outputOwner: true });
+    expect(new Set(received().map((item) => item.pid)).size).toBe(1);
+
+    // When the task reports, Claude's own turn becomes a job of its own.
+    fs.writeFileSync(releasePath, 'go');
+    const wake = await waitForPromptJob(baseUrl, token, `${initial}-wake-1`);
+    expect(wake.chatKey).toBe(chatKey);
+    expect(wake.transcript.message).toBe('The dev server exited.');
+    expect(wake.claudeStream).toMatchObject({
+      runId: initial,
+      outputOwner: true,
+      wake: { summaries: ['Background command "npm run dev" completed (exit code 0)'] },
+    });
+    const eventJob = await readPromptEventJob(baseUrl, token, wake.id, () => true);
+    expect(eventJob).toMatchObject({
+      origin: 'claude-background-task',
+      chatKey,
+      backgroundTaskSummaries: ['Background command "npm run dev" completed (exit code 0)'],
+    });
+    // With nothing left in the background, the run ends.
+    const deadline = Date.now() + 10_000;
+    while ((await backgroundTasks()).length > 0 && Date.now() < deadline) await Bun.sleep(100);
+    expect(await backgroundTasks()).toEqual([]);
+
+    // Stopping ends a run that is still holding tasks.
+    fs.unlinkSync(releasePath);
+    const another = `claude-bg-another-${port}`;
+    await enqueue(another, 'start a dev server');
+    await waitForPromptJob(baseUrl, token, another);
+    const anotherRun = (await backgroundTasks())[0];
+    expect(anotherRun?.runId).toBe(another);
+    const stop = await fetch(`${baseUrl}/v1/claude/background-tasks/stop`, {
+      method: 'POST', headers, body: JSON.stringify({ chatKey }),
+    });
+    expect(await stop.json()).toMatchObject({ ok: true, stopped: 1 });
+    const stopDeadline = Date.now() + 10_000;
+    while ((await backgroundTasks()).length > 0 && Date.now() < stopDeadline) await Bun.sleep(100);
+    expect(await backgroundTasks()).toEqual([]);
+    // A new message after stopping starts a fresh process.
+    const afterStop = `claude-bg-after-stop-${port}`;
+    await enqueue(afterStop, 'hello again');
+    await waitForPromptJob(baseUrl, token, afterStop);
+    const pids = received().map((item) => item.pid);
+    expect(new Set(pids).size).toBe(3);
+  }, 45_000);
+
   test('persists the final Codex transcript message when stored stdout is truncated', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-${port}`);

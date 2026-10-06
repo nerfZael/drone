@@ -11,12 +11,17 @@ import {
   hasBlockingPendingPrompt,
   isClaudeEffortLevel,
   isSendInNewChatQueueAction,
+  renderBackgroundTaskNotificationPrompt,
 } from '@drone/assistant-chat';
 import { resolvePromptChatName } from './prompt-chat-identity';
 import { readTranscriptTurnIdentitiesFromStore } from './transcript-store';
 
 import type { AgentPlan } from '@drone/assistant-chat';
-import { DroneApiRequestError } from '../host/api';
+import {
+  claudeBackgroundTasksList,
+  claudeBackgroundTasksStop,
+  DroneApiRequestError,
+} from '../host/api';
 import { commandForPid } from '../host/process-inspection';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
@@ -1327,6 +1332,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     },
     onTerminalPrompt: enqueueReconcileForDaemonPromptEvent,
     onApprovalPending: enqueueReconcileForDaemonPromptEvent,
+    onClaudeBackgroundTurn: adoptClaudeBackgroundTurn,
     sleep: sleepMs,
   });
 
@@ -1389,6 +1395,133 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     enqueueReconcile,
     enqueuePromptPump: enqueuePendingPromptPump,
   });
+
+  function chatNameForChatKey(droneId: string, chatKey: string): string | null {
+    const prefix = `chat:${droneId}:`;
+    const chatId = chatKey.startsWith(prefix) ? chatKey.slice(prefix.length).trim() : '';
+    if (!chatId) return null;
+    for (const chatName of listChatsFromStore({ droneId }).chats) {
+      if (String(readChatMetadataFromStore({ droneId, chatName })?.chat?.id ?? '') === chatId) {
+        return chatName;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Claude started a turn on its own for a background task. The daemon already
+   * runs it, so the hub records it as a delivered prompt and reconciles it like
+   * any other turn.
+   */
+  async function adoptClaudeBackgroundTurn(
+    droneIdRaw: string,
+    job: { id: string; chatKey: string; summaries: string[]; startedAt?: string },
+  ): Promise<void> {
+    const droneId = normalizeDroneIdentity(droneIdRaw);
+    const queue = getPromptQueueRepository();
+    if (!droneId || !queue) return;
+    if (queue.findChatNamesForPrompt({ droneId, promptId: job.id }).length > 0) return;
+    const chatName = chatNameForChatKey(droneId, job.chatKey);
+    if (!chatName) return;
+    // Adoption can lag the turn (a reconnecting hub sees it in a snapshot), and
+    // the chat orders turns by this time.
+    const startedMs = Date.parse(String(job.startedAt ?? ''));
+    const at = Number.isFinite(startedMs) ? new Date(startedMs).toISOString() : nowIso();
+    await queue.enqueue({
+      droneId,
+      chatName,
+      submissionSource: 'system',
+      idempotencyKey: `claude-background-turn:${job.id}`,
+      prompt: {
+        id: job.id,
+        at,
+        prompt: renderBackgroundTaskNotificationPrompt(
+          job.summaries.length > 0 ? job.summaries : ['Background task update'],
+        ),
+        deliveryMode: 'queue',
+        state: 'sent',
+        updatedAt: at,
+      },
+    });
+    enqueueReconcile(droneId, chatName);
+  }
+
+  function isClaudeChat(chat: unknown, drone: unknown): boolean {
+    if (!chat) return false;
+    const agent = inferChatAgent(chat, drone);
+    return agent?.kind === 'builtin' && agent.id === 'claude';
+  }
+
+  /**
+   * A daemon client from the stored connection, for reads that may be repeated
+   * often. Unlike prompt delivery it never tries to recover a stopped daemon.
+   */
+  function storedDaemonClient(drone: any): ReturnType<typeof makeClient> | null {
+    const token = typeof drone?.token === 'string' ? drone.token.trim() : '';
+    const hostPort = Number(drone?.hostPort);
+    if (!token || !Number.isFinite(hostPort) || hostPort <= 0) return null;
+    return makeClient(Math.floor(hostPort), token);
+  }
+
+  /**
+   * Background work a Claude chat left running. It can wake the chat into a
+   * turn of its own, so the UI shows it; stopping it ends the Claude process.
+   */
+  async function claudeBackgroundTasksForChat(opts: {
+    droneId: string;
+    chatName: string;
+    stop?: boolean;
+  }): Promise<{
+    tasks: Array<{ id: string; type: string; description: string; startedAt: string }>;
+    stopped?: number;
+  }> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = normalizeChatName(opts.chatName);
+    const chat = readChatMetadataFromStore({ droneId, chatName })?.chat;
+    const chatId = String(chat?.id ?? '').trim();
+    if (!droneId || !chatId) return { tasks: [] };
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+    if (resolved?.kind !== 'real' || !isClaudeChat(chat, resolved.drone)) return { tasks: [] };
+    const chatKey = `chat:${droneId}:${chatId}`;
+    if (opts.stop) {
+      // An explicit stop may bring the daemon back to reach the run.
+      const client = (await resolveDroneDaemonClientForEntry(resolved.drone))?.client;
+      if (!client) return { tasks: [], stopped: 0 };
+      const response = await claudeBackgroundTasksStop(client, chatKey);
+      return { tasks: [], stopped: Number(response?.stopped ?? 0) };
+    }
+    const client = storedDaemonClient(resolved.drone);
+    if (!client) return { tasks: [] };
+    // An unreachable or older daemon has no tasks to show.
+    const runs = await claudeBackgroundTasksList(client, chatKey, { timeoutMs: 5_000 }).catch(
+      () => [],
+    );
+    // While someone watches the chat, its wake-ups must reach the hub promptly.
+    if (runs.length > 0) ensureDaemonPromptEventSubscription(droneId);
+    return { tasks: runs.flatMap((run) => run.tasks) };
+  }
+
+  /**
+   * The hub hears about wake-ups through daemon event streams, which it only
+   * opens on demand. After a restart, reopen them for drones whose Claude runs
+   * are still holding background tasks.
+   */
+  async function watchSurvivingClaudeBackgroundTasks(): Promise<void> {
+    const registry = await loadRegistry();
+    for (const [droneIdRaw, drone] of Object.entries<any>(registry?.drones ?? {})) {
+      const droneId = normalizeDroneIdentity(droneIdRaw);
+      const client = storedDaemonClient(drone);
+      if (!droneId || !client) continue;
+      const hasClaudeChat = listChatsFromStore({ droneId }).chats.some((chatName: string) =>
+        isClaudeChat(readChatMetadataFromStore({ droneId, chatName })?.chat, drone),
+      );
+      if (!hasClaudeChat) continue;
+      const runs = await claudeBackgroundTasksList(client, '', { timeoutMs: 3_000 }).catch(
+        () => [],
+      );
+      if (runs.length > 0) ensureDaemonPromptEventSubscription(droneId);
+    }
+  }
 
   async function enqueueReconcileForDaemonPromptEvent(
     droneIdRaw: string,
@@ -3543,6 +3676,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   function startPromptRuntimeBackgroundWork(): void {
     usageRecovery.start();
     daemonPromptEventMonitor.start();
+    void watchSurvivingClaudeBackgroundTasks().catch((error) =>
+      hubLog('warn', 'failed to resume Claude background task watches', {
+        error: String(error?.message ?? error),
+      }),
+    );
     startProvisioning();
     pendingPromptPump.start();
     chatReconciliationQueue.start();
@@ -3556,6 +3694,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatHasReconcilablePendingPrompts,
     chatRequiresCodexApprovalForSummary,
     chatReconciliationQueue,
+    claudeBackgroundTasksForChat,
     createOrEnqueuePromptUnified,
     createOrEnqueueNewChatAction,
     daemonPromptEventMonitor,

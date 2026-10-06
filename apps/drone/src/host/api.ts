@@ -482,6 +482,32 @@ export async function promptCancel(client: DroneClient, id: string) {
   return await req(client, 'POST', `/v1/prompts/${encodeURIComponent(id)}/cancel`);
 }
 
+export type ClaudeBackgroundTaskRun = {
+  runId: string;
+  chatKey?: string;
+  resident: boolean;
+  tasks: Array<{ id: string; type: string; description: string; startedAt: string }>;
+};
+
+export async function claudeBackgroundTasksList(
+  client: DroneClient,
+  chatKey: string,
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<ClaudeBackgroundTaskRun[]> {
+  const response = await req(
+    client,
+    'GET',
+    `/v1/claude/background-tasks?chatKey=${encodeURIComponent(chatKey)}`,
+    undefined,
+    options,
+  );
+  return Array.isArray(response?.runs) ? response.runs : [];
+}
+
+export async function claudeBackgroundTasksStop(client: DroneClient, chatKey: string) {
+  return await req(client, 'POST', '/v1/claude/background-tasks/stop', { chatKey });
+}
+
 export async function codexPromptApprovalResolve(
   client: DroneClient,
   input: {

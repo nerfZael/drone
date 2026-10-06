@@ -337,6 +337,7 @@ import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
 import { registerChatQuestionRoutes } from './routes/chat-question-routes';
+import { registerClaudeBackgroundTaskRoutes } from './routes/claude-background-task-routes';
 import { registerCatalogRoutes } from './routes/catalog-routes';
 import { createChatRouteHandler } from './routes/chat-routes';
 import { createDroneLifecycleRouteHandler } from './routes/drone-lifecycle-routes';
@@ -4084,6 +4085,7 @@ async function startDroneHubApiServerWithLifecycle(
     chatHasReconcilablePendingPrompts,
     chatRequiresCodexApprovalForSummary,
     chatReconciliationQueue,
+    claudeBackgroundTasksForChat,
     createOrEnqueueNewChatAction,
     createOrEnqueuePromptUnified,
     dequeueProvisioning,
@@ -5796,6 +5798,7 @@ async function startDroneHubApiServerWithLifecycle(
     updateStoredUserTimeZone,
   });
   registerChatQuestionRoutes(apiRouter, hubApplication.questions);
+  registerClaudeBackgroundTaskRoutes(apiRouter, claudeBackgroundTasksForChat);
   registerAgentRunDiffRoutes(apiRouter);
   const changeRequestFeature = registerChangeRequestFeature(apiRouter, {
     writeSseEvent: writeHubSseEvent,

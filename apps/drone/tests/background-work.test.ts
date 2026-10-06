@@ -161,6 +161,39 @@ describe('DaemonPromptEventMonitor', () => {
     expect(daemonPromptEventWakeKind({ id: 'prompt-1', state: 'done' })).toBe('terminal');
   });
 
+  test('adopts a turn Claude started on its own before reconciling it', async () => {
+    const calls: string[] = [];
+    const monitor = new DaemonPromptEventMonitor({
+      normalizeDroneId: (value) => value,
+      resolveClient: async () => ({ exists: false, client: null }),
+      onTerminalPrompt: async (droneId, promptId) => {
+        calls.push(`terminal:${droneId}:${promptId}`);
+      },
+      onClaudeBackgroundTurn: async (droneId, job) => {
+        await Bun.sleep(5);
+        calls.push(`adopt:${droneId}:${job.id}:${job.chatKey}:${job.summaries.join('|')}:${job.startedAt}`);
+      },
+      sleep: async () => {},
+    });
+    const wake = {
+      id: 'run-wake-1',
+      chatKey: 'chat:drone-1:chat-1',
+      origin: 'claude-background-task',
+      backgroundTaskSummaries: ['Background command "npm test" completed'],
+      createdAt: '2026-10-06T10:00:00.000Z',
+      startedAt: '2026-10-06T10:00:01.000Z',
+    };
+    const handleEvent = (monitor as any).handleEvent.bind(monitor);
+    handleEvent('drone-1', 'job', JSON.stringify({ job: { ...wake, state: 'running' } }));
+    handleEvent('drone-1', 'job', JSON.stringify({ job: { ...wake, state: 'done' } }));
+    await monitor.close();
+    expect(calls).toEqual([
+      'adopt:drone-1:run-wake-1:chat:drone-1:chat-1:Background command "npm test" completed:2026-10-06T10:00:01.000Z',
+      'adopt:drone-1:run-wake-1:chat:drone-1:chat-1:Background command "npm test" completed:2026-10-06T10:00:01.000Z',
+      'terminal:drone-1:run-wake-1',
+    ]);
+  });
+
   test('aborts retry waits and settles monitor tasks on close', async () => {
     const sleepStarted = deferred();
     let sleepAborted = false;

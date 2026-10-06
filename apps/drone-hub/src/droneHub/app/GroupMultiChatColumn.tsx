@@ -1322,6 +1322,8 @@ export function GroupMultiChatColumn({
         modeHint=""
         composerTopAction={
           <DroneChatComposerMetadata
+            droneId={drone.id}
+            chatName={chatName}
             showWorkspaceInfo={showWorkspaceInfo}
             runtime={hostRuntime ? 'host' : 'container'}
             chatId={chatId}

@@ -22,11 +22,17 @@ export function recordExternalUsage(input: { job: any; droneId: string; chatId: 
     }
     return { ...item, model, provider };
   });
+  // A Claude run spans several turns once background tasks keep it alive, and
+  // each turn reports only its own usage. Its first turn keeps the run's id.
+  const claudeTurnId = String(job.claudeStream?.turnId ?? '');
+  const claudeExecution = job.claudeStream?.runId
+    ? `external:${input.droneId}:${job.claudeStream.runId}${
+        claudeTurnId && claudeTurnId !== job.claudeStream.runId ? `:${claudeTurnId}` : ''
+      }`
+    : '';
   const delivery: UsageDelivery = { execution: { id: job.codexAppServer?.runId
       ? `external:${input.droneId}:${job.codexAppServer.runId}`
-      : job.claudeStream?.runId
-        ? `external:${input.droneId}:${job.claudeStream.runId}`
-        : `external:${input.droneId}:${job.id}:${job.startedAt ?? job.createdAt}`,
+      : claudeExecution || `external:${input.droneId}:${job.id}:${job.startedAt ?? job.createdAt}`,
     chatId: input.chatId, droneId: input.droneId, chatName: input.chatName, repo: input.repo,
     agent: job.kind, startedAt: run?.startedAt ?? job.startedAt ?? job.createdAt, status: state,
     snapshotAt: run?.updatedAt ?? job.updatedAt ?? transcript?.parsedAt,

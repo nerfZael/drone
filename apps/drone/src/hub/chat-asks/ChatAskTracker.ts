@@ -1,4 +1,7 @@
-import { isEventNotificationPrompt } from '@drone/assistant-chat';
+import {
+  isBackgroundTaskNotificationPrompt,
+  isEventNotificationPrompt,
+} from '@drone/assistant-chat';
 
 import type { HubGenerationAttribution } from '../usage/trackHubGeneration';
 import {
@@ -63,9 +66,14 @@ export const ASK_MISSING_CHAT_RETRY_MS = 5 * 60_000;
 const MAX_PARALLEL_CHATS = 3;
 const MAX_REMEMBERED_IDS = 4_000;
 
-/** Event notifications arrive as user messages but were not written by the user, so they ask for nothing. */
+/**
+ * Event notifications and background-task wake-ups arrive as user messages but
+ * were not written by the user, so they ask for nothing.
+ */
 function isFromUser(message: AskSourceMessage): boolean {
-  return !isEventNotificationPrompt(message.text);
+  return (
+    !isEventNotificationPrompt(message.text) && !isBackgroundTaskNotificationPrompt(message.text)
+  );
 }
 
 export type ChatAsksView = {

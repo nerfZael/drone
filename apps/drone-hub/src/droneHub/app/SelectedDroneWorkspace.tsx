@@ -2670,6 +2670,8 @@ export function SelectedDroneWorkspace({
                     promoteNewChatActionErrorById={promoteNewChatActionErrorById}
                     composerTopAction={
                       <DroneChatComposerMetadata
+                        droneId={currentDrone.id}
+                        chatName={activeChatName}
                         runtime={hostRuntime ? 'host' : 'container'}
                         chatId={chatId}
                         initialSubscriptions={chatSubscriptions}
@@ -2815,6 +2817,8 @@ export function SelectedDroneWorkspace({
                   waiting={chatInputWaiting}
                   composerTopAction={
                     <DroneChatComposerMetadata
+                      droneId={currentDrone.id}
+                      chatName={activeChatName}
                       runtime={hostRuntime ? 'host' : 'container'}
                       chatId={chatId}
                       initialSubscriptions={chatSubscriptions}

@@ -2,6 +2,7 @@ import React from 'react';
 
 import { requestJson } from '../http';
 import { useDropdownDismiss } from '../../ui/dropdown';
+import { ChatBackgroundTaskIndicator, useChatBackgroundTasks } from './ChatBackgroundTaskIndicator';
 import { DroneRuntimeIndicator, type DroneRuntime } from './DroneRuntimeIndicator';
 import {
   chatSubscriptionEventLabel,
@@ -216,19 +217,26 @@ export function ChatSubscriptionIndicator({
 
 export function DroneChatComposerMetadata({
   runtime,
+  droneId,
+  chatName,
   chatId,
   initialSubscriptions,
   branch,
   showWorkspaceInfo = true,
 }: {
   runtime: DroneRuntime;
+  droneId?: string | null;
+  chatName?: string | null;
   chatId?: string | null;
   initialSubscriptions?: unknown;
   branch?: string | null;
   showWorkspaceInfo?: boolean;
 }) {
   const subscriptions = useChatResourceSubscriptions(chatId, initialSubscriptions);
-  if (!showWorkspaceInfo && subscriptions.length === 0) return null;
+  const backgroundTasks = useChatBackgroundTasks(droneId, chatName);
+  if (!showWorkspaceInfo && subscriptions.length === 0 && backgroundTasks.tasks.length === 0) {
+    return null;
+  }
 
   return (
     <div className="flex min-w-0 w-full items-center justify-between gap-3 px-2">
@@ -238,6 +246,12 @@ export function DroneChatComposerMetadata({
             <DroneRuntimeIndicator runtime={runtime} />
           </div>
         ) : null}
+        <ChatBackgroundTaskIndicator
+          droneId={String(droneId ?? '').trim()}
+          chatName={String(chatName ?? '').trim()}
+          tasks={backgroundTasks.tasks}
+          reload={backgroundTasks.reload}
+        />
         <ChatSubscriptionIndicator subscriptions={subscriptions} />
       </div>
       {showWorkspaceInfo ? <DroneBranchIndicator branch={branch} /> : null}

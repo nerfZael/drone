@@ -2,6 +2,8 @@ import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import { renderBackgroundTaskNotificationPrompt } from '@drone/assistant-chat';
+
 import { TranscriptTurn } from '../src/droneHub/chat/TranscriptTurn';
 
 describe('completed external transcript presentation', () => {
@@ -473,3 +475,30 @@ describe('completed external transcript presentation', () => {
   });
 });
 
+
+describe('background task wake-up presentation', () => {
+  test('shows a turn Claude started on its own as a background task, not as raw markup', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 1,
+          at: '2026-10-06T10:00:00.000Z',
+          prompt: renderBackgroundTaskNotificationPrompt([
+            'Background command "npm test > out.txt" completed (exit code 0)',
+          ]),
+          session: 'claude',
+          logPath: '',
+          ok: true,
+          output: 'Tests passed.',
+        }}
+        messageId="wake-turn"
+      />,
+    );
+
+    expect(html).toContain('data-background-task-notification="true"');
+    expect(html).toContain('Background task');
+    expect(html).toContain('Background command &quot;npm test &gt; out.txt&quot; completed (exit code 0)');
+    expect(html).not.toContain('&lt;background-task-notification');
+    expect(html).toContain('Tests passed.');
+  });
+});
