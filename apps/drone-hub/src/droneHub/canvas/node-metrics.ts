@@ -15,20 +15,6 @@ export function getNodeHeightPx(nodeIdRaw: string): number {
   return parseCanvasChatNodeId(nodeIdRaw) ? CHAT_NODE_HEIGHT_PX : NODE_HEIGHT_PX;
 }
 
-// Zoomed out, a chat node keeps its footprint but gives its label the slack the width estimate
-// and the padding leave over: tighter side padding and text sized up to fill the remaining width.
-const NODE_DENSE_HORIZONTAL_PADDING_PX = 16;
-const NODE_BORDER_PX = 2;
-export const NODE_MAX_LABEL_TEXT_BOOST = 1.3;
-
-export function getChatLabelTextBoost(labelRaw: string, nodeWidthPx: number): number {
-  const label = String(labelRaw ?? '').trim();
-  const measured = label ? measureNodeLabelPx(label) : null;
-  const estimatedTextWidth = Math.max(1, measured ?? label.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX);
-  const available = nodeWidthPx - NODE_DENSE_HORIZONTAL_PADDING_PX - NODE_BORDER_PX;
-  return Math.max(1, Math.min(NODE_MAX_LABEL_TEXT_BOOST, available / estimatedTextWidth));
-}
-
 // The card title's classes, so a hidden probe renders the label in whatever font the theme uses.
 const NODE_LABEL_PROBE_CLASS = 'text-12-5 font-[var(--weight-semibold)]';
 let labelProbe: HTMLSpanElement | null = null;

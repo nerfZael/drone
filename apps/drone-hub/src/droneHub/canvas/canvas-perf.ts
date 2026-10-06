@@ -1,13 +1,18 @@
+import { recordUiPerformance } from '../../ui-diagnostics';
+
 /**
- * Opt-in timing for canvas gestures and actions. Off unless `localStorage['droneHub.canvasPerf'] = '1'`
- * (or `window.__droneCanvasPerf.enable()`); then each gesture logs its frame times and how much React
- * rendering it caused, and keeps the summaries in `window.__droneCanvasPerf.log`.
+ * Timing for canvas gestures and actions.
  *
- * Works in production builds, where React.Profiler reports nothing: renders are timed from a component's
- * body to its layout effect.
+ * Always on, and cheap: each gesture (zoom, pan, drag, marquee, edge pan) counts its frames, and one that drops
+ * frames is noted in the desktop app's diagnostics log, so stutter on a real board can be read back afterwards.
+ *
+ * In full with `localStorage['droneHub.canvasPerf'] = '1'` (or `window.__droneCanvasPerf.enable()`): every gesture
+ * and action is logged to the console with how much React rendering it caused, and kept in
+ * `window.__droneCanvasPerf.log`. Works in production builds, where React.Profiler reports nothing: renders are
+ * timed from a component's body to its layout effect.
  */
 
-export type CanvasPerfGesture = 'zoom' | 'pan' | 'drag' | 'marquee';
+export type CanvasPerfGesture = 'zoom' | 'pan' | 'drag' | 'marquee' | 'edge-pan';
 
 export type CanvasPerfSummary = {
   name: string;
@@ -31,6 +36,8 @@ type Active = {
 };
 
 const STORAGE_KEY = 'droneHub.canvasPerf';
+/** A gesture is noted in the diagnostics log once it drops this many frames. */
+const REPORTED_SLOW_FRAMES = 2;
 const WHEEL_IDLE_MS = 160;
 const MAX_LOG = 200;
 
@@ -82,21 +89,27 @@ function summarize(current: Active): CanvasPerfSummary {
   };
 }
 
-function record(summary: CanvasPerfSummary) {
-  log.push(summary);
-  if (log.length > MAX_LOG) log.shift();
+function format(summary: CanvasPerfSummary): string {
   const renders = Object.entries(summary.renders)
     .map(([id, stat]) => `${id}×${stat.count} ${stat.ms}ms`)
     .join(', ');
-  console.info(
-    `[canvas-perf] ${summary.name}: ${summary.durationMs}ms, ${summary.frames} frames avg ${summary.avgFrameMs}ms ` +
-      `p95 ${summary.p95FrameMs}ms max ${summary.maxFrameMs}ms slow ${summary.slowFrames}` +
-      (renders ? ` | renders: ${renders}` : ''),
-  );
+  return `${summary.name}: ${summary.durationMs}ms, ${summary.frames} frames avg ${summary.avgFrameMs}ms ` +
+    `p95 ${summary.p95FrameMs}ms max ${summary.maxFrameMs}ms slow ${summary.slowFrames}` +
+    (renders ? ` | renders: ${renders}` : '');
+}
+
+function record(summary: CanvasPerfSummary) {
+  if (summary.slowFrames >= REPORTED_SLOW_FRAMES && !summary.name.startsWith('action:')) {
+    recordUiPerformance('canvas-perf', summary.name, format(summary));
+  }
+  if (!enabled) return;
+  log.push(summary);
+  if (log.length > MAX_LOG) log.shift();
+  console.info(`[canvas-perf] ${format(summary)}`);
 }
 
 function begin(name: string) {
-  if (!enabled) return;
+  if (typeof requestAnimationFrame !== 'function') return;
   if (active?.name === name) return;
   if (active) end(active.name);
   const now = performance.now();
@@ -125,7 +138,6 @@ export const canvasPerf = {
   },
   /** Wheel zoom has no end event: it ends once the wheel has been still for a moment. */
   wheel() {
-    if (!enabled) return;
     begin('zoom');
     if (wheelIdleTimer !== null) clearTimeout(wheelIdleTimer);
     wheelIdleTimer = setTimeout(() => {
@@ -144,15 +156,6 @@ export const canvasPerf = {
         if (active === current) end(`action:${name}`);
       }, 0);
     });
-  },
-  /** Frames for a fixed time from now, e.g. an animation that follows a gesture. */
-  window(name: string, ms: number) {
-    if (!enabled) return;
-    begin(name);
-    const current = active;
-    setTimeout(() => {
-      if (active === current) end(name);
-    }, ms);
   },
   /** Call at the top of a component's body; pass the result to `renderEnd` from a layout effect. */
   renderStart(): number {

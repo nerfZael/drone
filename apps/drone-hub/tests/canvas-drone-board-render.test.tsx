@@ -14,7 +14,7 @@ import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub
 import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
-import { ZOOM_GESTURE_IDLE_MS } from '../src/droneHub/canvas/zoom-gesture';
+import { CARD_HOVER_DELAY_MS } from '../src/droneHub/canvas/card-hover';
 import { useFleetAssignmentDropState } from '../src/droneHub/app/use-fleet-assignment-drop-state';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard } from '../src/droneHub/canvas/drone-board';
 import { beginChatDeletion, markChatsDeleted, useChatDeletionStore } from '../src/droneHub/app/chat-deletion-store';
@@ -1064,14 +1064,22 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     // It looks like the Entity's cards and sits on their darker ground.
     expect(card().classList.contains('dh-canvas-work')).toBe(true);
     expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
-    // The card keeps one line; hovering it shows every step in a panel at the canvas's bottom left.
+    // The card keeps one line; resting the pointer on it shows every step in a panel at the canvas's bottom left.
     expect(card().textContent).not.toContain('Read the parser');
     expect(card().style.height).toBe('38px');
     // As wide as its short name needs, not a fixed width.
     expect(parseFloat(card().style.width)).toBeLessThan(200);
     const panel = () => container.querySelector('[data-canvas-steps-panel]');
+    const rest = () => act(async () => new Promise((resolve) => setTimeout(resolve, CARD_HOVER_DELAY_MS + 20)));
+    expect(panel()).toBeNull();
+    // Passing over it shows nothing: the panel waits for the pointer to rest there.
+    await act(async () => Simulate.mouseEnter(card()));
+    expect(panel()).toBeNull();
+    await act(async () => Simulate.mouseLeave(card()));
+    await rest();
     expect(panel()).toBeNull();
     await act(async () => Simulate.mouseEnter(card()));
+    await rest();
     expect(panel()?.textContent).toContain('Read the parser');
     expect(panel()?.textContent).toContain('Run tests');
     // The panel says how long and what it cost, and lists the current step once.
@@ -1337,9 +1345,11 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     for (let i = 0; i < 10; i++) await act(async () => actions.setPan(100 + i, 200 + i));
     expect(renders.size).toBe(0);
     expect(layoutReads).toBe(0);
-    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe('translate(109px, 209px) scale(1)');
+    // Panning moves the outer element; the world inside it only scales.
+    expect((container.querySelector('[data-canvas-pan]') as unknown as HTMLElement).style.transform).toBe('translate(109px, 209px)');
+    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe('scale(1)');
 
-    // Wheel samples within a frame compound into one zoom, anchored under the pointer.
+    // Wheel samples add up to one target, and the zoom glides there, anchored under the pointer.
     const anchor = { x: 400, y: 300 };
     const wheel = (deltaY: number, ctrlKey = false) => {
       const event = new dom.WheelEvent('wheel', { deltaY, ctrlKey, bubbles: true, cancelable: true });
@@ -1348,10 +1358,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
       viewport.dispatchEvent(event as never);
       return event;
     };
-    let zoomUpdates = 0;
-    unsubscribe = useDroneCanvasStore.subscribe((next, prev) => {
-      if (next.droneBoards.alpha?.scale !== prev.droneBoards.alpha?.scale) zoomUpdates++;
-    });
+    const anchoredAt = () => (anchor.x - board().panX) / board().scale;
     let pinch: { defaultPrevented: boolean } | null = null;
     await act(async () => {
       wheel(-100);
@@ -1359,38 +1366,28 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     });
     // A pinch arrives as Ctrl+wheel: it zooms the canvas, not the whole window.
     expect(pinch!.defaultPrevented).toBe(true);
-    expect(zoomUpdates).toBe(0);
+    expect(board().scale).toBe(1);
     await flushFrames();
-    expect(zoomUpdates).toBe(1);
-    unsubscribe();
+    // Part of the way after one frame, then on until it arrives, the same board point under the pointer throughout.
+    const firstStep = board().scale;
+    expect(firstStep).toBeGreaterThan(1);
+    expect(firstStep).toBeLessThan(Math.exp(0.3));
+    expect(anchoredAt()).toBeCloseTo(anchor.x - 109, 0);
+    for (let i = 0; i < 40; i++) await flushFrames();
     expect(board().scale).toBeCloseTo(Math.exp(0.3), 8);
-    expect((anchor.x - board().panX) / board().scale).toBeCloseTo(anchor.x - 109, 0);
-    expect(renders.size).toBe(0); // At these scales cards keep the same local geometry.
-    expect(layoutReads).toBe(0);
-
-    const slot = (name: string) => card(name).parentElement as unknown as HTMLElement;
-    const wheelStops = () => act(async () => new Promise((resolve) => setTimeout(resolve, ZOOM_GESTURE_IDLE_MS + 20)));
-    await wheelStops();
-    await act(async () => actions.setScale(0.5));
-    expect(renders.size).toBe(0); // Slots scale cards up for readability without rendering or measuring them.
-    expect(layoutReads).toBe(0);
-    expect(slot('default').style.scale).toBe('1.4');
-
-    // While the wheel turns, the boost holds so the GPU can scale what is drawn; it settles once the wheel stops.
-    await act(async () => wheel(100));
-    await flushFrames();
-    expect(board().scale).toBeLessThan(0.5);
-    expect(slot('default').style.scale).toBe('1.4');
-    await act(async () => wheel(-600));
-    await flushFrames();
-    expect(board().scale).toBeGreaterThan(0.85);
-    expect(slot('default').style.scale).toBe('1.4');
-    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.willChange).toBe('transform');
-    await wheelStops();
-    expect(slot('default').style.scale).toBe('1');
-    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.willChange).toBe('');
+    expect(anchoredAt()).toBeCloseTo(anchor.x - 109, 0);
+    // A zoom scales the whole board: no card renders, and nothing on a card resizes itself to the zoom.
     expect(renders.size).toBe(0);
+    expect(layoutReads).toBe(0);
+    const slot = (name: string) => card(name).parentElement as unknown as HTMLElement;
+    expect(slot('default').style.scale).toBe('');
+    expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe(`scale(${board().scale})`);
+    // Anything else that sets the zoom mid-glide (Fit, Reset) takes over.
+    await act(async () => wheel(-300));
+    await flushFrames();
     await act(async () => actions.setScale(0.5));
+    for (let i = 0; i < 10; i++) await flushFrames();
+    expect(board().scale).toBe(0.5);
 
     renders.clear();
     await act(async () => actions.moveNode(alpha('default'), 750, 300));
@@ -1700,6 +1697,235 @@ test('pasting the same text twice in the canvas composer puts it in the message 
     await act(async () => root.unmount());
     await new Promise((resolve) => setTimeout(resolve, 5));
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('middle-click holds the cursor in the canvas: it edge-pans, clicks reach the card under it, and middle-click releases it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global' });
+  useDroneCanvasStore.getState().upsertNodes([{ droneId: alpha('default'), label: 'default', x: 0, y: 0 }]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  // happy-dom has no layout and no pointer lock: give the panel a size and lock the way a browser does.
+  const originalRect = dom.HTMLElement.prototype.getBoundingClientRect;
+  dom.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.classList.contains('ui-panel') ? new dom.DOMRect(0, 0, 1000, 600) : new dom.DOMRect();
+  };
+  // The lock pans on the page's own animation frames: a 60Hz clock like a browser's.
+  Object.defineProperty(dom, 'requestAnimationFrame', { configurable: true,
+    value: (run: FrameRequestCallback) => setTimeout(() => run(performance.now()), 16) });
+  Object.defineProperty(dom, 'cancelAnimationFrame', { configurable: true, value: (id: number) => clearTimeout(id) });
+  let lockedElement: Element | null = null;
+  Object.defineProperty(dom.document, 'pointerLockElement', { configurable: true, get: () => lockedElement });
+  const lockChanged = () => dom.document.dispatchEvent(new dom.Event('pointerlockchange'));
+  Object.defineProperty(dom.HTMLElement.prototype, 'requestPointerLock', { configurable: true,
+    value(this: Element) { lockedElement = this; lockChanged(); } });
+  Object.defineProperty(dom.document, 'exitPointerLock', { configurable: true, value() { lockedElement = null; lockChanged(); } });
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} />));
+    const panel = container.querySelector('.ui-panel') as unknown as HTMLElement;
+    const viewport = container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
+    const card = container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element;
+    const cursor = () => dom.document.querySelector('[data-canvas-edge-pan-cursor]') as unknown as HTMLElement;
+    Object.defineProperty(dom.document, 'elementFromPoint', { configurable: true,
+      value: (x: number) => (x < 200 ? card : viewport) });
+    // The real mouse while locked: movement only, always at the panel. Movement arrives on pointer events,
+    // each followed by its mouse event.
+    const mouse = (type: string, init: Record<string, number> = {}) => act(async () => {
+      if (type === 'mousemove') {
+        panel.dispatchEvent(new dom.PointerEvent('pointermove', { bubbles: true, cancelable: true, pointerType: 'mouse', ...init }) as never);
+      }
+      panel.dispatchEvent(new dom.MouseEvent(type, { bubbles: true, cancelable: true, ...init }) as never);
+    });
+
+    await act(async () => Simulate.mouseDown(viewport, { button: 1, clientX: 500, clientY: 300 }));
+    expect(lockedElement).toBe(panel as unknown as Element);
+    expect(cursor().style.display).toBe('');
+    expect(cursor().style.transform).toBe('translate3d(500px, 300px, 0)');
+
+    // A click lands on the card under the drawn cursor, not where the real one was held.
+    await mouse('mousemove', { movementX: -380 });
+    expect(cursor().style.transform).toBe('translate3d(120px, 300px, 0)');
+    await mouse('mousedown', { button: 0, buttons: 1 });
+    await mouse('mouseup', { button: 0 });
+    await mouse('click', { button: 0, detail: 1 });
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([alpha('default')]);
+
+    // Pushed against the right edge, it stops there and the board pans right; a card held meanwhile stays under
+    // the cursor, travelling with it across the board.
+    const panX = useDroneCanvasStore.getState().panX;
+    await mouse('mousedown', { button: 0, buttons: 1 });
+    for (let i = 0; i < 4; i++) await mouse('mousemove', { movementX: 300, buttons: 1 });
+    expect(cursor().style.transform).toBe('translate3d(999px, 300px, 0)');
+    // The cursor turns into an arrow pointing the way the board moves.
+    expect(dom.document.querySelector('[data-canvas-edge-pan-arrow]')?.getAttribute('data-canvas-edge-pan-arrow')).toBe('1,0');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+    // Off the edge it stops panning; then the card is dropped.
+    await mouse('mousemove', { movementX: -100, buttons: 1 });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    const panned = panX - useDroneCanvasStore.getState().panX;
+    await mouse('mouseup', { button: 0 });
+    expect(panned).toBeGreaterThan(50);
+    expect(useDroneCanvasStore.getState().panX).toBe(panX - panned);
+    expect(useDroneCanvasStore.getState().panY).toBe(EMPTY_CANVAS_BOARD.panY);
+    expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')].x).toBeCloseTo(899 - 120 + panned, 0);
+    for (let i = 0; i < 2; i++) await mouse('mousemove', { movementX: 300 });
+    // A spike no hand could make is ignored rather than throwing the cursor across the canvas.
+    await mouse('mousemove', { movementX: -900 });
+    expect(cursor().style.transform).toBe('translate3d(999px, 300px, 0)');
+
+    await mouse('mousedown', { button: 1, buttons: 4 });
+    expect(lockedElement).toBeNull();
+    expect(cursor().style.display).toBe('none');
+    const stopped = useDroneCanvasStore.getState().panX;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(useDroneCanvasStore.getState().panX).toBe(stopped);
+  } finally {
+    await act(async () => root.unmount());
+    dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('in the desktop app middle-click holds the real cursor: the app walls it in, the edges pan, and Esc, middle-click or the app releases it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global' });
+  useDroneCanvasStore.getState().upsertNodes([{ droneId: alpha('default'), label: 'default', x: 0, y: 0 }]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const originalRect = dom.HTMLElement.prototype.getBoundingClientRect;
+  dom.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.classList.contains('ui-panel') ? new dom.DOMRect(0, 0, 1000, 600) : new dom.DOMRect();
+  };
+  Object.defineProperty(dom, 'requestAnimationFrame', { configurable: true,
+    value: (run: FrameRequestCallback) => setTimeout(() => run(performance.now()), 16) });
+  Object.defineProperty(dom, 'cancelAnimationFrame', { configurable: true, value: (id: number) => clearTimeout(id) });
+  // The desktop app's bridge: it answers whether it walled the cursor in, and can end the hold itself.
+  const walls: Array<Record<string, number>> = [];
+  let released = 0;
+  let confineResult = { ok: true } as { ok: boolean; unsupported?: boolean };
+  let appEnds: (() => void) | null = null;
+  Object.defineProperty(dom, 'droneHubDesktop', { configurable: true, value: {
+    confineCursor: async (rect: Record<string, number>) => { walls.push(rect); return confineResult; },
+    releaseCursor: async () => { released++; return true; },
+    onCursorConfineEnded: (callback: () => void) => { appEnds = callback; return () => { appEnds = null; }; },
+  } });
+  let pointerLocks = 0;
+  Object.defineProperty(dom.HTMLElement.prototype, 'requestPointerLock', { configurable: true, value() { pointerLocks++; } });
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} />));
+    const viewport = container.querySelector('[data-drone-canvas-viewport]') as unknown as Element;
+    const card = container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element;
+    const zones = () => container.querySelector('[data-canvas-edge-pan-zones]');
+    const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)));
+    const hold = async () => {
+      await act(async () => Simulate.mouseDown(viewport, { button: 1, clientX: 500, clientY: 300 }));
+      await wait(0);
+    };
+    // The real mouse: ordinary events where the cursor is.
+    const at = (target: Element, type: string, clientX: number, init: Record<string, number> = {}) => act(async () => {
+      target.dispatchEvent(new dom.MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY: 300, ...init }) as never);
+    });
+
+    await hold();
+    expect(walls).toEqual([{ x: 0, y: 0, width: 1000, height: 600 }]);
+    expect(pointerLocks).toBe(0);
+    expect(zones()).not.toBeNull();
+    // Nothing is drawn: the real cursor stays.
+    expect((dom.document.querySelector('[data-canvas-edge-pan-cursor]') as unknown as HTMLElement).style.display).toBe('none');
+    // Clicks are the browser's own and reach the card as usual.
+    await at(card, 'mousedown', 50, { button: 0, buttons: 1 });
+    await at(card, 'mouseup', 50, { button: 0 });
+    await at(card, 'click', 50, { button: 0, detail: 1 });
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([alpha('default')]);
+
+    // Against the right edge it pans right at a steady speed from the start.
+    const panX = useDroneCanvasStore.getState().panX;
+    await at(viewport, 'mousemove', 998);
+    await wait(200);
+    const early = panX - useDroneCanvasStore.getState().panX;
+    await wait(200);
+    const later = panX - useDroneCanvasStore.getState().panX - early;
+    expect(early).toBeGreaterThan(50);
+    expect(Math.abs(later - early) / early).toBeLessThan(0.4);
+    expect(useDroneCanvasStore.getState().panY).toBe(EMPTY_CANVAS_BOARD.panY);
+    // Held against the left edge a little short of the bottom corner, as the walls can stop a diagonal push,
+    // it pans down and left.
+    const beforeCorner = useDroneCanvasStore.getState();
+    await act(async () => {
+      viewport.dispatchEvent(new dom.MouseEvent('mousemove', { bubbles: true, clientX: 1, clientY: 590 }) as never);
+    });
+    await wait(150);
+    expect(useDroneCanvasStore.getState().panX).toBeGreaterThan(beforeCorner.panX + 20);
+    expect(useDroneCanvasStore.getState().panY).toBeLessThan(beforeCorner.panY - 20);
+    await at(viewport, 'mousemove', 500);
+
+    // Escape releases, and only releases: the selection stays.
+    await act(async () => { dom.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }) as never); });
+    expect(zones()).toBeNull();
+    expect(released).toBe(1);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([alpha('default')]);
+    const stopped = useDroneCanvasStore.getState().panX;
+    await wait(60);
+    expect(useDroneCanvasStore.getState().panX).toBe(stopped);
+
+    // The app ends the hold (the window lost focus or moved).
+    await hold();
+    expect(zones()).not.toBeNull();
+    await act(async () => appEnds?.());
+    expect(zones()).toBeNull();
+    expect(released).toBe(2);
+
+    // Middle-click releases, and does not hold again.
+    await hold();
+    await at(viewport, 'mousedown', 500, { button: 1, buttons: 4 });
+    await wait(0);
+    expect(zones()).toBeNull();
+    expect(released).toBe(3);
+    expect(walls).toHaveLength(3);
+
+    // Where the app cannot wall the cursor in, the canvas draws its own instead.
+    confineResult = { ok: false, unsupported: true };
+    await hold();
+    expect(pointerLocks).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

@@ -136,6 +136,23 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
   retryStartup() {
     ipcRenderer.send(STARTUP_RETRY_CHANNEL);
   },
+  /**
+   * Holds the real cursor inside a rectangle of this page (CSS pixels from its top left) until released, or until the
+   * window loses focus, moves or reloads, when `onCursorConfineEnded` fires. `{ ok: false }` where it cannot be done.
+   */
+  async confineCursor(rect) {
+    try { return await ipcRenderer.invoke('drone-hub:cursor-confine', rect); }
+    catch { return { ok: false, unsupported: true }; }
+  },
+  releaseCursor() {
+    return ipcRenderer.invoke('drone-hub:cursor-release').catch(() => false);
+  },
+  onCursorConfineEnded(callback) {
+    if (typeof callback !== 'function') return () => {};
+    const listener = () => callback();
+    ipcRenderer.on('drone-hub:cursor-confine-ended', listener);
+    return () => ipcRenderer.removeListener('drone-hub:cursor-confine-ended', listener);
+  },
   onNavigationZoom(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, payload) => callback(payload);

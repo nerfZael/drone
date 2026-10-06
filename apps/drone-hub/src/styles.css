@@ -854,11 +854,16 @@ code, pre {
   background: var(--panel); color: var(--fg);
 }
 .entity-work-canvas .react-flow { background: var(--work-ground); }
-.entity-work-canvas .work-card, .dh-canvas-work.work-card { box-shadow: var(--work-shadow); }
+.entity-work-canvas .work-card { box-shadow: var(--work-shadow); }
+/* Drone canvas cards keep their shadow short: a long soft shadow on every card is most of what redrawing the
+   board costs, and the board is redrawn at every step of a zoom to keep its text sharp. */
+.dh-canvas-work.work-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 4px rgba(0, 0, 0, .25); }
 .dh-canvas-work-ground { background: #0f1116; }
 /* Drone canvas: while panning or drawing a selection, a shield covers the cards, so content moving under the
    pointer hit-tests one element and restyles no card's hover. Only the shield restyles when this toggles. */
 [data-canvas-gesture] > [data-canvas-gesture-shield] { display: block; }
+/* Drone canvas edge pan: the held cursor's arrow nudges the way the board moves. */
+@keyframes dh-edge-pan-nudge { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(2px); } }
 /* Markdown in the entity views, at the bench's size rather than the main chat's. */
 .dh-markdown.entity-md { font-size: 13px; line-height: 1.5; }
 .dh-markdown.entity-md > :first-child { margin-top: 0; }

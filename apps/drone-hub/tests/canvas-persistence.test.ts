@@ -2,17 +2,24 @@ import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { EMPTY_CANVAS_BOARD, getCanvasBoardActions, useDroneCanvasStore } from '../src/droneHub/canvas/use-drone-canvas-store';
 
-test('canvas persistence defers serialization, bounds staleness, and saves the latest boards without selections', async () => {
+test('canvas persistence waits for changes to pause, saves in idle time, and saves the latest boards without selections', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const descriptors = new Map<string, PropertyDescriptor | undefined>();
   const timers = new Map<number, { run: () => void; delay: number }>();
   let nextTimer = 0;
   let now = 1000;
   const originalNow = Date.now;
+  const idle: Array<() => void> = [];
+  Object.defineProperty(dom, 'requestIdleCallback', { configurable: true, value: (run: () => void) => idle.push(run) });
   useDroneCanvasStore.persist.clearStorage();
   for (const [key, value] of Object.entries({
     window: dom,
-    setTimeout: (run: () => void, delay: number) => { timers.set(++nextTimer, { run, delay }); return nextTimer; },
+    // A timer is gone once it has run, as a real one is.
+    setTimeout: (run: () => void, delay: number) => {
+      const id = ++nextTimer;
+      timers.set(id, { run: () => { timers.delete(id); run(); }, delay });
+      return id;
+    },
     clearTimeout: (id: number) => timers.delete(id),
   })) {
     descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -34,16 +41,21 @@ test('canvas persistence defers serialization, bounds staleness, and saves the l
     expect(serializedNodes).toBe(0);
     expect(dom.localStorage.length).toBe(0);
     expect(timers.size).toBe(1);
-    expect([...timers.values()][0].delay).toBe(180);
+    expect([...timers.values()][0].delay).toBe(250);
 
-    // A continuous gesture cannot keep postponing persistence beyond 900ms.
+    // A gesture writes every frame and keeps postponing the save: saving mid-gesture would stall a frame.
     now += 850;
     actions.moveNode('chat:a', 30, 40);
-    expect([...timers.values()][0].delay).toBe(50);
+    expect(timers.size).toBe(1);
+    expect([...timers.values()][0].delay).toBe(250);
     expect(serializedNodes).toBe(0);
+    // Once changes pause, the save waits for idle time.
     [...timers.values()][0].run();
-    expect(serializedNodes).toBe(1);
     expect(timers.size).toBe(0);
+    expect(serializedNodes).toBe(0);
+    expect(idle).toHaveLength(1);
+    idle.shift()!();
+    expect(serializedNodes).toBe(1);
     const key = useDroneCanvasStore.persist.getOptions().name;
     const saved = JSON.parse(dom.localStorage.getItem(key)!);
     expect(saved.version).toBe(3);

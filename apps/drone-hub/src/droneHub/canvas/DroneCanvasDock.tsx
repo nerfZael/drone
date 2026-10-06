@@ -5,7 +5,6 @@ import type { CanvasSendPrompt, CanvasDraftCreation } from './canvas-messaging';
 import React from 'react';
 import { createFrameBatch } from './frame-batch';
 import { canvasPerf } from './canvas-perf';
-import { createZoomGesture } from './zoom-gesture';
 import { flushSync } from 'react-dom';
 import '@xyflow/react/dist/style.css';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
@@ -98,17 +97,13 @@ import {
   type DroneBoardMember,
 } from './drone-board';
 import { CanvasTopicSwitcher } from './CanvasTopicSwitcher';
-import {
-  scaleCanvasRect,
-  type CanvasRect,
-} from './lineage-geometry';
+import type { CanvasRect } from './lineage-geometry';
 import {
   CHAT_NODE_HEIGHT_PX,
   DRONE_NODE_CHROME_WIDTH_PX,
   NODE_HEIGHT_PX,
   NODE_MIN_WIDTH_PX,
   getNodeHeightPx,
-  getChatLabelTextBoost,
   getNodeWidthPx,
   nodeLabelWidthPx,
 } from './node-metrics';
@@ -120,7 +115,6 @@ import {
   CanvasWorldLayer,
   CanvasZoomLabel,
   NO_CARD_SPREAD,
-  nodeReadabilityBoostAt,
   setCanvasGesture,
   viewBoundsOf,
   type CanvasNodeSize,
@@ -133,8 +127,11 @@ import {
   type SelectionBox,
 } from './canvas-geometry';
 import { useStableRecordValues } from './use-stable-record-values';
+import { createCardHover, HoveredCard } from './card-hover';
 import { useCanvasWheelZoom } from './use-canvas-wheel-zoom';
 import { CanvasEmptyState } from './CanvasEmptyState';
+import { CanvasEdgePanControls, CanvasEdgePanOverlay } from './CanvasEdgePan';
+import { isEdgePanLockedEvent, useCanvasEdgePanLock } from './use-canvas-edge-pan-lock';
 
 const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
@@ -152,6 +149,9 @@ type NodeDragState = {
   startClientY: number;
   startPositionsById: Record<string, { x: number; y: number }>;
   scale: number;
+  /** The board can pan under a drag (edge panning); the cards stay under the cursor. */
+  startPanX: number;
+  startPanY: number;
   moved: boolean;
   /** Restored when the cards are dropped on the composer as references rather than moved. */
   selectionBefore: string[];
@@ -167,6 +167,9 @@ type PanDragState = {
 type MarqueeDragState = {
   startClientX: number;
   startClientY: number;
+  /** The box's first corner stays on the same spot of the board if it pans meanwhile. */
+  startPanX: number;
+  startPanY: number;
   additive: boolean;
   baseSelectedIds: string[];
   moved: boolean;
@@ -543,7 +546,8 @@ export function DroneCanvasDock({
   const pendingClonesRef = React.useRef(new Map<string, Promise<boolean>>());
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
   const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardKey), [boardKey]);
-  const zoomGesture = React.useMemo(() => createZoomGesture(), []);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const edgePan = useCanvasEdgePanLock({ regionRef: panelRef, getView, setPan });
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
@@ -761,7 +765,7 @@ export function DroneCanvasDock({
     const timer = setInterval(() => setCardNowMs(Date.now()), busyChatKey ? 1000 : 30_000);
     return () => clearInterval(timer);
   }, [busyChatKey, canvasDetailedCards]);
-  const [hoveredCardId, hoverCard] = React.useState<string | null>(null);
+  const cardHover = React.useMemo(() => createCardHover(), []);
   // The steps panel sits at the bottom left, above the message bar wherever the two would overlap.
   const [stepsPanelBottomPx, setStepsPanelBottomPx] = React.useState(8);
   React.useLayoutEffect(() => {
@@ -1560,6 +1564,8 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     const onWindowMouseMove = (event: MouseEvent) => {
+      // While the cursor is held, the lock dispatches each event again at its own cursor.
+      if (isEdgePanLockedEvent(event)) return;
       // The mouseup can be lost (released over a webview, outside the window, or swallowed by another handler),
       // so a move with the primary button already up ends the drag instead of leaving the node stuck to the cursor.
       // Pans are right-drags (button bit 2); card and marquee drags are left-drags (bit 1).
@@ -1581,8 +1587,9 @@ export function DroneCanvasDock({
     const moves = createFrameBatch((event: MouseEvent) => {
       const nodeDrag = nodeDragRef.current;
       if (nodeDrag) {
-        const dx = (event.clientX - nodeDrag.startClientX) / nodeDrag.scale / cardSpreadRef.current.x;
-        const dy = (event.clientY - nodeDrag.startClientY) / nodeDrag.scale / cardSpreadRef.current.y;
+        const { panX, panY } = getView();
+        const dx = (event.clientX - nodeDrag.startClientX - (panX - nodeDrag.startPanX)) / nodeDrag.scale / cardSpreadRef.current.x;
+        const dy = (event.clientY - nodeDrag.startClientY - (panY - nodeDrag.startPanY)) / nodeDrag.scale / cardSpreadRef.current.y;
         const overComposer = nodeDrag.moved && isOverMessageComposer(event.clientX, event.clientY);
         setComposerDropHover(overComposer);
         if (nodeDrag.moved && !overComposer) {
@@ -1632,9 +1639,10 @@ export function DroneCanvasDock({
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
+      const { panX, panY } = getView();
       const box = buildSelectionBox(
-        marqueeDrag.startClientX,
-        marqueeDrag.startClientY,
+        marqueeDrag.startClientX + panX - marqueeDrag.startPanX,
+        marqueeDrag.startClientY + panY - marqueeDrag.startPanY,
         event.clientX,
         event.clientY,
         rect,
@@ -1645,10 +1653,8 @@ export function DroneCanvasDock({
 
       const hits: string[] = [];
       const view = getView();
-      const boost = nodeReadabilityBoostAt(zoomGesture.frozenScale() ?? view.scale);
       const viewBounds = viewBoundsOf(view.nodesByDroneId, shownNodeIdsRef.current, viewSizeByIdRef.current, cardSpreadRef.current);
-      for (const [droneId, rect] of Object.entries(viewBounds)) {
-        const bounds = scaleCanvasRect(rect, boost);
+      for (const [droneId, bounds] of Object.entries(viewBounds)) {
         if (rectIntersects(box.left, box.top, box.width, box.height,
           bounds.x * view.scale + view.panX, bounds.y * view.scale + view.panY,
           bounds.width * view.scale, bounds.height * view.scale)) hits.push(droneId);
@@ -1666,6 +1672,7 @@ export function DroneCanvasDock({
     });
 
     const onWindowMouseUp = (event: MouseEvent) => {
+      if (isEdgePanLockedEvent(event)) return;
       moves.flush();
       if (nodeDragRef.current) canvasPerf.gestureEnd('drag');
       if (panDragRef.current) canvasPerf.gestureEnd('pan');
@@ -1776,7 +1783,7 @@ export function DroneCanvasDock({
       window.removeEventListener('mouseup', onWindowMouseUp, true);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds, zoomGesture]);
+  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
 
   const fitViewportToNodes = React.useCallback(() => {
     const viewport = viewportRef.current;
@@ -2104,12 +2111,15 @@ export function DroneCanvasDock({
       }
 
       canvasPerf.gestureStart('drag');
+      cardHover.clear();
       nodeDragRef.current = {
         droneIds: dragIds,
         startClientX: event.clientX,
         startClientY: event.clientY,
         startPositionsById,
         scale: view.scale,
+        startPanX: view.panX,
+        startPanY: view.panY,
         moved: false,
         selectionBefore: selectedDroneIds,
       };
@@ -2183,7 +2193,7 @@ export function DroneCanvasDock({
     [activateCanvasNode, droneScope, openDroneBoard],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard: cardHover.hover, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
@@ -2191,9 +2201,16 @@ export function DroneCanvasDock({
     (event: React.MouseEvent<HTMLDivElement>) => {
       const { panX, panY } = getView();
       viewportRef.current?.focus({ preventScroll: true });
+      // Middle-click holds the cursor in the canvas for edge panning; while held, the lock itself releases it.
+      if (event.button === 1) {
+        event.preventDefault();
+        edgePan.lock(event.clientX, event.clientY);
+        return;
+      }
       if (event.button === 2) {
         event.preventDefault();
         canvasPerf.gestureStart('pan');
+        cardHover.clear();
         setCanvasGesture(viewportRef.current, true);
         panDragRef.current = {
           startClientX: event.clientX,
@@ -2221,17 +2238,20 @@ export function DroneCanvasDock({
         setSelectedDroneIds([]);
       }
       canvasPerf.gestureStart('marquee');
+      cardHover.clear();
       setCanvasGesture(viewport, true);
       marqueeDragRef.current = {
         startClientX: event.clientX,
         startClientY: event.clientY,
+        startPanX: panX,
+        startPanY: panY,
         additive,
         baseSelectedIds: selectedDroneIds.slice(),
         moved: false,
       };
       setSelectionBox(buildSelectionBox(event.clientX, event.clientY, event.clientX, event.clientY, rect));
     },
-    [getView, selectedDroneIds, setSelectedDroneIds],
+    [edgePan.lock, getView, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onCanvasDoubleClick = React.useCallback(
@@ -2272,7 +2292,8 @@ export function DroneCanvasDock({
     [createChatAtWorldPoint, createDraftAtWorldPoint, droneScope, focusViewport, inlineRenamingDroneId, getView],
   );
 
-  useCanvasWheelZoom(viewportRef, getView, setViewport, zoomGesture);
+  // Zooming moves cards under the pointer: the steps panel waits until the pointer rests again.
+  useCanvasWheelZoom(viewportRef, getView, setViewport, cardHover.clear);
   const { setNodeRef: setCanvasDropNodeRef } = useDroppable({
     id: 'canvas-drop',
     data: { type: 'canvas-drop' },
@@ -2763,10 +2784,6 @@ export function DroneCanvasDock({
       ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
       : '';
     const primaryLabel = inlineEditing ? inlineRenameDraft : droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label;
-    // CanvasWorldLayer's zoom rule applies this limit without rerendering each card.
-    const labelTextBoostLimit = !droneNode
-      ? getChatLabelTextBoost(primaryLabel, nodeWidth)
-      : 1;
     cardById[node.droneId] = <CanvasNodeCard
       nodeId={node.droneId}
       detail={detail}
@@ -2787,7 +2804,6 @@ export function DroneCanvasDock({
       repoLabel={repoLabel}
       repoBranch={repoBranch}
       primaryLabel={primaryLabel}
-      labelTextBoostLimit={labelTextBoostLimit}
       showCanvasLastMessagePreviews={showCanvasLastMessagePreviews}
       inlineRenameDraft={inlineEditing ? inlineRenameDraft : ''}
       inlineRenameBusy={inlineEditing && inlineRenameBusy}
@@ -2809,9 +2825,10 @@ export function DroneCanvasDock({
 
   return (
     <UiPanel
+      ref={panelRef}
       surface="alternate"
       flush
-      className="h-full w-full"
+      className="relative h-full w-full"
     >
         <UiPanelToolbar aria-label="Canvas controls" className="min-h-0 gap-1.5 px-2 py-1">
           <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="Canvas board">
@@ -2878,6 +2895,8 @@ export function DroneCanvasDock({
             </UiToolbarButton>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1">
+            <CanvasEdgePanControls lock={edgePan} />
+            <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true" />
             <UiToolbarButton size="xsmall" onClick={fitViewportToNodes} disabled={nodes.length === 0} title="Zoom and pan so every node is in view">
               Fit
             </UiToolbarButton>
@@ -2963,7 +2982,7 @@ export function DroneCanvasDock({
         // Right-drag pans the canvas, so right-click opens no menu.
         onContextMenu={(event) => event.preventDefault()}
       >
-        <CanvasWorldLayer boardDroneId={boardKey} zoomGesture={zoomGesture}>
+        <CanvasWorldLayer boardDroneId={boardKey}>
           <CanvasEdgesLayer
             boardKey={boardKey}
             nodeIds={nodeOrder}
@@ -2980,19 +2999,17 @@ export function DroneCanvasDock({
             boardKey={boardKey}
             nodeIds={nodeOrder}
             cardById={cardById}
-            sizeById={viewSizeById}
             cardSpread={cardSpread}
             movingNodeIds={movingNodeIds}
           />
         </CanvasWorldLayer>
         <div data-canvas-gesture-shield="" className="absolute inset-0 hidden" aria-hidden="true" />
 
-        {(() => {
-          // Only the card under the pointer: its steps in full, off the cards. A selected card shows nothing here,
+        <HoveredCard hover={cardHover}>{(focusId) => {
+          // Only the card the pointer rests on: its steps in full, off the cards. A selected card shows nothing here,
           // and neither does a draft, which has no steps yet.
-          const focusId = hoveredCardId && detailByNodeId?.[hoveredCardId] ? hoveredCardId : null;
-          const focus = focusId ? detailByNodeId?.[focusId] : null;
-          if (!focusId || !focus || isCanvasDraftNodeId(focusId)) return null;
+          const focus = detailByNodeId?.[focusId];
+          if (!focus || isCanvasDraftNodeId(focusId)) return null;
           const focusChat = parseCanvasChatNodeId(focusId);
           if (focusChat && droneById[focusChat.droneId]?.draftChats?.[focusChat.chatName] === true) return null;
           const focusDroneId = parseCanvasDroneNodeId(focusId);
@@ -3000,7 +3017,7 @@ export function DroneCanvasDock({
             ? String(effectiveDroneNameById[focusDroneId] ?? '').trim() || focusDroneId
             : parseCanvasChatNodeId(focusId)?.chatName ?? nodeMetaById[focusId]?.label ?? '';
           return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
-        })()}
+        }}</HoveredCard>
 
         {selectionBox ? (
           <div
@@ -3058,6 +3075,7 @@ export function DroneCanvasDock({
           <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)]" />
         ) : null}
       </UiPanelBody>
+      <CanvasEdgePanOverlay lock={edgePan} />
     </UiPanel>
   );
 }

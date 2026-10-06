@@ -19,9 +19,16 @@ const esbuild = require('esbuild');
 //   --wheel=60              wheel delta per tick; 8 with --scale=0.55 keeps the zoom in the scaled-up range
 //   --detailed              detailed cards
 //   --refresh=1000          ms between synthetic summary refreshes (0: none)
-//   --trace=zoom|marquee|dragall   record a Chrome trace of that step and print where its time went
-//   --shots                 save screenshots during and after each zoom
+//   --width=1400 --height=900  window size
+//   --trace=zoom|pan|marquee|dragall   record a Chrome trace of that step and print where its time went
+//   --shots                 save screenshots during and after each zoom, and while edge panning
 //   --noshadow --nogrid     strip card shadows or the dot grid, to see what they cost
+//   --shadow='0 2px 4px #0008'  give every card this shadow and nothing else one, to see what it costs
+//   --panx=20 --pany=20     starting pan; a fraction of a pixel shows whether text stays sharp
+//   --still                 only save a screenshot of the board at rest (still.png), e.g. to compare sharpness
+//   --zoomin=10 --settle=1500  with --still: first zoom in with that many wheel notches, then wait
+//   --nolayer               draw the pan as a plain 2D transform with no GPU layer, as the canvas once did
+//   --fraclayer             move the pan layer by the exact fractional pan, as before it snapped to pixels
 //   --out=result.json       write the raw summaries
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => {
   const [key, value] = arg.replace(/^--/, '').split('=');
@@ -79,7 +86,7 @@ async function main() {
         }
         useDroneCanvasStore.setState({ scope: 'global' });
         useDroneCanvasStore.getState().upsertNodes(nodes);
-        useDroneCanvasStore.getState().setViewport(20, 20, ${Number(args.scale ?? 0.7)});
+        useDroneCanvasStore.getState().setViewport(${Number(args.panx ?? 20)}, ${Number(args.pany ?? 20)}, ${Number(args.scale ?? 0.7)});
         let cloneCount = 0;
         const noop = () => {};
         function App() {
@@ -131,13 +138,79 @@ async function main() {
       console.log('TRACE ' + await contentTracing.stopRecording(path.join(__dirname, 'trace-' + name + '.json')));
     };
     app.whenReady().then(async () => {
-      const win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
+      const win = new BrowserWindow({ show: true, width: options.width, height: options.height, webPreferences: { backgroundThrottling: false } });
       win.webContents.on('console-message', (_event, level, message) => {
         if (level >= 2 && !message.includes('[canvas-perf]')) console.error('page:', message.slice(0, 300));
       });
       await win.loadFile(path.join(__dirname, 'index.html'));
-      if (options.nogrid) await win.webContents.insertCSS('div:has(+ [data-canvas-world]) { background-image: none !important; }');
+      if (options.nogrid) await win.webContents.insertCSS('[data-canvas-dot-grid] > div { background-image: none !important; }');
+      if (options.fraclayer) {
+        // The pan layer at the exact fractional offset, as shipped before snapping.
+        await win.webContents.executeJavaScript(`setTimeout(() => { document.querySelector('[data-canvas-pan]').style.transform = 'translate3d(${options.panX}px, ${options.panY}px, 0)'; }, 1500); 0`);
+      }
+      if (options.nolayer) {
+        // As the canvas used to draw: a 2D transform and no layer hints, so nothing gets a GPU layer of its own.
+        await win.webContents.insertCSS('[data-canvas-pan], [data-canvas-dot-grid] > div { will-change: auto !important; }');
+        await win.webContents.executeJavaScript(`setTimeout(() => { for (const el of document.querySelectorAll('[data-canvas-pan], [data-canvas-dot-grid] > div')) el.style.transform = el.style.transform.replace('translate3d(', 'translate(').replace(/, 0(px)?\\)$/, ')'); }, 1500); 0`).catch(() => {});
+      }
+      if (options.probeblur) {
+        // One card fades its opacity, as a done card does on hover; then the wheel zooms in. Compare it with an
+        // identical card that did not fade.
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const ids = await win.webContents.executeJavaScript(`(() => {
+          const cards = [...document.querySelectorAll('[data-canvas-node-kind="chat"]')].filter((c) => c.textContent.trim() === 'chat-1');
+          // Two cards one above the other: chat-1 of the first drone and of the first drone in the next row.
+          const [faded, plain] = [cards[0], cards[8]];
+          // As a finished chat's card: dimmed, brightening while hovered and dimming again after.
+          faded.style.transition = 'opacity 100ms';
+          faded.style.opacity = '0.8';
+          setTimeout(() => { faded.style.opacity = '1'; }, 300);
+          setTimeout(() => { faded.style.opacity = '0.8'; }, 600);
+          plain.style.opacity = '0.8';
+          return [faded.dataset.droneId, plain.dataset.droneId];
+        })()`);
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        // Zoom in on the faded card, so it stays in view with the other one below it.
+        const box = await win.webContents.executeJavaScript(`(() => {
+          const [a, b] = ${JSON.stringify(ids)}.map((id) => document.querySelector('[data-drone-id="' + CSS.escape(id) + '"]').getBoundingClientRect());
+          return { x: Math.round(a.x + a.width / 2), y: Math.round(a.y + a.height / 2) };
+        })()`);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: box.x, y: box.y });
+        for (let i = 0; i < 10; i++) {
+          win.webContents.sendInputEvent({ type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 60, canScroll: true });
+          await new Promise((resolve) => setTimeout(resolve, 16));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const rects = await win.webContents.executeJavaScript(`${JSON.stringify(ids)}.map((id) => { const r = document.querySelector('[data-drone-id="' + CSS.escape(id) + '"]').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }; })`);
+        fs.writeFileSync(path.join(__dirname, 'probe.png'), (await win.webContents.capturePage()).toPNG());
+        console.log('PROBE ' + __dirname + ' ' + JSON.stringify(rects));
+        app.exit(0);
+        return;
+      }
+      if (options.still) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        if (options.zoomIn) {
+          // Arrive at the zoom with the wheel, as a person does, rather than loading at it.
+          const at = await win.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-drone-canvas-viewport]').getBoundingClientRect(); return { x: Math.round(r.x + 150), y: Math.round(r.y + 120) }; })()`);
+          win.webContents.sendInputEvent({ type: 'mouseMove', x: at.x, y: at.y });
+          for (let i = 0; i < options.zoomIn; i++) {
+            win.webContents.sendInputEvent({ type: 'mouseWheel', x: at.x, y: at.y, deltaX: 0, deltaY: 60, canScroll: true });
+            await new Promise((resolve) => setTimeout(resolve, 30));
+          }
+          await new Promise((resolve) => setTimeout(resolve, options.settleMs));
+          console.log('ZOOMED ' + await win.webContents.executeJavaScript(`document.querySelector('[data-canvas-pan]').style.transform + ' ' + document.querySelector('[data-canvas-world]').style.transform`));
+        }
+        const image = await win.webContents.capturePage({ x: 0, y: 60, width: 700, height: 260 });
+        fs.writeFileSync(path.join(__dirname, 'still.png'), image.toPNG());
+        console.log('STILL ' + path.join(__dirname, 'still.png'));
+        app.exit(0);
+        return;
+      }
       if (options.noshadow) await win.webContents.insertCSS('[data-canvas-world] * { box-shadow: none !important; }');
+      if (options.shadow) {
+        await win.webContents.insertCSS('[data-canvas-world] * { box-shadow: none !important; }');
+        await win.webContents.insertCSS(`[data-canvas-world] [data-canvas-node] { box-shadow: ${options.shadow} !important; }`);
+      }
       const evaluate = (source) => win.webContents.executeJavaScript(source);
       for (let i = 0; i < 200 && !(await evaluate('!!document.querySelector("[data-canvas-node]")')); i++) await wait(30);
       await wait(1500);
@@ -150,9 +223,9 @@ async function main() {
       const INPUT_MS = 8; // A 125Hz mouse.
 
       let shot = 0;
-      const capture = async (name) => {
+      const capture = async (name, whole = false) => {
         if (!options.shots) return;
-        const image = await win.webContents.capturePage({ x: center.x - 300, y: center.y - 200, width: 600, height: 400 });
+        const image = await win.webContents.capturePage(whole ? undefined : { x: center.x - 300, y: center.y - 200, width: 600, height: 400 });
         const file = path.join(__dirname, `shot-${++shot}-${name}.png`);
         fs.writeFileSync(file, image.toPNG());
         console.log('SHOT ' + file);
@@ -190,7 +263,7 @@ async function main() {
 
       send({ type: 'mouseMove', x: center.x, y: center.y });
       await traced('zoom', async () => { await zoom(30, options.wheel); await zoom(30, -options.wheel); });
-      await drag(center, 60, 'right');
+      await traced('pan', () => drag(center, 60, 'right'));
       await drag(await centerOf('[data-canvas-node-kind="chat"]'), 60);
       await traced('marquee', () => drag(empty, 60));
       await key('a', ['control']);
@@ -204,6 +277,45 @@ async function main() {
       await key('Delete');
       await click({ x: empty.x + 400, y: empty.y });
       await click({ x: empty.x + 400, y: empty.y }, 2);
+      // Edge pan: middle-click holds the cursor, pushing against an edge or a corner pans that way.
+      const panOf = () => evaluate(`(() => { const t = document.querySelector('[data-canvas-pan]').style.transform.match(/translate(?:3d)?\\(([-0-9.]+)px, ([-0-9.]+)px/); return { x: Number(t[1]), y: Number(t[2]) }; })()`);
+      const isLocked = () => evaluate('!!document.pointerLockElement');
+      // Browsers grant pointer lock only to a focused page.
+      app.focus({ steal: true });
+      win.focus();
+      win.webContents.focus();
+      await wait(200);
+      send({ type: 'mouseMove', x: center.x, y: center.y });
+      send({ type: 'mouseDown', button: 'middle', x: center.x, y: center.y, clickCount: 1 });
+      send({ type: 'mouseUp', button: 'middle', x: center.x, y: center.y, clickCount: 1 });
+      await wait(300);
+      const edgePan = { locked: await isLocked(), moves: [] };
+      await capture('edge-locked', true);
+      // Under pointer lock the mouse reports movement only, and Electron's injected input reports it wrongly on
+      // X11 (measured against the real cursor). Give the lock movement directly, as a mouse would.
+      const push = async (dx, dy, steps) => {
+        for (let i = 0; i < steps; i++) {
+          await evaluate(`document.pointerLockElement?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', movementX: ${dx}, movementY: ${dy} }))`);
+          await wait(INPUT_MS * 2);
+        }
+      };
+      let at = { ...center };
+      for (const [name, dx, dy] of [['right', 30, 0], ['bottom-left', -30, 30]]) {
+        const before = await panOf();
+        await push(dx, dy, 60);
+        await wait(700);
+        await capture('edge-' + name, true);
+        const after = await panOf();
+        edgePan.cursorAt ??= {};
+        edgePan.cursorAt[name] = await evaluate(`({ cursor: document.querySelector('[data-canvas-edge-pan-cursor]').style.transform,
+          glow: [...document.querySelectorAll('[data-canvas-edge-glow]')].filter((g) => g.classList.contains('opacity-100')).map((g) => g.dataset.canvasEdgeGlow) })`);
+        edgePan.moves.push({ name, dx: Math.round(after.x - before.x), dy: Math.round(after.y - before.y) });
+      }
+      send({ type: 'mouseDown', button: 'middle', x: at.x, y: at.y, clickCount: 1 });
+      send({ type: 'mouseUp', button: 'middle', x: at.x, y: at.y, clickCount: 1 });
+      await wait(300);
+      edgePan.releasedByMiddleClick = !(await isLocked());
+      console.log('EDGEPAN ' + JSON.stringify(edgePan));
       const result = await evaluate(`JSON.stringify({ cards: document.querySelectorAll('[data-canvas-node]').length, log: window.__droneCanvasPerf.log })`);
       console.log('RESULT ' + result);
       app.exit(0);
@@ -211,19 +323,25 @@ async function main() {
   }
   fs.writeFileSync(path.join(dir, 'runner.cjs'), `(${desktopRunner.toString()})()`);
   const env = { ...process.env, CANVAS_BENCH_OPTIONS: JSON.stringify({
-    trace: args.trace ?? '', wheel: Number(args.wheel ?? 60), shots: Boolean(args.shots),
-    noshadow: Boolean(args.noshadow), nogrid: Boolean(args.nogrid),
+    trace: args.trace ?? '', wheel: Number(args.wheel ?? 60), width: Number(args.width ?? 1400), height: Number(args.height ?? 900), shots: Boolean(args.shots),
+    noshadow: Boolean(args.noshadow), shadow: args.shadow ?? '', nogrid: Boolean(args.nogrid), nolayer: Boolean(args.nolayer), fraclayer: Boolean(args.fraclayer), still: Boolean(args.still), zoomIn: Number(args.zoomin ?? 0), settleMs: Number(args.settle ?? 1500), probeblur: Boolean(args.probeblur), panX: Number(args.panx ?? 20), panY: Number(args.pany ?? 20),
   }) };
   delete env.ELECTRON_RUN_AS_NODE;
   const output = execFileSync(require('electron'), [path.join(dir, 'runner.cjs')], {
     env, encoding: 'utf8', timeout: 150000, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const lines = output.split('\n');
+  const probe = lines.find((line) => line.startsWith('PROBE '));
+  if (probe) { console.log(probe); return; }
+  const still = lines.find((line) => line.startsWith('STILL '));
+  for (const line of lines) if (line.startsWith('ZOOMED ')) console.log(line);
+  if (still) { console.log(still); return; }
   const resultLine = lines.find((line) => line.startsWith('RESULT '));
   assert(resultLine, output);
   const result = JSON.parse(resultLine.slice('RESULT '.length));
   if (args.out) fs.writeFileSync(args.out, JSON.stringify(result, null, 2));
   for (const line of lines) if (line.startsWith('SHOT ')) console.log(line);
+  for (const line of lines) if (line.startsWith('EDGEPAN ')) console.log(`edge pan: ${line.slice('EDGEPAN '.length)}`);
   const traceLine = lines.find((line) => line.startsWith('TRACE '));
   if (traceLine) summarizeTrace(traceLine.slice('TRACE '.length));
   console.log(`${result.cards} cards`);

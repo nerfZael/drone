@@ -7,8 +7,12 @@ import { normalizeCanvasNewCardSettings, type CanvasNewCardSettings } from './ca
 const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
 const DRONE_CANVAS_STORAGE_KEY = profileStorageKey('droneHub.canvas');
-const CANVAS_PERSIST_DEBOUNCE_MS = 180;
-const CANVAS_PERSIST_MAX_STALE_MS = 900;
+/**
+ * Saved once changes pause for this long. There is no deadline: a pan or drag writes every frame, and saving
+ * mid-gesture (every board, stringified, then a synchronous storage write) would stall a frame. Leaving the page
+ * saves at once.
+ */
+const CANVAS_PERSIST_DEBOUNCE_MS = 250;
 const DRAFT_CANVAS_NODE_PREFIX = 'draft:';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -345,12 +349,10 @@ function getBrowserLocalStorage(): Storage | null {
 const canvasPersistStorage: PersistStorage<DroneCanvasState> = (() => {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   const pending = new Map<string, StorageValue<DroneCanvasState>>();
-  let pendingSince: number | null = null;
 
   const flush = () => {
     if (flushTimer !== null) clearTimeout(flushTimer);
     flushTimer = null;
-    pendingSince = null;
     if (pending.size === 0) return;
     const storage = getBrowserLocalStorage();
     if (!storage) {
@@ -370,11 +372,14 @@ const canvasPersistStorage: PersistStorage<DroneCanvasState> = (() => {
   };
 
   const scheduleFlush = () => {
-    if (flushTimer !== null) {
-      clearTimeout(flushTimer);
-    }
-    const remaining = CANVAS_PERSIST_MAX_STALE_MS - (Date.now() - (pendingSince ?? Date.now()));
-    flushTimer = setTimeout(flush, Math.max(0, Math.min(CANVAS_PERSIST_DEBOUNCE_MS, remaining)));
+    if (flushTimer !== null) clearTimeout(flushTimer);
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      // In idle time where the browser offers it, so even the one write does not land in a busy frame.
+      const idle = typeof window !== 'undefined' ? window.requestIdleCallback : undefined;
+      if (typeof idle === 'function') idle(() => flush(), { timeout: 1000 });
+      else flush();
+    }, CANVAS_PERSIST_DEBOUNCE_MS);
   };
 
   if (typeof window !== 'undefined') {
@@ -404,7 +409,6 @@ const canvasPersistStorage: PersistStorage<DroneCanvasState> = (() => {
     },
     setItem: (name, value) => {
       pending.set(name, value);
-      pendingSince ??= Date.now();
       scheduleFlush();
     },
     removeItem: (name) => {
@@ -412,7 +416,6 @@ const canvasPersistStorage: PersistStorage<DroneCanvasState> = (() => {
       if (pending.size === 0) {
         if (flushTimer !== null) clearTimeout(flushTimer);
         flushTimer = null;
-        pendingSince = null;
       }
       const storage = getBrowserLocalStorage();
       if (!storage) return;

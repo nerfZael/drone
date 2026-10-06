@@ -30,6 +30,11 @@ export function recordUiAction(action: DiagnosticAction): void {
   emit({ type: 'breadcrumb', ...action });
 }
 
+/** A performance note, e.g. a canvas gesture that dropped frames; kept in the desktop diagnostics log. */
+export function recordUiPerformance(kind: string, action: string, message: string): void {
+  emit({ type: 'breadcrumb', kind, action, message: message.slice(0, 4000) });
+}
+
 export function reportUiError(kind: string, error: unknown, extra: { componentStack?: string; source?: string; line?: number; column?: number } = {}): string {
   let id = `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   try {

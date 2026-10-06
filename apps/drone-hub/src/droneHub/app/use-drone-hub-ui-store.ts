@@ -38,6 +38,16 @@ import {
 } from '../../theme';
 import { resolveManualSidebarToggle } from './resolve-manual-sidebar-toggle';
 
+export const MIN_CANVAS_EDGE_PAN_SPEED = 500;
+export const MAX_CANVAS_EDGE_PAN_SPEED = 8000;
+const DEFAULT_CANVAS_EDGE_PAN_SPEED = 2400;
+
+function clampCanvasEdgePanSpeed(value: unknown): number {
+  const speed = Number(value);
+  if (!Number.isFinite(speed)) return DEFAULT_CANVAS_EDGE_PAN_SPEED;
+  return Math.round(Math.min(MAX_CANVAS_EDGE_PAN_SPEED, Math.max(MIN_CANVAS_EDGE_PAN_SPEED, speed)));
+}
+
 type Updater<T> = T | ((prev: T) => T);
 
 type NameSuggestToast = null | {
@@ -135,6 +145,8 @@ type DroneHubUiState = {
   showCanvasLastMessagePreviews: boolean;
   /** Canvas cards like the Entity's Work cards: status, what it is doing, how long, and cost. */
   canvasDetailedCards: boolean;
+  /** How fast the canvas pans when the locked cursor pushes against its edge, in screen pixels per second. */
+  canvasEdgePanSpeed: number;
   /** Floating side chat windows stay out of the way while a canvas pane is open. */
   hideSideChatWindowsWithCanvas: boolean;
   transcriptInlineImageOverrides: Record<string, boolean>;
@@ -214,6 +226,7 @@ type DroneHubUiState = {
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
   setCanvasDetailedCards: (next: Updater<boolean>) => void;
+  setCanvasEdgePanSpeed: (next: Updater<number>) => void;
   setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnContextRepoPath: (next: Updater<string>) => void;
@@ -387,6 +400,7 @@ type DroneHubUiPersistedState = Pick<
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
   | 'canvasDetailedCards'
+  | 'canvasEdgePanSpeed'
   | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
@@ -1018,6 +1032,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
       canvasDetailedCards: false,
+      canvasEdgePanSpeed: DEFAULT_CANVAS_EDGE_PAN_SPEED,
       hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
       spawnContextRepoPath: '',
@@ -1283,6 +1298,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         })),
       setCanvasDetailedCards: (next) =>
         set((s) => ({ canvasDetailedCards: resolveNext(s.canvasDetailedCards, next) })),
+      setCanvasEdgePanSpeed: (next) =>
+        set((s) => ({ canvasEdgePanSpeed: clampCanvasEdgePanSpeed(resolveNext(s.canvasEdgePanSpeed, next)) })),
       setHideSideChatWindowsWithCanvas: (next) =>
         set((s) => ({
           hideSideChatWindowsWithCanvas: resolveNext(s.hideSideChatWindowsWithCanvas, next),
@@ -1545,6 +1562,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
         canvasDetailedCards: state.canvasDetailedCards,
+        canvasEdgePanSpeed: state.canvasEdgePanSpeed,
         hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
@@ -1675,6 +1693,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),
           canvasDetailedCards: normalizeBoolean(persisted.canvasDetailedCards ?? currentState.canvasDetailedCards),
+          canvasEdgePanSpeed: clampCanvasEdgePanSpeed(persisted.canvasEdgePanSpeed ?? currentState.canvasEdgePanSpeed),
           hideSideChatWindowsWithCanvas: normalizeBoolean(
             persisted.hideSideChatWindowsWithCanvas ?? currentState.hideSideChatWindowsWithCanvas,
           ),

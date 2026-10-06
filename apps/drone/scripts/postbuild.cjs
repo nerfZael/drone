@@ -132,33 +132,38 @@ async function ensureBlipBundleDependenciesBuilt(root) {
   runOrThrow('bun', workspaceBuildArgs('@blip/mcp'), { cwd: repoRoot });
 }
 
+/** Everything the desktop app loads from apps/drone/desktop; it runs from these copies in dist. */
+const DRONE_HUB_ELECTRON_FILES = [
+  'hub-electron-main.cjs',
+  'hub-desktop-recordings.cjs',
+  'hub-audio-capture.cjs',
+  'hub-electron-chat-windows.cjs',
+  'hub-electron-notifications.cjs',
+  'hub-notification-preload.cjs',
+  'hub-notification.html',
+  'hub-notification-renderer.js',
+  'hub-electron-companion.cjs',
+  'hub-electron-snipping.cjs',
+  'hub-capture-cursor.cjs',
+  'hub-x11-cursor.py',
+  'hub-snipping-preload.cjs',
+  'hub-snipping.html',
+  'hub-electron-global-shortcuts.cjs',
+  'hub-x11-backquote.cjs',
+  'hub-x11-backquote.py',
+  'hub-electron-cursor-confine.cjs',
+  'hub-x11-cursor-confine.py',
+  'hub-electron-diagnostics.cjs',
+  'hub-electron-recovery.cjs',
+  'hub-electron-html-preview.cjs',
+  'hub-electron-launch.cjs',
+  'hub-electron-static-server.cjs',
+  'hub-electron-preload.cjs',
+  'hub-electron-zoom.cjs',
+];
+
 async function copyDroneHubElectronMain(root) {
-  for (const filename of [
-    'hub-electron-main.cjs',
-    'hub-desktop-recordings.cjs',
-    'hub-audio-capture.cjs',
-    'hub-electron-chat-windows.cjs',
-    'hub-electron-notifications.cjs',
-    'hub-notification-preload.cjs',
-    'hub-notification.html',
-    'hub-notification-renderer.js',
-    'hub-electron-companion.cjs',
-    'hub-electron-snipping.cjs',
-    'hub-capture-cursor.cjs',
-    'hub-x11-cursor.py',
-    'hub-snipping-preload.cjs',
-    'hub-snipping.html',
-    'hub-electron-global-shortcuts.cjs',
-    'hub-x11-backquote.cjs',
-    'hub-x11-backquote.py',
-    'hub-electron-diagnostics.cjs',
-    'hub-electron-recovery.cjs',
-    'hub-electron-html-preview.cjs',
-    'hub-electron-launch.cjs',
-    'hub-electron-static-server.cjs',
-    'hub-electron-preload.cjs',
-    'hub-electron-zoom.cjs',
-  ]) {
+  for (const filename of DRONE_HUB_ELECTRON_FILES) {
     const source = path.join(root, 'desktop', filename);
     const target = path.join(root, 'dist', filename);
     await fs.copyFile(source, target);
@@ -227,6 +232,7 @@ async function main() {
 module.exports = {
   blipBundleArgs,
   copyDroneHubElectronMain,
+  DRONE_HUB_ELECTRON_FILES,
   CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
   DRONE_HUB_BUILD_ID_FILE,

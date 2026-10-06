@@ -72,6 +72,8 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const diagnostics = createDesktopDiagnostics({
   logPath: path.join(app.getPath('userData'), 'logs', 'desktop.jsonl'),
 });
+// The canvas holds the real cursor inside itself while edge panning.
+const cursorConfinement = require('./hub-electron-cursor-confine.cjs').installCursorConfinement({ ipcMain, BrowserWindow, screen });
 require('./hub-electron-html-preview.cjs').installHtmlPreviewWindows({
   ipcMain, BrowserWindow, session, diagnostics,
   getWindow: () => mainWindow, getConnection: () => recordingConnection,
@@ -701,6 +703,7 @@ if (!hasSingleInstanceLock) {
 
   app.on('before-quit', (event) => {
     isQuitting = true;
+    cursorConfinement.close();
     void desktopGlobalShortcuts?.close();
     desktopGlobalShortcuts = null;
     if (desktopCleanupComplete) return;

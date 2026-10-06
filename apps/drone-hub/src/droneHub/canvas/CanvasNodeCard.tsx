@@ -53,7 +53,6 @@ type CanvasNodeCardProps = {
   repoLabel: string;
   repoBranch: string;
   primaryLabel: string;
-  labelTextBoostLimit: number;
   showCanvasLastMessagePreviews: boolean;
   inlineRenameDraft: string;
   inlineRenameBusy: boolean;
@@ -84,7 +83,6 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
   repoLabel,
   repoBranch,
   primaryLabel,
-  labelTextBoostLimit,
   showCanvasLastMessagePreviews,
   inlineRenameDraft,
   inlineRenameBusy,
@@ -101,7 +99,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
   const lastAgentSnippet = indicatorState?.lastAgentSnippet ?? null;
   const indicator = deleting ? (
     <span
-      className="inline-flex items-center gap-1 rounded-[4px] border border-[var(--red-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
+      className="inline-flex items-center gap-1 rounded-[4px] border border-[var(--red-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)]"
       style={{ fontFamily: 'var(--display)' }}
     >
       <UiSpinner size="small" label={null} inheritColor className="[&>span]:h-2.5 [&>span]:w-2.5" />
@@ -141,7 +139,13 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       aria-pressed={selected}
       aria-busy={deleting || undefined}
       title={deleting ? 'Deleting…' : undefined}
-      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left text-[var(--fg)] transition-[border-color,opacity] duration-100 ${
+      className={detail ? `dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left transition-[border-color,color] duration-100 ${
+        // A finished chat reads quieter, brightening under the pointer. By colour, not opacity: an opacity change
+        // runs on the GPU and lifts the card onto a layer of its own, drawn once and then stretched by a zoom.
+        detail.state === 'done' && !detail.unread && !selected
+          ? 'text-[color-mix(in_srgb,var(--fg)_72%,var(--panel))] hover:text-[var(--fg)]'
+          : 'text-[var(--fg)]'
+      } ${
         // One thin border says it all: full accent when selected, a softer one for the chat that is open.
         selected || dragging || inlineEditing || assignmentHoverTarget
           ? 'border-[var(--accent)]'
@@ -150,19 +154,19 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
             : detail.state === 'need'
             ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
             : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
-      } ${detail.state === 'done' && !detail.unread && !selected ? 'opacity-80 hover:opacity-100' : ''}` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color] duration-100 flex items-center ${
+      }` : `group/canvas-node absolute overflow-visible rounded-[var(--radius-medium)] border text-left shadow-[0_2px_4px_var(--shadow-color)] transition-[border-color,background-color] duration-100 flex items-center ${
         dragging
-          ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_14px_26px_var(--shadow-color)]'
+          ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_2px_4px_var(--shadow-color)]'
           : assignmentHoverTarget
-            ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_16px_28px_var(--shadow-color)]'
+            ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_2px_4px_var(--shadow-color)]'
             : selected || inlineEditing
-              ? 'border-[var(--accent-muted)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-subtle),0_10px_20px_var(--shadow-color)]'
+              ? 'border-[var(--accent-muted)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-subtle),0_2px_4px_var(--shadow-color)]'
               : draftNode
                 ? 'border-[var(--user-border)] bg-[var(--panel-overlay-soft)] hover:border-[var(--muted)]'
                 : droneNode
                   ? runtime === 'host'
-                    ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel-overlay)_58%)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
-                    : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel-overlay)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
+                    ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel-overlay)_58%)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_2px_4px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
+                    : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel-overlay)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_2px_4px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
                   : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
       }`}
       style={{
@@ -172,7 +176,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
           ? {
               padding: '0.4375rem 0.625rem',
             }
-          : { paddingInline: labelTextBoostLimit > 1 ? 'var(--canvas-node-padding, 0.625rem)' : '0.625rem' }),
+          : { paddingInline: '0.625rem' }),
         width: nodeWidth,
         height: nodeHeight,
       }}
@@ -192,7 +196,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       ) : null}
       {showCanvasLastMessagePreviews && lastAgentSnippet && !detail ? (
         <span
-          className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-10 leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
+          className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-10 leading-[1.35] text-[var(--muted)]"
           title={lastAgentSnippet}
         >
           <span className="line-clamp-2 break-words whitespace-pre-wrap">{lastAgentSnippet}</span>
@@ -207,8 +211,8 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
         // One row centred under the card: at least as wide as the card, and wider when the two
         // chips need it, so the repository and the branch spread apart instead of overlapping.
         <span
-          className={`pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap transition-opacity ${
-            droneNode || draftNode || selected ? '' : 'opacity-0 group-hover/canvas-node:opacity-100'
+          className={`pointer-events-none absolute left-1/2 top-full mt-[3px] flex min-w-[calc(100%-1rem)] -translate-x-1/2 justify-between gap-1.5 whitespace-nowrap ${
+            droneNode || draftNode || selected ? '' : 'invisible group-hover/canvas-node:visible'
           }`}
           data-canvas-card-repo
         >
@@ -225,12 +229,11 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
         </span>
       ) : null}
       {/* The title fades while the chat is being deleted; the Deleting badge above says why. */}
-      <span className={`min-w-0 flex-1 transition-opacity ${deleting ? 'opacity-45' : ''} ${inlineEditing && droneNode ? 'flex items-center gap-1.5' : ''}`}>
+      <span className={`min-w-0 flex-1 ${deleting ? 'opacity-45' : ''} ${inlineEditing && droneNode ? 'flex items-center gap-1.5' : ''}`}>
         {inlineEditing && droneNode ? runtimeIcon : null}
         {inlineEditing ? (
           <input
             ref={inlineRenameInputRef}
-            data-canvas-rename-input=""
             value={inlineRenameDraft}
             disabled={inlineRenameBusy}
             onChange={(event) => actions.current.setInlineRenameDraft(event.target.value)}
@@ -274,13 +277,6 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
             }}
             // Looks like the title it replaces: the card's own border already says it is being edited.
             className={`block w-full min-w-0 border-0 bg-transparent p-0 text-12-5 font-[var(--weight-semibold)] leading-[inherit] text-[var(--fg-secondary)] caret-[var(--accent)] outline-none focus:outline-none focus-visible:outline-none ${droneNode ? '' : 'text-center'}`}
-            style={
-              labelTextBoostLimit > 1
-                ? {
-                    fontSize: `calc(var(--text-12-5) * min(var(--canvas-node-boost, 1), ${labelTextBoostLimit.toFixed(3)}))`,
-                  }
-                : undefined
-            }
           />
         ) : assignmentHoverTarget ? (
           <span className="block">
@@ -316,14 +312,6 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
             {runtimeIcon}
             <span
               className={`min-w-0 flex-1 truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)] ${droneNode ? '' : 'text-center'}`}
-              // Grows with the zoom boost up to its limit by transform, set by CanvasWorldLayer's style rule:
-              // a font size would lay out every label again on each zoom frame.
-              data-canvas-label-boost={labelTextBoostLimit > 1 ? '' : undefined}
-              style={
-                labelTextBoostLimit > 1
-                  ? ({ '--canvas-label-boost-limit': labelTextBoostLimit.toFixed(3) } as React.CSSProperties)
-                  : undefined
-              }
             >
               {primaryLabel}
             </span>
@@ -335,7 +323,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
 });
 
 const CANVAS_NODE_META_CHIP_CLASS =
-  'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]';
+  'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)]';
 
 function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
   if (!state) return null;
@@ -346,7 +334,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
       const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
       return (
         <span
-          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)]"
           style={{ fontFamily: 'var(--display)' }}
           title={String(state.hubMessage ?? label)}
         >
@@ -364,7 +352,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   if (state.statusChecking) {
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.statusError ?? 'Checking status')}
       >
@@ -377,7 +365,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.hubMessage ?? state.statusError ?? label)}
       >
