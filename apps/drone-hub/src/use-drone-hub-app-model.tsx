@@ -19,6 +19,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
+import { useDesktopChatRequests } from './droneHub/app/desktop-chat-requests';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -495,6 +496,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       });
     });
   }, []);
+  /** Moves everything this client keeps under a chat's name, so open views stay warm across a rename. */
+  const followChatRename = React.useCallback((droneId: string, oldName: string, newName: string) => {
+    renameChatRuntimeCache(droneId, oldName, newName);
+    rememberOptimisticChatRename(droneId, oldName, newName);
+    useDetachedChatStore.getState().rename(droneId, oldName, newName);
+    useDesktopChatRequests.getState().rename(droneId, oldName, newName);
+    renameSideChatWorkspaceChat(droneId, oldName, newName);
+    const ui = useDroneHubUiStore.getState();
+    const oldDraftKey = chatInputDraftKeyForDroneChat(droneId, oldName);
+    const newDraftKey = chatInputDraftKeyForDroneChat(droneId, newName);
+    ui.setChatInputDraft(newDraftKey, ui.chatInputDrafts[oldDraftKey] ?? '');
+    ui.setChatInputDraft(oldDraftKey, '');
+    ui.setChatInputEditorMode(newDraftKey, Boolean(ui.chatInputEditorModes[oldDraftKey]));
+    ui.setChatInputEditorMode(oldDraftKey, false);
+  }, [rememberOptimisticChatRename]);
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -3461,14 +3477,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 body: JSON.stringify({ newName: operation.newName }),
               },
             );
-            renameChatRuntimeCache(
-              operation.droneId,
-              operation.chatName,
-              operation.newName,
-            );
-            rememberOptimisticChatRename(operation.droneId, operation.chatName, operation.newName);
-            useDetachedChatStore.getState().rename(operation.droneId, operation.chatName, operation.newName);
-            renameSideChatWorkspaceChat(operation.droneId, operation.chatName, operation.newName);
+            followChatRename(operation.droneId, operation.chatName, operation.newName);
             return {
               droneId: operation.droneId,
               oldName: operation.chatName,
@@ -4366,10 +4375,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             body: JSON.stringify({ newName }),
           },
         );
-        renameChatRuntimeCache(droneId, chatName, newName);
-        rememberOptimisticChatRename(droneId, chatName, newName);
-        useDetachedChatStore.getState().rename(droneId, chatName, newName);
-        renameSideChatWorkspaceChat(droneId, chatName, newName);
+        followChatRename(droneId, chatName, newName);
         setSidebarChatOrderByDrone((prev) => {
           const currentOrder = prev[droneId];
           if (!currentOrder || !currentOrder.includes(chatName)) return prev;
@@ -4449,10 +4455,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 body: JSON.stringify({ newName: candidate }),
               },
             );
-            renameChatRuntimeCache(droneId, chatName, candidate);
-            rememberOptimisticChatRename(droneId, chatName, candidate);
-            useDetachedChatStore.getState().rename(droneId, chatName, candidate);
-            renameSideChatWorkspaceChat(droneId, chatName, candidate);
+            followChatRename(droneId, chatName, candidate);
             const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
             const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
             if (oldCanvasNodeId && newCanvasNodeId) {

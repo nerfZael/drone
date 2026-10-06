@@ -61,6 +61,17 @@ export function deleteNativeChatSnapshot(droneId: string, chatName: string): voi
   if (threadId) histories.delete(threadId);
 }
 
+/** A renamed chat keeps its warm snapshot; its history is keyed by thread and needs no move. */
+export function renameNativeChatSnapshot(droneId: string, oldChatName: string, newChatName: string): void {
+  const oldKey = chatSelectionKey(droneId, oldChatName);
+  const newKey = chatSelectionKey(droneId, newChatName);
+  if (!oldKey || !newKey || oldKey === newKey) return;
+  const entry = snapshots.get(oldKey);
+  snapshots.delete(oldKey);
+  snapshots.delete(newKey);
+  if (entry) snapshots.set(newKey, entry);
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, (event) => {
     const id = disposedDroneIdFromEvent(event);

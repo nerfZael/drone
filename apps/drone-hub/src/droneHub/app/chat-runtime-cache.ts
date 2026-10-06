@@ -2,7 +2,7 @@ import { CacheExpiryTimer } from '@drone/hub-model';
 import type { ChatInfo } from '../../domain';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { chatSelectionKey } from './chat-selection-model';
-import { deleteNativeChatSnapshot } from '../assistant/native-chat-cache';
+import { deleteNativeChatSnapshot, renameNativeChatSnapshot } from '../assistant/native-chat-cache';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 
 export const CHAT_RUNTIME_CACHE_TTL_MS = 30_000;
@@ -120,10 +120,10 @@ export function renameChatRuntimeCache(
   const newKey = chatRuntimeCacheKey(droneId, newChatName);
   if (!oldKey || !newKey || oldKey === newKey) return;
   const oldEntry = cache.get(oldKey);
-  if (!oldEntry) {
-    deleteChatRuntimeCache(newKey);
-    return;
-  }
+  if (!oldEntry) deleteChatRuntimeCache(newKey);
+  // Native chats keep their warm view in a cache of their own.
+  renameNativeChatSnapshot(droneId, oldChatName, newChatName);
+  if (!oldEntry) return;
   const renamedEntry = { ...oldEntry };
   const oldChatInfo = oldEntry.chatInfo;
   if (oldChatInfo) {

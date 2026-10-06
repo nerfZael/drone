@@ -11,6 +11,9 @@ import {
   renameChatRuntimeCache,
   writeChatRuntimeCache,
 } from '../src/droneHub/app/chat-runtime-cache';
+import type { BlipHistoryPage } from '@blip/protocol';
+import type { AssistantSnapshot } from '../src/droneHub/assistant/assistant-types';
+import { readNativeChatSnapshot, writeNativeChatHistory, writeNativeChatSnapshot } from '../src/droneHub/assistant/native-chat-cache';
 
 function chatInfo(chat: string, agent: any) {
   return {
@@ -129,6 +132,21 @@ describe('chat runtime cache', () => {
       pending: [{ id: 'pending-1' }],
       transcripts: [{ id: 'turn-1' }],
     });
+  });
+
+  test('moves a native chat snapshot to the new name so the renamed chat opens warm', () => {
+    writeNativeChatSnapshot('drone-1', 'old-native', { threads: [{ id: 'rename-thread' }] } as AssistantSnapshot);
+    writeNativeChatHistory({
+      version: 1, threadId: 'rename-thread', sessionId: null,
+      entries: [{ id: '1', sequence: 1, timestamp: '2026-10-06T00:00:00Z', message: { role: 'assistant', content: 'hi' } }],
+      page: { limit: 1, beforeCursor: null, hasOlder: false },
+    } as BlipHistoryPage);
+
+    // Native chats need not have a runtime cache entry at all.
+    renameChatRuntimeCache('drone-1', 'old-native', 'new-native');
+
+    expect(readNativeChatSnapshot('drone-1', 'old-native')).toBeNull();
+    expect(readNativeChatSnapshot('drone-1', 'new-native')?.initialHistory?.entries).toHaveLength(1);
   });
 
   test('invalidates a stale destination when the renamed source was not cached', () => {
