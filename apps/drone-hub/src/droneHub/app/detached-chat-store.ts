@@ -7,6 +7,31 @@ import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '.
 
 export type DetachedChat = { droneId: string; chatName: string; open: boolean; bounds?: WorkspaceRect };
 export const detachedChatKey = (droneId: string, chatName: string) => JSON.stringify([droneId, chatName]);
+
+/**
+ * The key of the window showing this chat. A window keeps the key it opened
+ * with when its chat is renamed, so it is found by its chat, not by its key.
+ */
+export function chatWindowKey(
+  windows: Readonly<Record<string, { droneId: string; chatName: string }>>,
+  droneId: string,
+  chatName: string,
+): string | null {
+  return Object.keys(windows).find((key) => windows[key]!.droneId === droneId && windows[key]!.chatName === chatName) ?? null;
+}
+
+/** The chat's window key, or a new one that no renamed chat's window still holds. */
+export function openChatWindowKey(
+  windows: Readonly<Record<string, { droneId: string; chatName: string }>>,
+  droneId: string,
+  chatName: string,
+): string {
+  const existing = chatWindowKey(windows, droneId, chatName);
+  if (existing) return existing;
+  let key = detachedChatKey(droneId, chatName);
+  for (let n = 2; windows[key]; n += 1) key = JSON.stringify([droneId, chatName, n]);
+  return key;
+}
 export const DETACHED_CHAT_FOCUS_EVENT = 'drone-hub:focus-detached-chat';
 export const DETACHED_CHAT_BEFORE_ATTACH_EVENT = 'drone-hub:before-attach-chat';
 
@@ -40,7 +65,7 @@ type DetachedChatState = {
 export const useDetachedChatStore = create<DetachedChatState>()(persist((set, get) => ({
   chats: {},
   detach(droneId, chatName) {
-    const key = detachedChatKey(droneId, chatName);
+    const key = openChatWindowKey(get().chats, droneId, chatName);
     set({ chats: { ...get().chats, [key]: { ...get().chats[key], droneId, chatName, open: true } } });
     window.dispatchEvent(new CustomEvent(DETACHED_CHAT_FOCUS_EVENT, { detail: { key } }));
   },
@@ -56,17 +81,16 @@ export const useDetachedChatStore = create<DetachedChatState>()(persist((set, ge
     }
   },
   rename(droneId, oldName, newName) {
-    const oldKey = detachedChatKey(droneId, oldName);
-    const chat = get().chats[oldKey];
-    if (!chat || oldName === newName) return;
-    const chats = { ...get().chats };
-    delete chats[oldKey];
-    chats[detachedChatKey(droneId, newName)] = { ...chat, chatName: newName };
-    set({ chats });
+    // The window keeps its key, so it stays open and in place on the renamed chat.
+    const key = chatWindowKey(get().chats, droneId, oldName);
+    if (!key || oldName === newName) return;
+    set({ chats: { ...get().chats, [key]: { ...get().chats[key]!, chatName: newName } } });
   },
   forgetChat(droneId, chatName) {
+    const key = chatWindowKey(get().chats, droneId, chatName);
+    if (!key) return;
     const chats = { ...get().chats };
-    delete chats[detachedChatKey(droneId, chatName)];
+    delete chats[key];
     set({ chats });
   },
   forgetDrone(droneId) {

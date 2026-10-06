@@ -128,6 +128,19 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('rejects chat names with control characters, which clients use to tell chat IDs from names', async () => {
+    const droneId = 'drone-chat-control-name';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '\u0001review' }),
+    });
+    expect(created.r.status).toBe(400);
+    expect(String(created.data?.error)).toContain('control characters');
+  });
+
   test('MCP discovers and messages side chats while draft reads expose held messages', async () => {
     const droneId = 'drone-side-chat-catalog';
     await seedDrone(droneId);

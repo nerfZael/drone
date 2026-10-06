@@ -18,9 +18,9 @@ import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsD
 import React from 'react';
 import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
-import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
-import { useDesktopChatRequests } from './droneHub/app/desktop-chat-requests';
-import { renameChatId } from './droneHub/app/chat-identity';
+import { saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
+import { currentChatName, renameChatId, takeSeenChatRenames } from './droneHub/app/chat-identity';
+import { moveChatCanvasCards, moveChatClientState } from './droneHub/app/follow-chat-rename';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -50,7 +50,6 @@ import {
   getCanvasBoardActions,
   isCanvasDraftNodeId,
   selectCanvasBoard,
-  topicBoardKey,
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
 import { forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
@@ -381,7 +380,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDrone,
     selectedDroneIds,
     selectedGroupMultiChat,
-    selectedChat,
+    selectedChat: storedSelectedChat,
     draftChat,
     reposModalOpen,
     droneErrorModal,
@@ -478,18 +477,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     // Publish the new name and both boards' positions in one render. Otherwise
     // placement can recreate the old name while the summary still lists it.
     flushSync(() => {
-      const oldNodeId = createCanvasChatNodeId(droneId, oldName);
-      const newNodeId = createCanvasChatNodeId(droneId, newName);
-      if (oldNodeId && newNodeId) {
-        getCanvasBoardActions(null).replaceNodeId(oldNodeId, newNodeId, newName);
-        getCanvasBoardActions(droneId).replaceNodeId(oldNodeId, newNodeId, newName);
-        // Every topic holding the drone keeps the card where it was, too.
-        for (const topic of useDroneCanvasStore.getState().topics) {
-          if (topic.droneIds.includes(droneId)) {
-            getCanvasBoardActions(topicBoardKey(topic.id)).replaceNodeId(oldNodeId, newNodeId, newName);
-          }
-        }
-      }
+      moveChatCanvasCards(droneId, oldName, newName);
       setOptimisticChatRenames((current) => {
         // A chat renamed again before the summary caught up goes straight to its latest name.
         const renames = Object.fromEntries(
@@ -506,16 +494,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     renameChatId(droneId, oldName, newName);
     renameChatRuntimeCache(droneId, oldName, newName);
     rememberOptimisticChatRename(droneId, oldName, newName);
-    useDetachedChatStore.getState().rename(droneId, oldName, newName);
-    useDesktopChatRequests.getState().rename(droneId, oldName, newName);
-    renameSideChatWorkspaceChat(droneId, oldName, newName);
-    const ui = useDroneHubUiStore.getState();
-    const oldDraftKey = chatInputDraftKeyForDroneChat(droneId, oldName);
-    const newDraftKey = chatInputDraftKeyForDroneChat(droneId, newName);
-    ui.setChatInputDraft(newDraftKey, ui.chatInputDrafts[oldDraftKey] ?? '');
-    ui.setChatInputDraft(oldDraftKey, '');
-    ui.setChatInputEditorMode(newDraftKey, Boolean(ui.chatInputEditorModes[oldDraftKey]));
-    ui.setChatInputEditorMode(oldDraftKey, false);
+    moveChatClientState(droneId, oldName, newName);
   }, [rememberOptimisticChatRename]);
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),
@@ -583,6 +562,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setActiveRepoPath,
     setChatHeaderRepoPath,
   });
+  // A selected chat renamed anywhere stays selected under its new name.
+  const selectedChat = currentChatName(selectedDrone, storedSelectedChat);
+  React.useEffect(() => {
+    if (selectedChat !== storedSelectedChat) setSelectedChat(selectedChat);
+  }, [selectedChat, setSelectedChat, storedSelectedChat]);
+  React.useEffect(() => {
+    // Renamed anywhere (another device, an agent): what this client keeps under the old name follows.
+    for (const rename of takeSeenChatRenames()) moveChatClientState(rename.droneId, rename.oldName, rename.newName);
+  }, [drones]);
   React.useEffect(() => {
     setOptimisticChatRenames((current) => pruneOptimisticChatRenames(current, polledDrones));
   }, [polledDrones]);
@@ -4423,14 +4411,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
         );
         followChatRename(droneId, chatName, newName);
-        setSidebarChatOrderByDrone((prev) => {
-          const currentOrder = prev[droneId];
-          if (!currentOrder || !currentOrder.includes(chatName)) return prev;
-          return {
-            ...prev,
-            [droneId]: currentOrder.map((entry) => (entry === chatName ? newName : entry)),
-          };
-        });
         if (selectedDrone === droneId && selectedChat === chatName) {
           setSelectedChat(newName);
         }
@@ -4503,22 +4483,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             );
             followChatRename(droneId, chatName, candidate);
-            const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
-            const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
-            if (oldCanvasNodeId && newCanvasNodeId) {
-              useDroneCanvasStore
-                .getState()
-                .replaceNodeId(oldCanvasNodeId, newCanvasNodeId, candidate);
-              getCanvasBoardActions(droneId).replaceNodeId(oldCanvasNodeId, newCanvasNodeId, candidate);
-            }
-            setSidebarChatOrderByDrone((prev) => {
-              const currentOrder = prev[droneId];
-              if (!currentOrder || !currentOrder.includes(chatName)) return prev;
-              return {
-                ...prev,
-                [droneId]: currentOrder.map((entry) => (entry === chatName ? candidate : entry)),
-              };
-            });
             const { selectedDrone: activeDroneId, selectedChat: activeChatName } =
               useDroneHubUiStore.getState();
             if (activeDroneId === droneId && activeChatName === chatName) {

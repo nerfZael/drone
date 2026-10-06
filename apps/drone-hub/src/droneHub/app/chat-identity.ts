@@ -13,6 +13,22 @@ let idsByDrone = new Map<string, ChatIds>();
 // Renames made here, before the summaries show them.
 const renamedIdsByDrone = new Map<string, Record<string, string>>();
 
+export type ChatRename = { droneId: string; oldName: string; newName: string };
+// Renames seen in the summaries, from this client or anywhere else, not yet followed.
+let seenRenames: ChatRename[] = [];
+// Old name -> the name it was renamed to, so a reference by the old name finds the chat.
+const renamedToByDrone = new Map<string, Record<string, string>>();
+const RENAMED_TO_LIMIT = 50;
+
+function rememberRenamedTo(droneId: string, oldName: string, newName: string): void {
+  const renamedTo = renamedToByDrone.get(droneId) ?? {};
+  delete renamedTo[oldName];
+  renamedTo[oldName] = newName;
+  const oldest = Object.keys(renamedTo);
+  for (const name of oldest.slice(0, Math.max(0, oldest.length - RENAMED_TO_LIMIT))) delete renamedTo[name];
+  renamedToByDrone.set(droneId, renamedTo);
+}
+
 function chatNameOf(chatName: string | null | undefined): string {
   return String(chatName ?? '').trim() || 'default';
 }
@@ -21,6 +37,17 @@ function chatNameOf(chatName: string | null | undefined): string {
 export function publishChatIds(drones: readonly ChatIdSource[]): void {
   const next = new Map<string, ChatIds>();
   for (const drone of drones) if (drone.chatIds) next.set(drone.id, drone.chatIds);
+  for (const [droneId, chatIds] of next) {
+    const previous = idsByDrone.get(droneId);
+    if (!previous || previous === chatIds) continue;
+    const nameById = new Map(Object.entries(previous).map(([chatName, chatId]) => [chatId, chatName]));
+    for (const [newName, chatId] of Object.entries(chatIds)) {
+      const oldName = nameById.get(chatId);
+      if (oldName === undefined || oldName === newName) continue;
+      seenRenames.push({ droneId, oldName, newName });
+      rememberRenamedTo(droneId, oldName, newName);
+    }
+  }
   idsByDrone = next;
   for (const [droneId, renamed] of renamedIdsByDrone) {
     const listed = next.get(droneId) ?? {};
@@ -32,6 +59,13 @@ export function publishChatIds(drones: readonly ChatIdSource[]): void {
   }
 }
 
+/** Renames the summaries showed since the last call, in the order they happened. */
+export function takeSeenChatRenames(): ChatRename[] {
+  const renames = seenRenames;
+  seenRenames = [];
+  return renames;
+}
+
 /** The new name resolves to the same chat at once, before any view renders it. */
 export function renameChatId(droneId: string, oldName: string, newName: string): void {
   const chatId = chatIdFor(droneId, oldName);
@@ -39,6 +73,18 @@ export function renameChatId(droneId: string, oldName: string, newName: string):
   const renamed = renamedIdsByDrone.get(droneId) ?? {};
   renamed[chatNameOf(newName)] = chatId;
   renamedIdsByDrone.set(droneId, renamed);
+  rememberRenamedTo(droneId, chatNameOf(oldName), chatNameOf(newName));
+}
+
+/** The chat's name now: a name no chat holds any more leads to the chat it was renamed to. */
+export function currentChatName(droneId: string | null | undefined, chatName: string): string {
+  const id = String(droneId ?? '').trim();
+  const renamedTo = renamedToByDrone.get(id);
+  let name = chatName;
+  for (let hops = 0; renamedTo?.[name] && !chatIdFor(id, name) && hops < RENAMED_TO_LIMIT; hops += 1) {
+    name = renamedTo[name]!;
+  }
+  return name;
 }
 
 export function chatIdFor(droneId: string | null | undefined, chatName: string | null | undefined): string | null {
@@ -73,5 +119,7 @@ export const chatIdentityTesting = {
   reset() {
     idsByDrone = new Map();
     renamedIdsByDrone.clear();
+    renamedToByDrone.clear();
+    seenRenames = [];
   },
 };

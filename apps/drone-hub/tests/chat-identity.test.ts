@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chatIdFor, chatIdentityTesting, continuesChat, publishChatIds, renameChatId } from '../src/droneHub/app/chat-identity';
+import { chatIdFor, chatIdentityTesting, continuesChat, currentChatName, publishChatIds, renameChatId, takeSeenChatRenames } from '../src/droneHub/app/chat-identity';
 import { chatSelectionKey } from '../src/droneHub/app/chat-selection-model';
 
 afterEach(() => chatIdentityTesting.reset());
@@ -32,4 +32,25 @@ test('a renamed chat keeps its key under the new name before the summary shows i
   publishChatIds([{ id: 'drone', chatIds: { Renamed: 'chat-1', Notes: 'chat-2' } }]);
   expect(chatIdFor('drone', 'Roadmap')).toBeNull();
   expect(chatIdFor('drone', 'Renamed')).toBe('chat-1');
+});
+
+test('renames made anywhere are seen in the summaries, and an old name leads to the renamed chat', () => {
+  publishChatIds([{ id: 'drone', chatIds: { Plan: 'chat-1', Notes: 'chat-2' } }]);
+  expect(takeSeenChatRenames()).toEqual([]);
+
+  // Renamed on another device: the next summary shows the ID under a new name.
+  publishChatIds([{ id: 'drone', chatIds: { Roadmap: 'chat-1', Notes: 'chat-2' } }]);
+  publishChatIds([{ id: 'drone', chatIds: { 'Roadmap v2': 'chat-1', Notes: 'chat-2' } }]);
+
+  expect(takeSeenChatRenames()).toEqual([
+    { droneId: 'drone', oldName: 'Plan', newName: 'Roadmap' },
+    { droneId: 'drone', oldName: 'Roadmap', newName: 'Roadmap v2' },
+  ]);
+  expect(takeSeenChatRenames()).toEqual([]);
+  expect(currentChatName('drone', 'Plan')).toBe('Roadmap v2');
+  expect(currentChatName('drone', 'Notes')).toBe('Notes');
+
+  // A new chat that takes an old name is that chat, not the renamed one.
+  publishChatIds([{ id: 'drone', chatIds: { 'Roadmap v2': 'chat-1', Notes: 'chat-2', Plan: 'chat-3' } }]);
+  expect(currentChatName('drone', 'Plan')).toBe('Plan');
 });
