@@ -1,4 +1,4 @@
-import { takeTerminalOpenStartedAt, terminalModuleTiming } from './terminal-performance';
+import { takeTerminalFocusIntent, takeTerminalOpenStartedAt, terminalModuleTiming } from './terminal-performance';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -77,7 +77,7 @@ export function acquireTerminalView(
   view.terminal.options.theme = theme;
   view.fit.fit();
   view.connection.resize(view.terminal.cols, view.terminal.rows);
-  view.terminal.focus();
+  if (takeTerminalFocusIntent()) view.terminal.focus();
   view.connection.measure(reused ? 'view-restored' : 'view-created', started, {
     cols: view.terminal.cols,
     rows: view.terminal.rows,

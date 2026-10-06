@@ -1481,6 +1481,8 @@ export function DockableDroneWorkspace({
         migrateWorkspaceExplorerPanels(api);
         refreshWorkspacePanelTitles(api);
         syncEmptyWorkspaceSlots(api);
+        // A drone opens on its agent chat, not on whichever pane was last active.
+        api.getPanel(CHAT_PANEL_ID)?.api.setActive();
       } else {
         resetWorkspaceToChat(api);
       }
