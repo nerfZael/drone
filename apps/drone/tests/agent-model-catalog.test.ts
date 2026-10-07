@@ -652,6 +652,27 @@ describe('agent model catalog', () => {
     });
   });
 
+  test('asks native discovery for every provider when a picker wants them all', async () => {
+    const providers: Array<string | undefined> = [];
+    const router = new HubRouter(() => {}, async () => ({}));
+    registerAgentModelCatalogRoutes(router, {
+      normalizeBuiltinAgentId: () => null,
+      nativeModelCatalog: async (provider?: string) => {
+        providers.push(provider);
+        return { models: [] };
+      },
+      loadLifecycleRegistry: async () => ({ drones: {} }),
+      droneRuntime: () => 'container',
+      hostAgentInstalled: async () => false,
+      discoverModels: async () => ({ models: [] }),
+    });
+    for (const query of ['agent=native&providers=all', 'agent=native&providers=all&provider=gemini', 'agent=native']) {
+      await router.handle({ method: 'GET' } as any, {} as any, new URL(`http://hub.test/api/model-catalog?${query}`));
+    }
+    // An explicit provider still narrows it, and without providers=all the catalog is the one provider's, as before.
+    expect(providers).toEqual(['all', 'gemini', undefined]);
+  });
+
   test('host catalogs do not hydrate the drone registry', async () => {
     const responses: any[] = [];
     const router = new HubRouter((_response, status, body) => responses.push({ status, body }), async () => ({}));

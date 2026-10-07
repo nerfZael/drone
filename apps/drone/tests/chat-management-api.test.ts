@@ -1209,6 +1209,29 @@ describeSocketSuite('chat management api', () => {
     );
   });
 
+  test('a Built-in model named with its provider sets both, and Auto clears both', async () => {
+    const droneId = 'drone-chat-provider-model-ref';
+    await seedDrone(droneId);
+    const config = (body: unknown) => apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const info = async () => (await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`)).data;
+
+    expect((await config({ agent: { kind: 'native' }, model: 'cerebras:qwen-3-coder' })).r.status).toBe(200);
+    expect(await info()).toMatchObject({ provider: 'cerebras', model: 'qwen-3-coder' });
+    // Without an agent in the body, as a picker sends a model change.
+    expect((await config({ model: 'openrouter:anthropic/claude:free' })).r.status).toBe(200);
+    expect(await info()).toMatchObject({ provider: 'openrouter', model: 'anthropic/claude:free' });
+    expect((await config({ model: null })).r.status).toBe(200);
+    expect(await info()).toMatchObject({ provider: null, model: null });
+
+    // Another agent's model keeps its prefix: Codex names OpenRouter models this way itself.
+    expect((await config({ agent: { kind: 'builtin', id: 'codex' }, model: 'openrouter:some/model' })).r.status).toBe(200);
+    expect(await info()).toMatchObject({ provider: null, model: 'openrouter:some/model' });
+  });
+
   test('clears read-only agent permission mode when switching to an unsupported agent', async () => {
     const droneId = 'drone-chat-agent-permission-clear';
     await seedDrone(droneId);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Popover } from 'radix-ui';
-import { formatReasoningLabel } from '@drone/assistant-chat';
+import { formatReasoningLabel, splitNativeModelRef } from '@drone/assistant-chat';
 
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
@@ -29,6 +29,13 @@ export type ChatComposerModelPickerConfig = {
   agentLabel?: string;
   /** For chats whose agent is fixed: the agent, named but not changeable at the top of the menu. */
   agentName?: string;
+  /**
+   * The providers the models come from, for an agent with several (the Built-in agent): a row above the models picks
+   * which provider's models show. A choice from no listed provider, such as Auto, shows under every one.
+   */
+  providers?: ReadonlyArray<{ id: string; label: string }>;
+  /** Where the last model picked from each provider is remembered, so choosing that provider again brings it back. */
+  providerMemoryKey?: string;
   allowCustomModel?: boolean;
   requireExplicitModelSelection?: boolean;
   statusMessage?: string;
@@ -172,6 +179,21 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** A started chat's agent, which it keeps: named on the section's own line rather than offered for change. */
+export function FixedAgentRow({ name }: { name: string }) {
+  return (
+    <div
+      className="flex min-h-9 flex-shrink-0 items-center gap-2 px-3"
+      title="A chat keeps its agent once it has started."
+    >
+      <span className="flex-shrink-0 text-[.8125rem] font-semibold text-[var(--fg-strong)]">Agent</span>
+      <span data-chat-composer-model-picker-agent="true" className="min-w-0 truncate text-[.75rem] font-medium text-[var(--muted)]">
+        {name}
+      </span>
+    </div>
+  );
+}
+
 /** Up to this many models show at once; more get a search box and scroll. */
 const FEW_MODELS = 8;
 
@@ -209,16 +231,35 @@ export function ChatComposerModelMenuSections({
     visibleReasoning,
   } = resolveChatComposerModelSelection(config);
   const [searchQuery, setSearchQuery] = React.useState('');
-  const manyModels = models.length > FEW_MODELS;
+  const providers = config.providers && config.providers.length > 1 ? config.providers : null;
+  const listedProvider = (provider: string) => providers?.some((candidate) => candidate.id === provider) ?? false;
+  // The chosen model's provider; on Auto, which belongs to none, the provider the chat says it is on (its default's).
+  const chatProvider = listedProvider(selectedProvider)
+    ? selectedProvider
+    : listedProvider(config.currentProvider) ? config.currentProvider : '';
+  const [viewedProvider, setViewedProvider] = React.useState(() => chatProvider || providers?.[0]?.id || '');
+  // A choice made elsewhere, or a provider list that arrives later, shows that provider's models.
+  React.useEffect(() => {
+    setViewedProvider((current) => chatProvider || (listedProvider(current) ? current : providers?.[0]?.id || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatProvider, providers?.map((provider) => provider.id).join(',')]);
+  const agentModelPicks = useDroneHubUiStore((state) => state.agentModelPicks);
+  const rememberAgentModelPick = useDroneHubUiStore((state) => state.rememberAgentModelPick);
+  const providerMemory = (provider: string) =>
+    config.providerMemoryKey ? `${config.providerMemoryKey}@${provider}` : '';
+  const providerModels = providers
+    ? models.filter((model) => model.provider === viewedProvider || !listedProvider(model.provider))
+    : models;
+  const manyModels = providerModels.length > FEW_MODELS;
   // A custom model ID is typed into the search box, so it shows for that too.
   const showSearch = searchable && (manyModels || allowCustomModel);
 
   const normalizedQuery = showSearch ? searchQuery.trim().toLowerCase() : '';
   const visibleModels = normalizedQuery
-    ? models.filter((choice) =>
+    ? providerModels.filter((choice) =>
         `${choice.name ?? ''} ${choice.id}`.toLowerCase().includes(normalizedQuery),
       )
-    : models;
+    : providerModels;
   const customModelId =
     allowCustomModel &&
     normalizedQuery &&
@@ -261,6 +302,9 @@ export function ChatComposerModelMenuSections({
       'model',
     );
     setSearchQuery('');
+    const memory = listedProvider(model.provider) ? providerMemory(model.provider) : '';
+    // Kept as the bare model: one list names it `provider:model`, another names the provider apart.
+    if (memory) rememberAgentModelPick(memory, { model: splitNativeModelRef(model.id).model, reasoning: '' });
     if (!showReasoning && layout === 'standalone') onDone();
   };
 
@@ -296,6 +340,42 @@ export function ChatComposerModelMenuSections({
     </div>
   ) : null;
 
+  // Choosing a provider shows its models; one picked from it before comes back with it.
+  const selectProvider = (provider: string) => {
+    setViewedProvider(provider);
+    setSearchQuery('');
+    if (provider === chatProvider) return;
+    const remembered = agentModelPicks[providerMemory(provider)]?.model;
+    const model = remembered
+      ? models.find((choice) => choice.provider === provider && splitNativeModelRef(choice.id).model === remembered)
+      : undefined;
+    if (model) selectModel(model);
+  };
+
+  const providerChips = providers ? (
+    <div role="group" aria-label="Provider" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-2 pb-2">
+      {providers.map((provider) => {
+        const active = provider.id === viewedProvider;
+        return (
+          <button
+            key={provider.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => selectProvider(provider.id)}
+            aria-pressed={active}
+            className={`inline-flex h-8 items-center justify-center rounded-[.5rem] border px-2.5 text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
+              active
+                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
+                : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
+            }`}
+          >
+            {provider.label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   const modelGrid = (
     <>
       {showSearch ? (
@@ -311,7 +391,7 @@ export function ChatComposerModelMenuSections({
       ) : null}
       {/* Many models scroll in a box about four rows tall, so reasoning stays in sight below them. */}
       <div className={`min-h-0 flex-shrink-0 px-2 pb-2 ${manyModels ? 'max-h-[9.5rem] overflow-y-auto' : ''}`}>
-        <div role="group" aria-label="Model" className="grid grid-cols-2 gap-1">
+        <div role="group" aria-label="Model" className="grid grid-cols-3 gap-1">
           {visibleModels.length > 0 ? (
             visibleModels.map((choice) => {
               const active =
@@ -330,12 +410,11 @@ export function ChatComposerModelMenuSections({
                   className={chipClass(active)}
                 >
                   <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Auto'}</span>
-                  {active ? <span className="ml-1 flex-shrink-0 text-[var(--accent)]"><CheckIcon /></span> : null}
                 </button>
               );
             })
           ) : !customModelId ? (
-            <div className="col-span-2 flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
+            <div className="col-span-3 flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
               No matching models.
             </div>
           ) : null}
@@ -345,12 +424,13 @@ export function ChatComposerModelMenuSections({
               disabled={disabled}
               onClick={() =>
                 selectModel({
-                  provider: selectedProvider,
+                  // Typed while a provider's models show, it is that provider's model.
+                  provider: providers ? viewedProvider : selectedProvider,
                   id: customModelId,
                   name: customModelId,
                 })
               }
-              className="col-span-2 flex min-h-8 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
+              className="col-span-3 flex min-h-8 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
             >
               <span className="truncate">Use model ID “{customModelId}”</span>
             </button>
@@ -362,16 +442,11 @@ export function ChatComposerModelMenuSections({
 
   return (
     <>
-      {config.agentName ? (
+      {config.agentName ? <FixedAgentRow name={config.agentName} /> : null}
+      {providerChips ? (
         <>
-          <SectionTitle>Agent</SectionTitle>
-          <div
-            data-chat-composer-model-picker-agent="true"
-            title="A chat keeps its agent once it has started."
-            className="flex-shrink-0 truncate px-3 pb-2 text-[.75rem] font-medium text-[var(--chat-composer-fg)]"
-          >
-            {config.agentName}
-          </div>
+          <SectionTitle>Provider</SectionTitle>
+          {providerChips}
         </>
       ) : null}
       <SectionTitle>Model</SectionTitle>
@@ -454,7 +529,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
               align="start"
               sideOffset={6}
               collisionPadding={10}
-              className="z-50 flex max-h-[min(64vh,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)]"
+              className="z-50 flex max-h-[min(64vh,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)]"
             >
               {menuContent}
             </Popover.Content>

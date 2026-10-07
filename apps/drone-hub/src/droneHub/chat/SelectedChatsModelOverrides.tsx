@@ -5,7 +5,7 @@ import type { CanvasChatTarget } from '../canvas/canvas-messaging';
 import type { DroneSummary } from '../types';
 import { fetchDroneChatStateCached } from '../app/chat-api';
 import { requestJson } from '../http';
-import { normalizeAgentModelCatalog, type AgentModelCatalogOption } from '../app/use-agent-model-catalog';
+import { modelCatalogQuery, normalizeAgentModelCatalog, type AgentModelCatalogOption } from '../app/use-agent-model-catalog';
 import { buildExternalAgentComposerControls } from '../app/external-agent-composer-controls';
 import { BUILTIN_AGENT_OPTIONS } from '../app/app-config';
 import { composerAgentName } from './ChatComposerRuntimePicker';
@@ -51,6 +51,7 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
     void (async () => {
       const sources = new Map<string, { agent: string; runtime: string }>();
       if (draftAgentKey?.startsWith('builtin:')) sources.set(`${draftAgentKey}:container`, { agent: draftAgentKey.slice(8), runtime: 'container' });
+      if (draftAgentKey === 'native') sources.set('native', { agent: 'native', runtime: 'container' });
       const selected = JSON.parse(targetKey) as Array<CanvasChatTarget & { runtime: string }>;
       const configs = await Promise.allSettled(selected.map(async target => {
         const data = await fetchDroneChatStateCached({ ...target, includeConfig: true, includeTranscript: false, signal: controller.signal });
@@ -58,6 +59,7 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
         if (!info) return null;
         const agent = info.agent;
         if (agent.kind === 'builtin') sources.set(`${agent.id}:${target.runtime}`, { agent: agent.id, runtime: target.runtime });
+        if (agent.kind === 'native') sources.set('native', { agent: 'native', runtime: 'container' });
         const agentKey = agent.kind === 'builtin' ? `builtin:${agent.id}` : agent.kind;
         const agentName = agent.kind === 'custom'
           ? agent.label
@@ -65,7 +67,7 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
         return { agentKey, agentName, model: info.model, reasoning: info.reasoning };
       }));
       const catalogs = await Promise.allSettled([...sources.values()].map(async source => {
-        const data = await requestJson(`/api/model-catalog?${new URLSearchParams(source)}`, { signal: controller.signal });
+        const data = await requestJson(`/api/model-catalog?${modelCatalogQuery(source.agent, source.runtime === 'host' ? 'host' : 'container')}`, { signal: controller.signal });
         return normalizeAgentModelCatalog(data);
       }));
       if (controller.signal.aborted) return;

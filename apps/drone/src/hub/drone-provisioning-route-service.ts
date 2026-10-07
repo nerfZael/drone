@@ -1,4 +1,4 @@
-import { chatAgentSupportsReasoning } from '@drone/assistant-chat';
+import { chatAgentSupportsReasoning, isNativeAgentProviderId, splitNativeModelRef } from '@drone/assistant-chat';
 import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -120,10 +120,14 @@ function buildInitialSeedConfig(opts: {
   ) {
     return undefined;
   }
+  // A Built-in model may name its provider, `provider:model`; the seed keeps them apart, as the chat does.
+  const nativeModel = opts.seedAgent?.kind === 'native' ? splitNativeModelRef(opts.seedModel) : null;
+  const seedProvider = nativeModel?.provider || opts.seedProvider;
+  const seedModel = nativeModel ? nativeModel.model || null : opts.seedModel;
   return {
     chatName: opts.seedChatName,
-    ...(opts.seedProvider ? { provider: opts.seedProvider } : {}),
-    ...(opts.seedModel ? { model: opts.seedModel } : {}),
+    ...(seedProvider ? { provider: seedProvider } : {}),
+    ...(seedModel ? { model: seedModel } : {}),
     ...(opts.seedReasoning ? { reasoning: opts.seedReasoning } : {}),
     ...(opts.seedAgentPermissionMode !== 'execute'
       ? { agentPermissionMode: opts.seedAgentPermissionMode }
@@ -411,13 +415,7 @@ function createDroneProvisioningServiceHandler(
         const seedProviderRaw = String(
           body?.seedProvider ?? body?.seed?.provider ?? '',
         ).trim().toLowerCase();
-        let seedProvider =
-          seedProviderRaw === 'openai' ||
-          seedProviderRaw === 'gemini' ||
-          seedProviderRaw === 'openrouter' ||
-          seedProviderRaw === 'codex'
-            ? seedProviderRaw
-            : '';
+        let seedProvider: string = isNativeAgentProviderId(seedProviderRaw) ? seedProviderRaw : '';
         if (seedProviderRaw && !seedProvider) {
           json(res, 400, { ok: false, error: 'invalid Built-in model provider' });
           return;
@@ -1011,12 +1009,7 @@ function createDroneProvisioningServiceHandler(
               const seedProviderRaw = String(
                 raw?.seedProvider ?? raw?.seed?.provider ?? '',
               ).trim().toLowerCase();
-              let seedProvider =
-                seedProviderRaw === 'openai' ||
-                seedProviderRaw === 'gemini' ||
-                seedProviderRaw === 'codex'
-                  ? seedProviderRaw
-                  : '';
+              let seedProvider: string = isNativeAgentProviderId(seedProviderRaw) ? seedProviderRaw : '';
               if (seedProviderRaw && !seedProvider) {
                 rejected.push({ name, error: 'invalid Built-in model provider', status: 400 });
                 continue;

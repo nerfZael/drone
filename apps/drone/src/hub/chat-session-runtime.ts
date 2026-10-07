@@ -4,7 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { AgentRunFileChanges } from '@blip/protocol';
-import { chatAgentSupportsReasoning, normalizeAgentSkillUses } from '@drone/assistant-chat';
+import {
+  chatAgentSupportsReasoning,
+  isNativeAgentProviderId,
+  normalizeAgentSkillUses,
+  splitNativeModelRef,
+} from '@drone/assistant-chat';
 import { normalizeMcpChatAccessScope } from './mcp-chat-access';
 import { settleAgentRunActivity } from './builtin-agent-activity';
 
@@ -1652,7 +1657,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
             delete cur.approvalPolicy;
           }
         }
-        if (opts.setProvider) {
+        // A Built-in model may name its provider, `provider:model`: the two are kept apart, as a provider set on its
+        // own is. Auto, no model, is the default provider's default model, so it clears the provider too.
+        const nativeModel = effectiveAgent.kind === 'native' && opts.setModel ? splitNativeModelRef(opts.model) : null;
+        const setProvider = opts.setProvider || Boolean(nativeModel?.provider) || (nativeModel !== null && !nativeModel.model);
+        const providerValue = nativeModel?.provider ?? (opts.setProvider ? opts.provider : null);
+        if (setProvider) {
           if (effectiveAgent.kind !== 'native') {
             const error: Error & { statusCode?: number } = new Error(
               'provider is only supported for Built-in chats',
@@ -1660,22 +1670,18 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
             error.statusCode = 400;
             throw error;
           }
-          const provider = String(opts.provider ?? '')
+          const provider = String(providerValue ?? '')
             .trim()
             .toLowerCase();
-          if (
-            provider === 'openai' ||
-            provider === 'codex' ||
-            provider === 'gemini' ||
-            provider === 'openrouter'
-          ) {
+          if (isNativeAgentProviderId(provider)) {
             cur.nativeProvider = provider;
           } else {
             delete cur.nativeProvider;
           }
         }
         if (opts.setModel) {
-          if (opts.model) cur.model = opts.model;
+          const model = nativeModel ? nativeModel.model : opts.model;
+          if (model) cur.model = model;
           else delete cur.model;
         }
         if (opts.setReasoning) {

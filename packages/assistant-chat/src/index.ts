@@ -25,6 +25,7 @@ export * from './groq-transcription-prompt.js';
 export * from './merge-workspace-transfer-progress.js';
 export * from './model-catalog.js';
 export * from './native-chat-types.js';
+export * from './native-model-ref.js';
 export * from './pending-prompts.js';
 export * from './pull-request-confirmation.js';
 export * from './resource-subscription-presentation.js';

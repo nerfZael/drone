@@ -2,7 +2,7 @@ import React from 'react';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components/MenuSelect';
 import type { ChatAgentConfig } from '../../domain';
 import { buildExternalAgentComposerControls } from '../app/external-agent-composer-controls';
-import { normalizeAgentModelCatalog, type AgentModelCatalogOption } from '../app/use-agent-model-catalog';
+import { modelCatalogQuery, normalizeAgentModelCatalog, type AgentModelCatalogOption } from '../app/use-agent-model-catalog';
 import { repoPathLabel } from '../app/repo-path-label';
 import type { ChatComposerRuntimePickerConfig } from '../chat/ChatComposerRuntimePicker';
 import { requestJson } from '../http';
@@ -22,7 +22,7 @@ function useModelCatalog(agent: ChatAgentConfig | null | undefined): { models: A
   React.useEffect(() => {
     if (!id) return;
     const controller = new AbortController();
-    const query = new URLSearchParams(id === 'native' ? { agent: id } : { agent: id, runtime: 'container' });
+    const query = modelCatalogQuery(id, 'container');
     void requestJson(`/api/model-catalog?${query}`, { signal: controller.signal })
       .then((data) => { if (!controller.signal.aborted) setState({ id, models: normalizeAgentModelCatalog(data), error: null }); })
       .catch((error) => {

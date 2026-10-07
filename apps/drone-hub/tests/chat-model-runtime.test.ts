@@ -242,3 +242,33 @@ test('Codex picker keeps OpenRouter routes distinct and clears unsupported reaso
   switchedPicker.onSelect({ provider: 'external', id: 'vendor/model' }, 'model');
   expect(updates.at(-1)).toEqual({ model: 'vendor/model', reasoning: 'high' });
 });
+
+test('Built-in picker files each model under its provider and offers the providers', () => {
+  const updates: any[] = [];
+  const opts = {
+    hasChats: true, modelControlEnabled: true, currentAgentKey: 'native',
+    models: [
+      { id: 'codex:gpt-a', label: 'GPT A', reasoningLevels: ['low', 'high'], defaultReasoningLevel: 'low', isDefault: true },
+      { id: 'cerebras:qwen', label: 'Qwen', reasoningLevels: ['off'], defaultReasoningLevel: 'off' },
+    ],
+    currentModel: null, currentReasoning: null, modelDisabled: false,
+    loading: false, error: null, stale: false, transcripts: [], onUpdate: (settings: any) => updates.push(settings),
+  };
+  const picker = buildExternalAgentComposerControls(opts)?.controls[0];
+  if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
+  expect(picker.providers?.map((provider) => provider.label)).toEqual(['ChatGPT', 'Cerebras']);
+  // On Auto, the default model's provider shows first.
+  expect(picker.currentProvider).toBe('codex');
+  expect(picker.options.filter((option) => option.id).map((option) => `${option.provider}/${option.id}`))
+    .toEqual(['codex/codex:gpt-a', 'codex/codex:gpt-a', 'cerebras/cerebras:qwen']);
+  picker.onSelect({ provider: 'cerebras', id: 'cerebras:qwen' }, 'model');
+  expect(updates).toEqual([{ model: 'cerebras:qwen', reasoning: 'off' }]);
+  const onCerebras = buildExternalAgentComposerControls({ ...opts, currentModel: 'cerebras:qwen', currentReasoning: 'off' })?.controls[0];
+  expect(onCerebras?.kind === 'model-picker' && onCerebras.currentProvider).toBe('cerebras');
+  // A model ID typed under a provider is that provider's.
+  picker.onSelect({ provider: 'gemini', id: 'gemini-next' }, 'model');
+  expect(updates.at(-1)).toMatchObject({ model: 'gemini:gemini-next' });
+  // Other agents have no provider row.
+  const codex = buildExternalAgentComposerControls({ ...opts, currentAgentKey: 'builtin:codex' })?.controls[0];
+  expect(codex?.kind === 'model-picker' && codex.providers).toBeUndefined();
+});

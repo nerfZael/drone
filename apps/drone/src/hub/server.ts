@@ -23,7 +23,7 @@ import { URL } from 'node:url';
 import { withDroneOpLock } from './drone-op-lock';
 
 import { BaseConfigManager } from 'dvm';
-import { normalizeAgentPlan, sameAgentPlan } from '@drone/assistant-chat';
+import { NATIVE_AGENT_PROVIDERS, nativeModelRef, normalizeAgentPlan, sameAgentPlan } from '@drone/assistant-chat';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import {
@@ -5875,11 +5875,26 @@ async function startDroneHubApiServerWithLifecycle(
 
   registerAgentModelCatalogRoutes(apiRouter, {
     normalizeBuiltinAgentId,
-    nativeModelCatalog: async (requestedProvider?: LlmProviderId) => {
+    nativeModelCatalog: async (requestedProvider?: LlmProviderId | 'all') => {
       const [snapshot, effectiveProvider] = await Promise.all([
         assistantService.defaultSettings(),
         resolveEffectiveLlmProvider(),
       ]);
+      if (requestedProvider === 'all') {
+        // Every configured provider's models, each named `provider:model` so a picker's one string carries both.
+        const defaultRef = nativeModelRef(snapshot.defaultModel.provider, snapshot.defaultModel.model);
+        const models = buildNativeModelCatalog(snapshot.models, snapshot.defaultModel).map((model) => {
+          const id = nativeModelRef(model.provider, model.id);
+          return { ...model, id, isDefault: id === defaultRef };
+        });
+        const present = new Set(models.map((model) => model.provider));
+        return {
+          provider: snapshot.defaultModel.provider || effectiveProvider.provider,
+          providers: NATIVE_AGENT_PROVIDERS.filter((provider) => present.has(provider.id)),
+          defaultModel: { ...snapshot.defaultModel, model: defaultRef },
+          models,
+        };
+      }
       const provider = requestedProvider ?? effectiveProvider.provider;
       const models = buildNativeModelCatalog(snapshot.models, snapshot.defaultModel, provider);
       const configuredDefault =

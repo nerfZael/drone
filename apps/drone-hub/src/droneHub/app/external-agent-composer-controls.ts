@@ -1,5 +1,11 @@
 import type { ChatComposerControlsConfig } from '../chat';
-import { buildModelCatalogChoices } from '@drone/assistant-chat';
+import {
+  buildModelCatalogChoices,
+  isNativeAgentProviderId,
+  NATIVE_AGENT_PROVIDERS,
+  nativeModelRef,
+  splitNativeModelRef,
+} from '@drone/assistant-chat';
 import type { ChatModelOption } from './app-types';
 import {
   displayedChatModelTitle,
@@ -86,10 +92,20 @@ export function buildExternalAgentComposerControls(opts: {
             name: 'Auto',
           },
         ];
-  const modelChoices = [
-    ...autoChoices,
-    ...buildModelCatalogChoices(opts.models, 'external'),
-  ];
+  // The Built-in agent's models are named `provider:model`, from every configured provider: each choice is filed
+  // under its provider, and the picker offers the providers. Auto, the default model, shows under every one.
+  const native = opts.currentAgentKey === 'native';
+  const catalogChoices = buildModelCatalogChoices(opts.models, 'external').map((choice) => {
+    const provider = native ? splitNativeModelRef(choice.id).provider : null;
+    return provider ? { ...choice, provider } : choice;
+  });
+  const modelChoices = [...autoChoices, ...catalogChoices];
+  const presentProviders = new Set(catalogChoices.map((choice) => choice.provider));
+  const providers = native ? NATIVE_AGENT_PROVIDERS.filter((provider) => presentProviders.has(provider.id)) : [];
+  const defaultCatalogModel = opts.models.find((model) => model.isDefault) ?? opts.models[0];
+  const currentProvider = native
+    ? splitNativeModelRef(opts.currentModel).provider ?? splitNativeModelRef(defaultCatalogModel?.id).provider ?? 'external'
+    : 'external';
   const statusMessage = opts.error
     ? `${opts.models.length > 0 ? 'Using the last detected catalog. ' : ''}${opts.error}`
     : opts.stale
@@ -106,8 +122,9 @@ export function buildExternalAgentComposerControls(opts: {
       {
         kind: 'model-picker',
         id: 'external-model',
-        currentProvider: 'external',
+        currentProvider,
         currentModel: opts.currentModel ?? '',
+        ...(providers.length > 1 ? { providers, providerMemoryKey: 'native' } : {}),
         currentThinkingLevel: displayedReasoning ?? undefined,
         agentChoosesDefaultReasoning,
         options: modelChoices,
@@ -128,6 +145,10 @@ export function buildExternalAgentComposerControls(opts: {
           if (!choice.id) {
             opts.onUpdate({ model: null, reasoning: null });
             return;
+          }
+          // A model ID typed in the Built-in picker is named with the provider it was typed under.
+          if (native && !splitNativeModelRef(choice.id).provider && isNativeAgentProviderId(choice.provider)) {
+            choice = { ...choice, id: nativeModelRef(choice.provider, choice.id) };
           }
           const catalogModel = opts.models.find((model) => model.id === choice.id) ?? null;
           const hasCatalogReasoning = Boolean(catalogModel?.reasoningLevels?.length);

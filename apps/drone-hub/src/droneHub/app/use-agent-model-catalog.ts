@@ -14,12 +14,21 @@ type CachedAgentModelCatalog = {
   discoveredAt: string | null;
 };
 
-const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v5');
+// v6: the Built-in agent's models are named `provider:model`, across every configured provider.
+const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v6');
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const CATALOG_UPDATED_EVENT = 'drone-hub:agent-model-catalog-updated';
 
 function text(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+/**
+ * The model catalog request for an agent. The Built-in agent lists every configured provider's models, named
+ * `provider:model`, so its picker can offer the provider too.
+ */
+export function modelCatalogQuery(agentId: string, runtime: 'container' | 'host'): URLSearchParams {
+  return new URLSearchParams(agentId === 'native' ? { agent: agentId, providers: 'all' } : { agent: agentId, runtime });
 }
 
 export function normalizeAgentModelCatalog(value: unknown): AgentModelCatalogOption[] {
@@ -152,7 +161,7 @@ export function useAgentModelCatalog(opts: {
     setLoading(true);
     setError(null);
     try {
-      const query = new URLSearchParams({ agent: opts.agentId, runtime: opts.runtime });
+      const query = modelCatalogQuery(opts.agentId, opts.runtime);
       const response = await fetch(`/api/model-catalog?${query.toString()}`);
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body?.ok === false) throw new Error(body?.error || `Model detection failed (${response.status})`);

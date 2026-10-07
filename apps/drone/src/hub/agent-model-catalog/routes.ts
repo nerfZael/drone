@@ -74,7 +74,10 @@ export function registerAgentModelCatalogRoutes(
       if (requestedProvider && !['openai', 'codex', 'gemini', 'openrouter', 'cerebras'].includes(requestedProvider)) {
         return fail(400, 'provider must be openai, codex, gemini, openrouter, or cerebras');
       }
-      const catalog = await deps.nativeModelCatalog(requestedProvider || undefined);
+      // providers=all lists every configured provider's models, named `provider:model`, for a picker that offers
+      // the provider too; without it, the one provider's models keep their plain ids.
+      const allProviders = String(url.searchParams.get('providers') ?? '').trim().toLowerCase() === 'all';
+      const catalog = await deps.nativeModelCatalog(allProviders && !requestedProvider ? 'all' : requestedProvider || undefined);
       json(200, { ok: true, agent: 'native', runtime, ...catalog, source: 'native' });
       return;
     }

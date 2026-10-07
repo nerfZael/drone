@@ -5,6 +5,7 @@ import { Popover } from 'radix-ui';
 import type { UiMenuSelectEntry } from '../../ui/components';
 import {
   ChatComposerModelMenuSections,
+  FixedAgentRow,
   resolveChatComposerModelSelection,
   type ChatComposerModelPickerConfig,
 } from './ChatComposerModelPicker';
@@ -61,7 +62,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Every agent at once, one click each: there are only a few, so there is no list to open or search. */
+/**
+ * Every agent at once, one click each: there are only a few, so there is no list to open or search. A started chat
+ * keeps its agent, so then the agent is only named.
+ */
 function AgentSection({
   agent,
   onDone,
@@ -69,6 +73,10 @@ function AgentSection({
   agent: ChatComposerRuntimeAgentConfig;
   onDone: () => void;
 }) {
+  const others = agent.entries.filter((entry) =>
+    entry.kind !== 'separator' && entry.value !== agent.value && !agent.actionValues?.includes(entry.value));
+  const fixed = agent.disabled || (others.length > 0 && others.every((entry) => entry.kind !== 'separator' && entry.disabled));
+  if (fixed) return <FixedAgentRow name={agent.label} />;
   return (
     <>
       <SectionTitle>Agent</SectionTitle>
@@ -76,14 +84,14 @@ function AgentSection({
         role="group"
         aria-label="Agent"
         title={agent.disabled ? 'The agent cannot be changed for this chat.' : undefined}
-        className="grid flex-shrink-0 grid-cols-2 gap-1 px-2 pb-2"
+        className="grid flex-shrink-0 grid-cols-3 gap-1 px-2 pb-2"
       >
         {agent.entries.map((entry, index) => {
           if (entry.kind === 'separator') {
             return (
               <div
                 key={entry.key ?? `separator-${index}`}
-                className="col-span-2 mx-1 my-0.5 h-px bg-[var(--border-subtle)]"
+                className="col-span-3 mx-1 my-0.5 h-px bg-[var(--border-subtle)]"
                 aria-hidden="true"
               />
             );
@@ -111,7 +119,6 @@ function AgentSection({
               }`}
             >
               <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-              {active ? <span className="ml-1 flex-shrink-0 text-[var(--accent)]"><CheckIcon /></span> : null}
             </button>
           );
         })}
@@ -258,7 +265,7 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
             align="start"
             sideOffset={6}
             collisionPadding={10}
-            className="z-50 flex max-h-[min(72vh,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-y-auto rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] pt-0.5 shadow-[var(--chat-composer-shadow)]"
+            className="z-50 flex max-h-[min(72vh,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.25rem))] flex-col overflow-y-auto rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] pt-0.5 shadow-[var(--chat-composer-shadow)]"
           >
             <ChatComposerRuntimePanel config={config} onDone={() => setOpen(false)} />
           </Popover.Content>

@@ -1,3 +1,4 @@
+import { NATIVE_AGENT_PROVIDERS } from '@drone/assistant-chat';
 import type { ChatComposerControlsConfig } from '../chat';
 import type {
   AssistantModelOption,
@@ -41,6 +42,9 @@ export function buildNativeAgentComposerControls({
         currentModel: thread?.model ?? '',
         currentThinkingLevel: thread?.thinkingLevel ?? 'off',
         options: models,
+        // Models come from every configured provider: the picker offers the providers, and remembers a model per one.
+        providers: NATIVE_AGENT_PROVIDERS.filter((provider) => models.some((model) => model.provider === provider.id)),
+        providerMemoryKey: 'native',
         title: 'Choose model and reasoning',
         disabled: !thread || busy,
         searchable: true,

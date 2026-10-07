@@ -1,4 +1,5 @@
 import {
+  nativeModelRef,
   normalizePresentedChatResourceSubscriptions,
   type PresentedChatResourceSubscription,
 } from '@drone/assistant-chat';
@@ -319,8 +320,11 @@ function normalizeChatInfoPayloadBase(
 }
 
 export function normalizeChatInfoPayload(data: any): ChatInfo {
+  const base = normalizeChatInfoPayloadBase(data);
   return {
-    ...normalizeChatInfoPayloadBase(data),
+    ...base,
+    // A Built-in chat's model is named with its provider, as the Built-in catalog names its models.
+    ...(base.agent.kind === 'native' && base.model ? { model: nativeModelRef(data?.provider, base.model) } : {}),
     chatId: String(data?.chatId ?? '').trim() || null,
     subscriptions: normalizeChatResourceSubscriptionsPayload(data?.subscriptions),
     agentLocked: data?.agentLocked === true,

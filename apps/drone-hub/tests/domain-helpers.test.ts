@@ -49,6 +49,17 @@ describe('drone hub domain helpers', () => {
     ]);
   });
 
+  test('names a Built-in chat\'s model with its provider, and only a Built-in chat\'s', () => {
+    const base = { name: 'd', chat: 'default', sessionName: 's', createdAt: '2026-02-10T00:00:00.000Z' };
+    expect(normalizeChatInfoPayload({ ...base, agent: { kind: 'native' }, provider: 'gemini', model: 'gemini-3' }).model)
+      .toBe('gemini:gemini-3');
+    expect(normalizeChatInfoPayload({ ...base, agent: { kind: 'native' }, provider: null, model: 'gemini-3' }).model)
+      .toBe('gemini-3');
+    expect(normalizeChatInfoPayload({ ...base, agent: { kind: 'native' }, provider: 'gemini', model: null }).model).toBeNull();
+    expect(normalizeChatInfoPayload({ ...base, agent: { kind: 'builtin', id: 'codex' }, provider: 'gemini', model: 'x' }).model)
+      .toBe('x');
+  });
+
   test('normalizes chat agent payloads for custom and builtin agents', () => {
     const custom = normalizeChatInfoPayload({
       name: 'auth-drone',

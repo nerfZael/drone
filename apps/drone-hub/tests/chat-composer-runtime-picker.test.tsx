@@ -91,6 +91,14 @@ test('one picker chooses the agent, model, reasoning, and access', async () => {
     // Every agent is in sight: one click switches.
     await act(async () => button('Claude Code').click());
     await act(async () => button('Never ask').click());
+    // A started chat keeps its agent: the panel names it on one line instead of offering the others.
+    await act(async () => root.render(<ChatComposerRuntimePanel config={{
+      ...config,
+      agent: { ...config.agent!, entries: config.agent!.entries.map((entry) => entry.kind === 'separator' || entry.value === 'builtin:codex' ? entry : { ...entry, disabled: true }) },
+    }} onDone={() => {}} />));
+    expect(element.querySelector('[data-chat-composer-model-picker-agent]')?.textContent).toBe('Codex');
+    expect(button('Claude Code')).toBeUndefined();
+    await act(async () => root.render(<ChatComposerRuntimePanel config={config} onDone={() => changes.push('done')} />));
     // The agent and access keep the panel open, so several can be set at once.
     expect(changes).toEqual(['agent:builtin:claude', 'approvals:none']);
     // Reasoning, chosen last, closes it.
@@ -197,6 +205,81 @@ test('many models get a search box', async () => {
     // Model 1, 10 and 11.
     expect(modelButtons()).toBe(3);
   } finally {
+    await act(async () => root.unmount());
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
+  }
+});
+
+test('the provider row shows one provider\'s models and brings back the one last picked there', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  const picks = useDroneHubUiStore.getState().agentModelPicks;
+  const element = dom.document.createElement('div');
+  dom.document.body.appendChild(element);
+  const root = createRoot(element as unknown as HTMLElement);
+  const selected: string[] = [];
+  let current = { provider: 'codex', id: 'codex:gpt-a' };
+  const config = (): ChatComposerRuntimePickerConfig => ({
+    model: {
+      currentProvider: current.provider,
+      currentModel: current.id,
+      showReasoning: false,
+      providers: [{ id: 'codex', label: 'ChatGPT' }, { id: 'openai', label: 'OpenAI' }],
+      providerMemoryKey: 'native',
+      options: [
+        { provider: 'external', id: '', name: 'Auto' },
+        { provider: 'codex', id: 'codex:gpt-a', name: 'GPT A' },
+        { provider: 'openai', id: 'openai:gpt-a', name: 'GPT A' },
+        { provider: 'openai', id: 'openai:gpt-b', name: 'GPT B' },
+      ],
+      onSelect: (choice) => {
+        selected.push(choice.id);
+        current = { provider: choice.provider, id: choice.id };
+      },
+    },
+  });
+  const render = () => act(async () => root.render(<ChatComposerRuntimePanel config={config()} onDone={() => {}} />));
+  const models = () => Array.from(element.querySelectorAll('[aria-label="Model"] button')).map((button) => button.textContent);
+  const button = (group: string, label: string) => Array.from(element.querySelectorAll(`[aria-label="${group}"] button`))
+    .find((candidate) => candidate.textContent === label) as unknown as HTMLButtonElement;
+  try {
+    useDroneHubUiStore.setState({ agentModelPicks: {} });
+    // On Auto, which is no provider's, the row starts on the provider the chat is on, not the first one.
+    current = { provider: 'openai', id: '' };
+    await render();
+    expect(models()).toEqual(['Auto', 'GPT A', 'GPT B']);
+    await act(async () => root.render(<></>));
+    current = { provider: 'codex', id: 'codex:gpt-a' };
+    await render();
+    // Auto belongs to no provider, so it shows under each.
+    expect(models()).toEqual(['Auto', 'GPT A']);
+    await act(async () => button('Provider', 'OpenAI').click());
+    // Nothing picked from OpenAI yet: choosing it only shows its models.
+    expect(selected).toEqual([]);
+    expect(models()).toEqual(['Auto', 'GPT A', 'GPT B']);
+    await act(async () => button('Model', 'GPT B').click());
+    await render();
+    expect(selected).toEqual(['openai:gpt-b']);
+    await act(async () => button('Model', 'GPT A').click());
+    await render();
+    await act(async () => button('Provider', 'ChatGPT').click());
+    await render();
+    expect(selected).toEqual(['openai:gpt-b', 'openai:gpt-a']);
+    // Back on OpenAI, the model last picked there comes back.
+    current = { provider: 'codex', id: 'codex:gpt-a' };
+    await render();
+    await act(async () => button('Provider', 'OpenAI').click());
+    expect(selected).toEqual(['openai:gpt-b', 'openai:gpt-a', 'openai:gpt-a']);
+  } finally {
+    useDroneHubUiStore.setState({ agentModelPicks: picks });
     await act(async () => root.unmount());
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
