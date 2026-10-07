@@ -1,4 +1,5 @@
 import React from 'react';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { Popover } from 'radix-ui';
 
 import type { UiMenuSelectEntry } from '../../ui/components';
@@ -196,9 +197,17 @@ function ChoiceGroupSection({ group }: { group: ChatComposerRuntimeChoiceGroup }
   );
 }
 
+/**
+ * The agent's name on the composer's button, where it shares a line with the model: Claude Code is "Claude", as the
+ * model says which. The menu keeps the full names.
+ */
+function composerAgentName(agent: ChatComposerRuntimeAgentConfig): string {
+  return agent.value === 'builtin:claude' ? 'Claude' : agent.label;
+}
+
 export function chatComposerRuntimeTriggerLabel(config: ChatComposerRuntimePickerConfig): string {
   const parts = [
-    config.agent?.label,
+    config.agent ? composerAgentName(config.agent) : undefined,
     config.model ? resolveChatComposerModelSelection(config.model).triggerLabel : undefined,
   ].filter((part): part is string => Boolean(part));
   return parts.join(' · ');
@@ -228,6 +237,8 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
   const { agent, model, choiceGroups = [] } = config;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = React.useState(false);
+  // A setting: the button names only the model, the shortest it can be. The agent is in the menu.
+  const hideAgentName = useDroneHubUiStore((state) => state.composerHidesAgentName);
   const triggerLabel = chatComposerRuntimeTriggerLabel(config);
   const modelLabel = model ? resolveChatComposerModelSelection(model).triggerLabel : '';
   if (!agent && !model && choiceGroups.length === 0) return null;
@@ -262,7 +273,7 @@ export function ChatComposerRuntimePicker({ config }: { config: ChatComposerRunt
               {modelLabel ? (
                 <>
                   {/* Narrow composers drop the agent name and keep the model. */}
-                  {agent ? <span data-chat-composer-runtime-agent-label="true">{agent.label} · </span> : null}
+                  {agent && !hideAgentName ? <span data-chat-composer-runtime-agent-label="true">{composerAgentName(agent)} · </span> : null}
                   {modelLabel}
                 </>
               ) : (

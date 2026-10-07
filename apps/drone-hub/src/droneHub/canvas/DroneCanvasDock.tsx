@@ -602,7 +602,7 @@ export function DroneCanvasDock({
    * at, and it is drawn at its own size, spread out of where it is stored.
    */
   const newCardHalfInStore = React.useCallback((label: string) => ({
-    x: detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: false, clock: false }) / 2 / cardSpreadRef.current.x,
+    x: detailedCardWidthPx(nodeLabelWidthPx(label), { runtimeIcon: false, stateSlot: true }) / 2 / cardSpreadRef.current.x,
     y: DETAILED_CARD_HEIGHT_PX / 2 / cardSpreadRef.current.y,
   }), []);
   /** A point under the pointer, in the space positions are stored in. */
@@ -652,23 +652,39 @@ export function DroneCanvasDock({
     [chatNodeStateById],
   );
   const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(busyChatKey);
-  // A detailed card is as wide as its name and, while it works, its clock need.
+  const chatNodesByDroneId = React.useMemo(() => {
+    const out: Record<string, Array<(typeof nodes)[number]>> = {};
+    for (const node of nodes) {
+      const chatRef = parseCanvasChatNodeId(node.droneId);
+      if (!chatRef) continue;
+      (out[chatRef.droneId] ??= []).push(node);
+    }
+    return out;
+  }, [nodes]);
+  // A drone card says its state unless its chats are on the canvas to say their own: a one-chat drone, or one shown
+  // without its chats, says it here.
+  const droneCardShowsState = React.useCallback((droneId: string) => {
+    const drone = droneById[droneId];
+    const chatCount = (drone?.chats?.length ?? 0) + (drone?.sideChats?.length ?? 0);
+    return chatCount <= 1 || !chatNodesByDroneId[droneId]?.length;
+  }, [chatNodesByDroneId, droneById]);
+  // A card is as wide as its name, beside its state and a drone's runtime icon.
   const detailedWidthByNodeId = React.useMemo(() => {
     const out: Record<string, number> = {};
     for (const node of nodes) {
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
-      const busy = canvasDroneId
-        ? droneChatNames(droneById[canvasDroneId]).some((chatName) => chatNodeStateById[createCanvasChatNodeId(canvasDroneId, chatName)]?.busy)
-        : Boolean(chatNodeStateById[node.droneId]?.busy);
       const label = node.droneId === inlineRenamingDroneId
         ? inlineRenameDraft
         : canvasDroneId
           ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
           : parseCanvasChatNodeId(node.droneId)?.chatName ?? node.label;
-      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: Boolean(canvasDroneId), clock: busy });
+      out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), {
+        runtimeIcon: Boolean(canvasDroneId),
+        stateSlot: !canvasDroneId || droneCardShowsState(canvasDroneId),
+      });
     }
     return out;
-  }, [chatNodeStateById, droneById, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  }, [droneCardShowsState, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
   // What every chat on the canvas has cost, each counted once: a drone card stands for all its chats.
   const canvasCost = React.useMemo(() => {
     const chatIds = new Set<string>();
@@ -710,15 +726,6 @@ export function DroneCanvasDock({
       if (isCanvasDraftNodeId(node.droneId)) continue;
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
       if (canvasDroneId && !out[canvasDroneId]) out[canvasDroneId] = node;
-    }
-    return out;
-  }, [nodes]);
-  const chatNodesByDroneId = React.useMemo(() => {
-    const out: Record<string, Array<(typeof nodes)[number]>> = {};
-    for (const node of nodes) {
-      const chatRef = parseCanvasChatNodeId(node.droneId);
-      if (!chatRef) continue;
-      (out[chatRef.droneId] ??= []).push(node);
     }
     return out;
   }, [nodes]);
@@ -846,8 +853,7 @@ export function DroneCanvasDock({
           const drone = droneById[canvasDroneId];
           const chatNames = [...(drone?.chats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
           const chats = droneChatNames(drone).map((chatName) => chatInput(canvasDroneId, chatName));
-          // With its chats on the canvas, each says its own state; a one-chat drone or one shown alone says it here.
-          const showState = chatNames.length <= 1 || !chatNodesByDroneId[canvasDroneId]?.length;
+          const showState = droneCardShowsState(canvasDroneId);
           card = { ...combineDetailedCards(chats.map((chat) => chat.card), chats.map((chat) => chat.activity), cardNowMs, chatNames.length), showState };
         } else if (chatRef) {
           card = chatInput(chatRef.droneId, chatRef.chatName).card;
@@ -861,7 +867,7 @@ export function DroneCanvasDock({
     }
     detailCacheRef.current = nextCache;
     return out;
-  }, [busySeenAt, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, nodes]);
+  }, [busySeenAt, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, droneCardShowsState, nodes]);
   const selectedDraftNodeId = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
     const id = String(selectedDroneIds[0] ?? '').trim();

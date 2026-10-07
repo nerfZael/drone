@@ -410,6 +410,8 @@ export function ChatInput({
       root.isConnected &&
       root.offsetParent !== null &&
       !root.closest('[aria-hidden="true"]') &&
+      // The chat in the canvas's full-view panel is for reading; its composer is hidden, the canvas's writes.
+      !root.closest('[data-canvas-chat-panel]') &&
       !composerLockedRef.current,
     );
   }, []);
@@ -902,7 +904,9 @@ export function ChatInput({
             root &&
             root.isConnected &&
             root.getClientRects().length > 0 &&
-            !root.closest('[aria-hidden="true"]'),
+            !root.closest('[aria-hidden="true"]') &&
+            // The chat in the canvas's full-view panel is for reading; its composer is hidden, the canvas's writes.
+            !root.closest('[data-canvas-chat-panel]'),
           );
         },
         toggle: () => toggleEditorModeRef.current(),

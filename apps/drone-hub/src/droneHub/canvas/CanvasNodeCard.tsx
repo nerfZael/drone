@@ -155,7 +155,8 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       style={{
         left: 0,
         top: 0,
-        padding: '0.3125rem 0.5rem',
+        // Less on the left, where the state's icon has room of its own in its slot.
+        padding: '0.3125rem 0.5rem 0.3125rem 0.375rem',
         width: nodeWidth,
         height: nodeHeight,
       }}
@@ -167,12 +168,6 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       {/* The card says its state inside it; a deletion, which it does not know of, is said above it. */}
       {deletingBadge ? (
         <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">{deletingBadge}</span>
-      ) : null}
-      {/* A new reply: a dot on the card's corner. */}
-      {unread ? (
-        <span className="pointer-events-none absolute -right-[3px] -top-[3px] z-[3] flex" data-canvas-card-unread>
-          <span className="h-2 w-2 rounded-full bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]" title="Unread agent message" aria-label="Unread agent message" />
-        </span>
       ) : null}
       {showCanvasLastMessagePreviews && lastAgentSnippet ? (
         <span
@@ -270,22 +265,18 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
           </span>
         ) : (
           <span className="grid min-w-0" data-canvas-detailed-card={detail.state}>
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span className="flex min-w-0 items-center gap-1">
+              {/* The sidebar's icon for the same state, in a slot kept whatever the state, so the name never shifts:
+                  working, queued, waiting for an answer, failed; idle, a green dot for a new reply or a hollow
+                  circle once it is read. A drone whose chats show their own states has no slot. */}
+              {detail.showState ? (
+                <span className="inline-flex w-3 flex-shrink-0 justify-center" title={unread ? `${detail.label} · new reply` : detail.label}
+                  data-canvas-card-state={unread ? 'unread' : detail.icon}>
+                  <SidebarItemStateIndicator state={detail.icon} unread={unread} showReadyAnchor />
+                </span>
+              ) : null}
               {runtimeIcon}
               <span className="min-w-0 truncate text-[13px] font-semibold" title={`${primaryLabel}\n${detail.text}`}>{primaryLabel}</span>
-              {detail.workingSince !== null ? (
-                <span className="ml-auto flex-shrink-0 font-mono text-[11px] tabular-nums text-[var(--muted)]" title="How long it has been working"
-                  data-canvas-card-clock>
-                  {detail.clock}
-                </span>
-              ) : null}
-              {detail.showState ? (
-                // The sidebar's icon for the same state; a new reply is the dot on the card's corner.
-                <span className={`${detail.workingSince !== null ? '' : 'ml-auto'} inline-flex flex-shrink-0`} title={detail.unread ? `${detail.label} · new reply` : detail.label}
-                  data-canvas-card-state={detail.icon}>
-                  <SidebarItemStateIndicator state={detail.icon} unread={false} showReadyAnchor={detail.state === 'idle'} />
-                </span>
-              ) : null}
             </span>
           </span>
         )}

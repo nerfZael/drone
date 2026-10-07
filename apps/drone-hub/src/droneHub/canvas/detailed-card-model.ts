@@ -83,18 +83,20 @@ export type DetailedCard = {
 export const DETAILED_CARD_WIDTH_PX = 440;
 /** Short names still get a card that reads as one, not a chip. */
 const DETAILED_CARD_MIN_WIDTH_PX = 80;
-/** Padding (8px a side) and border around a detailed card's content. */
-const DETAILED_CARD_CHROME_PX = 18;
-/** Room kept for a working clock ("2h25m"), so the card does not change width as it ticks. */
-const DETAILED_CLOCK_PX = 44;
+/** Padding (6px left, 8px right) and border around a detailed card's content. */
+const DETAILED_CARD_CHROME_PX = 16;
+/** The state's slot left of the name, kept whatever the state, so the name never shifts: a 12px icon and its gap. */
+const DETAILED_STATE_SLOT_PX = 16;
+/** A drone's runtime icon and its gap. */
+const DETAILED_RUNTIME_ICON_PX = 18;
 
 /**
- * A detailed card as wide as its name (title text at 13px, beside its icons and, while it works, its clock).
- * Its steps are in the panel that opens on hover. `titleWidthPx` is the name's width at the compact card's 12.5px.
+ * A detailed card as wide as its name (title text at 13px), beside its state's slot (which a drone card whose chats
+ * say their own states does without) and a drone's runtime icon. Its steps
+ * are in the panel that opens on hover. `titleWidthPx` is the name's width at the compact card's 12.5px.
  */
-export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boolean; runtimeIcon: boolean; clock?: boolean }): number {
-  const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateIcon ? 18 : 0) + (opts.runtimeIcon ? 20 : 0) +
-    (opts.clock ? DETAILED_CLOCK_PX : 0);
+export function detailedCardWidthPx(titleWidthPx: number, opts: { runtimeIcon: boolean; stateSlot: boolean }): number {
+  const title = Math.ceil(titleWidthPx * 13 / 12.5) + (opts.stateSlot ? DETAILED_STATE_SLOT_PX : 0) + (opts.runtimeIcon ? DETAILED_RUNTIME_ICON_PX : 0);
   return Math.max(DETAILED_CARD_MIN_WIDTH_PX, Math.min(DETAILED_CARD_WIDTH_PX, title + DETAILED_CARD_CHROME_PX));
 }
 /** One line, the name and its state, with 5px above and below it: no more card than the name needs. */

@@ -250,7 +250,8 @@ export function ChatComposerModelMenuSections({
       },
       'reasoning',
     );
-    if (layout === 'standalone') onDone();
+    // Reasoning is the last thing chosen, after the agent and the model: choosing it closes the picker.
+    onDone();
   };
 
   const selectModel = (model: ChatComposerModelChoice) => {

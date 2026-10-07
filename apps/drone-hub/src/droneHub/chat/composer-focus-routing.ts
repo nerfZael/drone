@@ -41,6 +41,17 @@ export function routeComposerFocus(
     detail: { name: side?.dataset.sideChatName ?? null, target },
   }));
 
+  // The chat in the canvas's full-view panel is read there and written to from the canvas's composer, the only
+  // one in sight: shortcuts pressed in the panel (Q records, S sends) act on that composer.
+  if (target.closest('[data-canvas-chat-panel]')) {
+    const canvasComposer = doc.querySelector<HTMLElement>(`[data-canvas-message-bar] ${COMPOSER_SELECTOR}`);
+    if (canvasComposer?.dataset.activeComposerId) {
+      registry.focus(canvasComposer.dataset.activeComposerId);
+      markEditorTarget(canvasComposer.dataset.editorModeTargetId ?? '');
+    }
+    return;
+  }
+
   // Prefer the actual composer when its controls or editor receive focus.
   let composer = target.closest<HTMLElement>(COMPOSER_SELECTOR);
   if (!composer && side) {

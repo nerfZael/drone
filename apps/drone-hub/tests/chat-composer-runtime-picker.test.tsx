@@ -73,17 +73,21 @@ test('one picker chooses the agent, model, reasoning, and access', async () => {
     ) as unknown as HTMLButtonElement;
   try {
     expect(chatComposerRuntimeTriggerLabel(config)).toBe('Codex · Model A (High)');
+    // Beside the model on the button, Claude Code is just Claude; the menu keeps its full name.
+    expect(chatComposerRuntimeTriggerLabel({ ...config, agent: { ...config.agent!, value: 'builtin:claude', label: 'Claude Code' } }))
+      .toBe('Claude · Model A (High)');
     await act(async () => root.render(<ChatComposerRuntimePanel config={config} onDone={() => changes.push('done')} />));
     for (const title of ['Agent', 'Model', 'Reasoning', 'Access', 'Approvals']) {
       expect(element.textContent).toContain(title);
     }
     await act(async () => button('Codex').click());
     await act(async () => button('Claude Code').click());
-    await act(async () => button('Low').click());
     await act(async () => button('Never ask').click());
-    expect(changes).toEqual(['agent:builtin:claude', 'reasoning:model-a:low', 'approvals:none']);
-    // Settings changes keep the panel open so several can be made at once.
-    expect(changes).not.toContain('done');
+    // The agent and access keep the panel open, so several can be set at once.
+    expect(changes).toEqual(['agent:builtin:claude', 'approvals:none']);
+    // Reasoning, chosen last, closes it.
+    await act(async () => button('Low').click());
+    expect(changes).toEqual(['agent:builtin:claude', 'approvals:none', 'reasoning:model-a:low', 'done']);
   } finally {
     await act(async () => root.unmount());
     for (const [key, descriptor] of originals) {

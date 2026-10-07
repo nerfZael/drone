@@ -1076,12 +1076,13 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(container.contains(settingsPanel as never)).toBe(false);
     await act(async () => (dom.document.querySelector('.fixed.inset-0') as unknown as HTMLElement).click());
     expect(dom.document.querySelector('[aria-label="Chat step tracking"][role="dialog"]')).toBeNull();
-    // While it works, its clock sits beside its state; its cost is off the card, in the canvas total and on hover.
-    expect(card().querySelector('[data-canvas-card-clock]')?.textContent).toContain('1m');
+    // No clock on the card, which keeps only its state and name; its cost is off it, in the canvas total and on hover.
+    expect(card().querySelector('[data-canvas-card-clock]')).toBeNull();
+    expect(card().textContent).not.toContain('1m');
     expect(card().textContent).not.toContain('$0.42');
     expect(container.querySelector('[data-canvas-cost-total]')?.textContent).toBe('$0.42');
-    // An unread reply is flagged once the chat is idle, as in the sidebar; while it works on, no corner dot.
-    expect(card().querySelector('[data-canvas-card-unread]')).toBeNull();
+    // An unread reply is flagged once the chat is idle, as in the sidebar; while it works on, its state shows.
+    expect(card().querySelector('[data-canvas-card-state="unread"]')).toBeNull();
     expect(card().querySelector('[data-canvas-detailed-card]')?.textContent).not.toContain('$0.42');
     // Positioned by its slot, so moving it does not render the card.
     expect((card().parentElement as unknown as HTMLElement).style.translate).toBe('225px 250px');
@@ -1122,6 +1123,14 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => Simulate.mouseEnter(card()));
     expect(panel()).toBeNull();
     await act(async () => Simulate.mouseLeave(card()));
+    // Idle, it shows the sidebar's marks in the same slot left of its name: a green dot for a new reply, a hollow
+    // circle once it is read.
+    const idle = (unreadAgentMessage: boolean) => act(async () => root.render(<Dock drone={makeDrone(['default'])}
+      chatNodeStateById={{ [chatCard]: { ...chatState[chatCard], busy: false, unreadAgentMessage } }} />));
+    await idle(true);
+    expect(card().querySelector('[data-canvas-card-state="unread"]')).not.toBeNull();
+    await idle(false);
+    expect(card().querySelector('[data-canvas-card-state="idle"] [data-sidebar-ready-anchor]')).not.toBeNull();
     await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={chatState} />));
     // Dragging moves the stored position by the pointer's distance in compact space.
     await act(async () => Simulate.mouseDown(card(), { button: 0, clientX: 300, clientY: 400 }));
@@ -1506,7 +1515,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     await act(async () => Simulate.doubleClick(viewport, { button: 0, clientX: 600, clientY: 500 }));
     const draft = Object.values(useDroneCanvasStore.getState().nodesByDroneId)[0];
     // Drawn centred on the point, at its own size; stored in the space cards are drawn spread out of.
-    const drawnWidth = detailedCardWidthPx(nodeLabelWidthPx('Untitled'), { stateIcon: true, runtimeIcon: false, clock: false });
+    const drawnWidth = detailedCardWidthPx(nodeLabelWidthPx('Untitled'), { runtimeIcon: false, stateSlot: true });
     expect(draft.x * DETAILED_CARD_SPREAD.x + drawnWidth / 2).toBeCloseTo(450, 0);
     expect(draft.y * DETAILED_CARD_SPREAD.y + DETAILED_CARD_HEIGHT_PX / 2).toBeCloseTo(250, 0);
   } finally {

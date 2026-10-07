@@ -143,6 +143,8 @@ type DroneHubUiState = {
   headerOverflowOpen: boolean;
   outputView: OutputView;
   showCanvasLastMessagePreviews: boolean;
+  /** The composer's agent and model button names only the model ("GPT-5.6 Sol", not "Codex · GPT-5.6 Sol"). */
+  composerHidesAgentName: boolean;
   /** Canvas cards like the Entity's Work cards: status, what it is doing, how long, and cost. */
   /** How fast the canvas pans when the locked cursor pushes against its edge, in screen pixels per second. */
   canvasEdgePanSpeed: number;
@@ -224,6 +226,7 @@ type DroneHubUiState = {
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
+  setComposerHidesAgentName: (next: Updater<boolean>) => void;
   setCanvasEdgePanSpeed: (next: Updater<number>) => void;
   setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
@@ -397,6 +400,7 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
+  | 'composerHidesAgentName'
   | 'canvasEdgePanSpeed'
   | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
@@ -1028,6 +1032,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
+      composerHidesAgentName: false,
       canvasEdgePanSpeed: DEFAULT_CANVAS_EDGE_PAN_SPEED,
       hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
@@ -1292,6 +1297,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next),
         })),
+      setComposerHidesAgentName: (next) =>
+        set((s) => ({ composerHidesAgentName: resolveNext(s.composerHidesAgentName, next) })),
       setCanvasEdgePanSpeed: (next) =>
         set((s) => ({ canvasEdgePanSpeed: clampCanvasEdgePanSpeed(resolveNext(s.canvasEdgePanSpeed, next)) })),
       setHideSideChatWindowsWithCanvas: (next) =>
@@ -1555,6 +1562,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
+        composerHidesAgentName: state.composerHidesAgentName,
         canvasEdgePanSpeed: state.canvasEdgePanSpeed,
         hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
@@ -1682,6 +1690,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.groupMultiChatStatusSort ?? currentState.groupMultiChatStatusSort,
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
+          composerHidesAgentName: normalizeBoolean(persisted.composerHidesAgentName ?? currentState.composerHidesAgentName),
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),

@@ -137,6 +137,8 @@ export function GeneralSettingsTab({
   const setThemeId = useDroneHubUiStore((state) => state.setThemeId);
   const readingDensityMode = useDroneHubUiStore((state) => state.readingDensityMode);
   const setReadingDensityMode = useDroneHubUiStore((state) => state.setReadingDensityMode);
+  const composerHidesAgentName = useDroneHubUiStore((state) => state.composerHidesAgentName);
+  const setComposerHidesAgentName = useDroneHubUiStore((state) => state.setComposerHidesAgentName);
   const {
     llmSettings,
     llmSettingsLoading,
@@ -945,6 +947,14 @@ export function GeneralSettingsTab({
                 ]}
                 onValueChange={setReadingDensityMode}
                 className="self-start sm:self-auto"
+              />
+            </div>
+            <div className="border-t border-[var(--border-subtle)] pt-4">
+              <UiSwitch
+                checked={composerHidesAgentName}
+                onCheckedChange={setComposerHidesAgentName}
+                label="Hide the agent in the composer"
+                description="The composer's agent and model button names only the model, such as GPT-5.6 Sol instead of Codex · GPT-5.6 Sol. The agent is still in its menu."
               />
             </div>
           </section>

@@ -295,3 +295,14 @@ describe('Companion focused chat context', () => {
     expect(h.selected()).toEqual(main);
   });
 });
+
+test('in the canvas full-view chat panel, shortcuts act on the canvas composer, the only one in sight', () => {
+  const { doc, register, registry, actions, focus, editorTarget } = fixture();
+  register('canvas', true);
+  doc.append({ 'data-canvas-message-bar': '1' }).append({ 'data-active-composer-id': 'canvas', 'data-editor-mode-target-id': 'canvas-editor' });
+  const transcript = doc.append({ 'data-canvas-chat-panel': 'true' }).append({ 'data-main-workspace-chat': 'true' }).append();
+  focus(transcript);
+  registry.toggleVoiceRecording();
+  expect(actions).toEqual(['canvas:q']);
+  expect(editorTarget()).toBe('canvas-editor');
+});
