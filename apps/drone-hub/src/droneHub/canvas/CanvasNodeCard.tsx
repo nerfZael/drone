@@ -136,21 +136,26 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       aria-pressed={selected}
       aria-busy={deleting || undefined}
       title={deleting ? 'Deleting…' : undefined}
-      className={`dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border bg-[var(--panel)] text-left transition-[border-color,color] duration-100 ${
+      className={`dh-canvas-work work-card group/canvas-node absolute flex items-center overflow-visible rounded-[9px] border ${
+        isActiveSidebarChat ? 'bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel))]' : 'bg-[var(--panel)]'
+      } text-left transition-[border-color,color] duration-100 ${
         // A finished chat reads quieter, brightening under the pointer. By colour, not opacity: an opacity change
         // runs on the GPU and lifts the card onto a layer of its own, drawn once and then stretched by a zoom.
         detail.state === 'done' && !detail.unread && !selected
           ? 'text-[color-mix(in_srgb,var(--fg)_72%,var(--panel))] hover:text-[var(--fg)]'
           : 'text-[var(--fg)]'
       } ${
-        // Selected: only the border changes, to the accent. The chat that is open has its accent edge instead.
-        selected || dragging || inlineEditing || assignmentHoverTarget
-          ? 'border-[var(--accent)]'
-          : draftNode
-            ? 'border-dashed border-[var(--user-border)] hover:border-[var(--muted)]'
-            : detail.state === 'need'
-              ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
-              : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]'
+        // Selected: only the border changes, to blue. The chat that is open keeps the lavender accent, as a tint and an
+        // edge, so the two read apart when they are different cards and stack when they are the same.
+        selected || dragging || inlineEditing
+          ? 'border-[var(--act)]'
+          : assignmentHoverTarget
+            ? 'border-[var(--accent)]'
+            : draftNode
+              ? 'border-dashed border-[var(--user-border)] hover:border-[var(--muted)]'
+              : detail.state === 'need'
+                ? 'border-[color-mix(in_srgb,var(--orange)_55%,var(--border))]'
+                : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--act)_45%,var(--border))]'
       }`}
       style={{
         left: 0,
@@ -161,9 +166,9 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
         height: nodeHeight,
       }}
     >
-      {/* The chat that is open: the card's left edge in the accent, following its rounded corners. */}
+      {/* The chat that is open: its left edge in the accent, following its rounded corners, over the card's tint. */}
       {isActiveSidebarChat ? (
-        <span data-canvas-card-open="" className="pointer-events-none absolute -inset-px z-[2] rounded-[9px] shadow-[inset_2px_0_0_var(--accent)]" />
+        <span data-canvas-card-open="" className="pointer-events-none absolute -inset-px z-[2] rounded-[9px] shadow-[inset_3px_0_0_var(--accent)]" />
       ) : null}
       {/* The card says its state inside it; a deletion, which it does not know of, is said above it. */}
       {deletingBadge ? (

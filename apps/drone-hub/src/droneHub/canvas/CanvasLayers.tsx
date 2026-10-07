@@ -15,11 +15,14 @@ import { buildCanvasRelationshipEdges } from './relationship-edges';
  * A zoom scales the whole board, cards, text and arrowheads alike, and nothing else: no part resizes
  * itself to the zoom, so a zoom never ends in anything settling or sharpening.
  */
+// The grid keeps its dots between these distances apart on screen at every zoom, like a map's graticule: past the
+// wider one, a dot appears between every two; under the narrower one, every other dot goes. Halving and doubling the
+// spacing on the board keeps every dot where it was, and the new ones fade in, so the grid never jumps. It is never
+// finer than DOT_GRID_BASE_SPACING_PX on the board: zoomed in past that, the dots spread with the cards.
+const DOT_GRID_MIN_SPACING_PX = 24;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
-const DOT_GRID_MAX_OPACITY = 0.34;
-// Zoomed out, the dots are as bright as node outlines and read as noise; they are gone by this scale.
-const DOT_GRID_FADE_OUT_SCALE = 0.55;
+const DOT_GRID_OPACITY = 0.2;
 // Arrowheads, in board pixels: they scale with the zoom like the cards they point at.
 const EDGE_MARKER_PX = 14;
 const EDGE_PLUG_MARKER_PX = 10;
@@ -53,6 +56,25 @@ function positiveRemainder(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
 }
 
+/**
+ * The dot grid at a zoom: dots `fineSpacing` apart on screen, between DOT_GRID_MIN_SPACING_PX and twice that (wider
+ * zoomed in past 1.5), every
+ * other one also drawn by a coarse grid twice as wide. The fine grid's own dots fade in as it widens; where the two
+ * grids' dots meet, the coarse one makes up the rest, so those dots are always DOT_GRID_OPACITY.
+ */
+export function dotGridAt(scale: number) {
+  const levels = Math.min(0, Math.floor(Math.log2((DOT_GRID_BASE_SPACING_PX * scale) / DOT_GRID_MIN_SPACING_PX)));
+  const fineSpacing = DOT_GRID_BASE_SPACING_PX * scale / 2 ** levels;
+  const fade = Math.max(0, Math.min(1, fineSpacing / DOT_GRID_MIN_SPACING_PX - 1));
+  const fineOpacity = DOT_GRID_OPACITY * fade;
+  return {
+    fineSpacing,
+    coarseSpacing: fineSpacing * 2,
+    fineOpacity,
+    coarseOpacity: (DOT_GRID_OPACITY - fineOpacity) / (1 - fineOpacity),
+  };
+}
+
 export function CanvasWorldLayer({ boardDroneId, children }: {
   boardDroneId: string | null;
   children: React.ReactNode;
@@ -65,9 +87,8 @@ export function CanvasWorldLayer({ boardDroneId, children }: {
       return { panX: board.panX, panY: board.panY, scale: board.scale };
     }),
   );
-  const dotVisibility = Math.max(0, Math.min(1, (scale - DOT_GRID_FADE_OUT_SCALE) / (1 - DOT_GRID_FADE_OUT_SCALE)));
-  const dotOpacity = DOT_GRID_MAX_OPACITY * Math.pow(dotVisibility, 1.2);
-  const dotSpacing = DOT_GRID_BASE_SPACING_PX * scale;
+  const dotGrid = dotGridAt(scale);
+  const dotSpacing = dotGrid.coarseSpacing;
   return (
     <>
       {/* The grid is a tile larger by one spacing, slid by the pan's remainder: panning moves it rather than
@@ -80,11 +101,12 @@ export function CanvasWorldLayer({ boardDroneId, children }: {
             top: -dotSpacing,
             width: `calc(100% + ${dotSpacing * 2}px)`,
             height: `calc(100% + ${dotSpacing * 2}px)`,
-            backgroundImage:
-              dotOpacity > 0
-                ? `radial-gradient(circle, rgba(var(--canvas-dot-rgb), ${dotOpacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`
-                : 'none',
-            backgroundSize: `${dotSpacing}px ${dotSpacing}px`,
+            backgroundImage: [dotGrid.fineOpacity, dotGrid.coarseOpacity]
+              .map((opacity) => `radial-gradient(circle, rgba(var(--canvas-dot-rgb), ${opacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`)
+              .join(', '),
+            // Each tile's dot is at its centre; shifted by half a tile, the dots sit on the board's multiples.
+            backgroundSize: `${dotGrid.fineSpacing}px ${dotGrid.fineSpacing}px, ${dotSpacing}px ${dotSpacing}px`,
+            backgroundPosition: `${-dotGrid.fineSpacing / 2}px ${-dotGrid.fineSpacing / 2}px, ${-dotSpacing / 2}px ${-dotSpacing / 2}px`,
             transform: `translate3d(${snapToDevicePixels(positiveRemainder(panX, dotSpacing))}px, ${snapToDevicePixels(positiveRemainder(panY, dotSpacing))}px, 0)`,
             willChange: 'transform',
           }}

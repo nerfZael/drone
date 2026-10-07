@@ -4272,10 +4272,10 @@ select:disabled optgroup {
 }
 
 /* On the canvas, folded, the composer is one slim line over the board. */
-/* Folded, it is as wide as the placeholder and the picker need, and never narrower than when open. */
+/* Folded, it is only as wide as the placeholder and the picker need: the picker naming the agent or not widens or
+   narrows it, and it opens to its full width. */
 .dh-canvas-composer:has([data-chat-composer-expanded="false"]) {
   width: max-content;
-  min-width: min(26rem, calc(100% - 1rem));
   max-width: calc(100% - 1rem);
 }
 
@@ -4289,7 +4289,9 @@ select:disabled optgroup {
   padding-right: .1875rem;
 }
 
+/* Room for "Ask the agent", in place of a textarea's default twenty columns. */
 .dh-canvas-composer .dh-chat-composer-row--collapsed textarea {
+  width: 7.25rem;
   min-height: 2rem;
   padding: .3125rem .375rem;
   font-size: .8125rem;
