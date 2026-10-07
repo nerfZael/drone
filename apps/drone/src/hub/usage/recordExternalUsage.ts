@@ -2,12 +2,12 @@ import { getUsageStore, type UsageStore } from './UsageStore';
 import { parseBuiltinPromptJobTranscript } from '../builtin-transcript-sessions';
 import { getUsageJournal, type UsageJournal, type UsageDelivery } from './UsageJournal';
 
-export function recordExternalUsage(input: { job: any; droneId: string; chatId: string; chatName: string; repo?: string; model?: string }, journal: UsageJournal = getUsageJournal(), destination?: UsageStore): void {
+export function recordExternalUsage(input: { job: any; droneId: string; chatId: string; chatName: string; repo?: string; model?: string; forkedFromSessionId?: string }, journal: UsageJournal = getUsageJournal(), destination?: UsageStore): void {
   const { job } = input;
   if (!job) return;
-  const watch = { droneId: input.droneId, promptId: String(job.id ?? ''), chatId: input.chatId,
-    chatName: input.chatName, repo: input.repo, model: input.model };
-  journal.watch(watch);
+  const watch = journal.watch({ droneId: input.droneId, promptId: String(job.id ?? ''), chatId: input.chatId,
+    chatName: input.chatName, repo: input.repo, model: input.model,
+    ...(input.forkedFromSessionId ? { forkedFromSessionId: input.forkedFromSessionId } : {}) });
   const run = job.codexAppServer?.run;
   const state = run?.state ?? job.state;
   if (state === 'queued') return;
@@ -36,6 +36,7 @@ export function recordExternalUsage(input: { job: any; droneId: string; chatId: 
     chatId: input.chatId, droneId: input.droneId, chatName: input.chatName, repo: input.repo,
     agent: job.kind, startedAt: run?.startedAt ?? job.startedAt ?? job.createdAt, status: state,
     snapshotAt: run?.updatedAt ?? job.updatedAt ?? transcript?.parsedAt,
+    ...(watch.forkedFromSessionId ? { forkedFromSessionId: watch.forkedFromSessionId } : {}),
   }, observations, replace: true };
   if (['done', 'failed', 'canceled'].includes(state) && job.exitStatusSource !== 'missing-exit-file') {
     journal.complete(watch, delivery);

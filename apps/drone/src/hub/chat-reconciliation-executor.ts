@@ -3,7 +3,7 @@ import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { codexPromptOwnsResponse, codexPromptRunMetadata } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
-import { completePendingChatFork } from './chat-fork';
+import { completePendingChatFork, pendingChatForkSourceSessionId } from './chat-fork';
 import { readChatReconciliationEntry } from './chat-reconciliation-read';
 import { codexSessionIdentity } from '../codex-session-identity';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
@@ -378,7 +378,9 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       }
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
-      recordExternalUsage({ job, droneId, chatId: String(entry.id), chatName, repo: d.repoPath, model: pendingModel });
+      // A copied chat's first turn reports its source session's totals too; usage subtracts them.
+      const forkedFromSessionId = pendingChatForkSourceSessionId(entry, jobKind) || undefined;
+      recordExternalUsage({ job, droneId, chatId: String(entry.id), chatName, repo: d.repoPath, model: pendingModel, forkedFromSessionId });
       const runMetadata = codexPromptRunMetadata(job);
       if (runMetadata.runId && (p.runId !== runMetadata.runId || p.runStartedAt !== runMetadata.runStartedAt)) {
         Object.assign(p, runMetadata);

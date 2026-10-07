@@ -57,3 +57,25 @@ test('session totals recorded before the fix are repaired once, oldest first', (
     expect(reopened.chatActivity({ droneId: 'd1' })[0].estimatedCost).toBeCloseTo(3.75, 6);
   } finally { reopened.close(); }
 });
+
+test('a copied chat counts only what it added to the session it forked', () => {
+  const store = new UsageStore(':memory:');
+  try {
+    turns(store);
+    const at = (minutes: number) => new Date(Date.parse(store.trackingSince) + minutes * 60_000).toISOString();
+    const copy = (id: string, chatId: string, minutes: number, observation: ReturnType<typeof total>, forkedFromSessionId?: string) =>
+      store.record({ id, chatId, droneId: 'd1', chatName: chatId, agent: 'claude', startedAt: at(minutes), status: 'done',
+        ...(forkedFromSessionId ? { forkedFromSessionId } : {}) }, [observation]);
+    const cost = (chatName: string) => store.chatActivity({ droneId: 'd1' }).find((row) => row.chatName === chatName)?.estimatedCost;
+    // Forked after t2, the copy starts from s1's totals then: its turn added 0.75.
+    copy('f1', 'Copy', 4, { ...total(140, 90, 1700, 4.25), sessionId: 's2' }, 's1');
+    expect(cost('Copy')).toBeCloseTo(0.75, 6);
+    // A later snapshot that no longer names the source keeps the subtraction; so does the copy's next turn.
+    copy('f1', 'Copy', 4, { ...total(140, 90, 1700, 4.25), sessionId: 's2' });
+    copy('f2', 'Copy', 5, { ...total(150, 95, 1800, 5), sessionId: 's2' });
+    expect(cost('Copy')).toBeCloseTo(1.5, 6);
+    // Copied from a checkpoint at t1, a fork starts from s1's totals as of t1, not its latest.
+    copy('g1', 'Checkpoint', 6, { ...total(110, 60, 1100, 2.5), sessionId: 's3' }, 's1');
+    expect(cost('Checkpoint')).toBeCloseTo(0.5, 6);
+  } finally { store.close(); }
+});

@@ -303,3 +303,14 @@ test('a late provisional failure cannot replace newer completed usage', () => {
     expect(store.analytics().totals.missing).toBe(0);
   } finally { store.close(); }
 });
+
+test('a copied chat keeps its fork source for every snapshot of its first turn, and for recovery', () => {
+  const journal = new UsageJournal(':memory:');
+  try {
+    const watch = { droneId: 'drone', promptId: 'first', chatId: 'chat', chatName: 'Copy' };
+    expect(journal.watch({ ...watch, forkedFromSessionId: 'source' }).forkedFromSessionId).toBe('source');
+    // Once the chat learns its own session, it stops naming the source.
+    expect(journal.watch(watch).forkedFromSessionId).toBe('source');
+    expect(journal.due(Number.MAX_SAFE_INTEGER)[0].forkedFromSessionId).toBe('source');
+  } finally { journal.close(); }
+});

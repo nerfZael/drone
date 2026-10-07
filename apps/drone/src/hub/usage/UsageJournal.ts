@@ -7,6 +7,8 @@ import { openUsageDatabase } from './helpers/openUsageDatabase';
 export type UsageDelivery = { execution: UsageExecution; observations: UsageObservation[]; replace: boolean };
 export type ExternalUsageWatch = {
   droneId: string; promptId: string; chatId: string; chatName: string; repo?: string; model?: string;
+  /** For a chat's first turn after it was copied: the agent session it was forked from. */
+  forkedFromSessionId?: string;
 };
 export type PendingUsageWatch = ExternalUsageWatch & { key: string; attempts: number };
 
@@ -41,11 +43,19 @@ export class UsageJournal {
     return delivered;
   }
 
-  watch(input: ExternalUsageWatch): void {
+  /** Returns the watch as kept: a fork's source, once known, stays after the chat stops naming it. */
+  watch(input: ExternalUsageWatch): ExternalUsageWatch {
     if (!input.promptId || !input.chatId || !input.droneId) throw new Error('Usage watch requires prompt, drone and chat identities');
+    let kept = input;
+    if (!input.forkedFromSessionId) {
+      const row = this.db.prepare('SELECT payload FROM external_watches WHERE id=?').get(watchKey(input)) as any;
+      const forkedFromSessionId = row ? JSON.parse(row.payload).forkedFromSessionId : undefined;
+      if (typeof forkedFromSessionId === 'string' && forkedFromSessionId) kept = { ...input, forkedFromSessionId };
+    }
     this.db.prepare(`INSERT INTO external_watches (id,payload,next_attempt) VALUES (?,?,?)
       ON CONFLICT(id) DO UPDATE SET payload=excluded.payload`)
-      .run(watchKey(input), JSON.stringify(input), Date.now());
+      .run(watchKey(kept), JSON.stringify(kept), Date.now());
+    return kept;
   }
 
   due(now = Date.now(), limit = 24): PendingUsageWatch[] {

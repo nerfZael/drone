@@ -12,6 +12,8 @@ const HELPER_PURPOSES_SQL = `(${HELPER_USAGE_PURPOSES.map((purpose) => `'${purpo
 export type UsageExecution = {
   id: string; chatId?: string; droneId?: string; chatName?: string; repo?: string;
   agent: string; purpose?: string; startedAt: string; status: string; observedAt?: string; snapshotAt?: string;
+  /** A copied chat's first turn: the agent session it was forked from. */
+  forkedFromSessionId?: string;
 };
 export type UsageFilter = {
   chatId?: string; droneId?: string; agent?: string; model?: string; provider?: string; repo?: string;
@@ -236,24 +238,36 @@ export class UsageStore {
    * Claude Code's end-of-turn totals (`modelUsage`, `costUSD`) cover its whole session so far, not the turn: summed
    * per turn they count every earlier turn again. A turn keeps what it added since the session's previous turn; the
    * running totals stay in `cumulative`, for the next turn to subtract.
+   *
+   * A copied chat forks its source's session, and the fork starts from the source's totals: its first turn subtracts
+   * the largest of the source's that its own include (an earlier turn's when the copy was made from a checkpoint).
    */
   private sessionTurnDelta(execution: UsageExecution, observation: UsageObservation): UsageObservation {
     const sessionId = (observation as { sessionId?: string }).sessionId;
     if (observation.provider !== 'anthropic' || observation.scope !== 'tree' || !sessionId || execution.agent !== 'claude') return observation;
     const current = (observation as { cumulative?: SessionTotals }).cumulative ?? sessionTotals(observation);
-    const previousRow = this.db.prepare(`SELECT o.data_json FROM observations o JOIN executions e ON e.id=o.execution_id
+    const forkedFromSessionId = (observation as { forkedFromSessionId?: string }).forkedFromSessionId ?? execution.forkedFromSessionId;
+    const turnsBefore = (session: string, limit: number) => (this.db.prepare(`SELECT o.data_json FROM observations o
+      JOIN executions e ON e.id=o.execution_id
       WHERE o.provider='anthropic' AND o.model=? AND o.execution_id<>? AND e.started_at<=?
         AND json_extract(o.data_json,'$.scope')='tree' AND json_extract(o.data_json,'$.sessionId')=?
-      ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`).get(observation.model, execution.id, execution.startedAt, sessionId) as any;
-    const previousData = previousRow ? JSON.parse(previousRow.data_json) : null;
-    const previous: SessionTotals | null = previousData ? previousData.cumulative ?? sessionTotals(previousData) : null;
+      ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`).all(observation.model, execution.id, execution.startedAt, session, limit) as any[])
+      .map((row): SessionTotals => { const data = JSON.parse(row.data_json); return data.cumulative ?? sessionTotals(data); });
+    const covers = (totals: SessionTotals) => TOTAL_FIELDS.every((field) => (current[field] ?? 0) >= (totals[field] ?? 0));
+    let previous: SessionTotals | null = turnsBefore(sessionId, 1)[0] ?? null;
+    if (!previous && forkedFromSessionId && forkedFromSessionId !== sessionId) {
+      // The fork's starting point: the most the source had reached that the fork's totals include.
+      const size = (totals: SessionTotals) => TOTAL_FIELDS.reduce((sum, field) => sum + (totals[field] ?? 0), 0);
+      previous = turnsBefore(forkedFromSessionId, 500).filter(covers)
+        .reduce<SessionTotals | null>((best, totals) => !best || size(totals) > size(best) ? totals : best, null);
+    }
     // A session that restarted its count (a new process) is already per-process: keep it as it is.
-    const continues = previous && TOTAL_FIELDS.every((field) => (current[field] ?? 0) >= (previous[field] ?? 0));
+    const continues = previous && covers(previous);
     const delta = (field: keyof SessionTotals) => current[field] === null ? null
       : continues ? Math.max(0, (current[field] ?? 0) - (previous![field] ?? 0)) : current[field];
     return { ...observation, input: delta('input'), output: delta('output'), cacheRead: delta('cacheRead'),
       cacheWrite: delta('cacheWrite'), reasoning: delta('reasoning'), reportedCost: delta('reportedCost') ?? undefined,
-      cumulative: current } as UsageObservation;
+      cumulative: current, ...(forkedFromSessionId ? { forkedFromSessionId } : {}) } as UsageObservation;
   }
 
   /** Once: rewrites Claude session totals recorded before `sessionTurnDelta`, oldest first so each finds its predecessor. */
@@ -320,9 +334,12 @@ export class UsageStore {
   }
 
   private writeObservation(execution: UsageExecution, incoming: UsageObservation): void {
-    const delta = this.sessionTurnDelta(execution, incoming);
+    const old = this.db.prepare('SELECT price_id,model,provider,data_json FROM observations WHERE execution_id=? AND id=?').get(execution.id, incoming.id) as any;
+    // Once known, a fork's source stays with its first turn, through later snapshots and repricing.
+    const keptFork = old && !(incoming as { forkedFromSessionId?: string }).forkedFromSessionId
+      ? JSON.parse(old.data_json).forkedFromSessionId : undefined;
+    const delta = this.sessionTurnDelta(execution, keptFork ? { ...incoming, forkedFromSessionId: keptFork } as UsageObservation : incoming);
     let observation = delta;
-    const old = this.db.prepare('SELECT price_id,model,provider FROM observations WHERE execution_id=? AND id=?').get(execution.id, observation.id) as any;
     const priceRow = old?.price_id && old.model === observation.model && old.provider === observation.provider
       ? this.db.prepare('SELECT data_json FROM prices WHERE id=?').get(old.price_id) as any
       : this.db.prepare('SELECT data_json FROM prices WHERE provider=? AND model=? AND effective_at<=? ORDER BY effective_at DESC,created_at DESC,rowid DESC LIMIT 1')
