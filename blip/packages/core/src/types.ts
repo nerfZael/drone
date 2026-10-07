@@ -25,6 +25,11 @@ export interface BlipSessionState {
   changedFiles: string[];
   readFiles: string[];
   parentSessionId?: string;
+  /**
+   * The identity a copy's provider prompt cache knows it by: its original's, so the history they share is found in the
+   * cache. Unset, a session goes by its own id.
+   */
+  cacheKey?: string;
   forkedFromEntryId?: string;
   providerSessionId?: string;
   providerThreadId?: string;

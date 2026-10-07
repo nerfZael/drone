@@ -155,4 +155,23 @@ describe("openai codex responses", () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	test("a copied conversation goes by its original's cache identity", async () => {
+		const model = getModel("openai-codex", "gpt-5.6-luna") as Model<"openai-codex-responses">;
+		let request: Request | undefined;
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			request = new Request(input, init);
+			return new Response(JSON.stringify({ error: { message: "stop" } }), { status: 400 });
+		}) as typeof fetch;
+		try {
+			await streamSimpleOpenAICodexResponses(model, context, {
+				apiKey: fakeCodexToken(), transport: "sse", sessionId: "copy", cacheKey: "original",
+			}).result();
+			expect(request?.headers.get("session_id")).toBe("original");
+			expect(JSON.parse(await request!.text()).prompt_cache_key).toBe("original");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });

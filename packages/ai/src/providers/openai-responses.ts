@@ -92,7 +92,7 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 			// Create OpenAI client
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
-			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
+			const cacheSessionId = cacheRetention === "none" ? undefined : (options?.cacheKey ?? options?.sessionId);
 			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId);
 			let params = buildParams(model, context, options);
 			const nextParams = await options?.onPayload?.(params, model);
@@ -224,7 +224,7 @@ function buildParams(model: Model<"openai-responses">, context: Context, options
 		model: model.id,
 		input: messages,
 		stream: true,
-		prompt_cache_key: cacheRetention === "none" ? undefined : options?.sessionId,
+		prompt_cache_key: cacheRetention === "none" ? undefined : (options?.cacheKey ?? options?.sessionId),
 		prompt_cache_retention: getPromptCacheRetention(compat, cacheRetention),
 		store: false,
 	};

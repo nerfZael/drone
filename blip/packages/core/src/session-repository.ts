@@ -8,12 +8,21 @@ import type {
   TranscriptEntry,
 } from './types.js';
 
+/**
+ * The identity a session's provider prompt cache knows it by. A copy goes by its original's, so the history they share
+ * is found in the cache; copies made before copies kept one go by their parent's.
+ */
+export function sessionCacheKey(session: Pick<BlipSessionState, 'id' | 'cacheKey' | 'parentSessionId'>): string {
+  return session.cacheKey ?? session.parentSessionId ?? session.id;
+}
+
 export interface CreateSessionInput {
   provider: string;
   model: string;
   permissionMode: PermissionMode;
   toolProfile: ToolProfile;
   parentSessionId?: string;
+  cacheKey?: string;
   forkedFromEntryId?: string;
   transcriptSeed?: TranscriptEntry[];
 }

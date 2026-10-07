@@ -201,8 +201,10 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 			if (nextBody !== undefined) {
 				body = nextBody as RequestBody;
 			}
-			const websocketRequestId = options?.sessionId || createCodexRequestId();
-			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId);
+			// The cache identity: a copied conversation's original's, so their shared history is found in the cache.
+			const cacheIdentity = options?.cacheKey ?? options?.sessionId;
+			const websocketRequestId = cacheIdentity || createCodexRequestId();
+			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, cacheIdentity);
 			const websocketHeaders = buildWebSocketHeaders(
 				model.headers,
 				options?.headers,
@@ -420,7 +422,7 @@ function buildRequestBody(
 		input: messages,
 		text: { verbosity: options?.textVerbosity || "low" },
 		include: ["reasoning.encrypted_content"],
-		prompt_cache_key: codexPromptCacheKey(options?.sessionId),
+		prompt_cache_key: codexPromptCacheKey(options?.cacheKey ?? options?.sessionId),
 		tool_choice: "auto",
 		parallel_tool_calls: true,
 	};

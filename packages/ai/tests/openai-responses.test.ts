@@ -37,6 +37,18 @@ describe("openai responses", () => {
 		expect((await capturePayload(model))?.reasoning).toBeUndefined();
 	});
 
+	test("a copied conversation goes by its original's cache identity", async () => {
+		let payload: any;
+		await streamSimpleOpenAIResponses(getModel("openai", "gpt-6.1-sol"), context, {
+			apiKey: "test-key", sessionId: "copy", cacheKey: "original",
+			onPayload: (nextPayload) => {
+				payload = nextPayload;
+				throw new Error("stop after payload capture");
+			},
+		}).result();
+		expect(payload.prompt_cache_key).toBe("original");
+	});
+
 	test("separates GPT-5.6 cache reads and writes from uncached input", () => {
 		const usage = parseResponsesUsage({
 			input_tokens: 100,

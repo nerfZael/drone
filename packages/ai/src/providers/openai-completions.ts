@@ -142,7 +142,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const compat = getCompat(model);
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
-			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
+			const cacheSessionId = cacheRetention === "none" ? undefined : (options?.cacheKey ?? options?.sessionId);
 			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat, measureRequestAttempts(metrics, elapsed));
 			let params = buildParams(model, context, options, compat, cacheRetention);
 			const nextParams = await options?.onPayload?.(params, model);
@@ -513,7 +513,7 @@ function buildParams(
 		prompt_cache_key:
 			(model.baseUrl.includes("api.openai.com") && cacheRetention !== "none") ||
 			(cacheRetention === "long" && compat.supportsLongCacheRetention)
-				? options?.sessionId
+				? (options?.cacheKey ?? options?.sessionId)
 				: undefined,
 		prompt_cache_retention: cacheRetention === "long" && compat.supportsLongCacheRetention ? "24h" : undefined,
 	};

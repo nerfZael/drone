@@ -10,7 +10,7 @@ import {
 import { validateToolArguments } from '@mariozechner/pi-ai/agent-core';
 import type { CompactionSettings } from './compaction.js';
 import { BlipContextManager } from './context-manager.js';
-import type { SessionRepository } from './session-repository.js';
+import { sessionCacheKey, type SessionRepository } from './session-repository.js';
 import { RuntimeTimingTracker } from './runtime-timing.js';
 import type {
   BlipPromptInput,
@@ -258,6 +258,7 @@ class BlipSession implements BlipSessionHandle {
         messages: initialMessages,
       },
       sessionId: state.id,
+      cacheKey: sessionCacheKey(state),
       toolExecution: 'parallel',
       getApiKey: options.getApiKey,
       onResponse: options.onResponse,

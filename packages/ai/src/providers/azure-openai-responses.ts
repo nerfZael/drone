@@ -245,7 +245,7 @@ function buildParams(
 		model: deploymentName,
 		input: messages,
 		stream: true,
-		prompt_cache_key: options?.sessionId,
+		prompt_cache_key: options?.cacheKey ?? options?.sessionId,
 	};
 
 	if (options?.maxTokens) {

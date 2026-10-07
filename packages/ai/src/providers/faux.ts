@@ -210,7 +210,8 @@ function withUsageEstimate(
 	let input = promptTokens;
 	let cacheRead = 0;
 	let cacheWrite = 0;
-	const sessionId = options?.sessionId;
+	// Like real providers, the cache knows a conversation by its cache key when it has one.
+	const sessionId = options?.cacheKey ?? options?.sessionId;
 
 	if (sessionId && options?.cacheRetention !== "none") {
 		const previousPrompt = promptCache.get(sessionId);

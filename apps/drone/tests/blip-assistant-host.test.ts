@@ -564,6 +564,16 @@ describe('Blip assistant host', () => {
       const clonedSessionId = await repository.sessionIdForThread('cloned-thread');
       expect(clonedSessionId).not.toBe(sourceSessionId);
       expect((await repository.load(clonedSessionId!)).parentSessionId).toBe(sourceSessionId);
+      // The clone's first message finds the history it shares with its source in the provider's prompt cache.
+      faux.setResponses([fauxAssistantMessage('cloned response')]);
+      await host.promptThread('cloned-thread', 'cloned prompt');
+      const clonedReply = (await host.historyPage('cloned-thread', { limit: 10 })).entries
+        .map((entry) => entry.message).filter((message: any) => message?.role === 'assistant').at(-1) as any;
+      expect(clonedReply.usage.cacheRead).toBeGreaterThan(0);
+      // A clone of the clone goes by the original's cache identity too.
+      await host.cloneThread('cloned-thread', 'second-clone-thread');
+      const secondSessionId = await repository.sessionIdForThread('second-clone-thread');
+      expect((await repository.load(secondSessionId!)).cacheKey).toBe(sourceSessionId);
       faux.unregister();
     });
   });

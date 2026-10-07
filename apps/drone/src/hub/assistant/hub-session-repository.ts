@@ -225,6 +225,7 @@ export class HubSessionRepository implements SessionRepository {
       createdAt: at,
       updatedAt: at,
       ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+      ...(input.cacheKey ? { cacheKey: input.cacheKey } : {}),
       ...(input.forkedFromEntryId ? { forkedFromEntryId: input.forkedFromEntryId } : {}),
     };
     const createRows = () => {
@@ -569,6 +570,8 @@ export class HubSessionRepository implements SessionRepository {
     return this.create({
       ...input,
       parentSessionId: source.id,
+      // As Blip's sessionCacheKey: a copy shares its original's prompt cache identity.
+      cacheKey: source.cacheKey ?? source.parentSessionId ?? source.id,
       transcriptSeed,
     });
   }

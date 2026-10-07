@@ -227,8 +227,9 @@ function buildRequestOptions(model: Model<"mistral-conversations">, options?: Mi
 
 	// Mistral infrastructure uses `x-affinity` for KV-cache reuse (prefix caching).
 	// Respect explicit caller-provided header values.
-	if (options?.sessionId && !headers["x-affinity"]) {
-		headers["x-affinity"] = options.sessionId;
+	const affinity = options?.cacheKey ?? options?.sessionId;
+	if (affinity && !headers["x-affinity"]) {
+		headers["x-affinity"] = affinity;
 	}
 
 	if (Object.keys(headers).length > 0) {

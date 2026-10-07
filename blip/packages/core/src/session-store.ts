@@ -8,6 +8,7 @@ import type {
   ForkSessionInput,
   SessionRepository,
 } from './session-repository.js';
+import { sessionCacheKey } from './session-repository.js';
 import type {
   BlipRuntimeEvent,
   BlipSessionState,
@@ -99,6 +100,7 @@ export class SessionStore implements SessionRepository {
       createdAt,
       updatedAt: createdAt,
       ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+      ...(input.cacheKey ? { cacheKey: input.cacheKey } : {}),
       ...(input.forkedFromEntryId ? { forkedFromEntryId: input.forkedFromEntryId } : {}),
     };
     await mkdir(this.sessionDir(id), { recursive: true });
@@ -262,6 +264,7 @@ export class SessionStore implements SessionRepository {
     return this.create({
       ...input,
       parentSessionId: source.id,
+      cacheKey: sessionCacheKey(source),
       transcriptSeed: transcript,
     });
   }

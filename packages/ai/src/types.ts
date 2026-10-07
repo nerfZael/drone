@@ -96,6 +96,12 @@ export interface StreamOptions {
 	 */
 	sessionId?: string;
 	/**
+	 * Optional identity the provider's prompt cache knows this conversation by, in place of `sessionId`: a copy of a
+	 * conversation passes its original's, so the history they share is found in the cache. Connections and other
+	 * session state stay with `sessionId`.
+	 */
+	cacheKey?: string;
+	/**
 	 * Optional callback for inspecting or replacing provider payloads before sending.
 	 * Return undefined to keep the payload unchanged.
 	 */
