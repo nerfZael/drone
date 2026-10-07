@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 import {
@@ -8,7 +9,11 @@ import {
   composerAgentName,
   type ChatComposerRuntimePickerConfig,
 } from '../src/droneHub/chat/ChatComposerRuntimePicker';
-import { ChatComposerModelPicker, type ChatComposerModelPickerConfig } from '../src/droneHub/chat/ChatComposerModelPicker';
+import {
+  ChatComposerModelMenuSections,
+  ChatComposerModelPicker,
+  type ChatComposerModelPickerConfig,
+} from '../src/droneHub/chat/ChatComposerModelPicker';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { agentAccessChoiceGroups } from '../src/droneHub/app/agent-access-choice-groups';
 
@@ -83,7 +88,7 @@ test('one picker chooses the agent, model, reasoning, and access', async () => {
     for (const title of ['Agent', 'Model', 'Reasoning', 'Access', 'Approvals']) {
       expect(element.textContent).toContain(title);
     }
-    await act(async () => button('Codex').click());
+    // Every agent is in sight: one click switches.
     await act(async () => button('Claude Code').click());
     await act(async () => button('Never ask').click());
     // The agent and access keep the panel open, so several can be set at once.
@@ -101,7 +106,7 @@ test('one picker chooses the agent, model, reasoning, and access', async () => {
   }
 });
 
-test('an agent action closes the picker, and choosing a model folds its list', async () => {
+test('every agent and model is one click away; a model keeps the picker open, an agent action closes it', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
@@ -146,16 +151,51 @@ test('an agent action closes the picker, and choosing a model folds its list', a
     ) as unknown as HTMLButtonElement | undefined;
   try {
     await act(async () => render());
-    // Among the other settings, the model list starts folded.
-    expect(button('Model B')).toBeUndefined();
-    await act(async () => button('Model A')!.click());
+    // A few models need no search box.
+    expect(element.querySelector('input')).toBeNull();
     await act(async () => button('Model B')!.click());
     await act(async () => render());
+    // The agent and access settings may follow, so the picker stays open with every model still in sight.
     expect(events).toEqual(['model:model-b']);
-    expect(button('Model A')).toBeUndefined();
-    await act(async () => button('Pi')!.click());
+    expect(button('Model A')).toBeDefined();
     await act(async () => button('Add custom...')!.click());
     expect(events).toEqual(['model:model-b', 'done', 'agent:add-custom']);
+  } finally {
+    await act(async () => root.unmount());
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
+  }
+});
+
+test('many models get a search box', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  const element = dom.document.createElement('div');
+  dom.document.body.appendChild(element);
+  const root = createRoot(element as unknown as HTMLElement);
+  const models = Array.from({ length: 12 }, (_, index) => ({ provider: 'external', id: `model-${index}`, name: `Model ${index}` }));
+  const config: ChatComposerRuntimePickerConfig = {
+    model: { currentProvider: 'external', currentModel: 'model-0', showReasoning: false, options: models, onSelect: () => {} },
+  };
+  const modelButtons = () => element.querySelectorAll('[aria-label="Model"] button').length;
+  try {
+    await act(async () => root.render(<ChatComposerRuntimePanel config={config} onDone={() => {}} />));
+    expect(modelButtons()).toBe(12);
+    const search = element.querySelector('input[aria-label="Search models"]') as unknown as HTMLInputElement;
+    expect(search).not.toBeNull();
+    await act(async () => {
+      search.value = 'Model 1';
+      Simulate.change(search);
+    });
+    // Model 1, 10 and 11.
+    expect(modelButtons()).toBe(3);
   } finally {
     await act(async () => root.unmount());
     for (const [key, descriptor] of originals) {
@@ -189,6 +229,11 @@ test('a model-only picker names the agent too, unless the setting hides it', asy
     useDroneHubUiStore.setState({ composerHidesAgentName: false });
     await act(async () => root.render(<ChatComposerModelPicker config={config} />));
     expect(element.querySelector('button')?.textContent).toBe('Claude · Model A');
+    // A started chat's agent is named in the menu, not offered for change.
+    await act(async () => root.render(<ChatComposerModelMenuSections config={{ ...config, agentName: 'Claude Code' }} onDone={() => {}} />));
+    expect(element.querySelector('[data-chat-composer-model-picker-agent]')?.textContent).toBe('Claude Code');
+    expect(element.querySelector('[aria-label="Agent"]')).toBeNull();
+    await act(async () => root.render(<ChatComposerModelPicker config={config} />));
     await act(async () => useDroneHubUiStore.setState({ composerHidesAgentName: true }));
     expect(element.querySelector('button')?.textContent).toBe('Model A');
   } finally {

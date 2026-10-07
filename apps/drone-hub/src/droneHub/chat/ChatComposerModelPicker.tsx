@@ -27,6 +27,8 @@ export type ChatComposerModelPickerConfig = {
   triggerLabel?: string;
   /** The agent named before the model on the button, as the agent picker does, unless the setting hides it. */
   agentLabel?: string;
+  /** For chats whose agent is fixed: the agent, named but not changeable at the top of the menu. */
+  agentName?: string;
   allowCustomModel?: boolean;
   requireExplicitModelSelection?: boolean;
   statusMessage?: string;
@@ -170,9 +172,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Up to this many models show at once; more get a search box and scroll. */
+const FEW_MODELS = 8;
+
 /**
- * The model list and reasoning levels. `standalone` is the model picker's own
- * menu; `sections` gives each part a heading so it can sit among other settings.
+ * The models and reasoning levels, all in sight, so each is one click: a model keeps the menu open for its reasoning,
+ * and reasoning, chosen last, closes it. `standalone` is the model picker's own menu; `sections` sits among the agent
+ * and access settings, which come after the model there, so a model never closes it.
  */
 export function ChatComposerModelMenuSections({
   config,
@@ -185,13 +191,11 @@ export function ChatComposerModelMenuSections({
   onDone: () => void;
 }) {
   const {
-    currentModel,
     disabled = false,
     showReasoning = true,
     searchable = true,
     searchPlaceholder = 'Search models',
     allowCustomModel = false,
-    requireExplicitModelSelection = false,
     statusMessage,
     onSelect,
   } = config;
@@ -204,21 +208,12 @@ export function ChatComposerModelMenuSections({
     currentName,
     visibleReasoning,
   } = resolveChatComposerModelSelection(config);
-  // Alone, a picker without reasoning is just the model list. Among other
-  // settings the list stays folded until asked for.
-  const initialModelsOpen =
-    (layout === 'standalone' && !showReasoning) ||
-    (requireExplicitModelSelection && !currentModel);
-  const [modelsOpen, setModelsOpen] = React.useState(initialModelsOpen);
   const [searchQuery, setSearchQuery] = React.useState('');
+  const manyModels = models.length > FEW_MODELS;
+  // A custom model ID is typed into the search box, so it shows for that too.
+  const showSearch = searchable && (manyModels || allowCustomModel);
 
-  React.useEffect(() => {
-    setModelsOpen(initialModelsOpen);
-    setSearchQuery('');
-  }, [currentModel, initialModelsOpen]);
-
-  const modelListOpen = modelsOpen || (requireExplicitModelSelection && !selectedModelId);
-  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const normalizedQuery = showSearch ? searchQuery.trim().toLowerCase() : '';
   const visibleModels = normalizedQuery
     ? models.filter((choice) =>
         `${choice.name ?? ''} ${choice.id}`.toLowerCase().includes(normalizedQuery),
@@ -234,10 +229,7 @@ export function ChatComposerModelMenuSections({
       : '';
 
   const selectReasoning = (thinkingLevel: string) => {
-    if (!selectedModelId) {
-      setModelsOpen(true);
-      return;
-    }
+    if (!selectedModelId) return;
     const exact = choices.find(
       (choice) =>
         choice.provider === selectedProvider &&
@@ -269,12 +261,18 @@ export function ChatComposerModelMenuSections({
       'model',
     );
     setSearchQuery('');
-    if (showReasoning || layout === 'sections') setModelsOpen(false);
-    else onDone();
+    if (!showReasoning && layout === 'standalone') onDone();
   };
 
-  const reasoningChips = showReasoning && !modelListOpen && selectedModelId ? (
-    <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
+  const chipClass = (active: boolean) =>
+    `flex min-h-8 min-w-0 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
+      active
+        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
+        : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
+    }`;
+
+  const reasoningChips = showReasoning && selectedModelId ? (
+    <div role="group" aria-label="Reasoning" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-2 pb-2">
       {visibleReasoning.map((level) => {
         const active = level === selectedReasoning;
         return (
@@ -298,26 +296,11 @@ export function ChatComposerModelMenuSections({
     </div>
   ) : null;
 
-  const modelToggle = (
-    <button
-      type="button"
-      onClick={() => setModelsOpen((value) => !value)}
-      aria-expanded={modelListOpen}
-      className="mx-2 mb-2 flex h-[2.375rem] flex-shrink-0 items-center justify-between gap-3 rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-left"
-    >
-      <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
-        {currentName}
-      </span>
-      <span className="text-[var(--accent)]"><ChevronIcon up={modelListOpen} /></span>
-    </button>
-  );
-
-  const modelList = modelListOpen ? (
+  const modelGrid = (
     <>
-      {searchable ? (
+      {showSearch ? (
         <div className="flex-shrink-0 px-2 pb-1.5">
           <input
-            autoFocus
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder={searchPlaceholder}
@@ -326,8 +309,9 @@ export function ChatComposerModelMenuSections({
           />
         </div>
       ) : null}
-      <div className={`min-h-0 overflow-y-auto px-2 pb-2 ${layout === 'sections' ? 'max-h-[15rem] flex-shrink-0' : ''}`}>
-        <div className="flex flex-col gap-1">
+      {/* Many models scroll in a box about four rows tall, so reasoning stays in sight below them. */}
+      <div className={`min-h-0 flex-shrink-0 px-2 pb-2 ${manyModels ? 'max-h-[9.5rem] overflow-y-auto' : ''}`}>
+        <div role="group" aria-label="Model" className="grid grid-cols-2 gap-1">
           {visibleModels.length > 0 ? (
             visibleModels.map((choice) => {
               const active =
@@ -337,21 +321,21 @@ export function ChatComposerModelMenuSections({
                   key={`${choice.provider}:${choice.id}`}
                   type="button"
                   disabled={disabled}
-                  onClick={() => selectModel(choice)}
+                  onClick={() => {
+                    if (!active) selectModel(choice);
+                    else if (!showReasoning && layout === 'standalone') onDone();
+                  }}
+                  aria-pressed={active}
                   title={choice.id || choice.name}
-                  className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
-                    active
-                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
-                      : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
-                  }`}
+                  className={chipClass(active)}
                 >
                   <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Auto'}</span>
-                  {active ? <span className="ml-2 text-[var(--accent)]"><CheckIcon /></span> : null}
+                  {active ? <span className="ml-1 flex-shrink-0 text-[var(--accent)]"><CheckIcon /></span> : null}
                 </button>
               );
             })
           ) : !customModelId ? (
-            <div className="flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
+            <div className="col-span-2 flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
               No matching models.
             </div>
           ) : null}
@@ -366,7 +350,7 @@ export function ChatComposerModelMenuSections({
                   name: customModelId,
                 })
               }
-              className="flex min-h-9 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
+              className="col-span-2 flex min-h-8 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
             >
               <span className="truncate">Use model ID “{customModelId}”</span>
             </button>
@@ -374,42 +358,39 @@ export function ChatComposerModelMenuSections({
         </div>
       </div>
     </>
-  ) : null;
-
-  const status = statusMessage ? (
-    <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
-      {statusMessage}
-    </div>
-  ) : null;
-
-  if (layout === 'sections') {
-    return (
-      <>
-        <SectionTitle>Model</SectionTitle>
-        {modelToggle}
-        {modelList}
-        {reasoningChips ? (
-          <>
-            <SectionTitle>Reasoning</SectionTitle>
-            {reasoningChips}
-          </>
-        ) : null}
-        {statusMessage ? (
-          <div className="flex-shrink-0 px-3 pb-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
-            {statusMessage}
-          </div>
-        ) : null}
-      </>
-    );
-  }
+  );
 
   return (
     <>
-      <SectionTitle>{showReasoning && !modelListOpen ? 'Reasoning' : 'Model'}</SectionTitle>
-      {reasoningChips}
-      {modelToggle}
-      {modelList}
-      {status}
+      {config.agentName ? (
+        <>
+          <SectionTitle>Agent</SectionTitle>
+          <div
+            data-chat-composer-model-picker-agent="true"
+            title="A chat keeps its agent once it has started."
+            className="flex-shrink-0 truncate px-3 pb-2 text-[.75rem] font-medium text-[var(--chat-composer-fg)]"
+          >
+            {config.agentName}
+          </div>
+        </>
+      ) : null}
+      <SectionTitle>Model</SectionTitle>
+      {modelGrid}
+      {reasoningChips ? (
+        <>
+          <SectionTitle>Reasoning</SectionTitle>
+          {reasoningChips}
+        </>
+      ) : null}
+      {statusMessage ? (
+        <div
+          className={layout === 'sections'
+            ? 'flex-shrink-0 px-3 pb-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]'
+            : 'flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]'}
+        >
+          {statusMessage}
+        </div>
+      ) : null}
     </>
   );
 }

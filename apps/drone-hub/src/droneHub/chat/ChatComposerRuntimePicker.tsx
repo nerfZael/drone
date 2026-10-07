@@ -61,11 +61,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function entrySearchText(entry: UiMenuSelectEntry): string {
-  if (entry.kind === 'separator') return '';
-  return `${entry.searchText ?? ''} ${typeof entry.label === 'string' ? entry.label : ''} ${entry.value}`.toLowerCase();
-}
-
+/** Every agent at once, one click each: there are only a few, so there is no list to open or search. */
 function AgentSection({
   agent,
   onDone,
@@ -73,92 +69,53 @@ function AgentSection({
   agent: ChatComposerRuntimeAgentConfig;
   onDone: () => void;
 }) {
-  const [listOpen, setListOpen] = React.useState(false);
-  const [query, setQuery] = React.useState('');
-  const normalizedQuery = query.trim().toLowerCase();
-  const entries = normalizedQuery
-    ? agent.entries.filter(
-        (entry) => entry.kind !== 'separator' && entrySearchText(entry).includes(normalizedQuery),
-      )
-    : agent.entries;
-
   return (
     <>
       <SectionTitle>Agent</SectionTitle>
-      <button
-        type="button"
-        disabled={agent.disabled}
-        onClick={() => {
-          setListOpen((value) => !value);
-          setQuery('');
-        }}
-        aria-expanded={listOpen}
+      <div
+        role="group"
+        aria-label="Agent"
         title={agent.disabled ? 'The agent cannot be changed for this chat.' : undefined}
-        className="mx-2 mb-2 flex h-[2.375rem] flex-shrink-0 items-center justify-between gap-3 rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
+        className="grid flex-shrink-0 grid-cols-2 gap-1 px-2 pb-2"
       >
-        <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
-          {agent.label}
-        </span>
-        {agent.disabled ? null : <span className="text-[var(--accent)]"><ChevronIcon up={listOpen} /></span>}
-      </button>
-      {listOpen && !agent.disabled ? (
-        <>
-          <div className="flex-shrink-0 px-2 pb-1.5">
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search agents"
-              aria-label="Search agents"
-              className="h-8 w-full rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-[.75rem] font-normal text-[var(--chat-composer-fg)] placeholder:font-normal placeholder:text-[var(--chat-composer-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
-            />
-          </div>
-          <div className="max-h-[15rem] min-h-0 flex-shrink-0 overflow-y-auto px-2 pb-2">
-            <div className="flex flex-col gap-1">
-              {entries.length === 0 ? (
-                <div className="flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
-                  No matching agents.
-                </div>
-              ) : null}
-              {entries.map((entry, index) => {
-                if (entry.kind === 'separator') {
-                  return (
-                    <div
-                      key={entry.key ?? `separator-${index}`}
-                      className="mx-1 my-0.5 h-px flex-shrink-0 bg-[var(--border-subtle)]"
-                      aria-hidden="true"
-                    />
-                  );
-                }
-                const active = entry.value === agent.value;
-                return (
-                  <button
-                    key={entry.value}
-                    type="button"
-                    disabled={entry.disabled}
-                    title={entry.title}
-                    onClick={() => {
-                      setListOpen(false);
-                      setQuery('');
-                      // An action leads elsewhere, so the picker gets out of its way.
-                      if (agent.actionValues?.includes(entry.value)) onDone();
-                      if (!active) agent.onChange(entry.value);
-                    }}
-                    className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      active
-                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
-                        : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                    {active ? <span className="ml-2 text-[var(--accent)]"><CheckIcon /></span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      ) : null}
+        {agent.entries.map((entry, index) => {
+          if (entry.kind === 'separator') {
+            return (
+              <div
+                key={entry.key ?? `separator-${index}`}
+                className="col-span-2 mx-1 my-0.5 h-px bg-[var(--border-subtle)]"
+                aria-hidden="true"
+              />
+            );
+          }
+          const active = entry.value === agent.value;
+          const action = agent.actionValues?.includes(entry.value) ?? false;
+          return (
+            <button
+              key={entry.value}
+              type="button"
+              disabled={agent.disabled || entry.disabled}
+              title={entry.title}
+              aria-pressed={action ? undefined : active}
+              onClick={() => {
+                // An action leads elsewhere, so the picker gets out of its way.
+                if (action) onDone();
+                if (!active) agent.onChange(entry.value);
+              }}
+              className={`flex min-h-8 min-w-0 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                active
+                  ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
+                  : action
+                    ? 'border-dashed border-[var(--border)] text-[var(--muted)] hover:bg-[var(--hover)]'
+                    : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+              {active ? <span className="ml-1 flex-shrink-0 text-[var(--accent)]"><CheckIcon /></span> : null}
+            </button>
+          );
+        })}
+      </div>
     </>
   );
 }

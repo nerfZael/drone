@@ -12,7 +12,7 @@ import { composerAgentName } from './ChatComposerRuntimePicker';
 
 const KEEP_EACH = '__keep-each-chat__';
 
-type TargetSettings = { agentKey: string; model: string | null; reasoning: string | null };
+type TargetSettings = { agentKey: string; agentName: string; model: string | null; reasoning: string | null };
 
 /** The one value all targets share, or `mixed` when they differ. */
 function shared<T>(values: T[]): { mixed: false; value: T | null } | { mixed: true } {
@@ -58,7 +58,11 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
         if (!info) return null;
         const agent = info.agent;
         if (agent.kind === 'builtin') sources.set(`${agent.id}:${target.runtime}`, { agent: agent.id, runtime: target.runtime });
-        return { agentKey: agent.kind === 'builtin' ? `builtin:${agent.id}` : agent.kind, model: info.model, reasoning: info.reasoning };
+        const agentKey = agent.kind === 'builtin' ? `builtin:${agent.id}` : agent.kind;
+        const agentName = agent.kind === 'custom'
+          ? agent.label
+          : BUILTIN_AGENT_OPTIONS.find((option) => option.key === agentKey)?.label ?? agentKey;
+        return { agentKey, agentName, model: info.model, reasoning: info.reasoning };
       }));
       const catalogs = await Promise.allSettled([...sources.values()].map(async source => {
         const data = await requestJson(`/api/model-catalog?${new URLSearchParams(source)}`, { signal: controller.signal });
@@ -108,6 +112,7 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
   const agentKey = sharedAgent.mixed ? '' : sharedAgent.value ?? '';
   const agentOption = BUILTIN_AGENT_OPTIONS.find((option) => option.key === agentKey);
   const agentLabel = agentOption ? composerAgentName({ value: agentOption.key, label: agentOption.label }) : undefined;
+  const sharedAgentName = shared(settings.map(item => item.agentName));
   const differing = targets.length > 1 && (sharedModel.mixed || sharedReasoning.mixed);
   const overridden = value.model !== undefined || value.reasoning !== undefined;
   const triggerLabel = sharedModel.mixed
@@ -125,6 +130,8 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
     triggerLabel,
     // Chats that share an agent name it, as a new chat's picker does.
     agentLabel: agentLabel && !sharedModel.mixed ? agentLabel : undefined,
+    // A started chat keeps its agent, so the menu names it rather than offering others.
+    agentName: sharedAgentName.mixed ? 'Different agents' : sharedAgentName.value ?? undefined,
     title: differing ? 'The selected chats use different settings; a choice here applies to all of them' : pickerConfig.title,
     options: [...keepEach, ...pickerConfig.options],
     onSelect: (choice, selection) => {
