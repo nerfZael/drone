@@ -12,6 +12,7 @@ import {
   chatNamesForConfigSelection,
   chatSelectionKey,
 } from './chat-selection-model';
+import { chatAgentKey, rememberAgentModelPick, rememberedAgentModelPick } from './agent-model-picks';
 import { isDroneStartingOrSeeding } from './helpers';
 import { isNotFoundError } from './hooks';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
@@ -315,12 +316,16 @@ export function useChatConfigState({
         (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip'));
       const approvalSupported =
         agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
+      // The agent comes back with the model and reasoning last picked for it.
+      const remembered = rememberedAgentModelPick(chatAgentKey(agent));
+      const model = remembered.model || null;
+      const reasoning = remembered.reasoning || null;
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ agent, model: null, reasoning: null }),
+          body: JSON.stringify({ agent, model, reasoning }),
         },
       );
       setChatInfo((prev) => ({
@@ -330,8 +335,8 @@ export function useChatConfigState({
         subscriptions: prev?.subscriptions ?? [],
         agent,
         agentLocked: prev?.agentLocked ?? false,
-        model: null,
-        reasoning: null,
+        model,
+        reasoning,
         agentPermissionMode: readOnlySupported
           ? (prev?.agentPermissionMode ?? 'execute')
           : 'execute',
@@ -410,11 +415,17 @@ export function useChatConfigState({
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
       setChatInfoError(null);
+      if (chatInfo?.agent) {
+        rememberAgentModelPick(chatAgentKey(chatInfo.agent), {
+          model: hasModel ? (model ?? '') : (chatInfo.model ?? ''),
+          reasoning: hasReasoning ? (reasoning ?? '') : (chatInfo.reasoning ?? ''),
+        });
+      }
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CHAT_MODEL_SETTINGS_CHANGED, {
         detail: { droneId: selectedDrone, chatName: chat, settings: body },
       }));
     },
-    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, chatInfo, requestJson, selectedChat, selectedDrone],
   );
 
   const setChatAgentPermissionMode = React.useCallback(

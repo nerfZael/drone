@@ -44,6 +44,7 @@ import { useCanvasChatActivity } from './use-canvas-chat-activity';
 import { ChatStepsControl } from './ChatStepsControl';
 import { DraftRepoSelect, useCanvasModelPicker } from './CanvasDraftControls';
 import { canvasSettingsForAgent, type CanvasNewCardSettings } from './canvas-new-card-settings';
+import { rememberAgentModelPick, rememberedAgentModelPick } from '../app/agent-model-picks';
 import { agentAccessChoiceGroups, agentAccessSupport } from '../app/agent-access-choice-groups';
 import { ChatComposerRuntimePicker } from '../chat/ChatComposerRuntimePicker';
 import { requestJson } from '../http';
@@ -968,7 +969,11 @@ export function DroneCanvasDock({
     agentKey: newCardSettings.agentKey,
     model: newCardSettings.model,
     reasoning: newCardSettings.reasoning,
-    onChange: (patch) => applyNewCardSettings({ ...newCardSettings, ...patch }),
+    onChange: (patch) => {
+      const next = { ...newCardSettings, ...patch };
+      rememberAgentModelPick(next.agentKey, { model: next.model, reasoning: next.reasoning });
+      applyNewCardSettings(next);
+    },
     disabled: controlsDisabled,
   });
   // Messages to chats that already exist keep their own settings, with a one-off override instead of this picker.
@@ -981,7 +986,9 @@ export function DroneCanvasDock({
         value: newCardSettings.agentKey,
         label: newCardAgentLabel,
         entries: spawnAgentMenuEntries,
-        onChange: (key) => applyNewCardSettings(canvasSettingsForAgent(newCardSettings, key, resolveAgentKey(key))),
+        onChange: (key) => applyNewCardSettings(
+          canvasSettingsForAgent(newCardSettings, key, resolveAgentKey(key), rememberedAgentModelPick(key)),
+        ),
         disabled: controlsDisabled,
       },
       model: newCardModelPicker,

@@ -7,6 +7,8 @@ import { fetchDroneChatStateCached } from '../app/chat-api';
 import { requestJson } from '../http';
 import { normalizeAgentModelCatalog, type AgentModelCatalogOption } from '../app/use-agent-model-catalog';
 import { buildExternalAgentComposerControls } from '../app/external-agent-composer-controls';
+import { BUILTIN_AGENT_OPTIONS } from '../app/app-config';
+import { composerAgentName } from './ChatComposerRuntimePicker';
 
 const KEEP_EACH = '__keep-each-chat__';
 
@@ -103,6 +105,9 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
   })?.controls[0];
   if (controls?.kind !== 'model-picker') return null;
   const { kind: _kind, ...pickerConfig } = controls;
+  const agentKey = sharedAgent.mixed ? '' : sharedAgent.value ?? '';
+  const agentOption = BUILTIN_AGENT_OPTIONS.find((option) => option.key === agentKey);
+  const agentLabel = agentOption ? composerAgentName({ value: agentOption.key, label: agentOption.label }) : undefined;
   const differing = targets.length > 1 && (sharedModel.mixed || sharedReasoning.mixed);
   const overridden = value.model !== undefined || value.reasoning !== undefined;
   const triggerLabel = sharedModel.mixed
@@ -118,6 +123,8 @@ export function SelectedChatsModelOverrides({ targets, droneById, draftAgentKey,
     ...pickerConfig,
     id: 'selected-chats-model',
     triggerLabel,
+    // Chats that share an agent name it, as a new chat's picker does.
+    agentLabel: agentLabel && !sharedModel.mixed ? agentLabel : undefined,
     title: differing ? 'The selected chats use different settings; a choice here applies to all of them' : pickerConfig.title,
     options: [...keepEach, ...pickerConfig.options],
     onSelect: (choice, selection) => {

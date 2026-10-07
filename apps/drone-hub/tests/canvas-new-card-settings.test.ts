@@ -4,6 +4,7 @@ import {
   normalizeCanvasNewCardSettings,
   type CanvasNewCardSettings,
 } from '../src/droneHub/canvas/canvas-new-card-settings';
+import { chatAgentKey } from '../src/droneHub/app/agent-model-picks';
 
 const codex: CanvasNewCardSettings = {
   agentKey: 'builtin:codex',
@@ -30,4 +31,15 @@ test('another agent starts its model over and keeps only the access and approval
     .toEqual({ agentKey: 'builtin:cursor', model: '', reasoning: '', permissionMode: 'execute', approvalPolicy: 'ask' });
   expect(canvasSettingsForAgent({ ...codex, approvalPolicy: 'none' }, 'builtin:blip', { kind: 'builtin', id: 'blip' }))
     .toEqual({ agentKey: 'builtin:blip', model: '', reasoning: '', permissionMode: 'read', approvalPolicy: 'none' });
+});
+
+test('another agent starts with the model and reasoning last picked for it', () => {
+  expect(canvasSettingsForAgent(codex, 'builtin:claude', { kind: 'builtin', id: 'claude' }, { model: 'opus', reasoning: 'medium' }))
+    .toEqual({ agentKey: 'builtin:claude', model: 'opus', reasoning: 'medium', permissionMode: 'execute', approvalPolicy: 'ask' });
+});
+
+test('an agent goes by its picker key', () => {
+  expect(chatAgentKey({ kind: 'builtin', id: 'claude' })).toBe('builtin:claude');
+  expect(chatAgentKey({ kind: 'custom', id: 'mine', label: 'Mine', command: 'mine' })).toBe('custom:mine');
+  expect(chatAgentKey({ kind: 'native' })).toBe('native');
 });

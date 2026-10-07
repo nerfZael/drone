@@ -5,8 +5,11 @@ import { expect, test } from 'bun:test';
 import {
   ChatComposerRuntimePanel,
   chatComposerRuntimeTriggerLabel,
+  composerAgentName,
   type ChatComposerRuntimePickerConfig,
 } from '../src/droneHub/chat/ChatComposerRuntimePicker';
+import { ChatComposerModelPicker, type ChatComposerModelPickerConfig } from '../src/droneHub/chat/ChatComposerModelPicker';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { agentAccessChoiceGroups } from '../src/droneHub/app/agent-access-choice-groups';
 
 function accessGroups(overrides: Partial<Parameters<typeof agentAccessChoiceGroups>[0]> = {}) {
@@ -154,6 +157,42 @@ test('an agent action closes the picker, and choosing a model folds its list', a
     await act(async () => button('Add custom...')!.click());
     expect(events).toEqual(['model:model-b', 'done', 'agent:add-custom']);
   } finally {
+    await act(async () => root.unmount());
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.happyDOM.abort();
+  }
+});
+
+test('a model-only picker names the agent too, unless the setting hides it', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  const hidden = useDroneHubUiStore.getState().composerHidesAgentName;
+  const element = dom.document.createElement('div');
+  dom.document.body.appendChild(element);
+  const root = createRoot(element as unknown as HTMLElement);
+  const config: ChatComposerModelPickerConfig = {
+    currentProvider: 'external',
+    currentModel: 'model-a',
+    agentLabel: composerAgentName({ value: 'builtin:claude', label: 'Claude Code' }),
+    showReasoning: false,
+    options: [{ provider: 'external', id: 'model-a', name: 'Model A' }],
+    onSelect: () => {},
+  };
+  try {
+    useDroneHubUiStore.setState({ composerHidesAgentName: false });
+    await act(async () => root.render(<ChatComposerModelPicker config={config} />));
+    expect(element.querySelector('button')?.textContent).toBe('Claude · Model A');
+    await act(async () => useDroneHubUiStore.setState({ composerHidesAgentName: true }));
+    expect(element.querySelector('button')?.textContent).toBe('Model A');
+  } finally {
+    useDroneHubUiStore.setState({ composerHidesAgentName: hidden });
     await act(async () => root.unmount());
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

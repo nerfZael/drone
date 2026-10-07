@@ -788,8 +788,8 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     expect(sends).toHaveLength(sendsBeforeStop);
     await act(async () => Simulate.click(container.querySelector(`[data-drone-id="${alpha('default')}"]`) as unknown as Element));
     expect((input() as unknown as HTMLTextAreaElement).value).toBe('Recorded message');
-    // One picker shows the model and reasoning the chat will use.
-    expect(container.querySelector('[data-chat-composer-model-picker] > button')?.textContent).toBe('Saved model (Low)');
+    // One picker shows the agent, model, and reasoning the chat will use.
+    expect(container.querySelector('[data-chat-composer-model-picker] > button')?.textContent).toBe('Codex · Saved model (Low)');
     expect(container.querySelector('select')).toBeNull();
     expect(configs).toEqual([]);
     const modelTrigger = container.querySelector('[data-chat-composer-model-picker] > button')!;
@@ -797,7 +797,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     const dialogButton = (text: string) => Array.from(dom.document.querySelectorAll('[role="dialog"] button'))
       .find((button) => button.textContent?.trim() === text) as unknown as HTMLButtonElement;
     await act(async () => dialogButton('High').click());
-    expect(modelTrigger.textContent).toBe('Saved model (High)');
+    expect(modelTrigger.textContent).toBe('Codex · Saved model (High)');
     await type('Do not send from model controls');
     const beforeMenuKeys = sends.length;
     await key(modelTrigger as unknown as Element, 'Tab');
@@ -812,7 +812,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await type('With overrides');
     await key(input() as unknown as Element, 'Enter');
     expect((sends.at(-1) as any).overrides).toEqual({ model: 'other-model', reasoning: 'high' });
-    expect(modelTrigger.textContent).toBe('Saved model (Low)');
+    expect(modelTrigger.textContent).toBe('Codex · Saved model (Low)');
     // While chats that exist are selected, the one-off override stands in for the canvas's own settings.
     expect(container.querySelector('[data-chat-composer-runtime-picker]')).toBeNull();
     // Global-board drafts use the same attachments and retain the spawn-count control.

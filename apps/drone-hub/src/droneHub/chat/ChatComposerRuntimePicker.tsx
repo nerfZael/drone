@@ -201,7 +201,8 @@ function ChoiceGroupSection({ group }: { group: ChatComposerRuntimeChoiceGroup }
  * The agent's name on the composer's button, where it shares a line with the model: Claude Code is "Claude", as the
  * model says which. The menu keeps the full names.
  */
-function composerAgentName(agent: ChatComposerRuntimeAgentConfig): string {
+/** The agent's name beside the model on a composer button: Claude Code is just Claude there. */
+export function composerAgentName(agent: Pick<ChatComposerRuntimeAgentConfig, 'value' | 'label'>): string {
   return agent.value === 'builtin:claude' ? 'Claude' : agent.label;
 }
 

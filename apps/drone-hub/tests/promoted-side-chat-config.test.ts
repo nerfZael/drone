@@ -6,11 +6,15 @@ import * as selection from '../src/droneHub/app/chat-selection-model';
 import { isDroneStartingOrSeeding } from '../src/droneHub/app/helpers';
 import type { useChatConfigState } from '../src/droneHub/app/use-chat-config-state';
 import type { ChatInfo } from '../src/domain';
+import * as agentModelPicks from '../src/droneHub/app/agent-model-picks';
+import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import type { DroneSummary } from '../src/droneHub/types';
 
 // Exercise the real configuration hook through promotion and summary updates.
 // Only model discovery, telemetry, and cache storage are substituted.
-function configHarness(cache = new Map<string, any>()) {
+function configHarness(cache = new Map<string, any>(), requestJson: (url: string, init?: any) => Promise<any> = async () => {
+  throw new Error('Unexpected request');
+}) {
   let cursor = 0;
   const slots: any[] = [];
   const effects: Array<() => void> = [];
@@ -44,8 +48,9 @@ function configHarness(cache = new Map<string, any>()) {
     './hooks': { isNotFoundError: () => false },
     './use-agent-model-catalog': { useAgentModelCatalog: () => ({ models: [], loading: false }) },
     './chat-load-telemetry': { markChatLoadConfigResolved() {} },
+    './agent-model-picks': agentModelPicks,
     './chat-runtime-cache': {
-      readFreshChatRuntimeCache: (key: string) => cache.get(key) ?? null,
+      readChatRuntimeSnapshot: (key: string) => cache.get(key) ?? null,
       writeChatRuntimeCache: (key: string, value: any) => cache.set(key, value),
       deleteChatRuntimeCache: (key: string) => cache.delete(key),
     },
@@ -57,7 +62,7 @@ function configHarness(cache = new Map<string, any>()) {
   return (drone: DroneSummary, chat: string) => {
     const render = () => {
       cursor = 0;
-      return exports.useChatConfigState!({ selectedDrone: drone.id, selectedChat: chat, droneById: { [drone.id]: drone }, requestJson: async () => { throw new Error('Unexpected request'); } });
+      return exports.useChatConfigState!({ selectedDrone: drone.id, selectedChat: chat, droneById: { [drone.id]: drone }, requestJson });
     };
     render();
     effects.splice(0).forEach((effect) => effect());
@@ -128,3 +133,24 @@ test.each(['same-drone', 'other-drone'])(
     })).toBe('ready');
   },
 );
+
+test('a chat switched back to an agent gets the model and reasoning last picked for it', async () => {
+  const previous = useDroneHubUiStore.getState().agentModelPicks;
+  const bodies: any[] = [];
+  const render = configHarness(new Map(), async (_url, init) => { bodies.push(JSON.parse(init.body)); return {}; });
+  try {
+    useDroneHubUiStore.setState({ agentModelPicks: {} });
+    render(drone, 'default').resolveChatInfoFromState(
+      { chat: 'default', agent: { kind: 'builtin', id: 'claude' }, model: 'opus', reasoning: null } as ChatInfo,
+    );
+    // Only the reasoning changes; the model it goes with is remembered too.
+    await render(drone, 'default').setChatModelSettings({ reasoning: 'High' });
+    await render(drone, 'default').setChatAgent({ kind: 'builtin', id: 'codex' });
+    expect(render(drone, 'default').chatInfo).toMatchObject({ model: null, reasoning: null });
+    await render(drone, 'default').setChatAgent({ kind: 'builtin', id: 'claude' });
+    expect(bodies.at(-1)).toMatchObject({ agent: { kind: 'builtin', id: 'claude' }, model: 'opus', reasoning: 'high' });
+    expect(render(drone, 'default').chatInfo).toMatchObject({ model: 'opus', reasoning: 'high' });
+  } finally {
+    useDroneHubUiStore.setState({ agentModelPicks: previous });
+  }
+});

@@ -30,6 +30,7 @@ import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from '.
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
 import { agentAccessChoiceGroups } from './agent-access-choice-groups';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
+import { rememberAgentModelPick } from './agent-model-picks';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
 
@@ -220,12 +221,11 @@ export function DraftChatWorkspace({
             title: 'Choose model and reasoning',
             statusMessage: modelCatalogStatusMessage,
             onSelect: (choice, selection) => {
-              if (selection === 'reasoning') {
-                setSpawnReasoning(choice.thinkingLevel ?? '');
-                return;
-              }
-              setSpawnModel(choice.id);
-              setSpawnReasoning(choice.thinkingLevel ?? '');
+              const reasoning = choice.thinkingLevel ?? '';
+              const model = selection === 'reasoning' ? spawnModel : choice.id;
+              rememberAgentModelPick(spawnAgentKey, { model, reasoning });
+              if (selection !== 'reasoning') setSpawnModel(model);
+              setSpawnReasoning(reasoning);
             },
           }
         : undefined,

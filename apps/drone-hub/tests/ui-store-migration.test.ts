@@ -37,6 +37,7 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.6-sol',
         spawnReasoning: 'high',
+        agentModelPicks: {},
       });
 
       useDroneHubUiStore.getState().setSpawnAgentKey('builtin:claude');
@@ -50,8 +51,16 @@ describe('drone hub ui store migration', () => {
         spawnModel: '',
         spawnReasoning: '',
       });
+
+      // An agent picked for before comes back with the model and reasoning last picked for it.
+      useDroneHubUiStore.getState().rememberAgentModelPick('builtin:codex', { model: 'gpt-6-sol', reasoning: 'medium' });
+      useDroneHubUiStore.getState().setSpawnAgentKey('builtin:codex');
+      expect(useDroneHubUiStore.getState()).toMatchObject({ spawnModel: 'gpt-6-sol', spawnReasoning: 'medium' });
+      expect(useDroneHubUiStore.getState().spawnContextByRepoKey.__no_repo__)
+        .toMatchObject({ spawnModel: 'gpt-6-sol', spawnReasoning: 'medium' });
     } finally {
       useDroneHubUiStore.setState({
+        agentModelPicks: previous.agentModelPicks,
         spawnContextRepoPath: previous.spawnContextRepoPath,
         spawnContextByRepoKey: previous.spawnContextByRepoKey,
         spawnAgentKey: previous.spawnAgentKey,

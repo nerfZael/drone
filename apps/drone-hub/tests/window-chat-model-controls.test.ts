@@ -5,6 +5,7 @@ import * as selection from '../src/droneHub/app/chat-selection-model';
 import * as builder from '../src/droneHub/app/external-agent-composer-controls';
 import { isDroneStartingOrSeeding } from '../src/droneHub/app/helpers';
 import * as subagents from '../src/droneHub/app/subagents-menu-action';
+import { chatAgentKey } from '../src/droneHub/app/agent-model-picks';
 
 test('window model picker loads its own configuration and saves model/reasoning to that chat only', async () => {
   let cursor = 0;
@@ -31,6 +32,7 @@ test('window model picker loads its own configuration and saves model/reasoning 
     react, './chat-selection-model': selection, './external-agent-composer-controls': builder,
     './helpers': { isDroneStartingOrSeeding }, './hooks': { isNotFoundError: () => false },
     './subagents-menu-action': subagents,
+    './agent-model-picks': { chatAgentKey, rememberAgentModelPick() {}, rememberedAgentModelPick: () => ({ model: '', reasoning: '' }) },
     './chat-load-telemetry': { markChatLoadConfigResolved() {} },
     './chat-runtime-cache': {
       readFreshChatRuntimeCache: (key: string) => cache.get(key),

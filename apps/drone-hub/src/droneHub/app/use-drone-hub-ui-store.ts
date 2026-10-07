@@ -145,7 +145,8 @@ type DroneHubUiState = {
   showCanvasLastMessagePreviews: boolean;
   /** The composer's agent and model button names only the model ("GPT-5.6 Sol", not "Codex · GPT-5.6 Sol"). */
   composerHidesAgentName: boolean;
-  /** Canvas cards like the Entity's Work cards: status, what it is doing, how long, and cost. */
+  /** The model and reasoning last picked for each agent, by agent key, so switching back to an agent restores them. */
+  agentModelPicks: Record<string, AgentModelPick>;
   /** How fast the canvas pans when the locked cursor pushes against its edge, in screen pixels per second. */
   canvasEdgePanSpeed: number;
   /** Floating side chat windows stay out of the way while a canvas pane is open. */
@@ -227,6 +228,7 @@ type DroneHubUiState = {
   setOutputView: (next: Updater<OutputView>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
   setComposerHidesAgentName: (next: Updater<boolean>) => void;
+  rememberAgentModelPick: (agentKey: string, pick: AgentModelPick) => void;
   setCanvasEdgePanSpeed: (next: Updater<number>) => void;
   setHideSideChatWindowsWithCanvas: (next: Updater<boolean>) => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
@@ -401,6 +403,7 @@ type DroneHubUiPersistedState = Pick<
   | 'outputView'
   | 'showCanvasLastMessagePreviews'
   | 'composerHidesAgentName'
+  | 'agentModelPicks'
   | 'canvasEdgePanSpeed'
   | 'hideSideChatWindowsWithCanvas'
   | 'spawnContextByRepoKey'
@@ -715,6 +718,29 @@ function normalizeOutputView(value: unknown): OutputView {
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
+}
+
+/** A model and reasoning picked for an agent; empty means Auto. */
+export type AgentModelPick = { model: string; reasoning: string };
+
+export const NO_AGENT_MODEL_PICK: AgentModelPick = { model: '', reasoning: '' };
+
+function normalizeAgentModelPick(value: unknown): AgentModelPick {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  return {
+    model: normalizeTrimmedString(raw.model).slice(0, 200),
+    reasoning: normalizeTrimmedString(raw.reasoning).slice(0, 200),
+  };
+}
+
+function normalizeAgentModelPicks(value: unknown): Record<string, AgentModelPick> {
+  if (!value || typeof value !== 'object') return {};
+  const picks: Record<string, AgentModelPick> = {};
+  for (const [key, pick] of Object.entries(value as Record<string, unknown>)) {
+    const agentKey = key.trim();
+    if (agentKey) picks[agentKey] = normalizeAgentModelPick(pick);
+  }
+  return picks;
 }
 
 function normalizeTrimmedString(value: unknown): string {
@@ -1033,6 +1059,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       outputView: 'screen',
       showCanvasLastMessagePreviews: false,
       composerHidesAgentName: false,
+      agentModelPicks: {},
       canvasEdgePanSpeed: DEFAULT_CANVAS_EDGE_PAN_SPEED,
       hideSideChatWindowsWithCanvas: true,
       transcriptInlineImageOverrides: {},
@@ -1299,6 +1326,15 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         })),
       setComposerHidesAgentName: (next) =>
         set((s) => ({ composerHidesAgentName: resolveNext(s.composerHidesAgentName, next) })),
+      rememberAgentModelPick: (agentKey, pick) =>
+        set((s) => {
+          const key = normalizeTrimmedString(agentKey);
+          if (!key) return s;
+          const next = normalizeAgentModelPick(pick);
+          const current = s.agentModelPicks[key];
+          if (current && current.model === next.model && current.reasoning === next.reasoning) return s;
+          return { agentModelPicks: { ...s.agentModelPicks, [key]: next } };
+        }),
       setCanvasEdgePanSpeed: (next) =>
         set((s) => ({ canvasEdgePanSpeed: clampCanvasEdgePanSpeed(resolveNext(s.canvasEdgePanSpeed, next)) })),
       setHideSideChatWindowsWithCanvas: (next) =>
@@ -1374,17 +1410,18 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => {
           const spawnAgentKey = normalizeSpawnAgentKeyValue(resolveNext(s.spawnAgentKey, next));
           const agentChanged = spawnAgentKey !== s.spawnAgentKey;
+          const remembered = s.agentModelPicks[spawnAgentKey] ?? NO_AGENT_MODEL_PICK;
           const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
             s.spawnContextByRepoKey,
             s.spawnContextRepoPath,
             {
               spawnAgentKey,
-              ...(agentChanged ? { spawnModel: '', spawnReasoning: '' } : {}),
+              ...(agentChanged ? { spawnModel: remembered.model, spawnReasoning: remembered.reasoning } : {}),
             },
           );
           return {
             spawnAgentKey,
-            ...(agentChanged ? { spawnModel: '', spawnReasoning: '' } : {}),
+            ...(agentChanged ? { spawnModel: remembered.model, spawnReasoning: remembered.reasoning } : {}),
             spawnContextByRepoKey: nextByRepoKey,
           };
         }),
@@ -1563,6 +1600,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         outputView: state.outputView,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
         composerHidesAgentName: state.composerHidesAgentName,
+        agentModelPicks: state.agentModelPicks,
         canvasEdgePanSpeed: state.canvasEdgePanSpeed,
         hideSideChatWindowsWithCanvas: state.hideSideChatWindowsWithCanvas,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
@@ -1691,6 +1729,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           composerHidesAgentName: normalizeBoolean(persisted.composerHidesAgentName ?? currentState.composerHidesAgentName),
+          agentModelPicks: normalizeAgentModelPicks(persisted.agentModelPicks ?? currentState.agentModelPicks),
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),

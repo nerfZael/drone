@@ -3,6 +3,7 @@ import { Popover } from 'radix-ui';
 import { formatReasoningLabel } from '@drone/assistant-chat';
 
 import { useDropdownDismiss } from '../../ui/dropdown';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 
 export type ChatComposerModelChoice = {
   provider: string;
@@ -24,6 +25,8 @@ export type ChatComposerModelPickerConfig = {
   searchable?: boolean;
   searchPlaceholder?: string;
   triggerLabel?: string;
+  /** The agent named before the model on the button, as the agent picker does, unless the setting hides it. */
+  agentLabel?: string;
   allowCustomModel?: boolean;
   requireExplicitModelSelection?: boolean;
   statusMessage?: string;
@@ -422,6 +425,8 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
   const [open, setOpen] = React.useState(false);
   useDropdownDismiss(rootRef, open && menuPlacement === 'inline', setOpen);
   const { triggerLabel } = resolveChatComposerModelSelection(config);
+  const hideAgentName = useDroneHubUiStore((state) => state.composerHidesAgentName);
+  const agentLabel = hideAgentName ? undefined : config.agentLabel;
   const menuContent = (
     <ChatComposerModelMenuSections config={config} onDone={() => setOpen(false)} />
   );
@@ -440,9 +445,12 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
             aria-label={title}
             aria-haspopup="dialog"
             aria-expanded={open}
-            className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+            className={`inline-flex h-8 ${agentLabel ? 'max-w-[min(20rem,100%)]' : 'max-w-[14rem]'} items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            <span className="min-w-0 truncate">{triggerLabel}</span>
+            <span className="min-w-0 truncate">
+              {agentLabel ? <span data-chat-composer-runtime-agent-label="true">{agentLabel} · </span> : null}
+              {triggerLabel}
+            </span>
             <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
           </button>
         </Popover.Trigger>
