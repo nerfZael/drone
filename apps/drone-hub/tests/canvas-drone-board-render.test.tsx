@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
-import { expect, mock, test } from 'bun:test';
+import { afterEach, expect, mock, test } from 'bun:test';
 
 // Radix decides whether a DOM exists when it is first imported, before these tests make one, and then never opens a
 // popover. Its layout effect is React's own here, so the model pickers open as in the app.
@@ -11,7 +11,7 @@ mock.module('@radix-ui/react-use-layout-effect', () => ({ useLayoutEffect: React
 import { DndContext } from '@dnd-kit/core';
 import { createCanvasChatNodeId, createCanvasDroneNodeId, parseCanvasChatNodeId, parseCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 import { FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from '../src/droneHub/app/side-chat-events';
-import { NODE_HEIGHT_PX, getNodeWidthPx } from '../src/droneHub/canvas/node-metrics';
+import { NODE_HEIGHT_PX, getNodeWidthPx, nodeLabelWidthPx } from '../src/droneHub/canvas/node-metrics';
 import { useDroneHubUiStore } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { DroneCanvasDock } from '../src/droneHub/canvas/DroneCanvasDock';
 import { CARD_HOVER_DELAY_MS } from '../src/droneHub/canvas/card-hover';
@@ -25,7 +25,13 @@ import {
   topicBoardKey,
   useDroneCanvasStore,
 } from '../src/droneHub/canvas/use-drone-canvas-store';
+import { leaveCanvasFullView, showCanvasChatPanel, useCanvasFullViewStore } from '../src/droneHub/canvas/canvas-full-view';
+import { DOUBLE_MIDDLE_CLICK_MS } from '../src/droneHub/canvas/use-canvas-edge-pan-lock';
+import { DETAILED_CARD_HEIGHT_PX, DETAILED_CARD_SPREAD, detailedCardWidthPx } from '../src/droneHub/canvas/detailed-card-model';
 import type { DroneSummary } from '../src/droneHub/types';
+
+// A double middle-click turns the canvas's full view on for the session; each test starts without it.
+afterEach(() => leaveCanvasFullView());
 
 const agent = { kind: 'builtin', id: 'claude' };
 const alpha = (chatName: string) => createCanvasChatNodeId('alpha', chatName);
@@ -241,8 +247,9 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     await act(async () => root.render(<Dock drone={makeDrone(['default', 'Untitled 2'])} onCreateChat={onCreateUntitled} />));
     const { panX, panY, scale } = board();
     const untitled = board().nodesByDroneId[alpha('Untitled 2')];
-    expect(Math.abs(untitled.x - (6000 - panX) / scale)).toBeLessThan(200);
-    expect(Math.abs(untitled.y - (4000 - panY) / scale)).toBeLessThan(100);
+    // Positions are stored in the space cards are spread out of when drawn.
+    expect(Math.abs(untitled.x - (6000 - panX) / scale / DETAILED_CARD_SPREAD.x)).toBeLessThan(200);
+    expect(Math.abs(untitled.y - (4000 - panY) / scale / DETAILED_CARD_SPREAD.y)).toBeLessThan(100);
 
     // Deleted outside the canvas (the sidebar): its card goes at once and is not laid out again
     // while the summary still lists the chat, and nothing is left for a later chat of that name.
@@ -1042,9 +1049,9 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     await act(async () => root.render(<Dock drone={makeDrone(['default'])} chatNodeStateById={{
       [chatCard]: { statusOk: true, statusError: null, busy: true, unreadAgentMessage: true, lastAgentSnippet: 'Refactoring the parser' },
     }} />));
-    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
-    const toggle = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Detailed cards') as unknown as HTMLButtonElement;
-    await act(async () => { toggle.click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    // Cards are detailed: there is no other kind, and no switch for it.
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Detailed cards')).toBe(false);
     expect(card().querySelector('[data-canvas-detailed-card]')?.getAttribute('data-canvas-detailed-card')).toBe('working');
     // Its steps say what it is doing now, and the dots count them.
     // The card has no sentence of its own; what it is doing is in its hover text and the steps panel.
@@ -1120,12 +1127,9 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
       dom.dispatchEvent(new dom.MouseEvent('mouseup', { clientX: 345, clientY: 425, buttons: 0 }));
     });
     expect(useDroneCanvasStore.getState().nodesByDroneId[chatCard]).toMatchObject({ x: 120, y: 220 });
-    await act(async () => useDroneHubUiStore.getState().setCanvasDetailedCards(false));
-    expect(card().querySelector('[data-canvas-detailed-card]')).toBeNull();
-    expect((card().parentElement as unknown as HTMLElement).style.translate).toBe('120px 220px');
+    expect((card().parentElement as unknown as HTMLElement).style.translate).toBe(`${120 * DETAILED_CARD_SPREAD.x}px ${220 * DETAILED_CARD_SPREAD.y}px`);
   } finally {
     await act(async () => root.unmount());
-    useDroneHubUiStore.getState().setCanvasDetailedCards(false);
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -1245,9 +1249,10 @@ test('rectangle selection opens exactly one selected card only after release', a
   useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global', panX: 0, panY: 0, scale: 1 });
   const droneCard = createCanvasDroneNodeId('alpha');
   const chatCard = alpha('fork');
+  // Stored where they are drawn at (100, 100) and (500, 100): cards are drawn spread out of where they are stored.
   useDroneCanvasStore.getState().upsertNodes([
-    { droneId: droneCard, label: 'Alpha', x: 100, y: 100 },
-    { droneId: chatCard, label: 'fork', x: 500, y: 100 },
+    { droneId: droneCard, label: 'Alpha', x: 100 / DETAILED_CARD_SPREAD.x, y: 100 / DETAILED_CARD_SPREAD.y },
+    { droneId: chatCard, label: 'fork', x: 500 / DETAILED_CARD_SPREAD.x, y: 100 / DETAILED_CARD_SPREAD.y },
   ]);
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
@@ -1306,7 +1311,10 @@ test('rectangle selection opens exactly one selected card only after release', a
     const actions = getCanvasBoardActions('alpha');
     await act(async () => {
       actions.setViewport({ panX: 0, panY: 0, scale: 1 });
-      actions.moveNodes([{ droneId: alpha('default'), x: 100, y: 100 }, { droneId: chatCard, x: 500, y: 100 }]);
+      actions.moveNodes([
+        { droneId: alpha('default'), x: 100 / DETAILED_CARD_SPREAD.x, y: 100 / DETAILED_CARD_SPREAD.y },
+        { droneId: chatCard, x: 500 / DETAILED_CARD_SPREAD.x, y: 100 / DETAILED_CARD_SPREAD.y },
+      ]);
     });
     await start(490);
     await release(510);
@@ -1349,7 +1357,11 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
   const chats = ['default', ...Array.from({ length: 99 }, (_, i) => `chat-${i}`)];
   const states = Object.fromEntries(chats.map(name => [alpha(name), {
     statusOk: true, statusError: null, busy: false, unreadAgentMessage: false,
-    get lastAgentSnippet() { renders.set(name, (renders.get(name) ?? 0) + 1); return null; },
+    // Read by a card as it renders, which is what is counted; the board also reads it to work out what cards say.
+    get lastAgentSnippet() {
+      if (new Error().stack?.includes('CanvasNodeCard')) renders.set(name, (renders.get(name) ?? 0) + 1);
+      return null;
+    },
   }]));
   let unsubscribe = () => {};
   let layoutReads = 0;
@@ -1373,7 +1385,8 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     expect((container.querySelector('[data-canvas-pan]') as unknown as HTMLElement).style.transform).toBe('translate(109px, 209px)');
     expect((container.querySelector('[data-canvas-world]') as unknown as HTMLElement).style.transform).toBe('scale(1)');
 
-    // Wheel samples add up to one target, and the zoom glides there, anchored under the pointer.
+    // Wheel samples add up to one target, and the zoom glides there. In, the board point under the pointer stays
+    // under it; out, the middle of the view stays put.
     const anchor = { x: 400, y: 300 };
     const wheel = (deltaY: number, ctrlKey = false) => {
       const event = new dom.WheelEvent('wheel', { deltaY, ctrlKey, bubbles: true, cancelable: true });
@@ -1383,6 +1396,8 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
       return event;
     };
     const anchoredAt = () => (anchor.x - board().panX) / board().scale;
+    const middle = (viewport as unknown as HTMLElement).getBoundingClientRect().width / 2;
+    const middleAt = () => (middle - board().panX) / board().scale;
     let pinch: { defaultPrevented: boolean } | null = null;
     await act(async () => {
       wheel(-100);
@@ -1400,6 +1415,12 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     for (let i = 0; i < 40; i++) await flushFrames();
     expect(board().scale).toBeCloseTo(Math.exp(0.3), 8);
     expect(anchoredAt()).toBeCloseTo(anchor.x - 109, 0);
+    // Out, wherever the pointer is: the board point in the middle of the view stays in the middle.
+    const middleBefore = middleAt();
+    await act(async () => wheel(100));
+    for (let i = 0; i < 40; i++) await flushFrames();
+    expect(board().scale).toBeCloseTo(Math.exp(0.15), 6);
+    expect(middleAt()).toBeCloseTo(middleBefore, 0);
     // A zoom scales the whole board: no card renders, and nothing on a card resizes itself to the zoom.
     expect(renders.size).toBe(0);
     expect(layoutReads).toBe(0);
@@ -1416,7 +1437,7 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     renders.clear();
     await act(async () => actions.moveNode(alpha('default'), 750, 300));
     expect(renders.size).toBe(0); // Only its slot moves.
-    expect(slot('default').style.translate).toBe('750px 300px');
+    expect(slot('default').style.translate).toBe(`${750 * DETAILED_CARD_SPREAD.x}px ${300 * DETAILED_CARD_SPREAD.y}px`);
     expect(layoutReads).toBe(0);
 
     await renameCard(card('chat-0'));
@@ -1453,13 +1474,13 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     expect(updates).toBe(0);
     await flushFrames();
     expect(updates).toBe(1);
-    expect(board().nodesByDroneId[alpha('default')].x).toBe(start.x + 200);
+    expect(board().nodesByDroneId[alpha('default')].x).toBeCloseTo(start.x + 200 / DETAILED_CARD_SPREAD.x, 1);
     await act(async () => {
       dom.dispatchEvent(new dom.MouseEvent('mousemove', { clientX: 120, clientY: 10, buttons: 1 }));
       dom.dispatchEvent(new dom.MouseEvent('mouseup', { clientX: 120, clientY: 10, buttons: 0 }));
     });
     expect(updates).toBe(2);
-    expect(board().nodesByDroneId[alpha('default')].x).toBe(start.x + 220);
+    expect(board().nodesByDroneId[alpha('default')].x).toBeCloseTo(start.x + 220 / DETAILED_CARD_SPREAD.x, 1);
     unsubscribe();
     await flushFrames();
 
@@ -1480,8 +1501,10 @@ test('canvas gestures avoid unrelated card renders and layout reads, and use the
     await act(async () => useDroneCanvasStore.getState().setPan(150, 250));
     await act(async () => Simulate.doubleClick(viewport, { button: 0, clientX: 600, clientY: 500 }));
     const draft = Object.values(useDroneCanvasStore.getState().nodesByDroneId)[0];
-    expect(draft.x).toBe(450 - getNodeWidthPx('Untitled') / 2);
-    expect(draft.y).toBe(250 - NODE_HEIGHT_PX / 2);
+    // Drawn centred on the point, at its own size; stored in the space cards are drawn spread out of.
+    const drawnWidth = detailedCardWidthPx(nodeLabelWidthPx('Untitled'), { stateIcon: true, runtimeIcon: false, clock: false });
+    expect(draft.x * DETAILED_CARD_SPREAD.x + drawnWidth / 2).toBeCloseTo(450, 0);
+    expect(draft.y * DETAILED_CARD_SPREAD.y + DETAILED_CARD_HEIGHT_PX / 2).toBeCloseTo(250, 0);
   } finally {
     unsubscribe();
     await act(async () => root.unmount());
@@ -1811,7 +1834,7 @@ test('middle-click holds the cursor in the canvas: it edge-pans, clicks reach th
     expect(panned).toBeGreaterThan(50);
     expect(useDroneCanvasStore.getState().panX).toBe(panX - panned);
     expect(useDroneCanvasStore.getState().panY).toBe(EMPTY_CANVAS_BOARD.panY);
-    expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')].x).toBeCloseTo(899 - 120 + panned, 0);
+    expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')].x).toBeCloseTo((899 - 120 + panned) / DETAILED_CARD_SPREAD.x, 0);
     for (let i = 0; i < 2; i++) await mouse('mousemove', { movementX: 300 });
     // A spike no hand could make is ignored rather than throwing the cursor across the canvas.
     await mouse('mousemove', { movementX: -900 });
@@ -1936,13 +1959,42 @@ test('in the desktop app middle-click holds the real cursor: the app walls it in
     expect(zones()).toBeNull();
     expect(released).toBe(2);
 
-    // Middle-click releases, and does not hold again.
+    // Middle-click releases, and does not hold again. Right after the click that held it, the release is also the
+    // second click of a double middle-click, which asks for the canvas's full view; a later one only releases.
+    const fullView = () => useCanvasFullViewStore.getState().fullView;
     await hold();
     await at(viewport, 'mousedown', 500, { button: 1, buttons: 4 });
     await wait(0);
     expect(zones()).toBeNull();
     expect(released).toBe(3);
     expect(walls).toHaveLength(3);
+    expect(fullView()).toBe(true);
+    await hold();
+    await wait(DOUBLE_MIDDLE_CLICK_MS + 50);
+    await at(viewport, 'mousedown', 500, { button: 1, buttons: 4 });
+    await wait(0);
+    expect(zones()).toBeNull();
+    expect(released).toBe(4);
+    expect(fullView()).toBe(true);
+    // In the full view, Escape on the board closes the chat panel, then leaves the full view; the selection stays.
+    showCanvasChatPanel();
+    const escape = () => act(async () => {
+      viewport.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }) as never);
+    });
+    await escape();
+    expect(useCanvasFullViewStore.getState()).toEqual({ fullView: true, chatPanelOpen: false });
+    await escape();
+    expect(fullView()).toBe(false);
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([alpha('default')]);
+    // Out of it, Escape clears the selection as before.
+    await escape();
+    expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([]);
+    // In it, clearing the selection closes the chat panel, while the full view stays.
+    useCanvasFullViewStore.setState({ fullView: true });
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([alpha('default')]));
+    showCanvasChatPanel();
+    await act(async () => useDroneCanvasStore.getState().setSelectedDroneIds([]));
+    expect(useCanvasFullViewStore.getState()).toEqual({ fullView: true, chatPanelOpen: false });
 
     // Where the app cannot wall the cursor in, the canvas draws its own instead.
     confineResult = { ok: false, unsupported: true };

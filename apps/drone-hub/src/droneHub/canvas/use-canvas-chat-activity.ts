@@ -12,13 +12,12 @@ export type CanvasChatActivity = { activity: Record<string, ChatActivity>; steps
 const EMPTY: CanvasChatActivity = { activity: {}, steps: {} };
 
 /**
- * Cost, timing and steps per chat card, while detailed cards are shown: one request each for every chat, again
+ * Cost, timing and steps per chat card: one request each for every chat, again
  * every few seconds while anything works (steps change as it goes), and whenever a chat starts or stops.
  */
-export function useCanvasChatActivity(enabled: boolean, busyKey: string): CanvasChatActivity {
+export function useCanvasChatActivity(busyKey: string): CanvasChatActivity {
   const [byNodeId, setByNodeId] = React.useState<CanvasChatActivity>(EMPTY);
   React.useEffect(() => {
-    if (!enabled) return;
     let controller: AbortController | null = null;
     const load = () => {
       controller?.abort();
@@ -51,6 +50,6 @@ export function useCanvasChatActivity(enabled: boolean, busyKey: string): Canvas
       clearInterval(timer);
       controller?.abort();
     };
-  }, [enabled, busyKey]);
+  }, [busyKey]);
   return byNodeId;
 }

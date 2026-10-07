@@ -31,6 +31,8 @@ const POPUP_SELECTOR = '[role="menu"], [role="listbox"], [role="dialog"]';
 const MAX_FRAME_MS = 50;
 /** Chromium sometimes reports a locked mouse jumping hundreds of pixels at once; no hand moves that far in one event. */
 const MAX_MOVEMENT_PX = 400;
+/** A second middle-click this soon after the one that held the cursor is a double middle-click. */
+export const DOUBLE_MIDDLE_CLICK_MS = 500;
 
 /** The events the lock dispatches itself, at its cursor; every other mouse event while locked is the real mouse. */
 const dispatchedByLock = new WeakSet<Event>();
@@ -175,11 +177,16 @@ export type CanvasEdgePanLock = {
   unlock: () => void;
 };
 
-export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
+export function useCanvasEdgePanLock({ regionRef, getView, setPan, onDoubleMiddleClick }: {
   /** The element the cursor is held inside: the canvas panel. */
   regionRef: React.RefObject<HTMLElement | null>;
   getView: () => DroneCanvasBoard;
   setPan: (panX: number, panY: number) => void;
+  /**
+   * A double middle-click. The first click holds the cursor and the second, which arrives while it is held,
+   * releases it as usual, then this runs.
+   */
+  onDoubleMiddleClick?: () => void;
 }): CanvasEdgePanLock {
   const [mode, setMode] = React.useState<EdgePanMode | null>(null);
   const [edge, setEdge] = React.useState<EdgePanDirection>(NO_EDGE);
@@ -189,6 +196,18 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
   /** Set while the cursor is held; ends the hold. */
   const sessionRef = React.useRef<{ mode: EdgePanMode; end: () => void } | null>(null);
   const startingRef = React.useRef(false);
+  /** When the cursor was last held; a release by middle-click soon after is the second click of a double. */
+  const lockedAtRef = React.useRef(-Infinity);
+  /** Set by a second middle-click that lands while the desktop app is still putting up the walls. */
+  const abortStartRef = React.useRef(false);
+  const onDoubleRef = React.useRef(onDoubleMiddleClick);
+  onDoubleRef.current = onDoubleMiddleClick;
+  /** After a release by middle-click: a double middle-click when it came soon after the hold. */
+  const middleReleased = React.useCallback(() => {
+    if (performance.now() - lockedAtRef.current > DOUBLE_MIDDLE_CLICK_MS) return;
+    lockedAtRef.current = -Infinity;
+    onDoubleRef.current?.();
+  }, []);
 
   const unlock = React.useCallback(() => {
     sessionRef.current?.end();
@@ -197,7 +216,14 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
   const lock = React.useCallback((clientX: number, clientY: number) => {
     const region = regionRef.current;
     const view = region?.ownerDocument.defaultView;
-    if (!region || !view || sessionRef.current || startingRef.current) return;
+    if (!region || !view || sessionRef.current) return;
+    if (startingRef.current) {
+      // The second click of a double, before the walls are up: they come down as soon as they are.
+      abortStartRef.current = true;
+      middleReleased();
+      return;
+    }
+    lockedAtRef.current = performance.now();
     const doc = region.ownerDocument;
     const pan = (dx: number, dy: number) => {
       const { panX, panY } = viewRef.current.getView();
@@ -232,6 +258,7 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
         event.preventDefault();
         event.stopImmediatePropagation();
         end();
+        middleReleased();
       };
       const swallowMiddle = (event: MouseEvent) => {
         if (event.button !== 1) return;
@@ -319,7 +346,10 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
       const onLockChange = () => {
         if (doc.pointerLockElement === region && !started) {
           started = true;
-          const endDrawn = runDrawn(region, view, { x: clientX, y: clientY }, cursorRef, setEdge, pan, () => doc.exitPointerLock());
+          const endDrawn = runDrawn(region, view, { x: clientX, y: clientY }, cursorRef, setEdge, pan, () => {
+            doc.exitPointerLock();
+            middleReleased();
+          });
           const end = () => {
             if (sessionRef.current?.end !== end) return;
             sessionRef.current = null;
@@ -361,11 +391,12 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
       return;
     }
     startingRef.current = true;
+    abortStartRef.current = false;
     const ignoredPopups = openPopups(region);
     void bridge.confineCursor(boundingBox(reachableRects(region, ignoredPopups))).then((result) => {
       startingRef.current = false;
-      // The canvas closed while the app answered.
-      if (!region.isConnected) {
+      // The canvas closed while the app answered, or a second middle-click already released it.
+      if (!region.isConnected || abortStartRef.current) {
         if (result.ok) void bridge.releaseCursor();
         return;
       }
@@ -374,9 +405,9 @@ export function useCanvasEdgePanLock({ regionRef, getView, setPan }: {
       else startDrawn();
     }, () => {
       startingRef.current = false;
-      startDrawn();
+      if (!abortStartRef.current) startDrawn();
     });
-  }, [regionRef]);
+  }, [middleReleased, regionRef]);
 
   // Leaving the canvas releases the cursor.
   React.useEffect(() => () => sessionRef.current?.end(), []);

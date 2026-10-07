@@ -17,7 +17,6 @@ const esbuild = require('esbuild');
 //   --drones=60 --chats=3   board size (a drone card plus its chats per drone)
 //   --scale=0.7             starting zoom; below 0.85 cards are scaled up for readability
 //   --wheel=60              wheel delta per tick; 8 with --scale=0.55 keeps the zoom in the scaled-up range
-//   --detailed              detailed cards
 //   --refresh=1000          ms between synthetic summary refreshes (0: none)
 //   --width=1400 --height=900  window size
 //   --trace=zoom|pan|marquee|dragall   record a Chrome trace of that step and print where its time went
@@ -59,7 +58,6 @@ async function main() {
         import { createCanvasChatNodeId, createCanvasDroneNodeId } from './src/droneHub/app/app-config';
         window.fetch = async () => Response.json({ ok: true, models: [], deliveries: [], chats: [] });
         window.__droneCanvasPerf.enable();
-        useDroneHubUiStore.getState().setCanvasDetailedCards(${args.detailed === '1'});
         const DRONES = ${drones}, CHATS = ${chats};
         const chatNames = Array.from({ length: CHATS }, (_, i) => i === 0 ? 'default' : 'chat-' + i);
         // Rebuilt on every refresh, like the Hub's summaries: new objects with the same content.
@@ -101,7 +99,7 @@ async function main() {
           }, []);
           const summaries = React.useMemo(() => buildSummaries(revision), [revision]);
           return <DroneCanvasDock boardDrone={summaries.droneById['drone-0']} {...summaries}
-            fleetAssignedIdsByDroneId={{}} sidebarSelectedChatNodeId={null} onActivateChat={noop}
+            fleetAssignedIdsByDroneId={{}} sidebarSelectedChatNodeId={createCanvasChatNodeId('drone-0', 'chat-1')} onActivateChat={noop}
             onCloneChat={async (droneId, chatName, opts) => {
               const name = chatName + '-copy-' + (++cloneCount);
               opts?.onPlaced?.(name);

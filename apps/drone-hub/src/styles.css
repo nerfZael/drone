@@ -3215,6 +3215,24 @@ select:disabled optgroup {
   display: none;
 }
 
+/* The canvas's full view: only the canvas, so floating and detached chat windows step aside, keeping their places
+   for when it is left. */
+.dh-dockable-workspace[data-canvas-full-view='true'] .dv-resize-container,
+:root[data-canvas-full-view] .dh-detached-chats {
+  display: none;
+}
+
+/* The chat in the canvas's full view is for reading: the canvas's composer writes to it. The line above its own
+   composer (runtime, branch, asks) stays. */
+.dh-canvas-chat-panel .dh-chat-composer-box {
+  display: none;
+}
+
+/* In the canvas's full view its pane's title bar has nothing to do; the board takes its height. */
+.dh-dockable-workspace[data-canvas-full-view='true'] .dv-groupview .dv-tabs-and-actions-container {
+  display: none;
+}
+
 /* A single floating chat uses the entire title bar to move the window. */
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container {
   position: relative;

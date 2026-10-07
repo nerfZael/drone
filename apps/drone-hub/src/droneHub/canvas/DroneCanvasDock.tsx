@@ -132,6 +132,7 @@ import { useCanvasWheelZoom } from './use-canvas-wheel-zoom';
 import { CanvasEmptyState } from './CanvasEmptyState';
 import { CanvasEdgePanControls, CanvasEdgePanOverlay } from './CanvasEdgePan';
 import { isEdgePanLockedEvent, useCanvasEdgePanLock } from './use-canvas-edge-pan-lock';
+import { closeCanvasChatPanel, leaveCanvasFullView, showCanvasChatPanel, toggleCanvasFullView, useCanvasFullViewStore } from './canvas-full-view';
 
 const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
@@ -547,7 +548,11 @@ export function DroneCanvasDock({
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
   const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardKey), [boardKey]);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
-  const edgePan = useCanvasEdgePanLock({ regionRef: panelRef, getView, setPan });
+  const edgePan = useCanvasEdgePanLock({
+    regionRef: panelRef, getView, setPan,
+    // A double middle-click fills the workspace with the canvas, or leaves that again.
+    onDoubleMiddleClick: toggleCanvasFullView,
+  });
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
@@ -587,11 +592,19 @@ export function DroneCanvasDock({
     [droneById, effectiveDroneNameById],
   );
 
-  const canvasDetailedCards = useDroneHubUiStore((s) => s.canvasDetailedCards);
-  // Detailed cards are drawn spread apart; positions are stored, placed and pasted in compact space.
-  const cardSpread = canvasDetailedCards ? DETAILED_CARD_SPREAD : NO_CARD_SPREAD;
+  // Cards are drawn spread apart from where they are stored: positions are stored, placed and pasted in the compact
+  // space of the cards' first, smaller look, so arrangements made then keep their shape.
+  const cardSpread = DETAILED_CARD_SPREAD;
   const cardSpreadRef = React.useRef(cardSpread);
   cardSpreadRef.current = cardSpread;
+  /**
+   * Half a new card as drawn, in the space positions are stored in: a new card is centred on the point it is made
+   * at, and it is drawn at its own size, spread out of where it is stored.
+   */
+  const newCardHalfInStore = React.useCallback((label: string) => ({
+    x: detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: false, clock: false }) / 2 / cardSpreadRef.current.x,
+    y: DETAILED_CARD_HEIGHT_PX / 2 / cardSpreadRef.current.y,
+  }), []);
   /** A point under the pointer, in the space positions are stored in. */
   const screenToStorePoint = React.useCallback((...args: Parameters<typeof screenToWorldPoint>) => {
     const point = screenToWorldPoint(...args);
@@ -638,10 +651,9 @@ export function DroneCanvasDock({
     () => Object.entries(chatNodeStateById).filter(([, state]) => state.busy).map(([nodeId]) => nodeId).sort().join('|'),
     [chatNodeStateById],
   );
-  const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(canvasDetailedCards, busyChatKey);
+  const { activity: chatActivityByNodeId, steps: chatStepsByNodeId } = useCanvasChatActivity(busyChatKey);
   // A detailed card is as wide as its name and, while it works, its clock need.
   const detailedWidthByNodeId = React.useMemo(() => {
-    if (!canvasDetailedCards) return null;
     const out: Record<string, number> = {};
     for (const node of nodes) {
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
@@ -656,10 +668,9 @@ export function DroneCanvasDock({
       out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), { stateIcon: true, runtimeIcon: Boolean(canvasDroneId), clock: busy });
     }
     return out;
-  }, [canvasDetailedCards, chatNodeStateById, droneById, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  }, [chatNodeStateById, droneById, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
   // What every chat on the canvas has cost, each counted once: a drone card stands for all its chats.
   const canvasCost = React.useMemo(() => {
-    if (!canvasDetailedCards) return null;
     const chatIds = new Set<string>();
     for (const node of nodes) {
       const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
@@ -669,17 +680,15 @@ export function DroneCanvasDock({
     }
     const total = [...chatIds].reduce((sum, id) => sum + (chatActivityByNodeId[id]?.estimatedCost ?? 0), 0);
     return total > 0 ? costText({ estimatedCost: total }) : null;
-  }, [canvasDetailedCards, chatActivityByNodeId, droneById, nodes]);
-  // Card sizes as drawn: compact, or detailed cards' own.
+  }, [chatActivityByNodeId, droneById, nodes]);
+  // Card sizes as drawn.
   const viewSizeById = React.useMemo(() => {
     const out: Record<string, CanvasNodeSize> = {};
     for (const node of nodes) {
-      out[node.droneId] = detailedWidthByNodeId
-        ? { width: detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX, height: DETAILED_CARD_HEIGHT_PX }
-        : { width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX, height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX };
+      out[node.droneId] = { width: detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX, height: DETAILED_CARD_HEIGHT_PX };
     }
     return out;
-  }, [detailedWidthByNodeId, nodeHeightByDroneId, nodeWidthByDroneId, nodes]);
+  }, [detailedWidthByNodeId, nodes]);
   const viewSizeByIdRef = React.useRef(viewSizeById);
   viewSizeByIdRef.current = viewSizeById;
   const shownNodeIdsRef = React.useRef(nodeOrder);
@@ -750,6 +759,14 @@ export function DroneCanvasDock({
     return out;
   }, [chatNodesByDroneId, droneById, droneScope, forkSourceNodeIdByNodeId]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
+  // In the full view, clearing the selection on a board closes the chat panel: nothing is picked to read. A move to
+  // another board brings that board's own selection, which says nothing about the chat.
+  const previousSelectionRef = React.useRef({ boardKey, count: selectedDroneIds.length });
+  React.useEffect(() => {
+    const previous = previousSelectionRef.current;
+    previousSelectionRef.current = { boardKey, count: selectedDroneIds.length };
+    if (previous.boardKey === boardKey && previous.count > 0 && selectedDroneIds.length === 0) closeCanvasChatPanel();
+  }, [boardKey, selectedDroneIds.length]);
   const busySeenAtRef = React.useRef<Record<string, number>>({});
   const busySeenAt = React.useMemo(() => {
     const busy = busyChatKey ? busyChatKey.split('|') : [];
@@ -760,16 +777,14 @@ export function DroneCanvasDock({
   }, [busyChatKey]);
   const [cardNowMs, setCardNowMs] = React.useState(() => Date.now());
   React.useEffect(() => {
-    if (!canvasDetailedCards) return;
     setCardNowMs(Date.now());
     const timer = setInterval(() => setCardNowMs(Date.now()), busyChatKey ? 1000 : 30_000);
     return () => clearInterval(timer);
-  }, [busyChatKey, canvasDetailedCards]);
+  }, [busyChatKey]);
   const cardHover = React.useMemo(() => createCardHover(), []);
   // The steps panel sits at the bottom left, above the message bar wherever the two would overlap.
   const [stepsPanelBottomPx, setStepsPanelBottomPx] = React.useState(8);
   React.useLayoutEffect(() => {
-    if (!canvasDetailedCards) return;
     const viewport = viewportRef.current;
     const bar = viewport?.querySelector<HTMLElement>('[data-canvas-message-bar]');
     if (!viewport || !bar) return;
@@ -787,10 +802,9 @@ export function DroneCanvasDock({
     const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(place);
     mutations?.observe(bar, { attributes: true, attributeFilter: ['hidden'], subtree: true });
     return () => { observer?.disconnect(); mutations?.disconnect(); };
-  }, [canvasDetailedCards]);
+  }, []);
   const detailCacheRef = React.useRef<Record<string, { key: string; card: DetailedCard }>>({});
   const detailByNodeId = React.useMemo(() => {
-    if (!canvasDetailedCards) return null;
     const chatInput = (droneId: string, chatName: string) => {
       const nodeId = createCanvasChatNodeId(droneId, chatName);
       const state = chatNodeStateById[nodeId];
@@ -844,7 +858,7 @@ export function DroneCanvasDock({
     }
     detailCacheRef.current = nextCache;
     return out;
-  }, [busySeenAt, canvasDetailedCards, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, nodes]);
+  }, [busySeenAt, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, nodes]);
   const selectedDraftNodeId = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
     const id = String(selectedDroneIds[0] ?? '').trim();
@@ -1238,8 +1252,9 @@ export function DroneCanvasDock({
       options?: { avoidCollisions?: boolean },
     ): { x: number; y: number } => {
       const draftWidth = getNodeWidthPx('Untitled');
-      const baseX = anchorWorldX - draftWidth / 2;
-      const baseY = anchorWorldY - NODE_HEIGHT_PX / 2;
+      const half = newCardHalfInStore('Untitled');
+      const baseX = anchorWorldX - half.x;
+      const baseY = anchorWorldY - half.y;
       const roundedBase = { x: Math.round(baseX * 10) / 10, y: Math.round(baseY * 10) / 10 };
       if (options?.avoidCollisions === false) return roundedBase;
       const stepX = Math.max(38, Math.round(draftWidth * 0.36));
@@ -1287,7 +1302,7 @@ export function DroneCanvasDock({
       }
       return roundedBase;
     },
-    [getView, nodeWidthByDroneId, nodes],
+    [getView, newCardHalfInStore, nodeWidthByDroneId, nodes],
   );
 
   const createDraftAtWorldPoint = React.useCallback(
@@ -1342,15 +1357,13 @@ export function DroneCanvasDock({
   const createChatAtWorldPoint = React.useCallback(
     (worldX: number, worldY: number) => {
       if (!boardDroneId || !onCreateChat) return;
-      pendingChatPlacementRef.current = {
-        x: Math.round(worldX - NODE_MIN_WIDTH_PX / 2),
-        y: Math.round(worldY - CHAT_NODE_HEIGHT_PX / 2),
-      };
+      const half = newCardHalfInStore('Untitled');
+      pendingChatPlacementRef.current = { x: Math.round(worldX - half.x), y: Math.round(worldY - half.y) };
       void onCreateChat(boardDroneId, newCardSettings).then((ok) => {
         if (!ok) pendingChatPlacementRef.current = null;
       });
     },
-    [boardDroneId, newCardSettings, onCreateChat],
+    [boardDroneId, newCardHalfInStore, newCardSettings, onCreateChat],
   );
 
   const requestNewNodeNearViewportCenter = React.useCallback(() => {
@@ -1555,11 +1568,15 @@ export function DroneCanvasDock({
     const droneId = parseCanvasDroneNodeId(nodeId);
     if (droneId) {
       onActivateChat?.(droneId, 'default');
+      showCanvasChatPanel();
       return;
     }
     const chat = parseCanvasChatNodeId(nodeId);
     // Side chats included: selection opens their chat as the main chat.
-    if (chat) onActivateChat?.(chat.droneId, chat.chatName);
+    if (!chat) return;
+    onActivateChat?.(chat.droneId, chat.chatName);
+    // In the full view the main chat is out of sight; it shows in a panel at the canvas's left instead.
+    showCanvasChatPanel();
   }, [onActivateChat]);
 
   React.useEffect(() => {
@@ -2673,6 +2690,14 @@ export function DroneCanvasDock({
       if (key === 'escape') {
         event.preventDefault();
         event.stopPropagation();
+        // In the full view Escape steps back out of it: first out of the chat panel, then out of the full view. The
+        // selection stays, as when the canvas is left any other way.
+        const fullView = useCanvasFullViewStore.getState();
+        if (fullView.fullView) {
+          if (fullView.chatPanelOpen) closeCanvasChatPanel();
+          else leaveCanvasFullView();
+          return;
+        }
         canvasPerf.action('clear-selection');
         clearSelection();
         return;
@@ -2763,11 +2788,10 @@ export function DroneCanvasDock({
         ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
         : chatNodeStateById[node.droneId] ?? null;
     const deleting = Boolean(deletingChatNodeById[node.droneId]);
-    const detail = detailByNodeId?.[node.droneId] ?? null;
-    const nodeWidth = detail
-      ? detailedWidthByNodeId?.[node.droneId] ?? DETAILED_CARD_WIDTH_PX
-      : nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
-    const nodeHeight = detail ? DETAILED_CARD_HEIGHT_PX : nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
+    const detail = detailByNodeId[node.droneId];
+    if (!detail) continue;
+    const nodeWidth = detailedWidthByNodeId[node.droneId] ?? DETAILED_CARD_WIDTH_PX;
+    const nodeHeight = DETAILED_CARD_HEIGHT_PX;
     // A drone board is one drone's chats: its repository and branch are the same on every card.
     // A chat linked to its drone's card on this canvas shows neither: the drone card does.
     const repoFromDroneCard = Boolean(chatRef && droneNodeByDroneId[chatRef.droneId]);
@@ -2872,14 +2896,7 @@ export function DroneCanvasDock({
             >
               Last msgs
             </UiToolbarButton>
-            <UiToolbarButton size="xsmall"
-              pressed={canvasDetailedCards}
-              onClick={() => useDroneHubUiStore.getState().setCanvasDetailedCards(!canvasDetailedCards)}
-              title="Show cards like the Entity's Work view: state, what each chat is doing, how long it has worked or idled, and what it has cost."
-            >
-              Detailed cards
-            </UiToolbarButton>
-            {canvasDetailedCards ? <ChatStepsControl /> : null}
+            <ChatStepsControl />
             {canvasCost ? (
               <span className="px-1 font-mono text-[11px] tabular-nums text-[var(--muted)]" data-canvas-cost-total
                 title="What the chats on this canvas have cost in all. Hover a card for its own.">
@@ -3008,7 +3025,7 @@ export function DroneCanvasDock({
         <HoveredCard hover={cardHover}>{(focusId) => {
           // Only the card the pointer rests on: its steps in full, off the cards. A selected card shows nothing here,
           // and neither does a draft, which has no steps yet.
-          const focus = detailByNodeId?.[focusId];
+          const focus = detailByNodeId[focusId];
           if (!focus || isCanvasDraftNodeId(focusId)) return null;
           const focusChat = parseCanvasChatNodeId(focusId);
           if (focusChat && droneById[focusChat.droneId]?.draftChats?.[focusChat.chatName] === true) return null;

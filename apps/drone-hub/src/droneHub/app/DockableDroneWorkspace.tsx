@@ -31,6 +31,7 @@ import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDe
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
 import { OPEN_FILE_EXPLORER_EVENT } from '../files/file-explorer-navigation';
+import { closeCanvasChatPanel, leaveCanvasFullView, useCanvasFullViewStore } from '../canvas/canvas-full-view';
 import { openedFileTabId } from './opened-file-tabs';
 import { ChangesExplorerContext } from '../changes/changes-explorer-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
@@ -595,8 +596,54 @@ export function resetWorkspaceToChat(api: DockviewApi): void {
   ensureChatPanel(api);
 }
 
+/** Room around the chat's widest reading line: the transcript's side padding, its scrollbar, the panel's border. */
+const CANVAS_CHAT_PANEL_CHROME_PX = 48 + 12 + 1;
+
+/**
+ * The main chat in the canvas's full view: a panel at the canvas's left, as wide as the chat's widest reading line
+ * and no wider, so widening it would change nothing. It is for reading; the canvas's composer writes to it, so its
+ * own composer is hidden and only the line above it (runtime, branch, asks) stays.
+ */
+function CanvasChatPanel({ droneId, chatName, chatContent, top }: {
+  droneId: string;
+  chatName: string;
+  chatContent: React.ReactNode;
+  top: number;
+}) {
+  const probeRef = React.useRef<HTMLSpanElement | null>(null);
+  const [width, setWidth] = React.useState<number | null>(null);
+  React.useLayoutEffect(() => {
+    const probe = probeRef.current;
+    if (!probe) return;
+    setWidth(Math.ceil(probe.getBoundingClientRect().width) + CANVAS_CHAT_PANEL_CHROME_PX);
+  }, []);
+  return (
+    <div data-canvas-chat-panel="true" className="dh-canvas-chat-panel absolute bottom-0 left-0 z-20 flex max-w-[calc(100%-3rem)] flex-col border-r border-[var(--border)] bg-[var(--panel)] shadow-[0_0_24px_rgba(0,0,0,.35)]"
+      style={{ top, width: width ?? undefined }}>
+      {/* The chat's reading line, in the chat's own font. */}
+      <span ref={probeRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 h-0 overflow-hidden"
+        style={{ width: 'var(--chat-prose-max)', font: 'var(--chat-text-size)/1.65 var(--prose)' }} />
+      <div className="flex h-8 flex-shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] pl-3 pr-1 text-11 font-medium text-[var(--fg-secondary)]">
+        <span className="min-w-0 flex-1 truncate">{chatName}</span>
+        <button type="button" aria-label="Close chat" onClick={closeCanvasChatPanel}
+          className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <path d="M6 6l12 12" /><path d="M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+      <UiPanel flush className="min-h-0 flex-1" data-main-workspace-chat="true" data-chat-drone-id={droneId} data-chat-name={chatName}>
+        <React.Fragment key={droneId}>{chatContent}</React.Fragment>
+      </UiPanel>
+    </div>
+  );
+}
+
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
-  const { chatContent: content, mainChatName, droneId } = React.useContext(DockableDroneWorkspaceContext);
+  const { chatContent, mainChatName, droneId } = React.useContext(DockableDroneWorkspaceContext);
+  // In the canvas's full view the chat can show in a panel over the canvas instead; it is mounted in one place.
+  const inCanvasPanel = useCanvasFullViewStore((state) => state.fullView && state.chatPanelOpen);
+  const content = inCanvasPanel ? null : chatContent;
   React.useEffect(() => {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle(mainChatName || DEFAULT_CHAT_NAME);
@@ -1095,6 +1142,87 @@ export function DockableDroneWorkspace({
     return () => window.removeEventListener(FOCUS_FILE_PANEL_EVENT, focus);
   }, [currentDrone.id]);
 
+  // The canvas's full view: its group maximized, and the floating windows out of the way until it is left. The
+  // session's store says whether it is wanted; this workspace fills itself with its canvas to match.
+  const canvasFullViewWanted = useCanvasFullViewStore((state) => state.fullView);
+  const canvasChatPanelWanted = useCanvasFullViewStore((state) => state.chatPanelOpen);
+  const [canvasFullView, setCanvasFullView] = React.useState(false);
+  React.useEffect(() => {
+    const root = workspaceElementRef.current;
+    const api = apiRef.current;
+    if (!root || !api) return;
+    const isCanvas = (panel: WorkspaceDockPanel) => tabFromPanel(panel) === 'canvas';
+    const fullViewGroup = () => api.groups.find((group) => group.api.isMaximized() && group.activePanel && isCanvas(group.activePanel)) ?? null;
+    let disposed = false;
+    const sync = () => {
+      const on = Boolean(fullViewGroup());
+      setCanvasFullView(on);
+      // Detached chats float over the page from outside the workspace; they step aside too.
+      root.ownerDocument.documentElement.toggleAttribute('data-canvas-full-view', on);
+      // Dockview lets go of the maximized pane whenever a pane outside it is made active (opening a card's chat
+      // makes the main chat active), and for a moment while it saves the layout. The full view is only left on
+      // request, so once that is done the canvas fills the workspace again; without a canvas in the grid, it ends.
+      if (!on && useCanvasFullViewStore.getState().fullView) {
+        queueMicrotask(() => {
+          if (!disposed && !fullViewGroup() && useCanvasFullViewStore.getState().fullView) fill();
+        });
+      }
+    };
+    const fill = () => {
+      // A drone whose own layout has no canvas (a card opened another drone) gets one: the full view is the canvas.
+      if (!api.panels.some(isCanvas)) ensureWorkspaceToolPanel(api, 'canvas', 'single');
+      // Only a canvas in the grid fills the workspace; a floating or popped-out one stays as it is.
+      const canvas = api.panels.find((panel) => isCanvas(panel) && panel.api.group.api.location.type === 'grid');
+      if (!canvas) {
+        leaveCanvasFullView();
+        return;
+      }
+      if (canvas.api.group.activePanel !== canvas) canvas.api.setActive();
+      if (!canvas.api.group.api.isMaximized()) canvas.api.group.api.maximize();
+    };
+    if (canvasFullViewWanted) {
+      fill();
+    } else {
+      fullViewGroup()?.api.exitMaximized();
+    }
+    sync();
+    const disposable = api.onDidMaximizedGroupChange(sync);
+    return () => {
+      disposed = true;
+      disposable.dispose();
+      root.ownerDocument.documentElement.removeAttribute('data-canvas-full-view');
+    };
+  }, [canvasFullViewWanted, readyVersion]);
+  const canvasChatPanelOpen = canvasFullView && canvasChatPanelWanted;
+  // The panel starts under the canvas's toolbar, where the board itself starts.
+  const [canvasChatPanelTop, setCanvasChatPanelTop] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const root = workspaceElementRef.current;
+    if (!canvasChatPanelOpen || !root) return;
+    const measure = () => {
+      const board = root.querySelector('.dv-groupview [data-drone-canvas-viewport]');
+      if (board) setCanvasChatPanelTop(Math.max(0, Math.round(board.getBoundingClientRect().top - root.getBoundingClientRect().top)));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [canvasChatPanelOpen]);
+  React.useEffect(() => {
+    if (!canvasFullView) return;
+    // Escape closes the chat panel, then leaves the full view. Escape in a field, a menu or a dialog is theirs.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], .monaco-editor')) return;
+      if (useCanvasFullViewStore.getState().chatPanelOpen) closeCanvasChatPanel();
+      else leaveCanvasFullView();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canvasFullView]);
+
   const cancelPendingChatFocusRef = React.useRef<(() => void) | null>(null);
   const focusFloatingChat = React.useCallback((chatName: string, opts?: { keyboardFocus?: boolean }) => {
     if (chatName === mainChatName) return false;
@@ -1208,6 +1336,9 @@ export function DockableDroneWorkspace({
     previousMainChatRef.current = { droneId: currentDrone.id, chatName: mainChatName, returnRequest: sideChatReturnRequest };
     // Keep the active shared tool (and its focus) when changing its drone.
     if (sharedLayout && switchedDrone) return;
+    // In the canvas's full view the chat shows in its panel over the canvas; making its pane active would take the
+    // full view down, and the keyboard away from the canvas.
+    if (useCanvasFullViewStore.getState().fullView) return;
     if (sideChatFocusRequest?.droneId === currentDrone.id &&
       sideChatFocusRequest.chatName !== mainChatName && previous === undefined) return;
     const promoted = sideChats.some((chat) => chat.name === mainChatName);
@@ -1258,6 +1389,8 @@ export function DockableDroneWorkspace({
     try {
       const layout = api.toJSON();
       if (!layout.panels[CHAT_PANEL_ID]) return;
+      // The canvas's full view is a moment's view, not part of the layout: the workspace opens with its panes.
+      if (workspaceElementRef.current?.hasAttribute('data-canvas-full-view')) delete (layout.grid as { maximizedNode?: unknown }).maximizedNode;
       writeStoredLayout(currentDrone.id, layout, sharedLayout);
     } catch {
       // Ignore layout persistence failures; the active workspace can keep running.
@@ -1948,6 +2081,7 @@ export function DockableDroneWorkspace({
             paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
           } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
           data-floating-side-chats={hideFloatingSideChats ? 'hidden' : undefined}
+          data-canvas-full-view={canvasFullView ? 'true' : undefined}
           onMouseDownCapture={handleWorkspaceMouseDownCapture}
         >
           <UndoChatWindowLayout workspaceId={currentDrone.id} />
@@ -1962,6 +2096,10 @@ export function DockableDroneWorkspace({
             floatingGroupBounds="boundedWithinViewport"
             getTabContextMenuItems={workspaceTabContextMenuItems}
           />
+          {canvasChatPanelOpen ? (
+            <CanvasChatPanel droneId={currentDrone.id} chatName={mainChatName || DEFAULT_CHAT_NAME} chatContent={chatContent}
+              top={canvasChatPanelTop} />
+          ) : null}
         </div>
       )}
     </DockableDroneWorkspaceContext.Provider>
