@@ -759,6 +759,9 @@ export function DroneCanvasDock({
     return out;
   }, [chatNodesByDroneId, droneById, droneScope, forkSourceNodeIdByNodeId]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
+  // The open chat's accent edge says which chat is in sight. In the full view the main chat shows only in its panel,
+  // so with the panel closed no chat is open to show.
+  const openChatShown = useCanvasFullViewStore((state) => !state.fullView || state.chatPanelOpen);
   // In the full view, clearing the selection on a board closes the chat panel: nothing is picked to read. A move to
   // another board brings that board's own selection, which says nothing about the chat.
   const previousSelectionRef = React.useRef({ boardKey, count: selectedDroneIds.length });
@@ -2781,7 +2784,7 @@ export function DroneCanvasDock({
     const dragging = draggingNodeId === node.droneId;
     const inlineEditing = inlineRenamingDroneId === node.droneId;
     const assignmentHoverTarget = assignmentHoverNodeId === node.droneId && assignmentHoverTargetCount > 0;
-    const isActiveSidebarChat = Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
+    const isActiveSidebarChat = openChatShown && Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
     const indicatorState = draftNode
       ? null
       : droneNode && canvasDroneId

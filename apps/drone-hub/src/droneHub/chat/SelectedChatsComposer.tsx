@@ -149,7 +149,7 @@ export function SelectedChatsComposer(props: SelectedChatsComposerProps) {
         promptError={props.error} waiting={props.sending} disabled={props.sending} sendDisabled={props.selectedCount === 0} attachmentsEnabled attachmentMode="files"
         // On the canvas the empty composer folds to one slim line, and opens when clicked or typed in: the board
         // stays clear. The line keeps the agent and model in sight, and widens to fit them beside the placeholder.
-        placeholder={props.selectedCount === 0 ? 'Select chats to message' : surface === 'canvas' ? 'Ask the agent' : undefined}
+        placeholder={surface === 'canvas' ? 'Ask the agent' : props.selectedCount === 0 ? 'Select chats to message' : undefined}
         alwaysExpanded={surface !== 'canvas' && Boolean(props.runtimePicker)}
         onSend={async (payload, context) => {
           if (props.selectedCount === 0) return false;

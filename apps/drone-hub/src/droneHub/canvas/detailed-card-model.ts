@@ -81,9 +81,10 @@ export type DetailedCard = {
 
 /** The widest a detailed card gets; a longer name ends in an ellipsis. */
 export const DETAILED_CARD_WIDTH_PX = 440;
-const DETAILED_CARD_MIN_WIDTH_PX = 140;
-/** Padding and border around a detailed card's content. */
-const DETAILED_CARD_CHROME_PX = 22;
+/** Short names still get a card that reads as one, not a chip. */
+const DETAILED_CARD_MIN_WIDTH_PX = 80;
+/** Padding (8px a side) and border around a detailed card's content. */
+const DETAILED_CARD_CHROME_PX = 18;
 /** Room kept for a working clock ("2h25m"), so the card does not change width as it ticks. */
 const DETAILED_CLOCK_PX = 44;
 
@@ -96,8 +97,8 @@ export function detailedCardWidthPx(titleWidthPx: number, opts: { stateIcon: boo
     (opts.clock ? DETAILED_CLOCK_PX : 0);
   return Math.max(DETAILED_CARD_MIN_WIDTH_PX, Math.min(DETAILED_CARD_WIDTH_PX, title + DETAILED_CARD_CHROME_PX));
 }
-/** One line: the name and its state. */
-export const DETAILED_CARD_HEIGHT_PX = 38;
+/** One line, the name and its state, with 5px above and below it: no more card than the name needs. */
+export const DETAILED_CARD_HEIGHT_PX = 30;
 /**
  * Detailed cards are drawn at the stored positions spread apart by these factors, so the arrangement made
  * with compact cards holds without the bigger cards overlapping. Positions stay stored in compact space.

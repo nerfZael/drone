@@ -95,6 +95,7 @@ function Dock({
   droneRepoById = {},
   onRenameDrone,
   onDeleteDrones,
+  sidebarSelectedChatNodeId,
 }: {
   children?: React.ReactNode;
   drone: DroneSummary;
@@ -109,6 +110,7 @@ function Dock({
   droneRepoById?: DockProps['droneRepoById'];
   onRenameDrone?: DockProps['onRenameDrone'];
   onDeleteDrones?: DockProps['onDeleteDrones'];
+  sidebarSelectedChatNodeId?: DockProps['sidebarSelectedChatNodeId'];
 }) {
   const noop = () => {};
   return (
@@ -141,6 +143,7 @@ function Dock({
         createGroup=""
         onCreateGroupChange={noop}
         onDeleteDrones={onDeleteDrones}
+        sidebarSelectedChatNodeId={sidebarSelectedChatNodeId}
       />
     </DndContext></ActiveComposerProvider>
   );
@@ -701,7 +704,8 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await act(async () => getCanvasBoardActions('alpha').clearSelection());
     // The composer stays, with the settings for new cards, but sends to no one.
     expect(container.querySelector('[data-canvas-message-bar]')?.hasAttribute('hidden')).toBe(false);
-    expect(input().getAttribute('placeholder')).toBe('Select chats to message');
+    // It always asks for the message, selection or not: the cards show who it goes to.
+    expect(input().getAttribute('placeholder')).toBe('Ask the agent');
     // The selected cards show who a message goes to: no recipient line above the composer.
     expect(container.querySelector('[data-selected-chats-composer-meta]')).toBeNull();
     expect(container.querySelector('[data-canvas-message-bar] [data-chat-composer-runtime-picker]')).not.toBeNull();
@@ -1086,7 +1090,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect(container.querySelector('[data-drone-canvas-viewport]')?.classList.contains('dh-canvas-work-ground')).toBe(true);
     // The card keeps one line; resting the pointer on it shows every step in a panel at the canvas's bottom left.
     expect(card().textContent).not.toContain('Read the parser');
-    expect(card().style.height).toBe('38px');
+    expect(card().style.height).toBe(`${DETAILED_CARD_HEIGHT_PX}px`);
     // As wide as its short name needs, not a fixed width.
     expect(parseFloat(card().style.width)).toBeLessThan(200);
     const panel = () => container.querySelector('[data-canvas-steps-panel]');
@@ -2003,6 +2007,46 @@ test('in the desktop app middle-click holds the real cursor: the app walls it in
   } finally {
     await act(async () => root.unmount());
     dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});
+
+test('the open chat has its accent edge, except in the full view while its panel is closed', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, Element: dom.Element, HTMLElement: dom.HTMLElement,
+    HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    requestAnimationFrame: (run: FrameRequestCallback) => setTimeout(() => run(0), 0), cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async () => Response.json({ ok: true, models: [], agent: { kind: 'builtin', id: 'codex' } }),
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  }
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'global' });
+  useDroneCanvasStore.getState().upsertNodes([{ droneId: alpha('default'), label: 'default', x: 0, y: 0 }]);
+  const container = dom.document.createElement('div');
+  dom.document.body.append(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const edge = () => container.querySelector(`[data-drone-id="${alpha('default')}"] [data-canvas-card-open]`);
+  try {
+    await act(async () => root.render(<Dock drone={makeDrone(['default'])} sidebarSelectedChatNodeId={alpha('default')} />));
+    expect(edge()).not.toBeNull();
+    // In the full view the chat is in sight only in its panel.
+    await act(async () => useCanvasFullViewStore.setState({ fullView: true, chatPanelOpen: false }));
+    expect(edge()).toBeNull();
+    await act(async () => showCanvasChatPanel());
+    expect(edge()).not.toBeNull();
+    await act(async () => leaveCanvasFullView());
+    expect(edge()).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
     useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);

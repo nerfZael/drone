@@ -155,7 +155,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
       style={{
         left: 0,
         top: 0,
-        padding: '0.4375rem 0.625rem',
+        padding: '0.3125rem 0.5rem',
         width: nodeWidth,
         height: nodeHeight,
       }}
