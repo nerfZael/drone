@@ -86,6 +86,17 @@ export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
   ],
 };
 
+/**
+ * Full remote use of a desktop Hub: its whole API, event streams, terminals and drone
+ * preview ports, as if the viewer were sitting at that machine. Granting it is
+ * equivalent to local administrator access, so it is never granted by default.
+ */
+export const HUB_REMOTE_CAPABILITY: CapabilityDescriptor = {
+  id: 'hub-remote',
+  version: 1,
+  operations: ['hub.connect'],
+};
+
 export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   id: 'provider-credentials',
   version: 1,

@@ -3,6 +3,7 @@ import { requestJson } from '../http';
 import { CoalescedRefresh } from './coalesced-refresh';
 import type { MeshDevice, MeshStatus } from './use-device-mesh';
 import { subscribeDeviceMeshChanges } from './device-mesh-events';
+import { homeUrlForDevice, remoteHubRuntime, takeRequestedDeviceId } from './remote-hub';
 
 const SELECTED_DEVICE_STORAGE_KEY = 'drone-hub:selected-device-id';
 
@@ -35,6 +36,10 @@ export function desktopDeviceRouteAvailable(
 }
 
 function storedDeviceId(): string {
+  // A remote Hub page always shows that Hub; see readStatus.
+  if (remoteHubRuntime()) return '';
+  const requested = takeRequestedDeviceId();
+  if (requested) return requested;
   try {
     return window.localStorage.getItem(SELECTED_DEVICE_STORAGE_KEY)?.trim() ?? '';
   } catch {
@@ -66,6 +71,8 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
       setStatus((current) => sameMeshStatus(current, next) ? current : next);
       setError(null);
       setSelectedDeviceId((current) => {
+        // A remote Hub page always shows that Hub; other devices are chosen from home.
+        if (remoteHubRuntime()) return next.selfDeviceId;
         const selectedIsActive = next.devices.some(
           (device) => device.id === current && !device.revokedAt,
         );
@@ -119,6 +126,18 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
     devices.find((device) => device.id === status?.selfDeviceId) ??
     null;
   const selfDeviceId = status?.selfDeviceId ?? '';
+  const selectDevice = React.useCallback(
+    (deviceId: string) => {
+      const remote = remoteHubRuntime();
+      if (!remote) {
+        setSelectedDeviceId(deviceId);
+        return;
+      }
+      if (!deviceId || deviceId === selfDeviceId) return;
+      window.location.assign(homeUrlForDevice(remote, deviceId));
+    },
+    [selfDeviceId],
+  );
   const value = React.useMemo<DesktopDeviceContextValue>(
     () => ({
       status,
@@ -130,10 +149,10 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
       refreshing,
       error,
       remoteRouteAvailable: desktopDeviceRouteAvailable(status, selectedDevice),
-      selectDevice: setSelectedDeviceId,
+      selectDevice,
       refresh,
     }),
-    [devices, error, loading, refresh, refreshing, selectedDevice, selectedDeviceId, selfDeviceId, status],
+    [devices, error, loading, refresh, refreshing, selectDevice, selectedDevice, selectedDeviceId, selfDeviceId, status],
   );
 
   return <DesktopDeviceContext.Provider value={value}>{children}</DesktopDeviceContext.Provider>;

@@ -1,5 +1,6 @@
 import React from 'react';
 import { observeChatLoadRequest, responseTextBytes } from './chat-load-telemetry';
+import { viewerUrlForServiceUrl } from './remote-hub';
 
 function buildUnexpectedHtmlError(url: string): string {
   const path = String(url ?? '').trim();
@@ -216,7 +217,7 @@ export function isNotFoundError(err: any): boolean {
 export async function probeLocalhostPort(hostPort: number, timeoutMs: number): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const url = `http://localhost:${hostPort}`;
+  const url = viewerUrlForServiceUrl(`http://localhost:${hostPort}`);
 
   try {
     await fetch(url, {

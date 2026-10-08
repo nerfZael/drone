@@ -14,6 +14,7 @@ import {
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
 import { DroneLinksContent } from './DroneLinksDock';
 import { displayUrlForPreviewInput, normalizePreviewUrl } from './helpers';
+import { viewerUrlForServiceUrl } from '../app/remote-hub';
 import {
   isPreviewFocusUserRequested,
   NO_PREVIEW_POINTER_TIME,
@@ -60,7 +61,9 @@ export function DronePreviewDock({
   chatName: string;
 }) {
   const selectedUrl = previewUrlOverride || defaultPreviewUrl;
-  const selectedOpenUrl = selectedUrl;
+  // Loaded addresses only: the URL bar keeps showing the drone's own localhost address.
+  const selectedLoadUrl = React.useMemo(() => viewerUrlForServiceUrl(selectedUrl), [selectedUrl]);
+  const selectedOpenUrl = selectedLoadUrl;
   const displayedSelectedUrl = React.useMemo(() => displayUrlForPreviewInput(selectedUrl, portRows), [selectedUrl, portRows]);
   const defaultDisplayUrl = React.useMemo(() => displayUrlForPreviewInput(defaultPreviewUrl, portRows), [defaultPreviewUrl, portRows]);
   const selectedReachability = selectedPort
@@ -86,8 +89,8 @@ export function DronePreviewDock({
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
   const startupDetail = String(startup?.hubMessage ?? '').trim();
   const previewIframeSandbox = React.useMemo(
-    () => previewIframeSandboxForUrl(selectedUrl, typeof window === 'undefined' ? null : window.location.origin),
-    [selectedUrl],
+    () => previewIframeSandboxForUrl(selectedLoadUrl, typeof window === 'undefined' ? null : window.location.origin),
+    [selectedLoadUrl],
   );
 
   React.useEffect(() => {
@@ -423,7 +426,7 @@ export function DronePreviewDock({
               ref={iframeRef}
               key={`${selectedUrl}::${iframeRefreshNonce}`}
               title={selectedPort ? `Browser container:${selectedPort.containerPort}` : `Browser ${selectedUrl}`}
-              src={selectedUrl}
+              src={selectedLoadUrl ?? undefined}
               loading="lazy"
               sandbox={previewIframeSandbox}
               className="w-full h-full"

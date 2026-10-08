@@ -8,6 +8,7 @@ import {
   UiStatusDot,
 } from '../../ui/components';
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
+import { viewerUrlForServiceUrl } from '../app/remote-hub';
 
 export type DroneLinksContentProps = {
   agentLabel: string;
@@ -45,7 +46,7 @@ export function DroneLinksContent({
       {!portsError && portRows.length > 0 && (
         <div className="flex max-h-[164px] flex-col gap-1.5 overflow-auto pr-1">
           {portRows.map((p) => {
-            const routedUrl = `http://localhost:${p.hostPort}`;
+            const routedUrl = viewerUrlForServiceUrl(`http://localhost:${p.hostPort}`);
             const reachability = portReachabilityByHostPort[String(p.hostPort)] ?? 'checking';
             const isReachable = reachability === 'up';
             return (

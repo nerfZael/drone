@@ -42,6 +42,37 @@ Mobile bootstraps through a known Hub, verifies its signed directory and device-
 
 On the phone's pairing screen, **Find a Hub on Tailscale** accepts a desktop Tailscale name or exact HTTPS origin. The phone verifies the Hub's discovery proof, then **Request pairing** submits its signed identity to the desktop's approval list. No invitation QR or phone listener is required. This is address-assisted discovery, not enumeration of peers from the separate Tailscale mobile app.
 
+## Full remote Hub (desktop to desktop)
+
+Choosing another desktop in the device picker opens that Hub in full: canvas, editor, file
+explorer, changes, terminals and the drone browser. The other desktop must grant this device
+`hub-remote › hub.connect` in its Devices settings. The grant is equivalent to local
+administrator access and is never given by default. Without it, offline or for phones, the
+picker keeps the chat-only view, with the reason shown.
+
+- **Target** (`hub-remote-sessions.ts`): `hub.connect` over the signed mesh returns a short-lived
+  bearer session. Ingress requests under `/api/device-mesh/v2/hub/<session>/` are re-authorized
+  on every request: `api/...` goes to the local API with this Hub's own token, which never
+  leaves the machine, and `port/<n>/...` goes to a loopback service such as a drone preview.
+  HTTP, event streams and WebSocket upgrades are all supported. Revoking the grant closes open
+  streams. Sessions idle out after 30 minutes without streams and last at most 12 hours.
+- **Viewer** (`hub-remote-viewers.ts`): `POST /api/device-mesh/remote-hub/open` (local admin) starts
+  a loopback origin `http://127.0.0.1:<port>` per remote Hub. It serves this machine's own UI,
+  proxied from the opening page's origin with replaced runtime configuration, and forwards
+  `/api` there. `p<n>.localhost:<port>` reaches the remote machine's `localhost:<n>`. The port
+  and home origin persist in `remote-hub-ports.json`, so the remote page keeps its browser
+  state and survives a local Hub restart. API requests from other origins, cross-site
+  subresource requests and unknown Host headers are refused. Like the desktop UI proxy,
+  local processes on the viewing machine can use the origin.
+- **UI** (`remote-hub.ts`): a remote page keeps the picker on that Hub, and sends other choices
+  home with `?device=`. Loaded preview and service links (`localhost:<n>`) are mapped to
+  `p<n>.localhost`.
+
+Desktop recordings stay on the viewing machine. Remote file actions that open native apps,
+such as an external editor, run on the remote machine. Checks:
+`node --require ts-node/register --test tests/node/hub-remote.test.ts` from `apps/drone`, and
+`bun test tests/remote-hub.test.ts` from `apps/drone-hub`.
+
 ## Components
 
 - `device-mesh-tailscale.ts`, `device-mesh-discovery.ts`: CLI detection, peer enumeration, challenge-bound discovery.

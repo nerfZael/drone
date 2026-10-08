@@ -7,6 +7,7 @@ import {
   resolveDefaultPreviewPort,
 } from './helpers';
 import { readLocalStorageItem } from './hooks';
+import { viewerUrlForServiceUrl } from './remote-hub';
 
 type DroneQuickTarget = Pick<DroneSummary, 'id' | 'containerPort' | 'hostPort'>;
 type PortRow = { containerPort: number; hostPort: number };
@@ -87,6 +88,10 @@ async function fetchLivePortRows(droneIdRaw: string): Promise<PortRow[] | null> 
 }
 
 export function resolveDroneOpenTabUrl(drone: DroneQuickTarget): string | null {
+  return viewerUrlForServiceUrl(resolveStoredDroneOpenTabUrl(drone));
+}
+
+function resolveStoredDroneOpenTabUrl(drone: DroneQuickTarget): string | null {
   const droneId = String(drone?.id ?? '').trim();
   if (!droneId) return null;
   const prefs = readPreviewPreference(droneId);
@@ -126,7 +131,7 @@ async function resolveDroneOpenTabUrlLive(drone: DroneQuickTarget): Promise<stri
 }
 
 export async function openDroneTabFromLastPreview(drone: DroneQuickTarget): Promise<boolean> {
-  const url = await resolveDroneOpenTabUrlLive(drone);
+  const url = viewerUrlForServiceUrl(await resolveDroneOpenTabUrlLive(drone));
   if (!url) return false;
   try {
     window.open(url, '_blank', 'noopener,noreferrer');

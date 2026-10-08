@@ -13,3 +13,12 @@ export type DroneBrowserSession = {
   expiresAt: string;
   upstreamAuthority: string;
 };
+
+/** A short-lived bearer session for the full-Hub tunnel. Never expose the token to page JavaScript. */
+export type HubRemoteSession = {
+  sessionId: string;
+  /** Origin and path prefix; `api/...` and `port/<n>/...` are appended to it. */
+  baseUrl: string;
+  token: string;
+  expiresAt: string;
+};

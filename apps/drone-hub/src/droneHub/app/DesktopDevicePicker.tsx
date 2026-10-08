@@ -3,6 +3,7 @@ import { dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
 import { IconChevronDown } from './icons';
 import { desktopDeviceRouteAvailable, useDesktopDevice } from './DesktopDeviceProvider';
 import { DeviceConnectionIndicator } from './DeviceConnectionIndicator';
+import { remoteHubRuntime } from './remote-hub';
 
 function platformLabel(platform: string): string {
   if (platform === 'android') return 'Android';
@@ -28,6 +29,9 @@ export function DesktopDevicePicker({
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   useDropdownDismiss(menuRef, open, setOpen);
 
+  const remote = remoteHubRuntime();
+  // A remote Hub page lists that Hub's devices; "this device" is still the machine in use.
+  const homeDeviceId = remote?.homeDeviceId ?? selfDeviceId;
   const name = selectedDevice?.name || (loading ? 'Loading device…' : 'This device');
   const selectedHasRoute = desktopDeviceRouteAvailable(status, selectedDevice);
 
@@ -41,13 +45,18 @@ export function DesktopDevicePicker({
         type="button"
         className="flex h-7 min-w-0 items-center rounded-[var(--radius-medium)] pl-1.5 pr-0.5 text-left dh-type-control-compact text-[var(--fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
         title={`Switch device. Current device: ${name}`}
-        aria-label={`Current device: ${name}, ${selectedHasRoute ? 'online' : 'offline'}. Choose another device.`}
+        aria-label={`Current device: ${name}${remote ? ', used remotely' : ''}, ${selectedHasRoute ? 'online' : 'offline'}. Choose another device.`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
         <DeviceConnectionIndicator online={selectedHasRoute} className="mr-1.5" />
         <span className="min-w-0 truncate">{name}</span>
+        {remote ? (
+          <span className="ml-1.5 flex-shrink-0 dh-type-menu-meta !text-[var(--sidebar-meta-fg)]">
+            Remote
+          </span>
+        ) : null}
         <IconChevronDown className="ml-2 h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
       </button>
 
@@ -59,7 +68,8 @@ export function DesktopDevicePicker({
         >
           <div className="max-h-[min(360px,60vh)] overflow-y-auto">
             {devices.map((device) => {
-              const local = device.id === selfDeviceId;
+              const local = device.id === homeDeviceId;
+              const viewedRemotely = Boolean(remote) && device.id === selfDeviceId;
               const hasRoute = desktopDeviceRouteAvailable(status, device);
               const selected = device.id === selectedDevice?.id;
               return (
@@ -90,9 +100,9 @@ export function DesktopDevicePicker({
                     <span className="block truncate dh-type-control-compact">
                       {device.name}
                     </span>
-                    {local ? (
+                    {local || viewedRemotely ? (
                       <span className="mt-px block truncate text-micro font-normal text-[var(--sidebar-meta-fg)]">
-                        This device
+                        {local ? 'This device' : 'Using remotely'}
                       </span>
                     ) : null}
                   </span>

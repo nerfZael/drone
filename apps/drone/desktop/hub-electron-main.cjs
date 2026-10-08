@@ -74,9 +74,24 @@ const diagnostics = createDesktopDiagnostics({
 });
 // The canvas holds the real cursor inside itself while edge panning.
 const cursorConfinement = require('./hub-electron-cursor-confine.cjs').installCursorConfinement({ ipcMain, BrowserWindow, screen });
+// A window showing another desktop's Hub reads its files through that page's loopback
+// origin, which the local Hub authenticates on its own.
+function hubConnectionForPage() {
+  if (!recordingConnection) return null;
+  try {
+    const page = new URL(mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : '');
+    const home = desktopStaticUiServer ? new URL(desktopStaticUiServer.url) : null;
+    if (home && page.protocol === 'http:' && page.hostname === '127.0.0.1' && page.origin !== home.origin) {
+      return { apiUrl: page.origin, apiToken: '' };
+    }
+  } catch {
+    // Startup and error pages use the local Hub.
+  }
+  return recordingConnection;
+}
 require('./hub-electron-html-preview.cjs').installHtmlPreviewWindows({
   ipcMain, BrowserWindow, session, diagnostics,
-  getWindow: () => mainWindow, getConnection: () => recordingConnection,
+  getWindow: () => mainWindow, getConnection: hubConnectionForPage,
 });
 
 if (hasSingleInstanceLock) {

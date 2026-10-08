@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import DroneHubApp from './DroneHubApp';
 import { installDirectApiFetch } from './droneHub/app/direct-api-fetch';
+import { installRemoteServiceLinkRewriting } from './droneHub/app/remote-hub';
 import { registerPwa } from './register-pwa';
 import { useDroneHubUiStore } from './droneHub/app/use-drone-hub-ui-store';
 import { applyDesktopTheme } from './theme';
@@ -15,6 +16,7 @@ import './styles.css';
 applyDesktopTheme(useDroneHubUiStore.getState().themeId);
 applyReadingDensity(useDroneHubUiStore.getState().readingDensityMode);
 installDirectApiFetch();
+installRemoteServiceLinkRewriting();
 registerPwa();
 
 const container = document.getElementById('root');

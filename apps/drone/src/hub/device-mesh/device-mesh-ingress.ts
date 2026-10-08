@@ -233,7 +233,12 @@ export class DeviceMeshIngress {
       socket.on('close', () => sockets.delete(socket));
     });
     server.on('upgrade', (request, socket, head) => {
-      if (this.handleStreamUpgrade && (request.url?.startsWith('/api/device-mesh/v2/browser/') || request.url === '/api/device-mesh/v2/live-audio')) {
+      if (
+        this.handleStreamUpgrade &&
+        (request.url?.startsWith('/api/device-mesh/v2/browser/') ||
+          request.url?.startsWith('/api/device-mesh/v2/hub/') ||
+          request.url === '/api/device-mesh/v2/live-audio')
+      ) {
         void this.handleStreamUpgrade(request, socket, head).catch(() => socket.destroy());
       } else socket.destroy();
     });

@@ -58,6 +58,12 @@ function PermissionGrid({
             <div className="font-mono text-11 font-[var(--weight-semibold)] text-[var(--accent)]">
               {capability.id}@{capability.version}
             </div>
+            {capability.id === 'hub-remote' ? (
+              <div className="mt-1 text-10 leading-relaxed text-[var(--muted)]">
+                Lets that device use this whole Hub: canvas, editor, files, changes, terminals
+                and previews. Grant it only to your own machines.
+              </div>
+            ) : null}
             <div className="mt-2 grid gap-1.5">
               {capability.operations.map((operation) => {
                 const key = `${capability.id}:${operation}`;

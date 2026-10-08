@@ -14,6 +14,8 @@ import { DevicePhoneDiscovery } from './device-phone-discovery';
 import { DeviceLanDiscovery } from './device-lan-discovery';
 import { DeviceHttpTransfers } from './device-http-transfers';
 import { DeviceBrowserSessions } from './device-browser-sessions';
+import { HUB_REMOTE_PREFIX, HubRemoteSessions } from './hub-remote-sessions';
+import { HubRemoteViewers } from './hub-remote-viewers';
 import { DeviceRequestJournal } from './device-request-journal';
 import { WorkspaceHttpTransfers } from './workspace-http-transfers';
 import { DeviceResultUploads } from './device-result-uploads';
@@ -111,6 +113,12 @@ export async function createDeviceMeshService(options: {
     () => ingress?.status().publicEndpoint ?? null,
   );
   capabilities.register(createWorkspaceCapability(assistantPolicies, workspaceTransfers));
+  const hubRemoteSessions = new HubRemoteSessions(
+    localHubAccess,
+    store,
+    () => ingress?.status().publicEndpoint ?? null,
+  );
+  capabilities.register(hubRemoteSessions.capability());
   capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
@@ -138,6 +146,11 @@ export async function createDeviceMeshService(options: {
   ];
   extensions.push(transfers);
   extensions.push(workspaceTransfers);
+  extensions.push(hubRemoteSessions);
+  const hubRemoteViewers = new HubRemoteViewers(options.rootDir, store, (...args) =>
+    router.request(...args),
+  );
+  extensions.push(hubRemoteViewers);
   const httpHandler = new DeviceMeshHttp(
     identity,
     store,
@@ -164,7 +177,8 @@ export async function createDeviceMeshService(options: {
     (request, response, url) => httpHandler.handlePublic(request, response, url),
     (endpoint) => router.announceEndpoint(endpoint),
     async (request, socket, head) => {
-      if (!router.handleLiveAudioUpgrade(request, socket, head)) await browsers.upgrade(request, socket, head);
+      if (request.url?.startsWith(HUB_REMOTE_PREFIX)) await hubRemoteSessions.upgrade(request, socket, head);
+      else if (!router.handleLiveAudioUpgrade(request, socket, head)) await browsers.upgrade(request, socket, head);
     },
   );
   extensions.push(new DeviceMeshIngressHttp(ingress));
@@ -185,6 +199,7 @@ export async function createDeviceMeshService(options: {
     start: async () => {
       router.start();
       await ingress.start();
+      void hubRemoteViewers.restore().catch(() => undefined);
       void discovery.scan().catch(() => undefined);
       discoveryTimer = setInterval(() => void discovery.scan().catch(() => undefined), 60_000);
       discoveryTimer.unref?.();
@@ -202,6 +217,8 @@ export async function createDeviceMeshService(options: {
       if (pairingPruneTimer) clearInterval(pairingPruneTimer);
       pairingPruneTimer = null;
       await ingress.close();
+      await hubRemoteViewers.close();
+      hubRemoteSessions.close();
       browsers.close();
       await chatAttachments.close();
       transfers.close();

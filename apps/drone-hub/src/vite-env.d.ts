@@ -29,6 +29,13 @@ interface Window {
     readonly desktop?: boolean;
     readonly directApiBase?: string;
     readonly directApiToken?: string;
+    /** Set when this page shows another desktop's Hub through the local Hub. */
+    readonly remoteHub?: {
+      readonly deviceId?: string;
+      readonly deviceName?: string;
+      readonly homeDeviceId?: string;
+      readonly homeOrigin?: string;
+    };
   };
   readonly droneHubDesktop?: {
     recoverRenderer?(): void;

@@ -215,11 +215,13 @@ function RemoteMain({
   routeAvailable,
   sidebarCollapsed,
   onExpandSidebar,
+  notice,
 }: {
   model: ReturnType<typeof useRemoteDroneHub>;
   routeAvailable: boolean;
   sidebarCollapsed: boolean;
   onExpandSidebar(): void;
+  notice?: React.ReactNode;
 }) {
   const {
     selectedDevice,
@@ -291,6 +293,8 @@ function RemoteMain({
           {routeAvailable ? 'Refresh' : 'Retry'}
         </button>
       </header>
+
+      {notice}
 
       {!routeAvailable && model.selectedDrone ? (
         <div className="flex items-center justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-2 text-center text-10 text-[var(--muted)]">
@@ -490,9 +494,11 @@ function RemoteMain({
 function RemoteDeviceWorkspaceTarget({
   targetDeviceId,
   routeAvailable,
+  notice,
 }: {
   targetDeviceId: string;
   routeAvailable: boolean;
+  notice?: React.ReactNode;
 }) {
   const sidebarDockSide = useDroneHubUiStore(
     (state: RemoteSidebarUiState) => state.sidebarDockSide,
@@ -518,6 +524,7 @@ function RemoteDeviceWorkspaceTarget({
       routeAvailable={routeAvailable}
       sidebarCollapsed={sidebarCollapsed}
       onExpandSidebar={() => setSidebarCollapsed(false)}
+      notice={notice}
     />
   );
 
@@ -538,13 +545,14 @@ function RemoteDeviceWorkspaceTarget({
   );
 }
 
-export function RemoteDeviceWorkspace() {
+export function RemoteDeviceWorkspace({ notice }: { notice?: React.ReactNode } = {}) {
   const { selectedDeviceId, remoteRouteAvailable } = useDesktopDevice();
   return (
     <RemoteDeviceWorkspaceTarget
       key={selectedDeviceId}
       targetDeviceId={selectedDeviceId}
       routeAvailable={remoteRouteAvailable}
+      notice={notice}
     />
   );
 }

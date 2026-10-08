@@ -16,7 +16,7 @@ import { applyDesktopTheme } from './theme';
 import { applyReadingDensity } from './reading-density';
 import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
 import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopDeviceProvider';
-import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
+import { RemoteHubLauncher } from './droneHub/app/RemoteHubLauncher';
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
 import { ActiveComposerProvider } from './droneHub/chat/ActiveComposerContext';
 import { EditorZoomController } from './droneHub/files/editor-zoom';
@@ -86,7 +86,7 @@ function DroneHubAppContent() {
 
   return selectedDeviceId && selfDeviceId && selectedDeviceId !== selfDeviceId ? (
     <>
-      <RemoteDeviceWorkspace />
+      <RemoteHubLauncher />
       <div className="fixed right-3 top-12 z-[110] rounded border border-[var(--border)] bg-[var(--panel)]">
         <DesktopRecordings />
       </div>
