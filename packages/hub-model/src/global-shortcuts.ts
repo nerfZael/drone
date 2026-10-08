@@ -40,6 +40,7 @@ export const DRONE_HUB_SHORTCUT_ACTION_IDS = [
   'openBrowserTab',
   'openFilesTab',
   'openQuickOpen',
+  'createUntitledFile',
   'openTerminalTab',
   'canvasBack',
   'canvasForward',

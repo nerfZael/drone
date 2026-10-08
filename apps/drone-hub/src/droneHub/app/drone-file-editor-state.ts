@@ -1,5 +1,11 @@
 import { profileStorageKey } from '../../profile-storage';
-import { createOpenedFileTab, type OpenedFileTab, type OpenedFileTabsState } from './opened-file-tabs';
+import {
+  createOpenedFileTab,
+  createUntitledFileTab,
+  type OpenedFileTab,
+  type OpenedFileTabsState,
+} from './opened-file-tabs';
+import { readStoredUntitledFiles } from './untitled-editor-files';
 
 const EMPTY_OPENED_FILE_TABS_STATE: OpenedFileTabsState = { tabs: [], activeTabId: null };
 export const EDITOR_LAST_FILE_STORAGE_KEY = profileStorageKey('droneHub.editorLastFileByDrone');
@@ -79,7 +85,7 @@ export function writeRememberedEditorFile(
 export function rememberedEditorFileFromTab(
   tab: OpenedFileTab | null | undefined,
 ): RememberedEditorFile | null {
-  if (!tab) return null;
+  if (!tab || tab.untitled) return null;
   return {
     path: tab.path,
     name: tab.name,
@@ -88,7 +94,13 @@ export function rememberedEditorFileFromTab(
   };
 }
 
-export function restoredOpenedFileTabsStateByDrone(): Record<string, OpenedFileTabsState> {
+/**
+ * Each drone's tabs for a new session: its last opened file and, when
+ * `includeUntitled`, the unsaved new files it had open.
+ */
+export function restoredOpenedFileTabsStateByDrone(
+  { includeUntitled = false }: { includeUntitled?: boolean } = {},
+): Record<string, OpenedFileTabsState> {
   const restored: Record<string, OpenedFileTabsState> = {};
   for (const [droneId, file] of Object.entries(readRememberedEditorFileMap())) {
     const tab = createOpenedFileTab({
@@ -100,6 +112,18 @@ export function restoredOpenedFileTabsStateByDrone(): Record<string, OpenedFileT
       navigationSeq: 0,
     });
     restored[droneId] = { tabs: [tab], activeTabId: tab.tabId };
+  }
+  if (!includeUntitled) return restored;
+  for (const [droneId, untitled] of Object.entries(readStoredUntitledFiles())) {
+    const tabs = untitled.files.map((file) =>
+      createUntitledFileTab({ droneId, name: file.name, content: file.content, navigationSeq: 0 }),
+    );
+    const current = restored[droneId] ?? { tabs: [], activeTabId: null };
+    const active = tabs.find((tab) => tab.name === untitled.activeName);
+    restored[droneId] = {
+      tabs: [...current.tabs, ...tabs],
+      activeTabId: active?.tabId ?? current.activeTabId ?? tabs[0]?.tabId ?? null,
+    };
   }
   return restored;
 }

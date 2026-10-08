@@ -227,6 +227,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Searches files in the selected drone and opens the chosen result in the Editor.',
   },
   {
+    id: 'createUntitledFile',
+    label: 'New file',
+    description: 'Opens a new, unsaved file in the Editor. Its text is kept until you save it; saving asks for a folder and a name.',
+  },
+  {
     id: 'openTerminalTab',
     label: 'Open Terminal tab',
     description: 'Opens the Terminal workspace pane.',
@@ -287,6 +292,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: null,
   openQuickOpen: { key: 'p', mod: true, ctrl: false, meta: false, alt: false, shift: false },
+  createUntitledFile: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: null,
   canvasBack: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   canvasForward: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -576,6 +582,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openBrowserTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openBrowserTab),
     openFilesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFilesTab),
     openQuickOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openQuickOpen),
+    createUntitledFile: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createUntitledFile),
     openTerminalTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openTerminalTab),
     canvasBack: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.canvasBack),
     canvasForward: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.canvasForward),

@@ -6,6 +6,7 @@ import {
   activateFileTab,
   closeFileTab,
   closeFileTabsForPaths,
+  createUntitledFileTab,
   dirtyFileTabsForPaths,
   openedFileTabDirty,
   openFileTab,
@@ -52,6 +53,10 @@ import { readDesktopFile } from '../files/read-desktop-file';
 import { subscribeFileEvents, type WorkspaceFileEvent } from '../files/workspace-events';
 import { confirmDialog } from '../../ui/AppConfirmDialog';
 import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
+import { runDroneFsAction } from '../files/file-actions-api';
+import { requestSaveAs, type SaveAsOutcome } from '../files/SaveAsDialog';
+import { openNextInSourceMode } from '../files/text-view-mode-hints';
+import { nextUntitledFileName, untitledFilesFromTabState, writeStoredUntitledFiles } from './untitled-editor-files';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -68,6 +73,10 @@ type UseFileEditorStateArgs = {
    * a second editor (a desktop window), which would otherwise overwrite the Hub's.
    */
   rememberOpenedFiles?: boolean;
+  /** The folder a new file's save dialog starts in. */
+  saveAsDirectory?: string;
+  /** A new file was saved to `path` for the first time. */
+  onUntitledFileSaved?: (path: string) => void;
 };
 
 type LoadSession = { droneId: string; path: string; cancel: () => void };
@@ -77,8 +86,12 @@ function rememberedEditorFilesFromTabState(
 ): Record<string, RememberedEditorFile> {
   const remembered: Record<string, RememberedEditorFile> = {};
   for (const [droneId, state] of Object.entries(stateByDroneId)) {
+    // A new, unsaved file is restored on its own; while one is active, keep
+    // remembering a file from disk so it opens alongside it.
     const activeTab = state.tabs.find((tab) => tab.tabId === state.activeTabId);
-    const file = rememberedEditorFileFromTab(activeTab);
+    const file = rememberedEditorFileFromTab(
+      activeTab?.untitled ? state.tabs.filter((tab) => !tab.untitled).pop() : activeTab,
+    );
     if (file) remembered[droneId] = file;
   }
   return remembered;
@@ -198,11 +211,19 @@ export function useFileEditorState({
   hostedTabIds,
   onHostedTabActivated,
   rememberOpenedFiles = true,
+  saveAsDirectory,
+  onUntitledFileSaved,
 }: UseFileEditorStateArgs) {
   const currentDroneId = String(currentDrone?.id ?? '').trim();
+  // Only the editor that remembers files owns the unsaved new files; a second
+  // editor restoring them too would overwrite the first one's text.
   const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>(
-    restoredOpenedFileTabsStateByDrone,
+    () => restoredOpenedFileTabsStateByDrone({ includeUntitled: rememberOpenedFiles }),
   );
+  const saveAsDirectoryRef = React.useRef(saveAsDirectory);
+  saveAsDirectoryRef.current = saveAsDirectory;
+  const onUntitledFileSavedRef = React.useRef(onUntitledFileSaved);
+  onUntitledFileSavedRef.current = onUntitledFileSaved;
   const rememberedEditorFilesRef = React.useRef<Record<string, RememberedEditorFile> | null>(null);
   if (rememberedEditorFilesRef.current === null) {
     rememberedEditorFilesRef.current = rememberedEditorFilesFromTabState(tabStateByDroneId);
@@ -255,6 +276,22 @@ export function useFileEditorState({
       writeRememberedEditorFile(droneId, next[droneId] ?? null);
     }
     rememberedEditorFilesRef.current = next;
+  }, [rememberOpenedFiles, tabStateByDroneId]);
+
+  // Unsaved new files are written through on every change, so their text
+  // survives a crash, a restart or switching drones.
+  const storedUntitledFilesRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!rememberOpenedFiles) return;
+    const next = untitledFilesFromTabState(tabStateByDroneId);
+    const serialized = Object.keys(next).length === 0 ? '' : JSON.stringify(next);
+    if (storedUntitledFilesRef.current === null) {
+      // The first state was read from storage; nothing to write back yet.
+      storedUntitledFilesRef.current = serialized;
+      return;
+    }
+    if (serialized === storedUntitledFilesRef.current) return;
+    storedUntitledFilesRef.current = writeStoredUntitledFiles(next);
   }, [rememberOpenedFiles, tabStateByDroneId]);
 
   const setTabState = React.useCallback(
@@ -406,6 +443,19 @@ export function useFileEditorState({
     [currentDrone?.id, normalizePositiveInt, openEditorLocation, setEditorLocationHistoryForDrone],
   );
 
+  /** Opens a new, empty file in the editor that exists only there until it is saved. */
+  const createUntitledFile = React.useCallback((): string | null => {
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return null;
+    const current = openedFileTabsStateForDrone(tabStateByDroneIdRef.current, droneId);
+    const name = nextUntitledFileName(current.tabs.filter((tab) => tab.untitled).map((tab) => tab.name));
+    navigationSeqRef.current += 1;
+    const tab = createUntitledFileTab({ droneId, name, navigationSeq: navigationSeqRef.current });
+    setOpenFailure(null);
+    setTabStateForDrone(droneId, (prev) => ({ tabs: [...prev.tabs, tab], activeTabId: tab.tabId }));
+    return tab.tabId;
+  }, [currentDrone?.id, setTabStateForDrone]);
+
   const openQuickOpen = React.useCallback(() => {
     if (!currentDrone?.id) return;
     setQuickOpenQuery('');
@@ -452,7 +502,10 @@ export function useFileEditorState({
   }, [currentDroneId, openEditorLocation, setEditorLocationHistory]);
 
   React.useEffect(() => {
-    const dirtyTabs = Object.values(tabStateByDroneId).flatMap((state) => state.tabs.filter(openedFileTabDirty));
+    // Unsaved new files are kept in storage, so they do not hold up closing.
+    const dirtyTabs = Object.values(tabStateByDroneId).flatMap((state) =>
+      state.tabs.filter((tab) => !(rememberOpenedFiles && tab.untitled) && openedFileTabDirty(tab)),
+    );
     if (dirtyTabs.length === 0 || typeof window === 'undefined') return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -462,7 +515,7 @@ export function useFileEditorState({
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
     };
-  }, [tabStateByDroneId]);
+  }, [rememberOpenedFiles, tabStateByDroneId]);
 
   React.useEffect(() => {
     const disposeState = (event: Event) => {
@@ -905,7 +958,7 @@ export function useFileEditorState({
   }, [requestJson, updateTabs]);
 
   const watchKey = liveTabs
-    .filter((tab) => tab.loaded && tab.droneId && tab.path)
+    .filter((tab) => tab.loaded && !tab.untitled && tab.droneId && tab.path)
     .map((tab) => `${tab.tabId}\u0001${tab.droneId}\u0001${tab.path}`)
     .join('\u0000');
   const watchSessionsRef = React.useRef(new Map<string, { key: string; dispose: () => void }>());
@@ -940,6 +993,7 @@ export function useFileEditorState({
         targetLine: activeTab.targetLine,
         targetColumn: activeTab.targetColumn,
         navigationSeq: activeTab.navigationSeq,
+        untitled: Boolean(activeTab.untitled),
       }
     : null;
   const loading = Boolean(activeTab && (!activeTab.loaded || activeTab.loading));
@@ -980,6 +1034,7 @@ export function useFileEditorState({
         targetLine: tab.targetLine,
         targetColumn: tab.targetColumn,
         navigationSeq: tab.navigationSeq,
+        untitled: Boolean(tab.untitled),
       })),
     [tabs],
   );
@@ -1002,6 +1057,110 @@ export function useFileEditorState({
     [],
   );
 
+  const untitledSavesInFlightRef = React.useRef(new Set<string>());
+  /** Asks where to save a new file, writes it there and turns its tab into an ordinary file tab. */
+  const saveUntitledFileTab = React.useCallback(async (untitledTab: OpenedFileTab, text: string): Promise<boolean> => {
+    const { droneId, tabId } = untitledTab;
+    // One save dialog per new file, however often Ctrl+S is pressed.
+    if (untitledSavesInFlightRef.current.has(tabId)) return false;
+    untitledSavesInFlightRef.current.add(tabId);
+    let savedPath: string | null = null;
+    // A file this dialog created before its write failed is retried without
+    // being reported as someone else's existing file.
+    let createdPath: string | null = null;
+    const save = async ({ path, directory, name, overwrite }: {
+      path: string; directory: string; name: string; overwrite: boolean;
+    }): Promise<SaveAsOutcome> => {
+      let targetPath = path;
+      try {
+        if (!overwrite && path !== createdPath) {
+          try {
+            const created = await runDroneFsAction(droneId, { action: 'create-file', targetDir: directory, name });
+            createdPath = path;
+            if (created.path) targetPath = created.path;
+          } catch (e: any) {
+            const message = e?.message ?? String(e);
+            if (/already exists/i.test(message)) return { ok: false, exists: true, error: message };
+            throw e;
+          }
+        }
+        // The dialog is modal, but take the latest text in case it changed while it was open.
+        const latest = tabStateByDroneIdRef.current[droneId]?.tabs.find((tab) => tab.tabId === tabId);
+        const content = latest?.content ?? text;
+        const resp = await requestJson<Extract<DroneFsWritePayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/fs/file`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: targetPath, content }),
+          },
+        );
+        const finalPath = typeof resp.path === 'string' && resp.path.trim() ? resp.path.trim() : targetPath;
+        const finalName = finalPath.split('/').filter(Boolean).pop() || name;
+        const savedTabId = openedFileTabId(droneId, finalPath);
+        // Keep the source view: a new notes.md should not flip to its preview mid-edit.
+        openNextInSourceMode(droneId, finalPath);
+        navigationSeqRef.current += 1;
+        const navigationSeq = navigationSeqRef.current;
+        setTabStateForDrone(droneId, (state) => {
+          const tabs = state.tabs
+            // A replaced file that was already open is now this tab.
+            .filter((tab) => tab.tabId !== savedTabId)
+            .map((tab) => tab.tabId === tabId
+              ? {
+                  ...tab,
+                  tabId: savedTabId,
+                  path: finalPath,
+                  name: finalName,
+                  untitled: false,
+                  navigationSeq,
+                  saving: false,
+                  error: null,
+                  content,
+                  savedContent: content,
+                  size: Number.isFinite(Number(resp.size)) ? Math.max(0, Math.floor(Number(resp.size))) : content.length,
+                  mtimeMs: typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs) ? resp.mtimeMs : null,
+                  revision: typeof resp.revision === 'string' && resp.revision.trim() ? resp.revision.trim() : null,
+                  externalRevision: null,
+                }
+              : tab);
+          const activeTabId = state.activeTabId === tabId || state.activeTabId === savedTabId ? savedTabId : state.activeTabId;
+          return { tabs, activeTabId };
+        });
+        if (activeTabIdRef.current === tabId) {
+          activeTabIdRef.current = savedTabId;
+          contentRef.current = content;
+        }
+        savedPath = finalPath;
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    };
+    let saved = false;
+    try {
+      saved = await requestSaveAs({
+        droneId,
+        initialDirectory: saveAsDirectoryRef.current ?? '',
+        initialName: untitledTab.name,
+        save,
+      });
+    } finally {
+      untitledSavesInFlightRef.current.delete(tabId);
+    }
+    if (!saved || !savedPath) return false;
+    if (droneId === currentDroneId) onRefreshFsList();
+    setRecentFilesByDroneId((prev) => ({
+      ...prev,
+      [droneId]: trackRecentQuickOpenFile(prev[droneId] ?? [], {
+        path: savedPath!,
+        name: savedPath!.split('/').filter(Boolean).pop() || savedPath!,
+      }),
+    }));
+    onUntitledFileSavedRef.current?.(savedPath);
+    return true;
+  }, [currentDroneId, onRefreshFsList, requestJson, setTabStateForDrone]);
+
   const saveFileTab = React.useCallback(async (
     tabIdRaw: string,
     contentOverride?: string,
@@ -1018,6 +1177,7 @@ export function useFileEditorState({
       contentRef.current = contentOverride;
       updateTabs((prevTabs) => updateFileTabContent(prevTabs, tabId, contentOverride));
     }
+    if (targetTab.untitled) return await saveUntitledFileTab(targetTab, textToSave);
     updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === tabId ? { ...tab, saving: true, error: null } : tab)));
     try {
       const resp = await requestJson<Extract<DroneFsWritePayload, { ok: true }>>(
@@ -1073,7 +1233,7 @@ export function useFileEditorState({
       );
       return false;
     }
-  }, [findTab, onRefreshFsList, requestJson, updateTabs]);
+  }, [findTab, onRefreshFsList, requestJson, saveUntitledFileTab, updateTabs]);
 
   const saveOpenedFile = React.useCallback(
     (contentOverride?: string, expectedRevisionOverride?: string | null): Promise<boolean> =>
@@ -1093,7 +1253,8 @@ export function useFileEditorState({
       );
       if (
         openTab &&
-        (openTab.loading ||
+        (openTab.untitled ||
+          openTab.loading ||
           openTab.saving ||
           !openTab.loaded ||
           openTab.kind !== 'text' ||
@@ -1231,7 +1392,7 @@ export function useFileEditorState({
 
   const refreshFileTab = React.useCallback((tabIdRaw: string) => {
     const targetTab = findTab(tabIdRaw);
-    if (!targetTab || targetTab.loading || targetTab.saving) return;
+    if (!targetTab || targetTab.untitled || targetTab.loading || targetTab.saving) return;
     if (targetTab.kind === 'text' && targetTab.content !== targetTab.savedContent) return;
     updateTabs((prevTabs) =>
       prevTabs.map((tab) =>
@@ -1254,7 +1415,7 @@ export function useFileEditorState({
 
   const reloadFileTabFromDisk = React.useCallback((tabIdRaw: string) => {
     const targetTab = findTab(tabIdRaw);
-    if (!targetTab || targetTab.loading || targetTab.saving) return;
+    if (!targetTab || targetTab.untitled || targetTab.loading || targetTab.saving) return;
     updateTabs((prevTabs) =>
       prevTabs.map((tab) =>
         tab.tabId === targetTab.tabId
@@ -1351,6 +1512,7 @@ export function useFileEditorState({
     activeOpenedFileTabId: activeTabId,
     openEditorFile,
     openEditorLocation,
+    createUntitledFile,
     closeEditorFile,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,

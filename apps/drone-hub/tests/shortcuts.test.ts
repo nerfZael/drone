@@ -197,6 +197,13 @@ describe('shortcut defaults', () => {
       meta: false,
       alt: false,
       shift: false,
+    });    expect(defaults.createUntitledFile).toEqual({
+      key: 'n',
+      mod: true,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
     });
   });
 

@@ -15,6 +15,7 @@ import { useDroneHubAppModel } from './use-drone-hub-app-model';
 import { applyDesktopTheme } from './theme';
 import { applyReadingDensity } from './reading-density';
 import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
+import { SaveAsDialogHost } from './droneHub/files/SaveAsDialog';
 import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopDeviceProvider';
 import { RemoteHubLauncher } from './droneHub/app/RemoteHubLauncher';
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
@@ -110,6 +111,7 @@ export default function DroneHubApp() {
               <CompanionMirrorProvider><CompanionProvider>
                 <FileDictationProvider>
                   <DroneHubAppContent />
+                  <SaveAsDialogHost />
                 </FileDictationProvider>
               </CompanionProvider></CompanionMirrorProvider>
               </RecorderCompanionProvider>

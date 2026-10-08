@@ -59,6 +59,8 @@ import {
 import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from './editor-monaco-options';
 import { targetCodeColumns, usePanelExpansionMeasure, visualLineLength } from '../app/workspace-panel-expansion';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
+import { takeSourceModeHint, textViewModeKey } from './text-view-mode-hints';
+import { isUntitledEditorPath } from '../app/untitled-editor-files';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 import {
   MonacoEditorValueSynchronizer,
@@ -339,7 +341,8 @@ export function OpenedDroneFilePanel({
     revision: fileRevision,
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
-  const activeFileViewModeKey = JSON.stringify([droneId, activeFilePath]);
+  const activeFileViewModeKey = textViewModeKey(droneId, activeFilePath);
+  const activeFileIsUntitled = isUntitledEditorPath(activeFilePath);
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
   const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
@@ -444,6 +447,7 @@ export function OpenedDroneFilePanel({
       setOpenedTextMode('edit');
       return;
     }
+    if (takeSourceModeHint(activeFileViewModeKey)) openedTextModeByPathRef.current.set(activeFileViewModeKey, 'edit');
     setOpenedTextMode(
       openedTextModeByPathRef.current.get(activeFileViewModeKey) ??
         (shouldRecoverPreviewAsSource(activeFileViewModeKey) ? 'edit' : defaultTextFileViewModeForFile(activeFilePath, fileMime)),
@@ -713,6 +717,10 @@ export function OpenedDroneFilePanel({
     }
     return () => desktopWorkspaceLoads.finish(id, 'superseded');
   }, [activeFilePath, droneId, fileNavigationSeq, workspaceNavigationId]);
+  // Monaco keeps the editor across tab switches and runs onMount once, so its
+  // commands must read the current tab's save handler, not the first one's.
+  const onSaveFileRef = React.useRef(onSaveFile);
+  onSaveFileRef.current = onSaveFile;
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
@@ -723,7 +731,7 @@ export function OpenedDroneFilePanel({
       });
       editor.onDidFocusEditorText(() => companionWorkspace?.focusEditor(companionEditorTargetId));
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        void onSaveFile?.(editor.getValue());
+        void onSaveFileRef.current?.(editor.getValue());
       });
       editor.addCommand(monaco.KeyCode.F12, () => {
         languageActionsRef.current?.goToDefinition();
@@ -738,7 +746,7 @@ export function OpenedDroneFilePanel({
       desktopWorkspaceLoads.mark(diagnosticId, 'editorReady');
       desktopWorkspaceLoads.committed(diagnosticId);
     },
-    [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile, syncIncomingEditorValue],
+    [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, syncIncomingEditorValue],
   );
   const imageDiagnosticRef = React.useRef<HTMLImageElement | null>(null);
   React.useEffect(() => {
@@ -998,7 +1006,7 @@ export function OpenedDroneFilePanel({
                     droneName={droneName}
                     path={activeFilePath}
                     name={fileName || activeFilePath}
-                    editable={!readOnly && openedEditorIsText}
+                    editable={!readOnly && openedEditorIsText && !activeFileIsUntitled}
                     loading={Boolean(fileLoading)}
                     saving={Boolean(fileSaving)}
                     externallyChanged={Boolean(file.externallyChanged)}

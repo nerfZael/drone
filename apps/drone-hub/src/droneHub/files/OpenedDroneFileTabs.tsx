@@ -93,7 +93,8 @@ export function OpenedDroneFileTabs({
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', tab.tabId);
                 // Dropping the tab on the workspace grid opens it in its own window.
-                setFileTabDragPayload(event.dataTransfer, {
+                // A file window reads from disk, so an unsaved new file stays here.
+                if (!tab.untitled) setFileTabDragPayload(event.dataTransfer, {
                   droneId: tab.droneId,
                   tabId: tab.tabId,
                   path: tab.path ?? '',

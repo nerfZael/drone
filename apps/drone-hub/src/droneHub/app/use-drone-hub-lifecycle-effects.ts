@@ -80,6 +80,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   openQuickOpenFromShortcut: () => boolean;
+  createUntitledFileFromShortcut: () => boolean;
   toggleVoiceClipboardRecording: () => boolean;
   draftCreateOpen: boolean;
   draftCreateNameRef: React.RefObject<HTMLInputElement | null>;
@@ -146,6 +147,7 @@ export function useDroneHubLifecycleEffects({
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   openQuickOpenFromShortcut,
+  createUntitledFileFromShortcut,
   toggleVoiceClipboardRecording,
   draftCreateOpen,
   draftCreateNameRef,
@@ -532,6 +534,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       openQuickOpen: () => openQuickOpenFromShortcut(),
+      createUntitledFile: () => createUntitledFileFromShortcut(),
       openTerminalTab: () => {
         openRightPanelTabFromShortcut('terminal');
         return true;
@@ -682,6 +685,16 @@ export function useDroneHubLifecycleEffects({
         e.stopPropagation();
         return;
       }
+      // The code editor is a shortcut boundary and stops Ctrl+N and Ctrl+P from
+      // bubbling, yet it is where files are most often opened from. A terminal
+      // keeps them: they are the shell's history keys.
+      if (matched?.id === 'createUntitledFile' || matched?.id === 'openQuickOpen') {
+        if (e.target instanceof Element && e.target.closest('.xterm')) return;
+        if (!runShortcutAction(matched.id, e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (matched?.id !== 'toggleChatComposerEditorMode') return;
       if (!toggleCurrentChatComposerEditorMode()) return;
       e.preventDefault();
@@ -816,6 +829,7 @@ export function useDroneHubLifecycleEffects({
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     openQuickOpenFromShortcut,
+    createUntitledFileFromShortcut,
     rightPanelTab,
     requestRightPanelTab,
     setSidebarCollapsed,

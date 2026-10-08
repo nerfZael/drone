@@ -16,6 +16,8 @@ export type DroneOpenedFileState = {
   targetLine: number | null;
   targetColumn: number | null;
   navigationSeq: number;
+  /** A new file that exists only in the editor until it is saved. */
+  untitled?: boolean;
 };
 
 export type DroneOpenedFileTabState = DroneOpenedFileState & {

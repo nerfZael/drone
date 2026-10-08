@@ -2904,6 +2904,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     (tabId: string) => { focusFilePanel(String(currentDrone?.id ?? '').trim(), tabId); },
     [currentDrone?.id],
   );
+  // Set once the explorer's reveal is defined below.
+  const revealSavedUntitledFileRef = React.useRef<(path: string) => void>(() => {});
   const {
     openedFile: openedEditorFile,
     loading: openedEditorFileLoading,
@@ -2932,6 +2934,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openEditorFile,
     acceptCompanionFile,
     openEditorLocation,
+    createUntitledFile,
     closeEditorFile,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,
@@ -2959,6 +2962,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onRefreshFsList: refreshFsList,
     hostedTabIds: detachedFileTabIds,
     onHostedTabActivated: focusDetachedFileWindow,
+    saveAsDirectory: currentFsPath || defaultFsPathForCurrentDrone,
+    onUntitledFileSaved: (path) => revealSavedUntitledFileRef.current(path),
   });
   const editorStripFileTabs = React.useMemo(() => {
     if (detachedFileTabIds.length === 0) return openedEditorFileTabs;
@@ -3786,13 +3791,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCurrentFsPath(workspaceExplorerLocation(defaultFsPathForCurrentDrone, path).root);
     setExplorerReveal({ path, sequence: ++pathNavigationVersion.current, kind: 'file' });
   }, [defaultFsPathForCurrentDrone, setCurrentFsPath]);
+  revealSavedUntitledFileRef.current = revealFileInExplorer;
   const [pendingFileOpen, setPendingFileOpen] = React.useState<{ droneId: string; path: string } | null>(null);
   const activateOpenedEditorFileTab = React.useCallback(
     (tabId: string) => {
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
       const tab = openedEditorFileTabs.find((entry) => entry.tabId === tabId);
-      if (tab) revealFileInExplorer(tab.path);
+      if (tab && !tab.untitled) revealFileInExplorer(tab.path);
       setActiveOpenedFileTab(tabId);
     },
     [openedEditorFileTabs, revealFileInExplorer, setActiveOpenedFileTab],
@@ -3929,6 +3935,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, focusEditorPane, openEditorFile, revealFileInExplorer],
   );
+
+  const createUntitledFileFromShortcut = React.useCallback(() => {
+    if (!currentDrone?.id) return false;
+    focusEditorPane();
+    return createUntitledFile() != null;
+  }, [currentDrone?.id, createUntitledFile, focusEditorPane]);
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
     if (!currentDrone?.id) return false;
@@ -5382,6 +5394,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     openQuickOpenFromShortcut,
+    createUntitledFileFromShortcut,
     toggleVoiceClipboardRecording,
     draftCreateOpen,
     draftCreateNameRef,

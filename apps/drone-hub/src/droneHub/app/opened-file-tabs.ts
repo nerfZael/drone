@@ -1,3 +1,5 @@
+import { untitledEditorPath } from './untitled-editor-files';
+
 export type OpenedFileKind = 'text' | 'large-text' | 'image' | 'video' | 'binary';
 
 export type OpenedFileTab = {
@@ -21,6 +23,8 @@ export type OpenedFileTab = {
   revision?: string | null;
   externalRevision?: string | null;
   refreshNonce: number;
+  /** A new file made in the editor that has not been saved anywhere yet. */
+  untitled?: boolean;
 };
 
 export type OpenedFileTabsState = {
@@ -93,6 +97,28 @@ export function createOpenedFileTab(args: {
     revision: null,
     externalRevision: null,
     refreshNonce: 0,
+  };
+}
+
+/** A new, empty file that exists only in the editor until it is saved. */
+export function createUntitledFileTab(args: {
+  droneId: string;
+  name: string;
+  content?: string;
+  navigationSeq: number;
+}): OpenedFileTab {
+  return {
+    ...createOpenedFileTab({
+      droneId: args.droneId,
+      path: untitledEditorPath(args.name),
+      name: args.name,
+      targetLine: null,
+      targetColumn: null,
+      navigationSeq: args.navigationSeq,
+    }),
+    loaded: true,
+    content: args.content ?? '',
+    untitled: true,
   };
 }
 

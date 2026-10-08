@@ -81,6 +81,17 @@ describe('editable shortcut dispatch', () => {
     expect(out).toBe(true);
   });
 
+  test('allows New file from any editable input, including the code editor', () => {
+    const out = shouldDispatchEditableShortcutAction({
+      matchedActionId: 'createUntitledFile',
+      matchedShortcutKey: 'n',
+      targetInPrimaryChatInput: false,
+      targetInCanvasMessageInput: false,
+      targetInAssistantChatInput: false,
+    });
+    expect(out).toBe(true);
+  });
+
   test('allows voice transcription shortcut from chat inputs', () => {
     expect(
       shouldDispatchEditableShortcutAction({
@@ -169,7 +180,7 @@ describe('desktop-wide shortcut while typing', () => {
     expect(shouldRunGlobalShortcutAction({ actionId: 'markSelectedDronesUnread', documentFocused: false, activeElement: input })).toBe(true);
   });
   test('companion and composer shortcuts keep working while typing', () => {
-    for (const actionId of ['toggleCompanion', 'applyCompanionProposal', 'toggleChatComposerEditorMode', 'openQuickOpen']) {
+    for (const actionId of ['toggleCompanion', 'applyCompanionProposal', 'toggleChatComposerEditorMode', 'openQuickOpen', 'createUntitledFile']) {
       expect(shouldRunGlobalShortcutAction({ actionId, documentFocused: true, activeElement: input })).toBe(true);
     }
   });

@@ -20,7 +20,7 @@ export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDisp
   } = _args;
   const inDraftShortcutChatInput = targetInPrimaryChatInput || targetInCanvasMessageInput;
   const inVoiceShortcutChatInput = inDraftShortcutChatInput || targetInAssistantChatInput;
-  if (matchedActionId === 'openQuickOpen') return true;
+  if (matchedActionId === 'openQuickOpen' || matchedActionId === 'createUntitledFile') return true;
   if (matchedActionId === 'createDraftDrone') {
     return matchedShortcutKey === 'tab' && inDraftShortcutChatInput;
   }
@@ -34,6 +34,7 @@ export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDisp
 // to a desktop-wide one keeps the same manners (see use-global-shortcut-client).
 const GLOBAL_SHORTCUTS_ALLOWED_WHILE_TYPING = new Set<string>([
   'openQuickOpen',
+  'createUntitledFile',
   'toggleVoiceClipboardRecording',
   'toggleCompanion',
   'applyCompanionProposal',
