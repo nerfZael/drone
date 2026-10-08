@@ -152,3 +152,47 @@ export async function suggestDroneNameFromMessage(
   if (!name) throw new Error('LLM returned no valid drone name');
   return identifierStyle ? name.slice(0, 48).replace(/-+$/g, '') : name;
 }
+
+/** A short human title for a dictated note, used as its file name. */
+export async function suggestNoteTitleFromText(
+  noteText: string,
+  opts?: { provider?: LlmProviderId; apiKey?: string },
+): Promise<string> {
+  const text = String(noteText ?? '').trim();
+  if (!text) throw new Error('missing note text');
+  const runtime = await resolveHubLlmRuntime(opts);
+  const modelId = defaultDroneNameModelId(runtime.provider);
+  const outputSchema = runtime.z.object({
+    title: runtime.z.string().min(1).describe('Concise note title with spaces and an uppercase first letter, max 48 chars.'),
+  });
+  let object: any = null;
+  try {
+    const out = await runtime.generateObject({
+      model: runtime.modelFactory(modelId),
+      schema: outputSchema,
+      system: [
+        'You title notes that a person dictated.',
+        'Return only the structured output required by the schema.',
+        'Rules:',
+        '- Name what the note is about, such as "Grocery list" or "Ideas for onboarding flow".',
+        '- Use plain words with spaces and an uppercase first letter.',
+        '- Max length 48 characters. No quotes, dates, or file extensions.',
+      ].join('\n'),
+      // Long dictations are titled by their opening, which is enough to name them.
+      prompt: `Note:\n${text.slice(0, 8_000)}`,
+      maxRetries: 1,
+      reasoning: 'none',
+      ...(runtime.provider === 'openai'
+        ? { providerOptions: { openai: { reasoningEffort: 'none' } } }
+        : {}),
+    });
+    object = out.object;
+  } catch (e: any) {
+    throw new Error(
+      `${providerDisplayName(runtime.provider)} note title suggestion failed (model: ${modelId}): ${e?.message ?? String(e)}`,
+    );
+  }
+  const title = toDisplayName(String(object?.title ?? ''));
+  if (!title) throw new Error('LLM returned no note title');
+  return title;
+}

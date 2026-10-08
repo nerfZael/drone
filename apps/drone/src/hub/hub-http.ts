@@ -136,6 +136,8 @@ export function withCors(
       'x-drone-transcription-language',
       'x-drone-transcription-prompt-base64',
       'x-drone-companion-message-id',
+      'x-drone-speech-surface',
+      'x-drone-speech-target',
     ].join(','),
   );
   res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing,x-drone-request-id');

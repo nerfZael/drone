@@ -23,13 +23,14 @@ describe('global dictation numpad shortcuts', () => {
     expect(shortcut('NumpadDecimal')).toBe('close');
   });
 
-  test('maps numpad zero through five to their destinations', () => {
+  test('maps numpad zero through six to their destinations', () => {
     expect(shortcut('Numpad0')).toEqual({ destination: 'current-chat' });
     expect(shortcut('Numpad1')).toEqual({ destination: 'root-drone' });
     expect(shortcut('Numpad2')).toEqual({ destination: 'group-drone' });
     expect(shortcut('Numpad3')).toEqual({ destination: 'new-chat' });
     expect(shortcut('Numpad4')).toEqual({ destination: 'clone-chat' });
     expect(shortcut('Numpad5')).toEqual({ destination: 'companion' });
+    expect(shortcut('Numpad6')).toEqual({ destination: 'note' });
   });
 
   test('does not intercept the top number row or modified numpad keys', () => {
@@ -38,7 +39,7 @@ describe('global dictation numpad shortcuts', () => {
     expect(shortcut('NumpadAdd', { shiftKey: true })).toBeNull();
   });
 
-  test('shows Companion as the sixth scratchpad destination', () => {
+  test('shows Companion and Note as the last scratchpad destinations', () => {
     const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -61,7 +62,9 @@ describe('global dictation numpad shortcuts', () => {
 
       expect(html).toContain('Numpad 5: send to companion');
       expect(html).toContain('>Companion</span>');
-      expect(html).toContain('grid-cols-6');
+      expect(html).toContain('Numpad 6: send to note');
+      expect(html).toContain('>Note</span>');
+      expect(html).toContain('grid-cols-7');
     } finally {
       if (previousDescriptor) {
         Object.defineProperty(globalThis, 'localStorage', previousDescriptor);

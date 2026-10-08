@@ -4,7 +4,7 @@ import {
   browserMicrophoneOwnerLabel,
   type BrowserMicrophoneLease,
 } from '../chat/browser-microphone-coordinator';
-import { concatArrayBuffers, floatToPcm16, pcm16ToWav } from '../chat/use-chat-voice-recorder';
+import { concatArrayBuffers, fileCanceledSpeechClip, floatToPcm16, pcm16ToWav } from '../chat/use-chat-voice-recorder';
 
 const SAMPLE_RATE_HZ = 16_000;
 const CHANNELS = 1;
@@ -66,6 +66,11 @@ export function useDictationAudioRecorder(onError: (message: string) => void) {
     const capture = captureRef.current;
     captureRef.current = null;
     closeCapture(capture);
+    // A sub-second recording is an accidental tap, not something to keep.
+    if (capture && capture.totalBytes >= BYTES_PER_SECOND) {
+      const wav = pcm16ToWav(concatArrayBuffers(capture.chunks, capture.totalBytes), SAMPLE_RATE_HZ, CHANNELS);
+      fileCanceledSpeechClip(wav, 'audio/wav', { surface: 'global-dictation' });
+    }
     releaseMicrophone();
     setDurationMillis(0);
     setStatusValue('idle');

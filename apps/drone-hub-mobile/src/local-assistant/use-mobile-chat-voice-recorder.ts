@@ -18,6 +18,7 @@ import {
   ensureMobileRecordingPermission,
 } from './mobile-recording-permission';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
+import { fileMobileSpeechClip } from './mobile-speech-clips';
 import type {
   MobileMicrophoneCoordinator,
   MobileMicrophoneLease,
@@ -229,6 +230,7 @@ export function useMobileChatVoiceRecorder({
     async (owner: MobileRecordedVoiceSessionOwner) => {
       if (sessionRef.current.kind !== owner) return;
       const previousStatus = sessionRef.current.status;
+      const recordedMillis = Math.max(0, Number(recorderState.durationMillis) || 0);
       const pendingStart = startPromiseRef.current;
       const controller = transcribeAbortRef.current;
       generationRef.current += 1;
@@ -247,13 +249,16 @@ export function useMobileChatVoiceRecorder({
       recordingUriRef.current = uri;
       if (shouldStop) await recorder.stop().catch(() => undefined);
       uri = recordingUriRef.current || recorder.uri || uri;
-      deleteMobileVoiceRecordingFile(uri);
+      // A sub-second recording is an accidental tap, not something to keep.
+      if (previousStatus === 'starting' || (shouldStop && recordedMillis < 1_000)) {
+        deleteMobileVoiceRecordingFile(uri);
+      } else fileMobileSpeechClip(uri, { status: 'canceled', surface: `mobile-${owner}` });
       recordingUriRef.current = null;
       await releaseMicrophone();
       setStatusValue('idle');
       onError('');
     },
-    [onError, recorder, releaseMicrophone, setStatusValue],
+    [onError, recorder, recorderState.durationMillis, releaseMicrophone, setStatusValue],
   );
 
   const startRecordingOperation = React.useCallback(
@@ -412,6 +417,8 @@ export function useMobileChatVoiceRecorder({
     generationRef.current = generation;
     let uri = '';
     let controller: AbortController | null = null;
+    const owner = sessionRef.current.kind;
+    let outcome: { text: string } | { error: string } | null = null;
     try {
       uri = recordingUriRef.current || recorder.uri || '';
       if (!alreadyStopped) {
@@ -434,18 +441,28 @@ export function useMobileChatVoiceRecorder({
         uri,
         apiKey,
         signal: controller.signal,
+        deleteFile: false,
       });
+      outcome = { text: transcript };
       return generationRef.current === generation ? transcript : '';
     } catch (error: any) {
+      const message = error?.message ?? String(error);
+      outcome = message === 'No speech detected.' ? { text: '' } : { error: message };
       if (generationRef.current === generation && !controller?.signal.aborted) {
-        onError(error?.message ?? String(error));
+        onError(message);
       }
       return '';
     } finally {
       if (transcribeAbortRef.current === controller) transcribeAbortRef.current = null;
-      // The transcription helper deletes uploaded files itself. This second,
-      // idempotent cleanup also covers failures before the upload begins.
-      deleteMobileVoiceRecordingFile(uri);
+      // Keeps the recording with its outcome; a discard during transcription already filed it.
+      fileMobileSpeechClip(uri, {
+        surface: `mobile-${owner}`,
+        ...(controller?.signal.aborted || !outcome
+          ? { status: 'canceled' as const }
+          : 'error' in outcome
+            ? { status: 'failed' as const, error: outcome.error }
+            : { status: 'transcribed' as const, text: outcome.text }),
+      });
       if (recordingUriRef.current === uri) recordingUriRef.current = null;
       await releaseMicrophone();
       if (generationRef.current === generation) setStatusValue('idle');

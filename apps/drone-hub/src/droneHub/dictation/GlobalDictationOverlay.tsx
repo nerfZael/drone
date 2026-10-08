@@ -1,5 +1,6 @@
 import React from 'react';
 import { useRecorderCompanion } from './RecorderCompanionContext';
+import { requestJson } from '../http';
 import { ChatComposerEditor, type ChatComposerEditorHandle } from '../chat/ChatComposerEditor';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from '../companion/CompanionContext';
@@ -31,6 +32,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
   const dictation = useGlobalDictation({
     ...props,
     sendToCompanion,
+    saveNote: saveDictatedNote,
     prepareCompanionSend: companion?.prepareTextSubmission,
   });
   const recorder = useRecorderCompanion();
@@ -238,7 +240,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
         </span>
       </div>
 
-      <div className="grid shrink-0 grid-cols-6 gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-1.5">
+      <div className="grid shrink-0 grid-cols-7 gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-1.5">
         <DestinationButton
           shortcut="0"
           label="Current"
@@ -275,9 +277,28 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
           onClick={() => void dictation.requestSend('companion')}
           disabled={dictation.finalizing}
         />
+        <DestinationButton
+          shortcut="6"
+          label="Note"
+          onClick={() => void dictation.requestSend('note')}
+          disabled={dictation.finalizing}
+        />
       </div>
     </aside>
   );
+}
+
+async function saveDictatedNote(text: string): Promise<GlobalDictationSendResult> {
+  try {
+    await requestJson('/api/companion/notes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function HeaderButton({

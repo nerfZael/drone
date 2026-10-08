@@ -122,7 +122,7 @@ export async function transcribeChatVoiceWav(
     prompt?: string | null;
     telemetryId?: string;
     signal?: AbortSignal;
-  } = {},
+  } & SpeechClipLabels = {},
 ): Promise<string> {
   return await transcribeChatVoiceAudio(wav, 'audio/wav', options);
 }
@@ -136,7 +136,7 @@ export async function transcribeChatVoiceAudio(
     prompt?: string | null;
     telemetryId?: string;
     signal?: AbortSignal;
-  } = {},
+  } & SpeechClipLabels = {},
 ): Promise<string> {
   const prompt = normalizeGroqTranscriptionPrompt(options.prompt);
   const promptBytes = prompt ? new TextEncoder().encode(prompt) : null;
@@ -156,6 +156,7 @@ export async function transcribeChatVoiceAudio(
       ...(options.telemetryId
         ? { 'x-drone-companion-message-id': options.telemetryId.slice(0, 128) }
         : {}),
+      ...speechClipHeaders(options),
     },
     body: audio,
     signal: options.signal,
@@ -174,15 +175,40 @@ export async function transcribeChatVoiceAudio(
   return String(data?.text ?? '').trim();
 }
 
+/** How the Hub labels a recording in Settings › Recordings. */
+export type SpeechClipLabels = { surface?: string; target?: string };
+
+function speechClipHeaders(labels: SpeechClipLabels): Record<string, string> {
+  return {
+    ...(labels.surface ? { 'x-drone-speech-surface': encodeURIComponent(labels.surface) } : {}),
+    ...(labels.target ? { 'x-drone-speech-target': encodeURIComponent(labels.target.slice(0, 200)) } : {}),
+  };
+}
+
+/** Files a recording the user discarded, so it can still be found and transcribed later. */
+export function fileCanceledSpeechClip(audio: ArrayBuffer, mimeType: string, labels: SpeechClipLabels): void {
+  if (audio.byteLength <= 0) return;
+  void fetch('/api/speech-clips?status=canceled', {
+    method: 'POST',
+    headers: { 'content-type': mimeType || 'audio/webm', ...speechClipHeaders(labels) },
+    body: audio,
+  }).catch(() => undefined);
+}
+
 export function useChatVoiceRecorder({
   onError,
   microphoneOwner = 'voice-message',
   backgroundTranscription = false,
+  speechTarget,
 }: {
   onError: (message: string) => void;
   microphoneOwner?: BrowserMicrophoneOwner;
   backgroundTranscription?: boolean;
+  /** Destination label kept with each recording. */
+  speechTarget?: string;
 }) {
+  const speechTargetRef = React.useRef(speechTarget);
+  speechTargetRef.current = speechTarget;
   const [, setStatus] = React.useState<ChatVoiceRecordingStatus>('idle');
   const [durationMillis, setDurationMillis] = React.useState(0);
   const statusRef = React.useRef<ChatVoiceRecordingStatus>('idle');
@@ -249,11 +275,19 @@ export function useChatVoiceRecorder({
     }
     const capture = captureRef.current;
     captureRef.current = null;
+    // A sub-second recording is an accidental tap, not something to keep.
+    if (capture && recordingDurationMillis(capture) >= 1_000) {
+      // Listen for the final chunk before stopCapture stops the recorder.
+      void finishMediaRecording(capture).then(
+        (audio) => fileCanceledSpeechClip(audio, capture.mimeType, { surface: microphoneOwner, target: speechTargetRef.current }),
+        () => undefined,
+      );
+    }
     stopCapture(capture);
     releaseMicrophone();
     setDurationMillis(0);
     setStatusValue(transcriptionsRef.current.size ? 'transcribing' : 'idle');
-  }, [releaseMicrophone, setStatusValue, stopCapture]);
+  }, [microphoneOwner, releaseMicrophone, setStatusValue, stopCapture]);
 
   const startRecording = React.useCallback(async () => {
     if (statusRef.current !== 'idle' && !(backgroundTranscription && statusRef.current === 'transcribing')) return false;
@@ -408,6 +442,8 @@ export function useChatVoiceRecorder({
         const text = await transcribeChatVoiceAudio(audio, capture.mimeType, {
           signal: transcriptionAbort.signal,
           telemetryId: options?.telemetryId,
+          surface: microphoneOwner,
+          target: speechTargetRef.current,
         });
         return transcriptionAbort.signal.aborted ? '' : text;
       } catch (err: any) {
@@ -423,7 +459,7 @@ export function useChatVoiceRecorder({
         }
       }
     },
-    [backgroundTranscription, onError, releaseMicrophone, setStatusValue],
+    [backgroundTranscription, microphoneOwner, onError, releaseMicrophone, setStatusValue],
   );
 
   const stopRecordingForTranscript = React.useCallback(

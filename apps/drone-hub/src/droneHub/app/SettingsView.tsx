@@ -1,4 +1,5 @@
 import { NotificationsSettingsTab } from './NotificationsSettingsTab';
+import { RecordingsSettingsTab } from './RecordingsSettingsTab';
 import { CustomEventsSettingsTab } from './CustomEventsSettingsTab';
 import { UsageAnalyticsView } from '../usage/UsageAnalyticsView';
 import React from 'react';
@@ -278,6 +279,7 @@ export function SettingsView({
     if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} speech={speech} />;
     if (activeTab === 'next-actions') return <NextActionsSettingsTab settings={nextActions} />;
     if (activeTab === 'asks') return <ChatAsksSettingsTab settings={chatAsks} />;
+    if (activeTab === 'recordings') return <RecordingsSettingsTab />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;

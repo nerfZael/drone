@@ -310,6 +310,7 @@ export function AssistantComposer({
     [onChangeText],
   );
   const transcriptionQueue = useMobileTranscriptionQueue({
+    surface: 'mobile-single-shot',
     onTranscript: appendVoiceTranscript,
     onNotice: setVoiceError,
     onError: setVoiceError,

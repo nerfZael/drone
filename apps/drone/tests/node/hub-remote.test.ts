@@ -247,13 +247,14 @@ describe('full remote Hub access', () => {
   test('serves the home UI and forwards API, streams, WebSockets and previews', async () => {
     const previewPort = await startPreview();
     const sockets = new WebSocketServer({ noServer: true });
-    const seen: Array<{ authorization?: string; origin?: string; cookie?: string }> = [];
+    const seen: Array<{ authorization?: string; origin?: string; cookie?: string; remoteDevice?: string }> = [];
     const target = await startHub(
       (request, response, url) => {
         seen.push({
           authorization: request.headers.authorization,
           origin: request.headers.origin,
           cookie: request.headers.cookie,
+          remoteDevice: request.headers['x-drone-remote-device'] as string | undefined,
         });
         if (url.pathname === '/api/stream') {
           response.writeHead(200, { 'content-type': 'text/event-stream', 'access-control-allow-origin': '*' });
@@ -302,12 +303,15 @@ describe('full remote Hub access', () => {
     assert.equal((await viewerRequest(viewerUrl, '/assets/app.js')).body, 'console.log("app")');
 
     const api = await viewerRequest(viewerUrl, '/api/drones/a%2Fb/fs?x=1', {
-      headers: { origin: `http://127.0.0.1:${viewerPort}`, cookie: 'secret=1' },
+      headers: { origin: `http://127.0.0.1:${viewerPort}`, cookie: 'secret=1', 'x-drone-remote-device': 'Spoofed' },
     });
     assert.equal(api.status, 200);
     assert.equal(JSON.parse(api.body).path, '/api/drones/a%2Fb/fs?x=1');
     assert.equal(api.headers['access-control-allow-origin'], `http://127.0.0.1:${viewerPort}`);
-    assert.deepEqual(seen.at(-1), { authorization: `Bearer ${target.token}`, origin: undefined, cookie: undefined });
+    // The target names the viewing device itself; a viewer cannot choose the label.
+    const { remoteDevice, ...forwarded } = seen.at(-1)!;
+    assert.deepEqual(forwarded, { authorization: `Bearer ${target.token}`, origin: undefined, cookie: undefined });
+    assert.match(decodeURIComponent(remoteDevice ?? ''), /^Viewer /);
 
     const posted = await viewerRequest(viewerUrl, '/api/echo', {
       method: 'POST',

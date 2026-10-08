@@ -112,7 +112,10 @@ import {
 import {
   retryTemporaryNameSuggestion,
   suggestDroneNameFromMessage,
+  suggestNoteTitleFromText,
 } from './drone-name-from-message';
+import { createCompanionNote } from './companion/companion-notes';
+import { createSpeechClipService, registerSpeechClipRoutes } from './speech-clips/registerSpeechClipRoutes';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import type {
   AgentApprovalPolicy,
@@ -477,6 +480,7 @@ import {
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
+  resolveEffectiveVoiceInputSettings,
 } from './hub-settings';
 import {
   createSkill,
@@ -3924,6 +3928,19 @@ async function suggestCreatedDroneNameDirect(input: {
   return name;
 }
 
+async function createDictatedCompanionNote(text: unknown) {
+  return await createCompanionNote(text, {
+    suggestTitle: async (noteText) => {
+      const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
+      if (!resolved.apiKey) {
+        throw new Error(`Configure credentials for the automatic naming provider (${provider}) in Settings.`);
+      }
+      return await suggestNoteTitleFromText(noteText, { provider, apiKey: resolved.apiKey });
+    },
+    log: hubLog,
+  });
+}
+
 function normalizeContainerMcpUrl(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) return '';
@@ -4204,8 +4221,14 @@ async function startDroneHubApiServerWithLifecycle(
   registerBackgroundResource('global shortcuts', async () => globalShortcutService.close());
   const sidebarCommands = createSidebarCommandService(hubApplication);
   let actualPort = opts.port;
+  const speechClips = createSpeechClipService({
+    resolveGroqApiKey: async () => (await resolveGroqApiKeySettings()).apiKey,
+    resolveLanguage: async () => (await resolveEffectiveVoiceInputSettings()).language,
+    log: hubLog,
+  });
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
+    recordSpeechClip: (input) => speechClips.record(input),
     apiToken,
     sidebarCommands,
     hubServices: hubApplication,
@@ -4407,7 +4430,7 @@ async function startDroneHubApiServerWithLifecycle(
     deviceMesh.broadcastCapabilityEvent('companion', event, payload, operation, deviceId ? [deviceId] : undefined));
   const companionWss = createCompanionWebSocketServer(companionRuntime, companionMirrors);
   deviceMesh.registerCapability(
-    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces, companionMirrors),
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces, companionMirrors, createDictatedCompanionNote),
   );
   registerBackgroundResource('Companion runtime', () => companionRuntime.close());
   registerBackgroundResource('Companion mirrors', async () => companionMirrors.close());
@@ -5651,6 +5674,11 @@ async function startDroneHubApiServerWithLifecycle(
 
   const apiRouter = new HubRouter(json, readJsonBody);
   registerRecordingRoutes(apiRouter);
+  registerSpeechClipRoutes(apiRouter, speechClips);
+  apiRouter.post('/api/companion/notes', async ({ readJson, json, fail }) => {
+    try { json(200, { ok: true, ...await createDictatedCompanionNote((await readJson<any>())?.text) }); }
+    catch (error: any) { fail(error?.code === 'INVALID_REQUEST' ? 400 : 500, error instanceof Error ? error.message : String(error)); }
+  });
   registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands }, companionRuntime, companionMirrors);
   registerReflexRoutes(apiRouter);
   registerFolderWorkspace({ id: COMPANION_HOME_TARGET_ID, name: 'Companion home', root: ensureCompanionHome });
@@ -5949,6 +5977,7 @@ async function startDroneHubApiServerWithLifecycle(
       assistantService.emitExternalUiAction(uiAction, threadId),
     hubLog,
     companionTelemetry,
+    speechClips,
   });
 
   registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);

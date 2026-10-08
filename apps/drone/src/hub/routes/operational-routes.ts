@@ -2,6 +2,7 @@ import { droneChatNames } from '../drone-chat-names';
 import { preferredChatName } from '../preferred-chat';
 import { normalizeRequestDiagnostic } from '@drone/hub-model';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from '../groq-transcription';
+import { speechClipHeaders, type SpeechClipService } from '../speech-clips/registerSpeechClipRoutes';
 import {
   createSpeechJobId,
   normalizeGroqSpeechRequest,
@@ -362,6 +363,7 @@ export interface OperationalRouteDependencies {
     meta?: Record<string, unknown>,
   ) => void;
   companionTelemetry?: Pick<CompanionTelemetryService, 'recordTranscription'>;
+  speechClips?: Pick<SpeechClipService, 'begin' | 'finish'>;
 }
 
 export function registerOperationalRoutes(
@@ -377,6 +379,7 @@ export function registerOperationalRoutes(
     emitAssistantUiAction,
     hubLog,
     companionTelemetry,
+    speechClips,
   } = deps;
   let speechQueueTail: Promise<void> = Promise.resolve();
   let speechJobsInQueue = 0;
@@ -533,6 +536,7 @@ export function registerOperationalRoutes(
     let audioBytes: number | undefined;
     let model: string | undefined;
     let telemetryStatus: 'completed' | 'error' = 'error';
+    let clip: Promise<string | null> | null = null;
     const measure = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
       const phaseStartedAt = performance.now();
       try {
@@ -544,10 +548,17 @@ export function registerOperationalRoutes(
     try {
       const groqSettings: any = await measure<any>('settingsMs', () => resolveGroqApiKeySettings());
       if (!groqSettings.apiKey) {
-        json(400, {
-          ok: false,
-          error: 'GROQ API key is not configured. Add it in Drone Hub settings.',
-        });
+        const error = 'GROQ API key is not configured. Add it in Drone Hub settings.';
+        // Keep the recording so it can be transcribed once a key is added.
+        if (speechClips) {
+          try {
+            const audio = await readRawBody(req, { maxBytes: GROQ_TRANSCRIPTION_MAX_BYTES });
+            const mimeType = String(req.headers['content-type'] ?? '').split(';')[0]?.trim() || 'audio/webm';
+            void speechClips.begin({ audio, mimeType, ...speechClipHeaders(req) })
+              .then((id) => speechClips.finish(id, { error }));
+          } catch { /* An oversized or broken upload is not worth keeping. */ }
+        }
+        json(400, { ok: false, error });
         return;
       }
       const audio = await measure('readBodyMs', () =>
@@ -558,6 +569,8 @@ export function registerOperationalRoutes(
         String(req.headers['content-type'] ?? '')
           .split(';')[0]
           ?.trim() || 'audio/webm';
+      // Saved alongside the provider call so it adds no latency to the transcription.
+      clip = speechClips?.begin({ audio, mimeType, ...speechClipHeaders(req) }) ?? null;
       const transcription = await measure('groqMs', () =>
         transcribeAudioWithGroq({
           audio,
@@ -583,8 +596,12 @@ export function registerOperationalRoutes(
       model = transcription.model;
       telemetryStatus = 'completed';
       json(200, { ok: true, ...transcription });
+      void clip?.then((id) => speechClips?.finish(id, transcription));
     } catch (error) {
       const message = errorMessage(error);
+      // Groq reports silence as an error; the clip itself just has no speech.
+      const outcome = /returned an empty transcription/i.test(message) ? { text: '', model: '' } : { error: message };
+      void clip?.then((id) => speechClips?.finish(id, outcome));
       const status = /too large/i.test(message)
         ? 413
         : /GROQ API key is not configured/i.test(message)

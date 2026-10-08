@@ -51,6 +51,8 @@ import type {
   MobileDictationTarget,
 } from '../local-assistant/mobile-dictation-types';
 import { useMobileDictation } from '../local-assistant/use-mobile-dictation';
+import { setMobileSpeechClipSink, uploadMobileSpeechClip } from '../local-assistant/mobile-speech-clips';
+import { uploadNativeFile } from '../mesh/native-http-upload';
 import { MobileLoadingState } from '../local-assistant/MobileLoadingState';
 import { useMobileCompanion } from '../local-assistant/MobileCompanionContext';
 import { useMobileCompanionWorkspaceTarget } from '../local-assistant/use-mobile-companion-workspace-target';
@@ -174,7 +176,7 @@ import {
   mobileDroneRenameErrorMessage,
   validateMobileDroneRename,
 } from '../drones/mobile-drone-rename';
-import { isGranted, type DroneControlOperation } from '@drone/device-protocol';
+import { COMPANION_CAPABILITY, isGranted, type DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { WorkspaceAccessEditor } from '../local-assistant/WorkspaceAccessEditor';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
@@ -2551,12 +2553,43 @@ export function DronesScreen({
   const companion = useMobileCompanion();
   const sendDictationToCompanion = (text: string): Promise<MobileDictationSendResult> =>
     companion.submitText(text);
+  const saveDictationNote = async (text: string): Promise<MobileDictationSendResult> => {
+    if (!targetId || phoneTarget) {
+      return { ok: false, error: 'Notes are saved on a desktop Hub. Select one first.' };
+    }
+    if (!targetReachable) return { ok: false, error: 'The selected Drone Hub device is offline.' };
+    try {
+      await mesh.request(targetId, COMPANION_CAPABILITY.id, 'notes.create', { text });
+      return { ok: true };
+    } catch (saveError: unknown) {
+      return {
+        ok: false,
+        error: saveError instanceof Error ? saveError.message : String(saveError),
+      };
+    }
+  };
 
   const dictation = useMobileDictation({
     resolveTarget: resolveDictationTarget,
     send: sendMobileDictation,
     sendToCompanion: sendDictationToCompanion,
+    saveNote: saveDictationNote,
   });
+
+  // Recordings made while a desktop Hub is selected are kept by that Hub (Settings › Recordings).
+  // Reinstalling on reconnect retries the ones that waited while it was unreachable.
+  React.useEffect(() => {
+    if (!targetId || phoneTarget) return;
+    return setMobileSpeechClipSink({
+      deviceId: targetId,
+      upload: (clip) =>
+        uploadMobileSpeechClip(
+          clip,
+          (operation, payload) => mesh.request(targetId, 'device-core', operation, payload),
+          uploadNativeFile,
+        ),
+    });
+  }, [mesh.request, phoneTarget, targetId, targetReachable]);
 
   const transcriptMessages = React.useMemo(
     () => nativeMessages ?? mobileDroneTurnsToAssistantMessages(turns, pendingPrompts),

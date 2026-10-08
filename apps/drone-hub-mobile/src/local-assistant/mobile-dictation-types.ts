@@ -12,8 +12,11 @@ export type MobileDictationDroneDestination =
   | 'new-chat'
   | 'clone-chat';
 
-/** Drone destinations plus the on-device Companion, which takes the text as if it were spoken. */
-export type MobileDictationDestination = MobileDictationDroneDestination | 'companion';
+/**
+ * Drone destinations, the Companion (which takes the text as if it were spoken),
+ * and a new note file in the desktop Companion home.
+ */
+export type MobileDictationDestination = MobileDictationDroneDestination | 'companion' | 'note';
 
 export type MobileDictationChatTarget = {
   destination: 'current-chat' | 'new-chat' | 'clone-chat';

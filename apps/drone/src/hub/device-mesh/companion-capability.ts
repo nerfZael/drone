@@ -48,6 +48,7 @@ export function createCompanionCapability(
   broadcast: BroadcastEvent,
   workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save' | 'current'>,
   mirrors?: CompanionMirrorService,
+  createNote?: (text: unknown) => Promise<{ path: string; name: string; title: string }>,
 ): CapabilityHandler {
   const live = new CompanionLiveMeshSessions({
     settingsChanged: async settings => { await mirrors?.liveSettingsChanged(settings); },
@@ -98,6 +99,10 @@ export function createCompanionCapability(
         else if (operation === 'mirror.result') mirrors.result(sourceDeviceId, payload);
         else throw new Error('Unsupported mirror operation.');
         return { ok: true };
+      }
+      if (operation === 'notes.create') {
+        if (!createNote) throw new Error('Companion notes are unavailable on this Hub.');
+        return await createNote(payload.text);
       }
       if (['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update'].includes(operation)) return companionBehaviorSettings(operation, payload);
       if (operation === 'model.settings.get' || operation === 'model.settings.update') {

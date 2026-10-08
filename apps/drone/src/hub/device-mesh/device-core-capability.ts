@@ -2,6 +2,7 @@ import { DEVICE_CORE_CAPABILITY, WORKSPACE_CAPABILITY } from '@drone/device-prot
 import type { DeviceMeshStore } from './device-mesh-store';
 import type { CapabilityHandler } from './device-mesh-types';
 import { mobileChatLoadStore } from '../mobile-chat-load-store';
+import type { MeshSpeechClipUploads } from './mesh-speech-clip-uploads';
 
 function payloadObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -38,12 +39,23 @@ export function createDeviceCoreCapability(
   onMembershipChange: () => void | Promise<void> = () => undefined,
   onAccessChange: (deviceId: string) => void | Promise<void> = () => undefined,
   signDirectory?: (value: unknown) => string,
+  speechClips: () => MeshSpeechClipUploads | null = () => null,
 ): CapabilityHandler {
   return {
     descriptor: DEVICE_CORE_CAPABILITY,
     async invoke(operation, payload, context) {
       if (operation === 'diagnostics.chat-load.upload') {
         return mobileChatLoadStore().upload(context.sourceDevice.id, payloadObject(payload).records);
+      }
+      if (operation.startsWith('speech-clips.')) {
+        const uploads = speechClips();
+        if (!uploads)
+          throw Object.assign(new Error('speech clip uploads are unavailable'), { code: 'UNAVAILABLE' });
+        const body = payloadObject(payload);
+        if (operation === 'speech-clips.prepare') return uploads.prepare(context.sourceDevice.id, body);
+        if (operation === 'speech-clips.commit')
+          return uploads.commit(context.sourceDevice.id, context.sourceDevice.name, body);
+        if (operation === 'speech-clips.abort') return uploads.abort(context.sourceDevice.id, body);
       }
       if (operation === 'device.describe') {
         const state = await store.read();

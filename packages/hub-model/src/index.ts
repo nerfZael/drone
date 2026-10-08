@@ -9,3 +9,4 @@ export { WINDOW_LAYOUT_SLOTS, validateWindowLayoutPreset, type WindowLayoutSlot 
 export { diagnosticOperation, normalizeRequestDiagnostic, type RequestDiagnostic } from './request-diagnostics';
 
 export * from './desktop-recordings';
+export * from './speech-clips';

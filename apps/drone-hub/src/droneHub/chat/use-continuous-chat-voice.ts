@@ -234,6 +234,7 @@ export function useContinuousChatVoice({
             language: settings.language,
             prompt: transcriptContext,
             signal,
+            surface: microphoneOwner,
           });
         },
         route: () => routeKeyRef.current?.() ?? null,

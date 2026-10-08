@@ -1,4 +1,4 @@
-export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'next-actions' | 'asks' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'notifications' | 'custom-events' | 'usage' | 'general' | 'next-actions' | 'asks' | 'companion' | 'recordings' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -31,6 +31,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Companion',
     title: 'Companion settings',
     description: 'Configure the voice Companion model, tools, and system prompt.',
+  },
+  {
+    id: 'recordings',
+    label: 'Recordings',
+    title: 'Recordings',
+    description: 'Replay speech-to-text recordings, read their transcripts, and transcribe them again.',
   },
   {
     id: 'devices',

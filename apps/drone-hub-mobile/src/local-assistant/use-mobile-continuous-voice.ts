@@ -16,6 +16,7 @@ import {
 } from 'expo-audio';
 import { readGroqApiKey } from './local-assistant-settings';
 import { transcribeMobileVoiceWave } from './mobile-groq-transcription';
+import { fileMobileSpeechWave } from './mobile-speech-clips';
 import { MobileAudioStreamStartGate } from './mobile-audio-stream-start-gate';
 import type {
   MobileMicrophoneCoordinator,
@@ -274,14 +275,29 @@ export function useMobileContinuousVoice({
             silenceMillis: mobileVoiceInputSilenceMillis(settings),
             noiseHandling: settings.noiseHandling,
           },
-          transcribe: async ({ segment, context, signal }) =>
-            await transcribeMobileVoiceWave({
-              wave: pcm16ToWaveBytes(segment.pcm),
-              apiKey: await readGroqApiKey(),
-              settings,
-              prompt: context,
-              signal,
-            }),
+          transcribe: async ({ segment, context, signal }) => {
+            const wave = pcm16ToWaveBytes(segment.pcm);
+            try {
+              const text = await transcribeMobileVoiceWave({
+                wave,
+                apiKey: await readGroqApiKey(),
+                settings,
+                prompt: context,
+                signal,
+              });
+              fileMobileSpeechWave(wave, { status: 'transcribed', surface: 'mobile-continuous', text });
+              return text;
+            } catch (error) {
+              if (!signal?.aborted) {
+                fileMobileSpeechWave(wave, {
+                  status: 'failed',
+                  surface: 'mobile-continuous',
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+              throw error;
+            }
+          },
           deliver: input.onTranscript,
           ...(settings.confirmationFeedback ? { confirm: () => Vibration.vibrate(20) } : {}),
         });

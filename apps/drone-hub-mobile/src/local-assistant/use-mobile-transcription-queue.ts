@@ -2,6 +2,7 @@ import React from 'react';
 import { readGroqApiKey } from './local-assistant-settings';
 import { drainReadyMobileDictationTranscripts } from './mobile-dictation-queue';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
+import { fileMobileSpeechClip } from './mobile-speech-clips';
 import {
   deleteMobileVoiceRecordingFile,
   type MobileVoiceRecordingClip,
@@ -30,7 +31,10 @@ export function useMobileTranscriptionQueue({
   onTranscript,
   onNotice,
   onError,
+  surface = 'mobile-dictation',
 }: {
+  /** How the desktop Hub labels these recordings. */
+  surface?: string;
   onTranscript(transcript: string): void;
   onNotice(message: string): void;
   onError(message: string): void;
@@ -42,6 +46,8 @@ export function useMobileTranscriptionQueue({
   const onTranscriptRef = React.useRef(onTranscript);
   const onNoticeRef = React.useRef(onNotice);
   const onErrorRef = React.useRef(onError);
+  const surfaceRef = React.useRef(surface);
+  surfaceRef.current = surface;
   onTranscriptRef.current = onTranscript;
   onNoticeRef.current = onNotice;
   onErrorRef.current = onError;
@@ -80,7 +86,7 @@ export function useMobileTranscriptionQueue({
           if (clip.attempt !== attempt || abortController.signal.aborted) return;
           clip.status = 'ready';
           clip.text = transcript;
-          deleteMobileVoiceRecordingFile(clip.uri);
+          fileMobileSpeechClip(clip.uri, { status: 'transcribed', surface: surfaceRef.current, text: transcript });
         })
         .catch((transcriptionError: unknown) => {
           if (clip.attempt !== attempt || abortController.signal.aborted) return;
@@ -91,7 +97,7 @@ export function useMobileTranscriptionQueue({
           if (message === 'No speech detected.') {
             clip.status = 'ready';
             clip.text = '';
-            deleteMobileVoiceRecordingFile(clip.uri);
+            fileMobileSpeechClip(clip.uri, { status: 'transcribed', surface: surfaceRef.current });
             onNoticeRef.current('No speech was detected in that recording.');
             return;
           }
@@ -151,7 +157,7 @@ export function useMobileTranscriptionQueue({
     if (index < 0) return;
     const [clip] = clipsRef.current.splice(index, 1);
     clip?.abortController?.abort();
-    deleteMobileVoiceRecordingFile(clip?.uri);
+    fileMobileSpeechClip(clip?.uri, { status: 'failed', surface: surfaceRef.current, error: clip?.error });
     flushReady();
     refresh();
   }, [flushReady, refresh]);
@@ -160,7 +166,7 @@ export function useMobileTranscriptionQueue({
     for (const clip of clipsRef.current) {
       clip.attempt += 1;
       clip.abortController?.abort();
-      deleteMobileVoiceRecordingFile(clip.uri);
+      fileMobileSpeechClip(clip.uri, { status: 'canceled', surface: surfaceRef.current });
     }
     clipsRef.current = [];
     refresh();

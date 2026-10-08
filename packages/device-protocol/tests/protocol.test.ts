@@ -61,7 +61,7 @@ describe('device protocol', () => {
   });
 
   test('advertises Companion run controls as explicit permissions', () => {
-    expect(COMPANION_CAPABILITY.operations).toEqual(['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update', 'model.settings.get', 'model.settings.update', 'run.start', 'run.cancel', 'tool.result', 'proposal.result', 'workspaces.list', 'workspaces.update', 'workspaces.current', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'live.prompt.get', 'live.prompt.update', 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result']);
+    expect(COMPANION_CAPABILITY.operations).toEqual(['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update', 'model.settings.get', 'model.settings.update', 'run.start', 'run.cancel', 'tool.result', 'proposal.result', 'workspaces.list', 'workspaces.update', 'workspaces.current', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'live.prompt.get', 'live.prompt.update', 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result', 'notes.create']);
     expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(
       false,
     );
@@ -71,6 +71,16 @@ describe('device protocol', () => {
       1,
       'proposal.result',
     )).toBe(true);
+  });
+
+  test('saving a dictated note is covered by the Companion run grant', () => {
+    const run = [{ capability: 'companion', version: 1, operations: ['run.start'] }];
+    expect(isGranted(run, 'companion', 1, 'notes.create')).toBe(true);
+    expect(isGranted([], 'companion', 1, 'notes.create')).toBe(false);
+  });
+
+  test('any paired device may file speech clips', () => {
+    expect(isGranted([], 'device-core', 1, 'speech-clips.prepare')).toBe(true);
   });
 
   test('current workspace reads are covered by the workspace catalog grant', () => {

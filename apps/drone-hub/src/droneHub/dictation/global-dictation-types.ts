@@ -5,7 +5,8 @@ export type GlobalDictationDroneDestination =
   | 'new-chat'
   | 'clone-chat';
 
-export type GlobalDictationDestination = GlobalDictationDroneDestination | 'companion';
+/** Drone destinations, the Companion, and a new note file in the Companion home. */
+export type GlobalDictationDestination = GlobalDictationDroneDestination | 'companion' | 'note';
 
 export type GlobalDictationTarget =
   | {

@@ -1,5 +1,8 @@
 import type http from 'node:http';
 
+/** Set only by the remote Hub proxy: the name of the device whose session sent the request. */
+export const REMOTE_DEVICE_HEADER = 'x-drone-remote-device';
+
 // Connection-level headers never cross a proxy hop.
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',

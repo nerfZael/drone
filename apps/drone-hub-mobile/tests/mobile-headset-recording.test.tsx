@@ -36,7 +36,7 @@ if (process.env.DRONE_HEADSET_RECORDING_CHILD !== '1') {
     requestNotificationPermissionsAsync: async () => { permissionRequests++; return { granted: true }; },
     setAudioModeAsync: async () => {},
   }));
-  mock.module('expo-file-system', () => ({ File: class { exists = true; delete() {} } }));
+  mock.module('expo-file-system', () => ({ File: class { exists = true; delete() {} }, Directory: class {}, Paths: { cache: '', document: '' } }));
   mock.module('../src/local-assistant/local-assistant-settings', () => ({ readGroqApiKey: async () => 'test' }));
   mock.module('../src/local-assistant/mobile-groq-transcription', () => ({
     transcribeMobileVoiceRecording: ({ signal }: { signal: AbortSignal }) => new Promise<string>((resolve, reject) => {

@@ -44,6 +44,7 @@ type GlobalDictationControllerOptions = {
   send(target: GlobalDictationTarget, text: string): Promise<GlobalDictationSendResult>;
   sendToCompanion(text: string): Promise<GlobalDictationSendResult>;
   prepareCompanionSend?(): (text: string) => Promise<GlobalDictationSendResult>;
+  saveNote(text: string): Promise<GlobalDictationSendResult>;
 };
 
 export function useGlobalDictation(options: GlobalDictationControllerOptions) {
@@ -69,6 +70,8 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   const sendRef = React.useRef(options.send);
   const sendToCompanionRef = React.useRef(options.sendToCompanion);
   const prepareCompanionSendRef = React.useRef(options.prepareCompanionSend);
+  const saveNoteRef = React.useRef(options.saveNote);
+  saveNoteRef.current = options.saveNote;
   prepareCompanionSendRef.current = options.prepareCompanionSend;
   resolveTargetRef.current = options.resolveTarget;
   sendRef.current = options.send;
@@ -164,7 +167,7 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
       clip.status = 'pending';
       clip.error = '';
       clip.text = '';
-      const task = transcribeChatVoiceWav(clip.wav, { signal: abortController.signal })
+      const task = transcribeChatVoiceWav(clip.wav, { signal: abortController.signal, surface: 'global-dictation' })
         .then((transcript) => {
           if (clip.attempt !== attempt || abortController.signal.aborted) return;
           clip.status = 'ready';
@@ -298,8 +301,8 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
     async (destination: GlobalDictationDestination) => {
       if (finalizingRef.current) return;
       let target: GlobalDictationTarget | null = null;
-      let targetLabel = 'Companion';
-      if (destination !== 'companion') {
+      let targetLabel = destination === 'note' ? 'a new note' : 'Companion';
+      if (destination !== 'companion' && destination !== 'note') {
         const targetResult = resolveTargetRef.current(destination);
         if (!targetResult.ok) {
           setOpen(true);
@@ -337,7 +340,9 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
         setNetworkSending(true);
         const result = destination === 'companion'
           ? await sendToCompanion!(prompt)
-          : target
+          : destination === 'note'
+            ? await saveNoteRef.current(prompt)
+            : target
             ? await sendRef.current(target, prompt)
             : { ok: false as const, error: 'The dictation destination is invalid.' };
         if (!result.ok) {

@@ -545,6 +545,7 @@ export function ChatInput({
     onError: React.useCallback((message) => {
       setAttachmentError(message.trim() ? message : null);
     }, []),
+    speechTarget: droneName,
   });
   const continuousVoice = useContinuousChatVoice({
     resetKey,

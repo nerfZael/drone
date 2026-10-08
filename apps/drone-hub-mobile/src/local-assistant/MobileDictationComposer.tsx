@@ -26,6 +26,7 @@ import Bot from 'lucide-react-native/icons/bot';
 import Copy from 'lucide-react-native/icons/copy';
 import Layers from 'lucide-react-native/icons/layers';
 import MessageSquarePlus from 'lucide-react-native/icons/message-square-plus';
+import NotebookPen from 'lucide-react-native/icons/notebook-pen';
 import Mic from 'lucide-react-native/icons/mic';
 import Pause from 'lucide-react-native/icons/pause';
 import Play from 'lucide-react-native/icons/play';
@@ -58,6 +59,7 @@ const DESTINATION_ACTIONS: DestinationAction[] = [
   { destination: 'new-chat', label: 'New chat', icon: MessageSquarePlus },
   { destination: 'clone-chat', label: 'Clone chat', icon: Copy },
   { destination: 'companion', label: 'Companion', icon: Sparkles },
+  { destination: 'note', label: 'Note', icon: NotebookPen },
 ];
 
 const EDITOR_HEIGHT = 92;
@@ -598,6 +600,9 @@ function destinationAccessibilityLabel(input: {
   }
   if (input.destination === 'companion') {
     return 'Send dictation to Companion';
+  }
+  if (input.destination === 'note') {
+    return `Save dictation as a new note on ${input.deviceName}`;
   }
   return `Send dictation to a clone of the current chat in ${input.droneName}`;
 }

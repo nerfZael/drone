@@ -23,6 +23,7 @@ export function useMobileDictation(options: {
   resolveTarget(destination: MobileDictationDroneDestination): MobileDictationTargetResult;
   send(target: MobileDictationTarget, text: string): Promise<MobileDictationSendResult>;
   sendToCompanion(text: string): Promise<MobileDictationSendResult>;
+  saveNote(text: string): Promise<MobileDictationSendResult>;
 }) {
   const voice = useSharedMobileChatVoiceRecorder();
   const [hydrated, setHydrated] = React.useState(false);
@@ -55,6 +56,8 @@ export function useMobileDictation(options: {
   const resolveTargetRef = React.useRef(options.resolveTarget);
   const sendRef = React.useRef(options.send);
   const sendToCompanionRef = React.useRef(options.sendToCompanion);
+  const saveNoteRef = React.useRef(options.saveNote);
+  saveNoteRef.current = options.saveNote;
   const getRecordingSessionRef = React.useRef(voice.getRecordingSession);
   const discardRecordingRef = React.useRef(voice.discardRecording);
   resolveTargetRef.current = options.resolveTarget;
@@ -311,7 +314,7 @@ export function useMobileDictation(options: {
     async (destination: MobileDictationDestination) => {
       if (finalizingRef.current) return;
       let target: MobileDictationTarget | null = null;
-      if (destination !== 'companion') {
+      if (destination !== 'companion' && destination !== 'note') {
         const targetResult = resolveTargetRef.current(destination);
         if (!targetResult.ok) {
           setOpen(true);
@@ -351,7 +354,9 @@ export function useMobileDictation(options: {
         setNetworkSending(true);
         const result = target
           ? await sendRef.current(target, prompt)
-          : await sendToCompanionRef.current(prompt);
+          : destination === 'note'
+            ? await saveNoteRef.current(prompt)
+            : await sendToCompanionRef.current(prompt);
         if (!result.ok) {
           setError(result.error || 'The dictated text could not be sent.');
           return;

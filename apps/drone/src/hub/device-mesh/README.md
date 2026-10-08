@@ -68,7 +68,10 @@ picker keeps the chat-only view, with the reason shown.
   home with `?device=`. Loaded preview and service links (`localhost:<n>`) are mapped to
   `p<n>.localhost`.
 
-Desktop recordings stay on the viewing machine. Remote file actions that open native apps,
+Desktop recordings stay on the viewing machine. Speech-to-text clips are kept by the Hub
+that transcribes them, so a remote viewer's dictation lands in the target's Settings ›
+Recordings, labeled with the viewer's device name (`x-drone-remote-device`, set only by this
+proxy). Remote file actions that open native apps,
 such as an external editor, run on the remote machine. Checks:
 `node --require ts-node/register --test tests/node/hub-remote.test.ts` from `apps/drone`, and
 `bun test tests/remote-hub.test.ts` from `apps/drone-hub`.
@@ -86,6 +89,7 @@ such as an external editor, run on the remote machine. Checks:
 - `workspace-http-transfers.ts`: scoped binary GET/PUT tickets, size checks, resume offsets, and active policy checks.
 - Shared `http-workspace-adapter.ts`: composes independent download and upload handlers. `http-workspace-source.ts` owns stream cleanup; `http-workspace-destination.ts` owns staging, retry, and commit states. Platform upload sinks only handle disk I/O and binary upload.
 - `device-result-uploads.ts`: bounded, checksummed HTTP staging of phone-produced media.
+- `mesh-speech-clip-uploads.ts`: phones transcribe on-device, then file each recording with the selected Hub (`device-core › speech-clips.*`, open to any paired device).
 - `device-request-journal.ts`: durable command acceptance, preventing duplicate execution after restart.
 - `device-mesh-store.ts`, `device-identity.ts`: existing membership, grants, and identities, preserved in place.
 

@@ -12,6 +12,7 @@ import {
   HUB_REMOTE_PORT_UNREACHABLE,
   HUB_REMOTE_SESSION_HEADER,
   HUB_REMOTE_SESSION_INVALID,
+  REMOTE_DEVICE_HEADER,
   forwardableHeaders,
   portNumber,
   rejectUpgrade,
@@ -32,6 +33,8 @@ type Session = {
   expiresAt: number;
   idleUntil: number;
   active: Set<{ destroy(): void }>;
+  /** Refreshed on every admitted request, so a rename shows up without reconnecting. */
+  sourceName?: string;
 };
 
 type Target =
@@ -94,15 +97,19 @@ export class HubRemoteSessions implements DeviceMeshHttpExtension {
   }
 
   private async granted(source: string): Promise<boolean> {
-    if (this.closed) return false;
+    return (await this.grantedDevice(source)) !== null;
+  }
+
+  private async grantedDevice(source: string): Promise<{ name: string } | null> {
+    if (this.closed) return null;
     const state = await this.store.read();
     const device = state.devices[source];
-    return Boolean(
-      device &&
-        !device.revokedAt &&
-        source !== state.selfDeviceId &&
-        isGranted(device.grants, HUB_REMOTE_CAPABILITY.id, 1, 'hub.connect'),
-    );
+    return device &&
+      !device.revokedAt &&
+      source !== state.selfDeviceId &&
+      isGranted(device.grants, HUB_REMOTE_CAPABILITY.id, 1, 'hub.connect')
+      ? device
+      : null;
   }
 
   private async open(source: string): Promise<HubRemoteSession> {
@@ -158,10 +165,12 @@ export class HubRemoteSessions implements DeviceMeshHttpExtension {
       if (session && expired(session, now)) this.remove(session);
       return { status: 401, error: 'Remote Hub session expired', invalid: true };
     }
-    if (!(await this.granted(session.source))) {
+    const device = await this.grantedDevice(session.source);
+    if (!device) {
       this.remove(session);
       return { status: 401, error: 'Full Hub access was revoked', invalid: true };
     }
+    session.sourceName = device.name;
     if (this.sessions.get(session.id) !== session) {
       return { status: 401, error: 'Remote Hub session expired', invalid: true };
     }
@@ -180,17 +189,21 @@ export class HubRemoteSessions implements DeviceMeshHttpExtension {
     return { host: api.hostname.replace(/^\[|\]$/g, ''), port, hostHeader: api.host };
   }
 
-  private upstreamHeaders(request: http.IncomingMessage, target: Target, hostHeader: string) {
+  private upstreamHeaders(request: http.IncomingMessage, session: Session, target: Target, hostHeader: string) {
     // Browser credentials of the viewer's origin mean nothing to the API; preview services
     // keep their cookies and origin, which the viewer already rewrote to their own address.
     const headers = forwardableHeaders(
       request.headers,
       target.kind === 'api'
-        ? ['host', 'authorization', 'cookie', 'origin', 'referer']
+        ? ['host', 'authorization', 'cookie', 'origin', 'referer', REMOTE_DEVICE_HEADER]
         : ['host', 'authorization'],
     );
     headers.host = hostHeader;
-    if (target.kind === 'api') headers.authorization = `Bearer ${this.access.apiToken}`;
+    if (target.kind === 'api') {
+      headers.authorization = `Bearer ${this.access.apiToken}`;
+      // Labels work done for the viewer, such as the speech clips it records here.
+      if (session.sourceName) headers[REMOTE_DEVICE_HEADER] = encodeURIComponent(session.sourceName);
+    }
     return headers;
   }
 
@@ -219,7 +232,7 @@ export class HubRemoteSessions implements DeviceMeshHttpExtension {
         port: address.port,
         method,
         path: target.path,
-        headers: this.upstreamHeaders(request, target, address.hostHeader),
+        headers: this.upstreamHeaders(request, session, target, address.hostHeader),
       });
       const entry = {
         destroy: () => {
@@ -279,7 +292,7 @@ export class HubRemoteSessions implements DeviceMeshHttpExtension {
     }
     const { session, target } = admitted;
     const address = this.upstreamAddress(target);
-    const headers = this.upstreamHeaders(request, target, address.hostHeader);
+    const headers = this.upstreamHeaders(request, session, target, address.hostHeader);
     headers.connection = 'Upgrade';
     headers.upgrade = String(request.headers.upgrade ?? 'websocket');
     const upstream = net.connect({ host: address.host, port: address.port });

@@ -839,7 +839,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const onError = React.useCallback((message: string) => {
     valuesRef.current[COMPANION_SLOTS.indexOf(activeSlot.current as typeof COMPANION_SLOTS[number])]?.reportVoiceError(message);
   }, []);
-  const voice = useChatVoiceRecorder({ onError, microphoneOwner: 'companion', backgroundTranscription: true });
+  const voice = useChatVoiceRecorder({ onError, microphoneOwner: 'companion', backgroundTranscription: true, speechTarget: 'Companion' });
   const autoApprove = useCompanionAutoApprove();
   const liveSettings = useCompanionLiveSettingsStore();
   const [panelVisibility, setPanelVisibility] = React.useState<'auto' | 'open' | 'closed'>('auto');

@@ -19,6 +19,7 @@ import { HubRemoteViewers } from './hub-remote-viewers';
 import { DeviceRequestJournal } from './device-request-journal';
 import { WorkspaceHttpTransfers } from './workspace-http-transfers';
 import { DeviceResultUploads } from './device-result-uploads';
+import { MeshSpeechClipUploads, type RecordSpeechClip } from './mesh-speech-clip-uploads';
 import { MeshChatAttachmentHttp } from './mesh-chat-attachment-http';
 import { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { DeviceMeshRouter } from './device-mesh-router';
@@ -45,12 +46,14 @@ export async function createDeviceMeshService(options: {
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
   sidebarCommands: SidebarCommandService;
   hubServices?: HubServices;
+  recordSpeechClip?: RecordSpeechClip;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
   await store.read();
   await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
+  let speechClipUploads: MeshSpeechClipUploads | null = null;
   let ingress: DeviceMeshIngress;
   const browsers = new DeviceBrowserSessions(
     { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
@@ -81,6 +84,7 @@ export async function createDeviceMeshService(options: {
       () => router.broadcastMembership(),
       (deviceId) => router.accessChanged(deviceId),
       (value) => signDeviceText(identity, `drone-directory-v2\n${canonicalJson(value)}`),
+      () => speechClipUploads,
     ),
   );
   capabilities.register(
@@ -113,6 +117,13 @@ export async function createDeviceMeshService(options: {
     () => ingress?.status().publicEndpoint ?? null,
   );
   capabilities.register(createWorkspaceCapability(assistantPolicies, workspaceTransfers));
+  speechClipUploads = options.recordSpeechClip
+    ? new MeshSpeechClipUploads(
+        path.join(options.rootDir, 'speech-clip-uploads'),
+        workspaceTransfers,
+        options.recordSpeechClip,
+      )
+    : null;
   const hubRemoteSessions = new HubRemoteSessions(
     localHubAccess,
     store,
@@ -224,6 +235,7 @@ export async function createDeviceMeshService(options: {
       transfers.close();
       workspaceTransfers.close();
       resultUploads.close();
+      speechClipUploads?.close();
       await capabilities.close();
       httpHandler.close();
       router.close();

@@ -19,7 +19,7 @@ export function useVoiceClipboardRecorder(opts: {
     },
     [showToast],
   );
-  const { status, startRecording, stopRecordingForTranscript } = useChatVoiceRecorder({ onError });
+  const { status, startRecording, stopRecordingForTranscript } = useChatVoiceRecorder({ onError, speechTarget: 'Clipboard' });
 
   const toggleVoiceClipboardRecording = React.useCallback((): boolean => {
     if (status === 'idle') {
