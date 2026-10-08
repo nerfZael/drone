@@ -40,19 +40,27 @@ function operationsFromGrants(grants: MeshGrant[]): Set<string> {
   );
 }
 
+/** Phones cannot open a Hub in full, so they are never offered that grant. */
+function offeredTo(capability: MeshCapability, platform: string | undefined): boolean {
+  if (capability.id === 'device-core' || capability.id === 'workspace') return false;
+  return capability.id !== 'hub-remote' || (platform !== 'android' && platform !== 'ios');
+}
+
 function PermissionGrid({
   capabilities,
+  platform,
   selected,
   onChange,
 }: {
   capabilities: MeshCapability[];
+  platform?: string;
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {capabilities
-        .filter((capability) => capability.id !== 'device-core' && capability.id !== 'workspace')
+        .filter((capability) => offeredTo(capability, platform))
         .map((capability) => (
           <div key={capability.id} className="border-l border-[var(--border-subtle)] py-1 pl-3">
             <div className="font-mono text-11 font-[var(--weight-semibold)] text-[var(--accent)]">
@@ -202,6 +210,7 @@ export function DeviceCard({
             </div>
             <PermissionGrid
               capabilities={capabilities}
+              platform={device.platform}
               selected={selected}
               onChange={setSelected}
             />
@@ -540,6 +549,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                       <div className="mt-3">
                         <PermissionGrid
                           capabilities={mesh.status!.capabilities}
+                          platform={pending.device.platform}
                           selected={selected}
                           onChange={(next) =>
                             setPendingSelections((current) => ({ ...current, [pending.id]: next }))

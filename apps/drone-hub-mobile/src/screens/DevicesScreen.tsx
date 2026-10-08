@@ -106,8 +106,11 @@ export function DevicesScreen({ onPair }: { onPair(): void }) {
       const nextCapabilities = (
         Array.isArray(description?.capabilities) ? description.capabilities : []
       ).filter(
+        // Opening a Hub in full (hub-remote) is for desktops; this phone cannot use it.
         (capability: CapabilityDescriptor) =>
-          capability.id !== 'device-core' && capability.id !== 'workspace',
+          capability.id !== 'device-core' &&
+          capability.id !== 'workspace' &&
+          capability.id !== 'hub-remote',
       );
       const phone = (Array.isArray(listing?.devices) ? listing.devices : []).find(
         (item: MeshDevice) => item.id === mesh.identity?.id,
