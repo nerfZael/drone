@@ -7,21 +7,82 @@ index 36a19f2..98e0892 100644
 +  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
  </manifest>
-diff --git a/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt b/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt
-new file mode 100644
-index 0000000..b6bb013
---- /dev/null
-+++ b/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt
-@@ -0,0 +1,100 @@
-+package expo.modules.audio
-+
+diff --git a/android/src/main/java/expo/modules/audio/AudioModule.kt b/android/src/main/java/expo/modules/audio/AudioModule.kt
+index 992239b..bc8b5bc 100644
+--- a/android/src/main/java/expo/modules/audio/AudioModule.kt
++++ b/android/src/main/java/expo/modules/audio/AudioModule.kt
+@@ -6,10 +6,14 @@ import android.content.IntentFilter
+ import android.content.pm.PackageManager
+ import android.media.AudioAttributes
 +import android.media.AudioDeviceCallback
 +import android.media.AudioDeviceInfo
-+import android.media.AudioManager
-+import android.os.Build
+ import android.media.AudioFocusRequest
+ import android.media.AudioManager
+ import android.net.Uri
+ import android.os.Build
 +import android.os.Handler
 +import android.os.Looper
+ import android.util.Log
+ import androidx.core.content.ContextCompat
+ import androidx.core.net.toUri
+ import androidx.media3.common.C.CONTENT_TYPE_DASH
+@@ -47,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap
+ @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+ class AudioModule : Module() {
+   private lateinit var audioManager: AudioManager
++  private lateinit var deviceRouter: AudioDeviceRouter
+   private val context: Context
+     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+   private val httpClient = OkHttpClient()
+@@ -205,6 +210,7 @@ class AudioModule : Module() {
+
+     OnCreate {
+       audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
++      deviceRouter = AudioDeviceRouter(audioManager)
+       context.registerReceiver(ringerModeReceiver, IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION))
+     }
+
+@@ -212,7 +218,7 @@ class AudioModule : Module() {
+       shouldPlayInBackground = mode.shouldPlayInBackground
+       interruptionMode = mode.interruptionMode
+       playsInSilentMode = mode.playsInSilentMode
+-      updatePlaySoundThroughEarpiece(mode.shouldRouteThroughEarpiece ?: false)
++      runOnMain { deviceRouter.configure(mode.allowsRecording, mode.shouldRouteThroughEarpiece) }
+       allowsBackgroundRecording = mode.allowsBackgroundRecording
+
+       recorders.values.forEach { recorder ->
+@@ -332,6 +338,7 @@ class AudioModule : Module() {
+     }
+
+     OnDestroy {
++      runOnMain { deviceRouter.close() }
+       context.unregisterReceiver(ringerModeReceiver)
+       GlobalScope.launch(Dispatchers.Main) {
+         releaseAudioFocus()
+@@ -652,6 +659,7 @@ class AudioModule : Module() {
+
+       AsyncFunction("start") Coroutine { stream: AudioStream ->
+         checkRecordingPermission()
++        stream.useForegroundService = allowsBackgroundRecording
+         stream.start()
+       }
+
+@@ -916,8 +924,7 @@ class AudioModule : Module() {
+
+   @Suppress("DEPRECATION")
+   private fun updatePlaySoundThroughEarpiece(playThroughEarpiece: Boolean) {
+-    audioManager.mode = if (playThroughEarpiece) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
+-    audioManager.setSpeakerphoneOn(!playThroughEarpiece)
++    runOnMain { deviceRouter.configure(null, playThroughEarpiece) }
+   }
+
+   private fun retrieveStreamType(uri: Uri): Int = Util.inferContentType(uri)
+@@ -950,3 +957,96 @@
+     val TAG: String = AudioModule::class.java.simpleName
+   }
+ }
 +
++// Keep the router in an existing file to avoid Bun's new-file patch directory bug.
 +/** Own the communication route only while recording; media playback uses the OS route. */
 +@Suppress("DEPRECATION")
 +internal class AudioDeviceRouter(private val manager: AudioManager) {
@@ -113,61 +174,6 @@ index 0000000..b6bb013
 +    releaseRoute()
 +  }
 +}
-diff --git a/android/src/main/java/expo/modules/audio/AudioModule.kt b/android/src/main/java/expo/modules/audio/AudioModule.kt
-index 992239b..bc8b5bc 100644
---- a/android/src/main/java/expo/modules/audio/AudioModule.kt
-+++ b/android/src/main/java/expo/modules/audio/AudioModule.kt
-@@ -47,6 +47,7 @@ import java.util.concurrent.ConcurrentHashMap
- @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
- class AudioModule : Module() {
-   private lateinit var audioManager: AudioManager
-+  private lateinit var deviceRouter: AudioDeviceRouter
-   private val context: Context
-     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
-   private val httpClient = OkHttpClient()
-@@ -205,6 +206,7 @@ class AudioModule : Module() {
-
-     OnCreate {
-       audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-+      deviceRouter = AudioDeviceRouter(audioManager)
-       context.registerReceiver(ringerModeReceiver, IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION))
-     }
-
-@@ -212,7 +214,7 @@ class AudioModule : Module() {
-       shouldPlayInBackground = mode.shouldPlayInBackground
-       interruptionMode = mode.interruptionMode
-       playsInSilentMode = mode.playsInSilentMode
--      updatePlaySoundThroughEarpiece(mode.shouldRouteThroughEarpiece ?: false)
-+      runOnMain { deviceRouter.configure(mode.allowsRecording, mode.shouldRouteThroughEarpiece) }
-       allowsBackgroundRecording = mode.allowsBackgroundRecording
-
-       recorders.values.forEach { recorder ->
-@@ -332,6 +334,7 @@ class AudioModule : Module() {
-     }
-
-     OnDestroy {
-+      runOnMain { deviceRouter.close() }
-       context.unregisterReceiver(ringerModeReceiver)
-       GlobalScope.launch(Dispatchers.Main) {
-         releaseAudioFocus()
-@@ -652,6 +655,7 @@ class AudioModule : Module() {
- 
-       AsyncFunction("start") Coroutine { stream: AudioStream ->
-         checkRecordingPermission()
-+        stream.useForegroundService = allowsBackgroundRecording
-         stream.start()
-       }
- 
-@@ -916,8 +920,7 @@ class AudioModule : Module() {
-
-   @Suppress("DEPRECATION")
-   private fun updatePlaySoundThroughEarpiece(playThroughEarpiece: Boolean) {
--    audioManager.mode = if (playThroughEarpiece) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
--    audioManager.setSpeakerphoneOn(!playThroughEarpiece)
-+    runOnMain { deviceRouter.configure(null, playThroughEarpiece) }
-   }
-
-   private fun retrieveStreamType(uri: Uri): Int = Util.inferContentType(uri)
 diff --git a/android/src/main/java/expo/modules/audio/AudioRecorder.kt b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
 index 9a76836..a77c4ed 100644
 --- a/android/src/main/java/expo/modules/audio/AudioRecorder.kt
