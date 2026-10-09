@@ -135,7 +135,7 @@ export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.up
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: ['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update', 'model.settings.get', 'model.settings.update', ...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result', 'notes.create'],
+  operations: ['behavior.settings.get', 'behavior.settings.update', 'instructions.get', 'instructions.update', 'model.settings.get', 'model.settings.update', ...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update', 'mirror.settings.get', 'mirror.settings.update', 'mirror.publish', 'mirror.close', 'mirror.result', 'notes.create'],
 };
 
 export function isGranted(
@@ -156,7 +156,7 @@ export function isGranted(
         (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
           // Saving a dictated note is less than a Companion run may already do in its home.
           (operation === 'live.settings.get' || operation === 'proposal.result' || operation === 'notes.create' ||
-            ['mirror.settings.get', 'mirror.publish', 'mirror.close', 'mirror.result'].includes(operation)) &&
+            ['mirror.settings.get', 'mirror.settings.update', 'mirror.publish', 'mirror.close', 'mirror.result'].includes(operation)) &&
           grant.operations.includes('run.start')) ||
         // Reading the current workspace reveals nothing beyond the workspace catalog.
         (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&

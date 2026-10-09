@@ -1,5 +1,6 @@
 import { presentedChatSubscriptionResourceLabel, presentedChatSubscriptionDisplayIntent, companionToolActivityLabel, CompanionScreen } from '@drone/assistant-chat';
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
+import { useMobileCompanionMirrorSettings } from './use-mobile-companion-mirror-settings';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import { useMobileCompanionMirror } from './use-mobile-companion-mirror';
 import type { CompanionContextUsage, CompanionCompactionActivity } from '@drone/assistant-chat';
@@ -71,6 +72,8 @@ type MobileCompanionContextValue = {
   checkingVoiceMode: boolean;
   headsetShortcut: ReturnType<typeof useMobileCompanionHeadsetShortcut>;
   autoApproveSettings: ReturnType<typeof useMobileCompanionAutoApproveSettings>;
+  /** Whether the Hub's desktop shows this phone's Companion; older Hubs cannot change it remotely. */
+  mirrorSettings: ReturnType<typeof useMobileCompanionMirrorSettings>;
   /** The Hub's Live voice preference, shared with desktop Companion. */
   liveSettings: ReturnType<typeof useMobileCompanionLiveSettings> & { supported: boolean };
   switchingVoice: boolean;
@@ -217,6 +220,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         : '';
   const autoApproveSettings = useMobileCompanionAutoApproveSettings(
     available && targetCapability?.operations.includes('auto-approve.settings.get') ? target!.targetDeviceId : '',
+  );
+  const mirrorSettings = useMobileCompanionMirrorSettings(
+    available && targetCapability?.operations.includes('mirror.settings.update') ? target!.targetDeviceId : '',
   );
   const liveSupported = Boolean(
     available &&
@@ -783,6 +789,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       checkingVoiceMode,
       headsetShortcut,
       autoApproveSettings,
+      mirrorSettings,
       liveSettings,
       switchingVoice,
       recordingPaused: voice.session.kind === 'companion' && voice.session.status === 'paused',
@@ -830,7 +837,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     }),
     [
       proposalStore, proposalStoreVersion, proposalActionError,
-      live, checkingVoiceMode, headsetShortcut, autoApproveSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
+      live, checkingVoiceMode, headsetShortcut, autoApproveSettings, mirrorSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
       overlayOpen, overlayInset, reportOverlayInset, composerFocused,
       voice.session,
       toggleLiveVoice, toggleRecordingPause, discardRecording, readAppContext, resolveDroneName,

@@ -94,6 +94,7 @@ export function createCompanionCapability(
       if (operation.startsWith('mirror.')) {
         if (!mirrors) throw new Error('Companion mirroring is unavailable.');
         if (operation === 'mirror.settings.get') return mirrors.settings();
+        if (operation === 'mirror.settings.update') { await mirrors.setEnabled(payload.enabled); return mirrors.settings(); }
         if (operation === 'mirror.publish') return mirrors.publish(sourceDeviceId, context.sourceDevice.name, payload);
         if (operation === 'mirror.close') mirrors.remove(sourceDeviceId, requiredText(payload.sessionId, 'sessionId'));
         else if (operation === 'mirror.result') mirrors.result(sourceDeviceId, payload);

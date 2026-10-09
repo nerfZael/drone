@@ -35,6 +35,7 @@ import Folder from 'lucide-react-native/icons/folder';
 import FolderOpen from 'lucide-react-native/icons/folder-open';
 import Mic from 'lucide-react-native/icons/mic';
 import MicOff from 'lucide-react-native/icons/mic-off';
+import MonitorSmartphone from 'lucide-react-native/icons/monitor-smartphone';
 import Pause from 'lucide-react-native/icons/pause';
 import Play from 'lucide-react-native/icons/play';
 import Square from 'lucide-react-native/icons/square';
@@ -272,7 +273,8 @@ export function MobileCompanionOverlay() {
     companion.proposalExecution !== null;
   const autoApprove = companion.autoApproveSettings;
   const liveSettings = companion.liveSettings;
-  const errors = [companion.error, live.error, liveSettings.error, autoApprove.error].filter(Boolean);
+  const mirrorSettings = companion.mirrorSettings;
+  const errors = [companion.error, live.error, liveSettings.error, autoApprove.error, mirrorSettings.error].filter(Boolean);
   // Manual collapse persists through streamed replies; composer focus also keeps only the header.
   const showBody = !collapsed && !composerFocused &&
     (activityExpanded || captionsOpen || errors.length > 0 || Boolean(companion.reply) || Boolean(companion.proposal) || Boolean(companion.proposalHistory?.length));
@@ -381,6 +383,20 @@ export function MobileCompanionOverlay() {
       disabled: !companion.available || !autoApprove.supported || companion.proposalExecuting,
       loading: autoApprove.loading || autoApprove.saving,
       onPress: () => void autoApprove.save(!autoApprove.enabled),
+    },
+    {
+      id: 'mirror',
+      section: 'Proposals',
+      icon: MonitorSmartphone,
+      label: `Mirror on desktop ${mirrorSettings.enabled ? 'on' : 'off'}`,
+      detail: mirrorSettings.supported
+        ? 'Show this conversation and its proposals in desktop Companion. Audio stays on the phone.'
+        : 'Update the Hub to turn desktop mirroring on or off from your phone.',
+      selected: mirrorSettings.enabled,
+      tone: mirrorSettings.enabled ? 'accent' : 'neutral',
+      disabled: !mirrorSettings.supported,
+      loading: mirrorSettings.loading || mirrorSettings.saving,
+      onPress: () => void mirrorSettings.save(!mirrorSettings.enabled),
     },
     {
       id: 'workspaces',

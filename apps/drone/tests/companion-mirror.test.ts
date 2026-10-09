@@ -171,3 +171,17 @@ test('voice mode changes reach desktop and phone settings even when mirroring is
     expect(h.events.at(-1)).toMatchObject({ event: 'live.settings.changed', payload: { enabled: true, mode: 'live' }, operation: 'live.settings.get' });
   });
 });
+
+test('a phone can turn mirroring on and off, and every client hears the change', async () => {
+  await harness(async (h) => {
+    const capability = createCompanionCapability({} as any, async () => {}, undefined, h.service);
+    const context = { sourceDevice: { id: 'phone', name: 'Phone' }, requestId: 'request' } as any;
+    expect(await capability.invoke('mirror.settings.update', { enabled: true }, context)).toEqual({ enabled: true });
+    expect(h.views.at(-1).enabled).toBe(true);
+    expect(h.events.at(-1)).toMatchObject({ event: 'mirror.settings.changed', payload: { enabled: true } });
+    expect(await capability.invoke('mirror.settings.update', { enabled: false }, context)).toEqual({ enabled: false });
+    expect(await capability.invoke('mirror.settings.get', {}, context)).toEqual({ enabled: false });
+    await expect(capability.invoke('mirror.settings.update', { enabled: 'yes' }, context)).rejects.toThrow('boolean');
+    await capability.close?.();
+  });
+});

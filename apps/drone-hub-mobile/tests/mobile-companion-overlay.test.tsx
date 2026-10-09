@@ -33,7 +33,7 @@ mock.module('react-native-reanimated', () => ({
   withTiming: (value: unknown) => value,
 }));
 mock.module('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-for (const icon of ['audio-lines', 'captions', 'ellipsis', 'folder', 'folder-open', 'mic', 'mic-off', 'pause', 'play', 'square', 'send', 'trash-2', 'x', 'zap']) {
+for (const icon of ['audio-lines', 'captions', 'ellipsis', 'folder', 'folder-open', 'mic', 'mic-off', 'monitor-smartphone', 'pause', 'play', 'square', 'send', 'trash-2', 'x', 'zap']) {
   mock.module(`lucide-react-native/icons/${icon}`, () => ({ default: () => null }));
 }
 for (const name of ['MobileCompanionScreenPanel', 'MobileCompanionModelPicker', 'NativeMarkdown', 'MobileCompanionMenu', 'MobileCompanionProposal', 'MobileCompanionWorkspaceModal']) {
@@ -44,7 +44,7 @@ mock.module('../src/local-assistant/use-mobile-companion-current-workspace', () 
 const companion: any = {
   status: 'completed', overlayOpen: false, activity: [], subscriptions: [], transcript: '', reply: '', error: '',
   proposalHistory: [{ targetId: 'proposal-a', proposal: { title: 'Completed proposal' }, execution: { ok: true, operations: [] } }],
-  live: { status: 'idle', error: '', captions: '' }, liveSettings: { error: '' }, autoApproveSettings: { error: '' },
+  live: { status: 'idle', error: '', captions: '' }, liveSettings: { error: '' }, autoApproveSettings: { error: '' }, mirrorSettings: { error: '' },
   reportOverlayInset: noop, readAppContext: () => ({}), close: noop,
 };
 mock.module('../src/local-assistant/MobileCompanionContext', () => ({ useMobileCompanion: () => companion }));

@@ -9,6 +9,7 @@ import { canSnipForCompanion, snipForCompanion } from './companion-snip';
 import { formatShortcutBinding } from '../app/shortcuts';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { useCompanion } from './CompanionContext';
+import { useCompanionMirror } from './CompanionMirrorContext';
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { CompanionLivePanel } from './CompanionLivePanel';
 import { CompanionModelPicker } from './CompanionModelPicker';
@@ -134,6 +135,7 @@ export function CompanionOptionsMenu({
 }) {
   const companion = useCompanion();
   const companionWindow = useCompanionWindow();
+  const mirror = useCompanionMirror();
   const snipBinding = useDroneHubUiStore(state => state.shortcutBindings.snipCompanion);
   const screenBinding = useDroneHubUiStore(state => state.shortcutBindings.captureCompanionScreen);
   const snipShortcut = snipBinding ? formatShortcutBinding(snipBinding) : '';
@@ -207,6 +209,16 @@ export function CompanionOptionsMenu({
           description="Show Companion in a separate window, kept on top where supported; closing the window returns it to the app"
           checked={companionWindow.detached}
           onSelect={pick(companionWindow.toggle)}
+        /> : null}
+        {mirror ? <CompanionMenuItem
+          icon={<svg {...iconProps}><rect x="2" y="4" width="13" height="10" rx="1.5" /><path d="M6 18h5" /><rect x="16" y="8" width="6" height="12" rx="1.5" /></svg>}
+          label="Mirror phone Companion"
+          description={mirror.error || (!mirror.connected ? 'Connecting to Companion mirror'
+            : `Phone Companion mirroring ${mirror.enabled ? 'on' : 'off'}: review a phone's conversation and manage its proposals here; audio stays on the phone`)}
+          meta={mirror.saving ? 'Saving…' : !mirror.connected ? 'Connecting…' : undefined}
+          checked={mirror.enabled}
+          disabled={!mirror.connected || mirror.saving}
+          onSelect={() => void mirror.setEnabled(!mirror.enabled)}
         /> : null}
         <CompanionMenuItem
           icon={<svg {...iconProps}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" /></svg>}
