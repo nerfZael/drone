@@ -48,6 +48,7 @@ import { rememberAgentModelPick, rememberedAgentModelPick } from '../app/agent-m
 import { agentAccessChoiceGroups, agentAccessSupport } from '../app/agent-access-choice-groups';
 import { ChatComposerRuntimePicker } from '../chat/ChatComposerRuntimePicker';
 import { requestJson } from '../http';
+import { chatRuntimeCacheKey, readChatRuntimeSnapshot, writeChatRuntimeCache } from '../app/chat-runtime-cache';
 import { newChatConfigurationForAgent } from '../app/new-chat-creation';
 import type { DroneDeleteMode } from '../app/settings-types';
 import {
@@ -948,18 +949,23 @@ export function DroneCanvasDock({
     if (!selectedDraftChat) return;
     const { droneId, chatName } = selectedDraftChat;
     const configuration = newChatConfigurationForAgent(resolveAgentKey(next.agentKey), next);
+    const settings = {
+      agent: configuration.agent,
+      model: configuration.model ?? null,
+      reasoning: configuration.reasoning ?? null,
+      agentPermissionMode: configuration.agentPermissionMode,
+      ...(configuration.approvalPolicy ? { approvalPolicy: configuration.approvalPolicy } : {}),
+    };
     void requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        agent: configuration.agent,
-        model: configuration.model ?? null,
-        reasoning: configuration.reasoning ?? null,
-        agentPermissionMode: configuration.agentPermissionMode,
-        ...(configuration.approvalPolicy ? { approvalPolicy: configuration.approvalPolicy } : {}),
-      }),
+      body: JSON.stringify(settings),
     }).then(() => {
-      window.dispatchEvent(new CustomEvent('drone-hub:chat-model-settings-changed', { detail: { droneId, chatName, settings: {} } }));
+      // The chat may be open beside the canvas: it takes the new agent too, not only the model.
+      const key = chatRuntimeCacheKey(droneId, chatName);
+      const info = readChatRuntimeSnapshot(key)?.chatInfo;
+      if (info) writeChatRuntimeCache(key, { chatInfo: { ...info, ...settings } });
+      window.dispatchEvent(new CustomEvent('drone-hub:chat-model-settings-changed', { detail: { droneId, chatName, settings } }));
     }).catch((error: unknown) => {
       setMessageError(`Could not update "${chatName}": ${error instanceof Error ? error.message : String(error)}`);
     });

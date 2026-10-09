@@ -363,7 +363,9 @@ export function useChatConfigState({
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const onChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ droneId: string; chatName: string; settings: { model?: string | null; reasoning?: string | null; subagentsEnabled?: boolean } }>).detail;
+      // Another view may change the agent of a chat that has no message yet, as the canvas composer does.
+      const detail = (event as CustomEvent<{ droneId: string; chatName: string; settings: Partial<Pick<ChatInfo,
+        'agent' | 'model' | 'reasoning' | 'agentPermissionMode' | 'approvalPolicy' | 'subagentsEnabled'>> }>).detail;
       if (detail.droneId !== selectedDrone || detail.chatName !== selectedChat) return;
       setChatInfo(previous => previous ? { ...previous, ...detail.settings } : previous);
     };

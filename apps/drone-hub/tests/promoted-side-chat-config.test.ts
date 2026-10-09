@@ -154,3 +154,21 @@ test('a chat switched back to an agent gets the model and reasoning last picked 
     useDroneHubUiStore.setState({ agentModelPicks: previous });
   }
 });
+
+test('an open chat takes an agent change announced by another view', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const events = new EventTarget();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: events });
+  try {
+    const render = configHarness();
+    const codex = { chat: 'default', agent: { kind: 'builtin', id: 'codex' }, model: 'gpt-6.1-sol', reasoning: 'medium' } as ChatInfo;
+    render(drone, 'default').resolveChatInfoFromState(codex);
+    // As the canvas composer does for a new chat selected on the board.
+    const settings = { agent: { kind: 'builtin', id: 'claude' }, model: 'claude-opus-5-5', reasoning: null, agentPermissionMode: 'execute' };
+    events.dispatchEvent(new CustomEvent('drone-hub:chat-model-settings-changed', { detail: { droneId: drone.id, chatName: 'default', settings } }));
+    expect(render(drone, 'default').chatInfo).toEqual({ ...codex, ...settings } as ChatInfo);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'window', original);
+    else delete (globalThis as { window?: unknown }).window;
+  }
+});

@@ -1212,6 +1212,8 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
     // A new chat that has had no message follows the picker; another agent keeps only the access it can use.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('Untitled')]); await settle(); });
     await openComposer(container);
+    const announced: unknown[] = [];
+    dom.addEventListener('drone-hub:chat-model-settings-changed', (event) => announced.push((event as CustomEvent).detail));
     // Its menu opens outside the composer, which stays open meanwhile.
     await act(async () => picker()!.click());
     await act(async () => panelButton('Codex').click());
@@ -1223,6 +1225,8 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
     // No approval policy at all: the server refuses one, even the default, for an agent without approvals.
     expect(configs).toEqual([{ agent: { kind: 'builtin', id: 'claude' }, model: null, reasoning: null,
       agentPermissionMode: 'execute' }]);
+    // The chat open beside the canvas hears of the new agent, not only of a changed model.
+    expect(announced).toEqual([{ droneId: 'alpha', chatName: 'Untitled', settings: configs[0] }]);
 
     // A chat that has had its first message keeps its own settings, with a one-off override instead.
     await act(async () => { getCanvasBoardActions('alpha').setSelectedDroneIds([alpha('default')]); await settle(); });
