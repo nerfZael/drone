@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { preferredChatName } from './preferred-chat';
+import { chatReadMaxChars } from './chat-read/chat-read-limits';
 import { pendingChatSummary } from './chat-read/helpers/chat-read-presentation';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -3622,7 +3623,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. All chats return bounded visible messages with historyKind=messages. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
+      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. All chats return bounded visible messages with historyKind=messages. Text fields default to 4000 chars; maxCharsPerField goes up to 40000 with limit=1 (the cap is 80000/limit across a read), and truncated results carry a truncationHint. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -3634,7 +3635,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     async (args) => {
       const chat = await resolveTargetChat(args.drone, args.chat);
       const limit = cleanPositiveInt(args.limit, 10, 20);
-      const maxCharsPerField = cleanPositiveInt(args.maxCharsPerField, 4000, 8000);
+      const maxCharsPerField = chatReadMaxChars(args.maxCharsPerField, limit);
       const includeActivity = args.includeActivity === true;
       try {
         const response = await requestJson(

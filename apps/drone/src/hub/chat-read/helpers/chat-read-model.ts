@@ -5,6 +5,7 @@ import type {
   AssistantChatIdleTarget,
 } from '../../assistant/assistant-contracts';
 import { readNativeChatMessages } from '../../native-chat-messages';
+import { CHAT_IDLE_PREVIEW_CHARS, CHAT_MESSAGE_MAX_CHARS } from '../chat-read-limits';
 
 export type ChatVisibleMessage = {
   id: string;
@@ -52,7 +53,7 @@ export type ChatReadSnapshot = {
 export function readVisibleChatHistory(
   snapshot: ChatReadSnapshot,
   limit = 40,
-  maxChars = 8000,
+  maxChars = CHAT_MESSAGE_MAX_CHARS,
 ): { messages: ChatVisibleMessage[]; hasOlder: boolean } {
   if (snapshot.agent?.kind === 'native') {
     if (!snapshot.chatId) throw new Error('native chat has no stable identity');
@@ -89,14 +90,15 @@ export function summarizeChatActivity(
   ).length;
   const history =
     snapshot.agent?.kind === 'native'
-      ? readVisibleChatHistory(snapshot).messages
-      : cliMessages(snapshot.transcripts, 8000, true);
+      ? readVisibleChatHistory(snapshot, 40, CHAT_IDLE_PREVIEW_CHARS).messages
+      : cliMessages(snapshot.transcripts, CHAT_IDLE_PREVIEW_CHARS, true);
   const candidates: NonNullable<AssistantChatIdleStatus['latest']>[] = history.map((message) => ({
     id: message.turnId && message.role !== 'user' ? `agent:${message.turnId}` : message.id,
     role: message.role === 'user' ? 'user' : 'agent',
     status: message.status,
     at: message.at,
     text: message.text,
+    textOriginalLength: message.textOriginalLength,
     ...(message.turnId ? { turnId: message.turnId } : {}),
   }));
   for (const prompt of pending) {
@@ -106,6 +108,7 @@ export function summarizeChatActivity(
       status: pendingPromptIsWaiting(prompt) ? 'queued' : normalizePendingPromptState(prompt.state, 'queued'),
       at: String(prompt.at ?? ''),
       text: String(prompt.prompt ?? ''),
+      textOriginalLength: String(prompt.prompt ?? '').length,
       turnId: prompt.id,
     });
   }

@@ -42,6 +42,35 @@ describe('event notification prompts', () => {
     expect(eventNotificationEventLabel('question_request.resolved')).toBe('Question responses');
   });
 
+  test('shortens the longest field of an oversized event instead of dropping its identity', () => {
+    const prompt = renderEventNotificationPrompt({
+      providerContentBudget: 10_000,
+      events: [
+        {
+          provider: 'drone-hub',
+          resourceType: 'chat',
+          resourceId: 'chat-a',
+          eventType: 'chat.idle',
+          summary: 'drone/review became idle.',
+          providerContent: {
+            chatLabel: 'drone / review',
+            latestMessageId: 'agent:turn-1',
+            latestMessage: 'Points 1-8. '.repeat(2_000),
+          },
+        },
+      ],
+    });
+    const content = JSON.parse(parseEventNotificationPrompt(prompt)!.events[0]!.providerContentText);
+    expect(content).toMatchObject({
+      chatLabel: 'drone / review',
+      latestMessageId: 'agent:turn-1',
+      latestMessageTruncated: true,
+      latestMessageOriginalLength: 24_000,
+    });
+    expect(content.latestMessage.length).toBeGreaterThan(9_000);
+    expect(content.latestMessage).toStartWith('Points 1-8. ');
+  });
+
   test('shows chat status and context in two concise collapsed rows', () => {
     const event = {
       provider: 'drone-hub',

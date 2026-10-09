@@ -59,6 +59,35 @@ test('read service bounds requests, reports older history and removes completed 
   });
 });
 
+test('read service returns long replies whole for small reads and caps wide reads with a hint', async () => {
+  const review = 'r'.repeat(14_000);
+  const service = new ChatReadService(async () => ({
+    ...snapshot,
+    ok: true,
+    transcripts: [{ id: 'review', at: '2026-09-15T10:00:00Z', prompt: 'review it', output: review, ok: true }],
+    pending: [],
+  }));
+  const narrow = await service.read({ droneRef: 'drone', chatName: 'default', limit: 1, maxChars: 30_000 });
+  expect(narrow).toMatchObject({ maxCharsPerField: 30_000 });
+  expect((narrow as any).messages[1]).toMatchObject({ text: review, textTruncated: false });
+  expect((narrow as any).truncationHint).toBeUndefined();
+
+  const wide = await service.read({ droneRef: 'drone', chatName: 'default', limit: 20, maxChars: 30_000 });
+  expect(wide).toMatchObject({ maxCharsPerField: 4_000 });
+  expect((wide as any).messages[1]).toMatchObject({ textTruncated: true, textOriginalLength: 14_000 });
+  expect((wide as any).truncationHint).toContain('limit=1 and maxCharsPerField=40000');
+});
+
+test('idle status keeps a preview of long replies with their full length', () => {
+  const review = 'r'.repeat(14_000);
+  expect(
+    summarizeChatActivity({
+      ...snapshot,
+      transcripts: [{ id: 'review', at: '2026-09-15T10:00:00Z', prompt: 'review it', output: review, ok: true }],
+    }).latest,
+  ).toMatchObject({ text: 'r'.repeat(2_000), textOriginalLength: 14_000 });
+});
+
 test('activity handles queued work, failed delivery, silent completion and empty chats consistently', () => {
   expect(summarizeChatActivity(snapshot)).toMatchObject({ idle: true, reason: 'no_messages' });
   const completed = {

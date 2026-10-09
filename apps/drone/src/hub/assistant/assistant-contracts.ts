@@ -136,6 +136,7 @@ export type AssistantChatIdleStatus = {
     status: 'queued' | 'sending' | 'sent' | 'completed' | 'failed';
     at: string;
     text: string;
+    textOriginalLength?: number;
     turnId?: string;
   };
 };

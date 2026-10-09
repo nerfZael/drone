@@ -11,6 +11,7 @@ import {
 import { EventRunLimitError } from '../../host/event-run-budget';
 import crypto from 'node:crypto';
 import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
+import { CHAT_IDLE_PREVIEW_CHARS, CHAT_MESSAGE_MAX_CHARS } from '../chat-read/chat-read-limits';
 import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 
 import { ManagedLoop } from '../../background/managed-loop';
@@ -78,6 +79,7 @@ export type ChatSubscriptionStatus = {
     status?: string;
     at?: string;
     text?: string;
+    textOriginalLength?: number;
     turnId?: string;
   } | null;
 };
@@ -1390,6 +1392,11 @@ function chatEvent(
 ): ResourceEvent {
   const occurredAt = validIso(status.latest?.at, new Date().toISOString());
   const chatLabel = chatResourceSubscriptionLabel(location);
+  const latestMessage = String(status.latest?.text ?? '').slice(0, CHAT_IDLE_PREVIEW_CHARS);
+  const latestMessageLength = Math.max(
+    String(status.latest?.text ?? '').length,
+    status.latest?.textOriginalLength ?? 0,
+  );
   return {
     id: crypto.randomUUID(),
     providerEventId: `drone-hub:${subscription.resourceId}:${eventType}:${causeId}`,
@@ -1409,8 +1416,15 @@ function chatEvent(
       droneId: location.droneId,
       droneName: String(location.droneName ?? '').trim() || location.droneId,
       chatName: location.chatName,
-      latestMessage: String(status.latest?.text ?? '').slice(0, 8_000),
+      latestMessage,
       latestMessageId: String(status.latest?.id ?? '').trim() || null,
+      ...(latestMessageLength > latestMessage.length
+        ? {
+            latestMessageTruncated: true,
+            latestMessageOriginalLength: latestMessageLength,
+            readFullMessage: `latestMessage is a preview. Use read_chat with limit=1 and maxCharsPerField=${CHAT_MESSAGE_MAX_CHARS} for the full reply.`,
+          }
+        : {}),
       reason: status.reason,
     },
   };

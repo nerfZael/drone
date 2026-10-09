@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { droneRootPath } from '../host/paths';
+import { CHAT_MESSAGE_MAX_CHARS, CHAT_READ_DEFAULT_CHARS } from './chat-read/chat-read-limits';
 import type { ChatVisibleMessage } from './chat-read/helpers/chat-read-model';
 
 type ReadDatabase = {
@@ -14,7 +15,7 @@ export type NativeHistorySearchRow = { id: string; role: string; timestamp: stri
 
 export function readNativeChatMessages(threadId: string, limit: number, maxChars: number) {
   const boundedLimit = Math.max(1, Math.min(40, Math.floor(limit) || 20));
-  const boundedChars = Math.max(1, Math.min(8000, Math.floor(maxChars) || 4000));
+  const boundedChars = Math.max(1, Math.min(CHAT_MESSAGE_MAX_CHARS, Math.floor(maxChars) || CHAT_READ_DEFAULT_CHARS));
   return withNativeHistory(
     {
       messages: [] as ChatVisibleMessage[],

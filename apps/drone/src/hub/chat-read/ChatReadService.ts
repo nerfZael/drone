@@ -1,3 +1,4 @@
+import { CHAT_MESSAGE_MAX_CHARS, chatReadMaxChars } from './chat-read-limits';
 import { pendingChatSummary, boundedTranscriptTurn } from './helpers/chat-read-presentation';
 import {
   pendingChatMessages,
@@ -33,7 +34,7 @@ export class ChatReadService {
 
   async read(input: ReadOptions) {
     const limit = bound(input.limit, 10, 20);
-    const maxChars = bound(input.maxChars, 4000, 8000);
+    const maxChars = chatReadMaxChars(input.maxChars, limit);
     const includeActivity = input.includeActivity === true;
     const snapshot = await this.readSnapshot({
       droneRef: input.droneRef,
@@ -86,6 +87,15 @@ export class ChatReadService {
       ),
       limit,
       maxCharsPerField: maxChars,
+      ...(messages.some((message) => message.textTruncated) ||
+      turns.some((turn) => turn.truncated === true)
+        ? {
+            truncationHint:
+              maxChars < CHAT_MESSAGE_MAX_CHARS
+                ? `Some text was cut at ${maxChars} chars. Read again with limit=1 and maxCharsPerField=${CHAT_MESSAGE_MAX_CHARS} to get up to ${CHAT_MESSAGE_MAX_CHARS} chars per message.`
+                : `Some text is longer than the ${CHAT_MESSAGE_MAX_CHARS}-char maximum per message; ask the chat to resend the rest.`,
+          }
+        : {}),
       includeActivity,
       ...(includeActivity ? { turns } : {}),
     };

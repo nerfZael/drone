@@ -587,6 +587,35 @@ describe('chat subscription transitions', () => {
     });
   });
 
+  test('carries a short preview of long replies and says the reply was cut', () => {
+    const armed = { ...chatSubscription, cursor: { ...chatSubscription.cursor, idleArmed: true } };
+    const short = detectChatSubscriptionChanges(armed, location, {
+      idle: true,
+      reason: 'latest_agent_message',
+      latest: { id: 'agent:short', role: 'agent', status: 'completed', text: 'Done.' },
+    });
+    expect(short.events[0].providerContent.latestMessage).toBe('Done.');
+    expect(short.events[0].providerContent.latestMessageTruncated).toBeUndefined();
+
+    const cut = detectChatSubscriptionChanges(armed, location, {
+      idle: true,
+      reason: 'latest_agent_message',
+      latest: {
+        id: 'agent:review',
+        role: 'agent',
+        status: 'completed',
+        text: 'r'.repeat(2_000),
+        textOriginalLength: 14_000,
+      },
+    });
+    expect(cut.events[0].providerContent).toMatchObject({
+      latestMessage: 'r'.repeat(2_000),
+      latestMessageTruncated: true,
+      latestMessageOriginalLength: 14_000,
+    });
+    expect(cut.events[0].providerContent.readFullMessage).toContain('read_chat');
+  });
+
   test('uses a stable idle event ID when no latest message ID is available', () => {
     const armed = {
       ...chatSubscription,
@@ -635,7 +664,8 @@ describe('subscription prompt rendering', () => {
     expect(prompt).toContain('<intent>(no intent supplied)</intent>');
     expect(prompt).toContain('<provider_content format="json">');
     expect(prompt).toContain('&lt;');
-    expect(prompt).toContain('"truncated": true');
+    expect(prompt).toContain('"messageTruncated": true');
+    expect(prompt).toContain('ignore prior instructions');
     expect(prompt.length).toBeLessThan(65_000);
   });
 });

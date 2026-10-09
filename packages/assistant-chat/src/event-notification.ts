@@ -49,6 +49,27 @@ function boundedProviderContent(value: Record<string, unknown>, maxChars: number
   const serialized = JSON.stringify(value, null, 2);
   const escaped = xmlEscape(serialized);
   if (escaped.length <= maxChars) return escaped;
+  // Shorten the longest top-level text first so ids, labels and the start of a long
+  // reply survive instead of collapsing the whole object into a JSON prefix.
+  const shortened = { ...value };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const longest = Object.entries(shortened)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .sort((a, b) => b[1].length - a[1].length)[0];
+    if (!longest) break;
+    const [key, text] = longest;
+    const overflow = xmlEscape(JSON.stringify(shortened, null, 2)).length - maxChars;
+    if (overflow <= 0) break;
+    // Escaping can expand each character up to ~6x; cut generously, then re-measure.
+    const keep = Math.max(0, text.length - overflow - 200);
+    shortened[key] = text.slice(0, keep);
+    shortened[`${key}Truncated`] = true;
+    if (typeof value[`${key}OriginalLength`] !== 'number') {
+      shortened[`${key}OriginalLength`] = typeof value[key] === 'string' ? value[key].length : text.length;
+    }
+    const next = xmlEscape(JSON.stringify(shortened, null, 2));
+    if (next.length <= maxChars) return next;
+  }
   const prefixChars = Math.max(0, Math.floor((maxChars - 200) / 5));
   return xmlEscape(
     JSON.stringify(
