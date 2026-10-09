@@ -6,6 +6,7 @@ import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from '../companion/CompanionContext';
 import { CompanionNotificationCard, useNotificationExpiry } from '../companion/CompanionActionNotifications';
 import { CompanionNoteHeadline } from '../companion/CompanionOperationHeadline';
+import { openCompanionHomeFiles } from '../companion/companion-home-files';
 import { useIdleMonacoEditorPreload } from '../files/monaco-editor-loader';
 import type {
   GlobalDictationDroneDestination,
@@ -38,7 +39,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
   const saveNote = React.useCallback(async (text: string): Promise<GlobalDictationSendResult> => {
     const result = await saveDictatedNote(text);
     if (result.ok) {
-      const notification = { id: crypto.randomUUID(), name: result.name, createdAt: Date.now() };
+      const notification = { id: crypto.randomUUID(), name: result.name, path: result.path, createdAt: Date.now() };
       setSavedNotes((items) => [...items, notification].slice(-3));
     }
     return result;
@@ -305,7 +306,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
   );
 }
 
-type SavedNoteNotification = { id: string; name: string; createdAt: number };
+type SavedNoteNotification = { id: string; name: string; path: string; createdAt: number };
 
 function SavedNoteNotifications({ notifications, onDismiss }: {
   notifications: SavedNoteNotification[];
@@ -318,7 +319,8 @@ function SavedNoteNotifications({ notifications, onDismiss }: {
       className="fixed bottom-4 right-4 z-[90] flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-2">
       {notifications.map((notification) => (
         <CompanionNotificationCard key={notification.id} status="completed" label={`Create note ${notification.name}`}
-          onDismiss={() => onDismiss(notification.id)}>
+          onDismiss={() => onDismiss(notification.id)}
+          onOpen={() => { openCompanionHomeFiles({ path: notification.path }); onDismiss(notification.id); }}>
           <CompanionNoteHeadline name={notification.name} />
         </CompanionNotificationCard>
       ))}
@@ -326,15 +328,15 @@ function SavedNoteNotifications({ notifications, onDismiss }: {
   );
 }
 
-async function saveDictatedNote(text: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+async function saveDictatedNote(text: string): Promise<{ ok: true; name: string; path: string } | { ok: false; error: string }> {
   try {
-    const { name } = await requestJson<{ name: string }>('/api/companion/notes', {
+    const { name, path } = await requestJson<{ name: string; path: string }>('/api/companion/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
     });
     // "2026-10-09 Grocery list.md" shows as "2026-10-09 Grocery list".
-    return { ok: true, name: String(name ?? '').replace(/\.md$/i, '') || 'Note' };
+    return { ok: true, name: String(name ?? '').replace(/\.md$/i, '') || 'Note', path: String(path ?? '') };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

@@ -18,26 +18,32 @@ export function useNotificationExpiry(notifications: ReadonlyArray<{ id: string;
   }, [notifications, onDismiss]);
 }
 
-export function CompanionNotificationCard({ status, label, error, onDismiss, children }: {
+export function CompanionNotificationCard({ status, label, error, onDismiss, onOpen, children }: {
   status: 'completed' | 'failed';
   label: string;
   error?: string;
   onDismiss(): void;
+  /** Makes the whole card open what it reports. */
+  onOpen?(): void;
   children: React.ReactNode;
 }) {
+  const Content = onOpen ? 'button' : 'div';
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] px-3 py-2 text-xs shadow-[var(--shadow-dialog)]">
+    <div onClick={onOpen}
+      className={`flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] px-3 py-2 text-xs shadow-[var(--shadow-dialog)] ${onOpen ? 'cursor-pointer hover:border-[var(--accent-border)]' : ''}`}>
       <span aria-hidden="true" className={status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
         {status === 'failed' ? '!' : '✓'}
       </span>
-      <div className="min-w-0 flex-1 break-words text-[var(--fg-secondary)]">
+      {/* A click on the button bubbles to the card, so keyboard users open it the same way. */}
+      <Content {...(onOpen ? { type: 'button' as const, 'aria-label': `Open ${label}` } : {})}
+        className={`min-w-0 flex-1 break-words text-[var(--fg-secondary)] ${onOpen ? 'cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] rounded' : ''}`}>
         {status === 'failed'
           ? <span className="font-[var(--weight-semibold)] text-[var(--red)]">Failed: </span>
           : <span className="sr-only">Completed: </span>}
         {children}
-        {error ? <div className="mt-1 text-[var(--red)]">{error}</div> : null}
-      </div>
-      <button type="button" aria-label={`Dismiss notification: ${label}`} onClick={onDismiss} className="shrink-0 rounded px-1 text-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">×</button>
+        {error ? <span className="mt-1 block text-[var(--red)]">{error}</span> : null}
+      </Content>
+      <button type="button" aria-label={`Dismiss notification: ${label}`} onClick={(event) => { event.stopPropagation(); onDismiss(); }} className="shrink-0 rounded px-1 text-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">×</button>
     </div>
   );
 }

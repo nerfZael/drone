@@ -73,12 +73,14 @@ describe('Companion action notifications', () => {
 
   test('renders a saved note like a created drone, named by its file without the extension', () => {
     const html = renderToStaticMarkup(
-      <CompanionNotificationCard status="completed" label="Create note 2026-10-09 Grocery list" onDismiss={() => {}}>
+      <CompanionNotificationCard status="completed" label="Create note 2026-10-09 Grocery list" onDismiss={() => {}} onOpen={() => {}}>
         <CompanionNoteHeadline name="2026-10-09 Grocery list" />
       </CompanionNotificationCard>,
     );
     expect(html).toContain('text-[var(--green)]">Create note</span> <span');
     expect(html).toContain('2026-10-09 Grocery list</span>');
     expect(html).toContain('Dismiss notification: Create note 2026-10-09 Grocery list');
+    expect(html).toContain('cursor-pointer');
+    expect(html).toContain('<button type="button" aria-label="Open Create note 2026-10-09 Grocery list"');
   });
 });
