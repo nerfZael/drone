@@ -3,7 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { CompanionProposal, CompanionProposalExecutionItem } from '@drone/assistant-chat';
 import { createCompanionActionReporter, type CompanionActionNotification } from '../src/droneHub/companion/companion-action-notifications';
-import { CompanionActionNotifications } from '../src/droneHub/companion/CompanionActionNotifications';
+import { CompanionActionNotifications, CompanionNotificationCard } from '../src/droneHub/companion/CompanionActionNotifications';
+import { CompanionNoteHeadline } from '../src/droneHub/companion/CompanionOperationHeadline';
 
 const proposal: CompanionProposal = {
   version: 1,
@@ -68,5 +69,16 @@ describe('Companion action notifications', () => {
     expect(html).toContain('text-[var(--red)]">Failed: </span>');
     expect(html).toContain('Chat unavailable');
     expect(html).toContain('Dismiss notification:');
+  });
+
+  test('renders a saved note like a created drone, named by its file without the extension', () => {
+    const html = renderToStaticMarkup(
+      <CompanionNotificationCard status="completed" label="Create note 2026-10-09 Grocery list" onDismiss={() => {}}>
+        <CompanionNoteHeadline name="2026-10-09 Grocery list" />
+      </CompanionNotificationCard>,
+    );
+    expect(html).toContain('text-[var(--green)]">Create note</span> <span');
+    expect(html).toContain('2026-10-09 Grocery list</span>');
+    expect(html).toContain('Dismiss notification: Create note 2026-10-09 Grocery list');
   });
 });

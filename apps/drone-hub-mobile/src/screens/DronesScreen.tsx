@@ -28,6 +28,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   View,
 } from 'react-native';
 import { ChatFilesCarousel } from '../drones/ChatFilesCarousel';
@@ -2559,7 +2560,9 @@ export function DronesScreen({
     }
     if (!targetReachable) return { ok: false, error: 'The selected Drone Hub device is offline.' };
     try {
-      await mesh.request(targetId, COMPANION_CAPABILITY.id, 'notes.create', { text });
+      const note = await mesh.request(targetId, COMPANION_CAPABILITY.id, 'notes.create', { text });
+      const name = String(note?.name ?? '').replace(/\.md$/i, '') || 'Note';
+      if (Platform.OS === 'android') ToastAndroid.show(`Created note ${name}`, ToastAndroid.SHORT);
       return { ok: true };
     } catch (saveError: unknown) {
       return {

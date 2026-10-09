@@ -71,3 +71,7 @@ export function CompanionOperationHeadline({
   }
 }
 
+/** Headline for a dictated note saved to the Companion home. */
+export function CompanionNoteHeadline({ name }: { name: string }) {
+  return <><Action kind="create">Create note</Action> <Name>{name}</Name></>;
+}

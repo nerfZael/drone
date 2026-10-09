@@ -4,6 +4,8 @@ import { requestJson } from '../http';
 import { ChatComposerEditor, type ChatComposerEditorHandle } from '../chat/ChatComposerEditor';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from '../companion/CompanionContext';
+import { CompanionNotificationCard, useNotificationExpiry } from '../companion/CompanionActionNotifications';
+import { CompanionNoteHeadline } from '../companion/CompanionOperationHeadline';
 import { useIdleMonacoEditorPreload } from '../files/monaco-editor-loader';
 import type {
   GlobalDictationDroneDestination,
@@ -29,10 +31,22 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
     },
     [companion],
   );
+  const [savedNotes, setSavedNotes] = React.useState<SavedNoteNotification[]>([]);
+  const dismissSavedNote = React.useCallback((id: string) => {
+    setSavedNotes((items) => items.filter((item) => item.id !== id));
+  }, []);
+  const saveNote = React.useCallback(async (text: string): Promise<GlobalDictationSendResult> => {
+    const result = await saveDictatedNote(text);
+    if (result.ok) {
+      const notification = { id: crypto.randomUUID(), name: result.name, createdAt: Date.now() };
+      setSavedNotes((items) => [...items, notification].slice(-3));
+    }
+    return result;
+  }, []);
   const dictation = useGlobalDictation({
     ...props,
     sendToCompanion,
-    saveNote: saveDictatedNote,
+    saveNote,
     prepareCompanionSend: companion?.prepareTextSubmission,
   });
   const recorder = useRecorderCompanion();
@@ -59,7 +73,10 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
     observer.observe(element);
     return () => { observer.disconnect(); recorder.setHeight(0); };
   }, [dictation.open, recorder?.setHeight]);
-  if (!dictation.open) return null;
+  // The scratchpad closes once a note is saved; its toast takes the same corner.
+  if (!dictation.open) {
+    return <SavedNoteNotifications notifications={savedNotes} onDismiss={dismissSavedNote} />;
+  }
 
   const recordingActive =
     dictation.recordingStatus === 'starting' ||
@@ -288,14 +305,36 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
   );
 }
 
-async function saveDictatedNote(text: string): Promise<GlobalDictationSendResult> {
+type SavedNoteNotification = { id: string; name: string; createdAt: number };
+
+function SavedNoteNotifications({ notifications, onDismiss }: {
+  notifications: SavedNoteNotification[];
+  onDismiss(id: string): void;
+}) {
+  useNotificationExpiry(notifications, onDismiss);
+  if (!notifications.length) return null;
+  return (
+    <div aria-label="Saved note notifications" role="status" aria-live="polite" aria-relevant="additions"
+      className="fixed bottom-4 right-4 z-[90] flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-2">
+      {notifications.map((notification) => (
+        <CompanionNotificationCard key={notification.id} status="completed" label={`Create note ${notification.name}`}
+          onDismiss={() => onDismiss(notification.id)}>
+          <CompanionNoteHeadline name={notification.name} />
+        </CompanionNotificationCard>
+      ))}
+    </div>
+  );
+}
+
+async function saveDictatedNote(text: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   try {
-    await requestJson('/api/companion/notes', {
+    const { name } = await requestJson<{ name: string }>('/api/companion/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
     });
-    return { ok: true };
+    // "2026-10-09 Grocery list.md" shows as "2026-10-09 Grocery list".
+    return { ok: true, name: String(name ?? '').replace(/\.md$/i, '') || 'Note' };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
