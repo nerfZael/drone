@@ -248,6 +248,7 @@ export async function createDeviceMeshService(options: {
       signal?: AbortSignal,
     ) => router.request(targetDeviceId, capability, operation, payload, signal),
     capabilities,
+    isDeviceConnected: (deviceId: string) => router.connectedDeviceIds().includes(deviceId),
     registerCapability: (handler: CapabilityHandler) => capabilities.register(handler),
     broadcastCapabilityEvent: (
       capability: string,

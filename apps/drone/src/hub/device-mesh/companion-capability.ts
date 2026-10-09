@@ -31,6 +31,15 @@ type BroadcastEvent = (
   targetDeviceIds?: Iterable<string>,
 ) => Promise<void>;
 
+type CompanionCapabilityOptions = {
+  isDeviceConnected?: (deviceId: string) => boolean;
+  reconnectGraceMs?: number;
+};
+
+// A phone's mesh stream can drop for a moment (network handoff, Hub stall). The Hub replays
+// missed events when it reconnects, so a run only ends if the phone stays away this long.
+const COMPANION_RECONNECT_GRACE_MS = 30_000;
+
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -49,7 +58,9 @@ export function createCompanionCapability(
   workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save' | 'current'>,
   mirrors?: CompanionMirrorService,
   createNote?: (text: unknown) => Promise<{ path: string; name: string; title: string }>,
+  options: CompanionCapabilityOptions = {},
 ): CapabilityHandler {
+  const reconnectGraceMs = options.reconnectGraceMs ?? COMPANION_RECONNECT_GRACE_MS;
   const live = new CompanionLiveMeshSessions({
     settingsChanged: async settings => { await mirrors?.liveSettingsChanged(settings); },
     createSocket: send => new CompanionLiveSocket(send, { telemetry: runtime.liveTelemetry }),
@@ -79,11 +90,36 @@ export function createCompanionCapability(
     }
   };
 
+  const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const clearDisconnectTimer = (deviceId: string) => {
+    const timer = disconnectTimers.get(deviceId);
+    if (timer) clearTimeout(timer);
+    disconnectTimers.delete(deviceId);
+  };
+
   const closeDeviceSessions = async (deviceId: string) => {
+    clearDisconnectTimer(deviceId);
     mirrors?.disconnect(deviceId);
     live.revokeDevice(deviceId);
     const session = sessionsByDeviceId.get(deviceId);
     if (session) await cancelSession(session, false);
+  };
+
+  const disconnectDevice = (deviceId: string) => {
+    // Live audio rides the dropped stream; the phone restarts Live itself.
+    live.revokeDevice(deviceId);
+    const session = sessionsByDeviceId.get(deviceId);
+    clearDisconnectTimer(deviceId);
+    const timer = setTimeout(() => {
+      disconnectTimers.delete(deviceId);
+      if (options.isDeviceConnected?.(deviceId)) return;
+      // The desktop mirror stays live through a blip; its pending commands time out on their own.
+      mirrors?.disconnect(deviceId);
+      // Notify through the replay buffer so a phone that returns late still leaves "working".
+      if (session && sessionsByDeviceId.get(deviceId) === session) void cancelSession(session, true);
+    }, reconnectGraceMs);
+    timer.unref?.();
+    disconnectTimers.set(deviceId, timer);
   };
 
   return {
@@ -91,6 +127,7 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+      if (operation !== 'mirror.close') mirrors?.reconnect(sourceDeviceId);
       if (operation.startsWith('mirror.')) {
         if (!mirrors) throw new Error('Companion mirroring is unavailable.');
         if (operation === 'mirror.settings.get') return mirrors.settings();
@@ -222,13 +259,14 @@ export function createCompanionCapability(
       return { accepted: true };
     },
     async close() {
+      for (const deviceId of [...disconnectTimers.keys()]) clearDisconnectTimer(deviceId);
       live.close();
       await Promise.all(
         [...sessionsByDeviceId.values()].map((session) => cancelSession(session, false)),
       );
     },
     revokeDevice: closeDeviceSessions,
-    disconnectDevice: closeDeviceSessions,
+    disconnectDevice,
     accessChanged: closeDeviceSessions,
   };
 }

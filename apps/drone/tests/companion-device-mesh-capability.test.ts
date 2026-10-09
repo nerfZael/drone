@@ -314,7 +314,9 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
     run: async (input: any) => `Reply to ${input.prompt}`,
     steer: () => false,
     deleteSession: async (id: string) => { deleted.push(id); },
-  } as any, async (_capability, _event, payload) => { events.push(payload); });
+  } as any, async (_capability, _event, payload) => { events.push(payload); }, undefined, undefined, undefined, {
+    reconnectGraceMs: 0,
+  });
   try {
     await capability.invoke('run.start', { runId: 'mobile', messageId: 'user', prompt: 'watch' }, context());
     await waitFor(() => events.some((event) => event.status === 'completed'));
@@ -324,8 +326,39 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
     expect(events.find((event) => event.type === 'subscription')).toMatchObject({ runId: 'mobile', messageId: 'event' });
     expect(events.find((event) => event.reply === 'Reply to event')).toMatchObject({ runId: 'mobile', messageId: 'event' });
     await capability[lifecycle]?.('phone-1');
-    expect(deleted).toHaveLength(1);
+    await waitFor(() => deleted.length === 1);
     await expect(deliver({ prompt: 'late', messageId: 'late', deliveryMode: 'asap' })).rejects.toThrow('disconnected');
+  } finally { await capability.close?.(); }
+});
+
+test('a mobile run survives a mesh reconnect within the grace window', async () => {
+  const events: any[] = [];
+  let finish!: (reply: string) => void;
+  let connected = false;
+  const capability = createCompanionCapability({
+    cancel() {},
+    async deleteSession() {},
+    run: () => new Promise<string>((resolve) => { finish = resolve; }),
+  } as any, async (_capability, _event, payload) => { events.push(payload); }, undefined, undefined, undefined, {
+    isDeviceConnected: () => connected,
+    reconnectGraceMs: 10,
+  });
+  try {
+    await capability.invoke('run.start', { runId: 'mobile', messageId: 'user', prompt: 'long task' }, context());
+    await waitFor(() => typeof finish === 'function');
+    await capability.disconnectDevice?.('phone-1');
+    connected = true;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(events.some((event) => event.status === 'cancelled')).toBe(false);
+    finish('Done');
+    await waitFor(() => events.some((event) => event.status === 'completed'));
+    expect(events.find((event) => event.type === 'reply')).toMatchObject({ runId: 'mobile', reply: 'Done' });
+
+    await capability.invoke('run.start', { runId: 'mobile', messageId: 'again', prompt: 'another' }, context());
+    connected = false;
+    await capability.disconnectDevice?.('phone-1');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(events.some((event) => event.status === 'cancelled')).toBe(true);
   } finally { await capability.close?.(); }
 });
 

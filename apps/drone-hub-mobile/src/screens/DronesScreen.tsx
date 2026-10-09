@@ -2676,6 +2676,7 @@ export function DronesScreen({
     targetDeviceId: targetId,
     targetName: activeTarget?.name ?? 'Drone Hub',
     targetReachable,
+    targetReconnecting: targetConnectionState === 'reconnecting',
     phoneTarget,
     drones,
     selectedDrone: selected,

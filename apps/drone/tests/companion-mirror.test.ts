@@ -185,3 +185,28 @@ test('a phone can turn mirroring on and off, and every client hears the change',
     await capability.close?.();
   });
 });
+
+test('a brief phone reconnect keeps the desktop mirror live; a long outage recovers on the next request', async () => {
+  await harness(async (h) => {
+    await h.service.setEnabled(true); await h.publish();
+    let connected = false;
+    const capability = createCompanionCapability({} as any, async () => {}, undefined, h.service, undefined, {
+      isDeviceConnected: () => connected, reconnectGraceMs: 10,
+    });
+    const phone = { requestId: 'r', sourceDevice: { id: 'phone', name: 'My phone' } } as any;
+    const mirrored = () => h.views.at(-1).sessions[0].connected;
+    try {
+      await capability.disconnectDevice?.('phone');
+      connected = true;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(mirrored()).toBe(true);
+
+      connected = false;
+      await capability.disconnectDevice?.('phone');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(mirrored()).toBe(false);
+      await capability.invoke('mirror.settings.get', {}, phone);
+      expect(mirrored()).toBe(true);
+    } finally { await capability.close?.(); }
+  });
+});

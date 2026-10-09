@@ -93,6 +93,14 @@ export class CompanionMirrorService {
     this.changed();
   }
 
+  /** Any Companion request proves the phone's mirror session is reachable again. */
+  reconnect(deviceId: string): void {
+    const entry = this.entries.get(deviceId);
+    if (!entry || entry.view.connected) return;
+    entry.view.connected = true;
+    this.changed();
+  }
+
   disconnect(deviceId: string): void {
     const entry = this.entries.get(deviceId);
     if (entry) { entry.view.connected = false; entry.view.pending = false; }

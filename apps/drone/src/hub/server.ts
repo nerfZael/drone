@@ -4430,7 +4430,9 @@ async function startDroneHubApiServerWithLifecycle(
     deviceMesh.broadcastCapabilityEvent('companion', event, payload, operation, deviceId ? [deviceId] : undefined));
   const companionWss = createCompanionWebSocketServer(companionRuntime, companionMirrors);
   deviceMesh.registerCapability(
-    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces, companionMirrors, createDictatedCompanionNote),
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces, companionMirrors, createDictatedCompanionNote, {
+      isDeviceConnected: deviceMesh.isDeviceConnected,
+    }),
   );
   registerBackgroundResource('Companion runtime', () => companionRuntime.close());
   registerBackgroundResource('Companion mirrors', async () => companionMirrors.close());

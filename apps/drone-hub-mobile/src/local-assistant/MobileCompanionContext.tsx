@@ -48,6 +48,8 @@ export type MobileCompanionWorkspaceTarget = {
   targetDeviceId: string;
   targetName: string;
   reachable: boolean;
+  /** The route dropped and is coming back; a running Companion conversation survives it. */
+  reconnecting?: boolean;
   getAppContext(): Record<string, unknown>;
   readComposer(): CompanionTextSnapshot;
   applyComposer(
@@ -381,12 +383,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (
       !activeTarget ||
       activeTarget.targetDeviceId !== activeTargetDeviceId ||
-      !activeTarget.reachable ||
+      (!activeTarget.reachable && !activeTarget.reconnecting) ||
       !hasOperations
     ) {
       void close();
     }
-  }, [close, hasOperations, proposalExecuting, targetRevision, target?.targetDeviceId, target?.reachable]);
+  }, [close, hasOperations, proposalExecuting, targetRevision, target?.targetDeviceId, target?.reachable, target?.reconnecting]);
 
   const run = React.useCallback(
     async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveScope?: MobileLiveScope) => {

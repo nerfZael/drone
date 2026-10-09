@@ -30,6 +30,7 @@ export function useMobileCompanionWorkspaceTarget({
   targetDeviceId,
   targetName,
   targetReachable,
+  targetReconnecting = false,
   phoneTarget,
   drones,
   selectedDrone,
@@ -47,6 +48,7 @@ export function useMobileCompanionWorkspaceTarget({
   targetDeviceId: string;
   targetName: string;
   targetReachable: boolean;
+  targetReconnecting?: boolean;
   phoneTarget: boolean;
   drones: MobileDroneSummary[];
   selectedDrone: MobileDroneSummary | null;
@@ -460,6 +462,7 @@ export function useMobileCompanionWorkspaceTarget({
       targetDeviceId,
       targetName,
       reachable: targetReachable,
+      reconnecting: targetReconnecting,
       getAppContext: () => implementationRef.current!.getAppContext(),
       readComposer: () => implementationRef.current!.readComposer(),
       applyComposer: (...args) => implementationRef.current!.applyComposer(...args),
@@ -470,7 +473,7 @@ export function useMobileCompanionWorkspaceTarget({
       resolveDroneName: (droneId) => implementationRef.current!.resolveDroneName?.(droneId) ?? null,
     };
     return companion.registerWorkspaceTarget(target);
-  }, [companion.registerWorkspaceTarget, targetDeviceId, targetName, targetReachable]);
+  }, [companion.registerWorkspaceTarget, targetDeviceId, targetName, targetReachable, targetReconnecting]);
 
   return highlightedDroneIds;
 }

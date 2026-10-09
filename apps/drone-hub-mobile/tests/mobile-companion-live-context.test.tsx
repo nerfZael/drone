@@ -99,6 +99,9 @@ async function harness(settingsOnly = false, executeProposal: MobileCompanionWor
   return { context: () => context, settings: () => settings, changeWorkspace: () => { workspace = 'second'; },
     changeView: (nextChat: string, nextPane: string, path: string | null) => { chat = nextChat; pane = nextPane; openFile = path ? { path } : null; },
     switchHub: () => { target.targetDeviceId = 'other-hub'; }, composerWrites: () => composerWrites,
+    async setConnection(reachable: boolean, reconnecting: boolean) {
+      await act(async () => { context.registerWorkspaceTarget({ ...target, reachable, reconnecting }); });
+    },
     async refresh() { await act(async () => { root.update(<MobileCompanionProvider><Capture /></MobileCompanionProvider>); }); },
     async cleanup() {
       await act(async () => root.unmount());
@@ -131,6 +134,25 @@ test('finishing paused Companion dictation transcribes and submits the recording
   } finally {
     voice.session = previousSession;
     voice.stopRecordingForTranscript = previousStop;
+    await h.cleanup();
+  }
+});
+
+test('a brief Hub reconnect keeps a working Companion open; going offline closes it', async () => {
+  const h = await harness();
+  try {
+    let result: Awaited<ReturnType<ReturnType<typeof h.context>['submitText']>> | undefined;
+    await act(async () => { result = await h.context().submitText('Summarize the agent chat'); });
+    expect(result).toEqual({ ok: true });
+    expect(h.context().overlayOpen).toBe(true);
+    await h.setConnection(false, true);
+    expect(h.context().overlayOpen).toBe(true);
+    expect(calls.some((call) => call.operation === 'run.cancel')).toBe(false);
+    await h.setConnection(true, false);
+    expect(h.context().overlayOpen).toBe(true);
+    await h.setConnection(false, false);
+    expect(h.context().overlayOpen).toBe(false);
+  } finally {
     await h.cleanup();
   }
 });
