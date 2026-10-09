@@ -1732,11 +1732,12 @@ export function DronesScreen({
     options: {
       selectCreatedDrone?: boolean;
       onCreated?: (created: { droneId: string; droneName: string }) => void;
+      onError?: (message: string) => void;
     } = {},
   ): Promise<boolean> => {
     const selectCreatedDrone = options.selectCreatedDrone !== false;
     let created = false;
-    await run(`create-${payload.runtime}`, async () => {
+    const createTask = async () => {
       const destinationId = targetId;
       const navigationVersion = openDroneVersion.current;
       const localTarget = destinationId === mesh.identity?.id;
@@ -1890,6 +1891,15 @@ export function DronesScreen({
       ).catch(() => undefined);
       if (targetIdRef.current !== destinationId) return;
       void loadDrones(true);
+    };
+    await run(`create-${payload.runtime}`, async () => {
+      try {
+        await createTask();
+      } catch (error: any) {
+        // run() only shows the error on this screen; callers such as the Companion need it too.
+        options.onError?.(error?.message ?? String(error));
+        throw error;
+      }
     });
     if (created && payload.draft !== true) newDroneDraftContentRef.current = null;
     return created;
@@ -2683,12 +2693,17 @@ export function DronesScreen({
     },
     createDrone: async (payload, preferences) => {
       let created: { droneId: string; droneName: string } | null = null;
+      let failure = '';
       const ok = await createDrone(payload, preferences, [], {
         selectCreatedDrone: false,
         onCreated: (result) => {
           created = result;
         },
+        onError: (message) => {
+          failure = message;
+        },
       });
+      if (failure) throw new Error(failure);
       return ok ? created : null;
     },
     requestDroneControl: async (operation, payload) =>

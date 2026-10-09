@@ -337,7 +337,9 @@ export function useMobileCompanionWorkspaceTarget({
             seedAgent: { kind: 'native' },
           });
           const created = await createDrone(payload, preferences);
-          if (!created?.droneId) throw new Error('DRONE_NOT_CREATED');
+          if (!created?.droneId) {
+            throw new Error('The target accepted the create request but returned no drone id.');
+          }
           return created;
         },
         cloneDrone: async (operation) => {

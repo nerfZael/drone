@@ -3381,7 +3381,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             });
             if (!ok && creationError) throw new Error(creationError);
-            if (!ok || !created) throw new Error('DRONE_NOT_CREATED');
+            if (!ok || !created) throw new Error('Drone creation finished without reporting a drone id.');
             return created;
           },
           cloneDrone: async (operation) => {
