@@ -3,6 +3,13 @@ import * as Crypto from 'expo-crypto';
 import type { CompanionMirrorCommand, CompanionMirrorSnapshot } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
 
+// Streaming captions change the snapshot on every word. Keep the desktop current without spending
+// the phone's mesh request allowance, which proposal execution and drone controls share.
+const MIRROR_PUBLISH_MIN_INTERVAL_MS = 1_000;
+const MIRROR_SETTINGS_CHECK_MS = 5_000;
+// A Hub restart forgets the mirror without failing a publish; resend unchanged state this often.
+const MIRROR_RESYNC_MS = 60_000;
+
 type Input = {
   deviceId: string;
   read(): CompanionMirrorSnapshot;
@@ -25,6 +32,7 @@ export function useMobileCompanionMirror(input: Input): void {
     let publishing = false;
     let dirty = false;
     let lastSent = '';
+    let lastPublishAt = 0;
     let scheduled: (() => void) | undefined;
     let cancelRetry: (() => void) | undefined;
     const clock = input.schedule ?? ((callback: () => void, delayMs: number) => {
@@ -39,6 +47,7 @@ export function useMobileCompanionMirror(input: Input): void {
       const serialized = JSON.stringify(snapshot);
       if (!force && serialized === lastSent) return;
       publishing = true;
+      lastPublishAt = Date.now();
       try {
         const result = await send('mirror.publish', { sessionId, sequence: ++sequence, snapshot });
         if (typeof result?.enabled === 'boolean') enabled = result.enabled;
@@ -52,14 +61,17 @@ export function useMobileCompanionMirror(input: Input): void {
     };
     const schedule = () => {
       if (scheduled || disposed) return;
-      scheduled = clock(() => { scheduled = undefined; void publish(); }, 150);
+      const delay = Math.max(150, MIRROR_PUBLISH_MIN_INTERVAL_MS - (Date.now() - lastPublishAt));
+      scheduled = clock(() => { scheduled = undefined; void publish(); }, delay);
     };
     const load = async () => {
       try {
         const settings = await send('mirror.settings.get', {});
         if (disposed) return;
+        const wasEnabled = enabled;
         enabled = settings?.enabled === true;
-        if (enabled) await publish(true);
+        // An unchanged snapshot is skipped; a failed publish cleared lastSent, so it is resent here.
+        if (enabled) await publish(!wasEnabled || Date.now() - lastPublishAt >= MIRROR_RESYNC_MS);
       } catch { /* A reconnect retries discovery without interrupting voice. */ }
     };
     const unsubscribeSettings = subscribe('companion', 'mirror.settings.changed', (event) => {
@@ -86,7 +98,7 @@ export function useMobileCompanionMirror(input: Input): void {
     publishRef.current = schedule;
     void load();
     // Also recover a dropped publish or settings event when the mesh reconnects.
-    const retry = () => { cancelRetry = clock(() => { void load(); if (!disposed) retry(); }, 5_000); };
+    const retry = () => { cancelRetry = clock(() => { void load(); if (!disposed) retry(); }, MIRROR_SETTINGS_CHECK_MS); };
     retry();
     return () => {
       disposed = true; publishRef.current = null;

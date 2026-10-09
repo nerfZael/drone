@@ -49,7 +49,7 @@ async function harness(
         {
           capability: 'companion',
           version: 1,
-          operations: ['live.event', 'live.ping', 'live.close'],
+          operations: ['live.event', 'live.ping', 'live.close', 'mirror.publish'],
         },
       ],
       endpoints: [],
@@ -160,5 +160,18 @@ test('non-audio Live events retain the control limit, and audio still requires p
       ok: false,
       error: { code: 'PERMISSION_DENIED' },
     });
+  });
+});
+
+test('mirror publishes have their own allowance and never starve Companion controls', async () => {
+  await harness(async ({ send }) => {
+    for (let i = 0; i < 240; i++) {
+      expect(await send('mirror.publish', { sessionId: 'mirror', sequence: i })).toMatchObject({ ok: true });
+    }
+    expect(await send('mirror.publish', { sessionId: 'mirror', sequence: 240 })).toMatchObject({
+      ok: false,
+      error: { code: 'RATE_LIMITED' },
+    });
+    expect(await send('live.ping')).toMatchObject({ ok: true });
   });
 });

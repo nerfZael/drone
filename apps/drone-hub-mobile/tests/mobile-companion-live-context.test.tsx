@@ -432,6 +432,8 @@ async function proposalTool(request: any, callId: string, revision: string, name
   });
 }
 
+// Mirror publishes are spaced at least one second apart while the snapshot keeps changing.
+const MIRROR_PUBLISH_SETTLE_MS = 1_100;
 for (const mode of ['live', 'normal'] as const) test(`${mode} desktop mirror approvals validate the current phone revision and execute only once`, async () => {
   let executions = 0;
   const executedTitles: string[] = [];
@@ -468,7 +470,7 @@ for (const mode of ['live', 'normal'] as const) test(`${mode} desktop mirror app
     });
     await act(async () => { emitRun(request, { type: 'reply', reply: 'Ready' }); emitRun(request, { type: 'status', status: 'completed' }); });
     await reply;
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MIRROR_PUBLISH_SETTLE_MS)); });
     let publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
     expect(publication.snapshot.proposal.operations[0].name).toBe('Review');
     if (mode === 'normal') expect(publication.snapshot.captions).toBe('Create a group');
@@ -487,14 +489,14 @@ for (const mode of ['live', 'normal'] as const) test(`${mode} desktop mirror app
     await act(async () => { click('selection-stale', publication.snapshot.proposalRevision); await tick(); });
     expect(executions).toBe(0);
     expect(calls.find((call) => call.operation === 'mirror.result' && call.payload.commandId === 'selection-stale')!.payload.ok).toBe(false);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MIRROR_PUBLISH_SETTLE_MS)); });
     publication = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload;
     const revision = publication.snapshot.proposalRevision;
     await act(async () => { click('valid', revision); click('duplicate', revision); click('valid', revision); await tick(); });
     expect(executions).toBe(1);
     expect(h.context().proposalExecuting).toBe(true);
     await act(async () => { finish(); await tick(); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MIRROR_PUBLISH_SETTLE_MS)); });
     const completed = calls.filter((call) => call.operation === 'mirror.publish').at(-1)!.payload.snapshot;
     expect(executedTitles).toEqual(['Second']);
     expect(completed.proposal.title).toBe('Create group');

@@ -64,6 +64,11 @@ const MESH_MAX_BUFFERED_BYTES = 240 * 1024 * 2;
 // Android captures about 10 chunks/sec; iOS can exceed 20. Leave headroom for
 // startup buffering without letting microphone traffic consume control requests.
 const LIVE_AUDIO_REQUESTS_PER_MINUTE = 3_000;
+// The phone mirrors its Companion UI while text streams. Coalesced publishes get their own
+// allowance so a long voice session can never starve proposal execution or drone controls.
+const MIRROR_PUBLISHES_PER_MINUTE = 240;
+const CONTROL_REQUESTS_PER_MINUTE = 120;
+const RATE_LIMIT_LOG_INTERVAL_MS = 60_000;
 
 function send(ws: DeviceHttpChannel, payload: unknown): boolean {
   try {
@@ -136,6 +141,10 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
   );
 }
 
+function isMirrorPublishRequest(request: SignedCapabilityRequest): boolean {
+  return request.capability === 'companion' && request.operation === 'mirror.publish';
+}
+
 function isLiveAudioRequest(request: SignedCapabilityRequest): boolean {
   return (
     request.capability === 'companion' &&
@@ -182,9 +191,11 @@ export class DeviceMeshRouter {
   private readonly liveAudio = new MeshLiveAudioRouter((summary) => {
     console.info('[companion-live-audio]', JSON.stringify(summary));
   });
-  private readonly requestTimes = new Map<string, number[]>();
-  private readonly bulkRequestTimes = new Map<string, number[]>();
-  private readonly liveAudioRequestTimes = new Map<string, number[]>();
+  private readonly requestTimes = new Map<string, { at: number; operation: string }[]>();
+  private readonly bulkRequestTimes = new Map<string, { at: number; operation: string }[]>();
+  private readonly liveAudioRequestTimes = new Map<string, { at: number; operation: string }[]>();
+  private readonly mirrorRequestTimes = new Map<string, { at: number; operation: string }[]>();
+  private readonly rateLimitLoggedAt = new Map<string, number>();
   private readonly capabilityEventDirectPeerTimes = new Map<string, number[]>();
   private readonly capabilityEventRelaySourceTimes = new Map<string, number[]>();
   private readonly capabilityEventInvalidRelayTimes = new Map<string, number[]>();
@@ -832,20 +843,26 @@ export class DeviceMeshRouter {
     }
     const bulkTransfer = isBulkTransferRequest(request);
     const liveAudio = isLiveAudioRequest(request);
-    const rateLimit = liveAudio ? LIVE_AUDIO_REQUESTS_PER_MINUTE : bulkTransfer ? 600 : 120;
-    const rateMap = liveAudio
-      ? this.liveAudioRequestTimes
-      : bulkTransfer ? this.bulkRequestTimes : this.requestTimes;
+    const mirrorPublish = isMirrorPublishRequest(request);
+    const [rateBucket, rateLimit, rateMap] = liveAudio
+      ? ['live-audio', LIVE_AUDIO_REQUESTS_PER_MINUTE, this.liveAudioRequestTimes] as const
+      : bulkTransfer
+        ? ['bulk', 600, this.bulkRequestTimes] as const
+        : mirrorPublish
+          ? ['mirror', MIRROR_PUBLISHES_PER_MINUTE, this.mirrorRequestTimes] as const
+          : ['control', CONTROL_REQUESTS_PER_MINUTE, this.requestTimes] as const;
     const rateKey = connection.peerDeviceId;
-    const recent = (rateMap.get(rateKey) ?? []).filter((time) => time > Date.now() - 60_000);
+    const now = Date.now();
+    const recent = (rateMap.get(rateKey) ?? []).filter((entry) => entry.at > now - 60_000);
     if (recent.length >= rateLimit) {
+      this.logRateLimit(rateKey, rateBucket, rateLimit, recent, request, now);
       send(
         connection.ws,
         this.errorResponse(request, 'RATE_LIMITED', 'too many mesh requests from this peer'),
       );
       return;
     }
-    recent.push(Date.now());
+    recent.push({ at: now, operation: `${request.capability}.${request.operation}` });
     rateMap.set(rateKey, recent);
     const state = await this.store.read();
     if (request.targetDeviceId !== state.selfDeviceId) {
@@ -1334,6 +1351,30 @@ export class DeviceMeshRouter {
     errorCode: string | null = null,
   ): Promise<void> {
     await this.audit.record(request, outcome, errorCode).catch(() => undefined);
+  }
+
+  /** Name the traffic that exhausted a peer's allowance, at most once per peer and bucket per minute. */
+  private logRateLimit(
+    peerDeviceId: string,
+    bucket: string,
+    limit: number,
+    recent: { at: number; operation: string }[],
+    rejected: SignedCapabilityRequest,
+    now: number,
+  ): void {
+    const key = `${peerDeviceId}:${bucket}`;
+    if (now - (this.rateLimitLoggedAt.get(key) ?? 0) < RATE_LIMIT_LOG_INTERVAL_MS) return;
+    this.rateLimitLoggedAt.set(key, now);
+    const counts: Record<string, number> = {};
+    for (const entry of recent) counts[entry.operation] = (counts[entry.operation] ?? 0) + 1;
+    console.warn('[device-mesh-rate-limit]', JSON.stringify({
+      peerDeviceId,
+      sourceDeviceId: rejected.sourceDeviceId,
+      bucket,
+      limitPerMinute: limit,
+      rejected: `${rejected.capability}.${rejected.operation}`,
+      lastMinute: Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1])),
+    }));
   }
 
   private errorResponse(
