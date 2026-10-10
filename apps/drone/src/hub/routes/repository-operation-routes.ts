@@ -71,6 +71,7 @@ type RepositoryDependencyName =
   | 'parseShaFromText'
   | 'pullPreviewHostMergeCache'
   | 'reconcilePendingHostMirrorApply'
+  | 'repoWorktrees'
   | 'repoBaseRefMatchesCurrentHostBranch'
   | 'repoChangesScanCache'
   | 'resolveDroneOrRespond'

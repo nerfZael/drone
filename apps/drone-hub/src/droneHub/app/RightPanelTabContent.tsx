@@ -253,8 +253,9 @@ type RightPanelTabContentProps = {
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (fromTabId: string, toTabId: string) => void;
   onOpenPullRequest: (paneKey: PaneKey, pullRequest: RepoPullRequestSummary) => void;
-  onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string) => void;
-  onOpenChangesFileInEditor: (repoRelativePath: string) => void;
+  /** `repoRoot` is given for a file in another worktree than the drone's main checkout. */
+  onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string, repoRoot?: string) => void;
+  onOpenChangesFileInEditor: (repoRelativePath: string, repoRoot?: string) => void;
   onShowChanges: () => void;
   /** Chooses which workspace the Editor's File Explorer shows. */
   explorerSwitcher?: React.ReactNode;
@@ -542,10 +543,11 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               repoUnavailableReason={repoUnavailableReason}
               fixedContextMode="branch"
               acceptHistoricalRunChanges
+              chatName={chatName}
               disabled={disabled}
               hubPhase={drone.hubPhase}
               hubMessage={drone.hubMessage}
-              onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+              onRevealFileInFiles={(repoRelativePath, repoRoot) => onRevealChangesFileInFiles(paneKey, repoRelativePath, repoRoot)}
               onOpenFileInEditor={onOpenChangesFileInEditor}
               onShowChanges={onShowChanges}
             />

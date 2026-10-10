@@ -55,6 +55,7 @@ import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { registerAgentChatWorkspaceTools } from './mcp-workspace-tools';
+import { registerCurrentWorktreeTool } from './mcp-worktree-tools';
 import type { WorkspaceToolDefinition } from './assistant/workspace-tool-definitions';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import { createHttpHubServices, type HubServices } from './application/hub-services';
@@ -2577,6 +2578,17 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         return { droneId: principal.droneId, chatName: principal.chatName };
       },
       definitions: context.workspaceToolDefinitions,
+      requestJson,
+    });
+  }
+
+  // Any chat can say which worktree it works in; the Changes explorer can follow it there.
+  if (workspaceChat) {
+    registerCurrentWorktreeTool(server, {
+      chat: () => {
+        const principal = chatPrincipal(context) ?? workspaceChat;
+        return { droneId: principal.droneId, chatName: principal.chatName };
+      },
       requestJson,
     });
   }

@@ -110,6 +110,8 @@ import {
 } from './helpers';
 import { changesQueryKeys, useChangesQueries } from './useChangesQueries';
 import { useRepoLiveUpdates } from './useRepoLiveUpdates';
+import { useChangesWorktree } from './changes-worktree';
+import { ChangesWorktreeSwitcher } from './ChangesWorktreeSwitcher';
 import {
   readViewedChangesStore,
   setEntryViewed,
@@ -485,10 +487,22 @@ export type DroneChangesDockProps = {
   disabled: boolean;
   hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
-  onRevealFileInFiles: (repoRelativePath: string) => void;
-  onOpenFileInEditor: (repoRelativePath: string) => void;
+  /** `repoRoot` is given when the file is in another worktree than the drone's main checkout. */
+  onRevealFileInFiles: (repoRelativePath: string, repoRoot?: string) => void;
+  onOpenFileInEditor: (repoRelativePath: string, repoRoot?: string) => void;
   /** Brings the Changes view to the front when a file is picked in its separate explorer. */
   onShowChanges?: () => void;
+  /**
+   * The chat the explorer is shown with. Given, the explorer can show other worktrees of the repository: the one this
+   * chat reported, or one picked by hand.
+   */
+  chatName?: string | null;
+};
+
+type LiveDroneChangesDockProps = DroneChangesDockProps & {
+  /** The worktree shown instead of the main checkout. */
+  worktree: string | null;
+  worktreeSwitcher: React.ReactNode;
 };
 
 const MemoizedHistoricalChangesView = React.memo(AgentRunHistoricalChangesView);
@@ -501,8 +515,14 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
   React.useLayoutEffect(() => {
     actionsRef.current = props;
   });
-  const onOpenFileInEditor = React.useCallback((path: string) => actionsRef.current.onOpenFileInEditor(path), []);
-  const onRevealFileInFiles = React.useCallback((path: string) => actionsRef.current.onRevealFileInFiles(path), []);
+  const onOpenFileInEditor = React.useCallback(
+    (path: string, repoRoot?: string) => actionsRef.current.onOpenFileInEditor(path, repoRoot),
+    [],
+  );
+  const onRevealFileInFiles = React.useCallback(
+    (path: string, repoRoot?: string) => actionsRef.current.onRevealFileInFiles(path, repoRoot),
+    [],
+  );
   const onShowChanges = React.useCallback(() => actionsRef.current.onShowChanges?.(), []);
   const onReviewBack = React.useCallback(() => actionsRef.current.onReviewBack?.(), []);
   const [historicalRun, setHistoricalRun] = React.useState<ChangesOpenAgentRunDetail | null>(() =>
@@ -519,6 +539,27 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
     window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openHistoricalRun);
     return () => window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openHistoricalRun);
   }, [acceptHistoricalRunChanges, droneId]);
+
+  const worktreeChoice = useChangesWorktree({
+    droneId,
+    chatName: props.chatName ?? null,
+    enabled: props.chatName !== undefined && props.repoAttached && !props.disabled && !props.reviewOverride,
+  });
+  const worktreeSwitcher = React.useMemo(
+    () =>
+      worktreeChoice.worktrees.length > 1 ? (
+        <ChangesWorktreeSwitcher
+          droneId={droneId}
+          chatName={props.chatName ?? null}
+          mode={worktreeChoice.mode}
+          source={worktreeChoice.source}
+          path={worktreeChoice.path}
+          worktrees={worktreeChoice.worktrees}
+          chatWorktree={worktreeChoice.chatWorktree}
+        />
+      ) : null,
+    [droneId, props.chatName, worktreeChoice.chatWorktree, worktreeChoice.mode, worktreeChoice.path, worktreeChoice.source, worktreeChoice.worktrees],
+  );
 
   if (historicalRun) {
     return (
@@ -537,7 +578,11 @@ export function DroneChangesDock(props: DroneChangesDockProps) {
 
   return (
     <LiveDroneChangesDock
+      // Another worktree is another repository state: start its view fresh.
+      key={worktreeChoice.path ?? ''}
       {...props}
+      worktree={worktreeChoice.path}
+      worktreeSwitcher={worktreeSwitcher}
       onOpenFileInEditor={onOpenFileInEditor}
       onRevealFileInFiles={onRevealFileInFiles}
       onShowChanges={onShowChanges}
@@ -560,9 +605,20 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   disabled,
   hubPhase,
   hubMessage,
-  onOpenFileInEditor,
+  onOpenFileInEditor: onOpenRepoFileInEditor,
   onShowChanges,
-}: DroneChangesDockProps) {
+  worktree,
+  worktreeSwitcher,
+}: LiveDroneChangesDockProps) {
+  // The repository routes read the worktree when asked for it; the main checkout needs no parameter.
+  const withWorktree = React.useCallback(
+    (url: string) => (worktree ? `${url}${url.includes('?') ? '&' : '?'}worktree=${encodeURIComponent(worktree)}` : url),
+    [worktree],
+  );
+  const onOpenFileInEditor = React.useCallback(
+    (path: string) => onOpenRepoFileInEditor(path, worktree ?? undefined),
+    [onOpenRepoFileInEditor, worktree],
+  );
   const explorerHost = React.useContext(ChangesExplorerContext);
   const separateExplorer = explorerHost !== undefined;
   const confirm = useAppConfirmDialog();
@@ -604,7 +660,8 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   const [branchChangesMode, setBranchChangesMode] = React.useState<BranchChangesMode>(() =>
     workspaceSnapshot?.branchChangesMode ?? (readChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY) === 'pull-preview' ? 'pull-preview' : 'working-tree'),
   );
-  const dataMode: ChangesDataMode = contextMode === 'pull-request' ? 'pull-request' : branchChangesMode;
+  // Applying to the host compares the drone's main checkout with it; another worktree only has its working tree.
+  const dataMode: ChangesDataMode = contextMode === 'pull-request' ? 'pull-request' : worktree ? 'working-tree' : branchChangesMode;
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
     if (initialViewMode) return initialViewMode;
@@ -694,10 +751,11 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   const explorerBadgeHeightPx = Math.round(15 * explorerZoom * 10) / 10;
 
   const queryClient = useQueryClient();
+  // The Hub watches the main checkout only; another worktree is polled.
   const repoWatched = useRepoLiveUpdates(
     droneId,
     repoPath,
-    repoAttached && !disabled && !reviewOverride && contextMode === 'branch',
+    repoAttached && !disabled && !reviewOverride && contextMode === 'branch' && !worktree,
   );
   const {
     changes,
@@ -733,6 +791,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
     selectedCommitSha,
     externalPullRequestData: Boolean(reviewOverride),
     repoWatched,
+    worktree,
   });
 
   React.useEffect(() => {
@@ -1558,9 +1617,9 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       if (existing) return existing;
 
       const request = requestJson<Extract<RepoSourcePayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(droneId)}/repo/source?path=${encodeURIComponent(filePath)}&source=${source}${
+        withWorktree(`/api/drones/${encodeURIComponent(droneId)}/repo/source?path=${encodeURIComponent(filePath)}&source=${source}${
           source === 'sha' && typeof sha === 'string' && sha.trim() ? `&sha=${encodeURIComponent(sha.trim().toLowerCase())}` : ''
-        }`,
+        }`),
       )
         .then((data) => {
           const next = data.exists ? String(data.source ?? '') : '';
@@ -1600,7 +1659,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       }
       try {
         const data = await requestJson<Extract<RepoDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=3`,
+          withWorktree(`/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=3`),
         );
         if (!mountedRef.current) return;
         const nextState: DiffState = {
@@ -1794,7 +1853,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
         const url =
           mode === 'pull-request' && pullRequestNumber
             ? `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullRequestNumber}/commits/${encodeURIComponent(normalizedSha)}/diff?path=${encodeURIComponent(filePath)}&contextLines=3`
-            : `/api/drones/${encodeURIComponent(droneId)}/repo/commits/${encodeURIComponent(normalizedSha)}/diff?path=${encodeURIComponent(filePath)}&contextLines=3`;
+            : withWorktree(`/api/drones/${encodeURIComponent(droneId)}/repo/commits/${encodeURIComponent(normalizedSha)}/diff?path=${encodeURIComponent(filePath)}&contextLines=3`);
         const data = await requestJson<Extract<RepoCommitDiffPayload, { ok: true }>>(url);
         if (!mountedRef.current) return;
         const nextState: DiffState = {
@@ -2210,7 +2269,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       setWorkingTreeActionBusy(busyKey);
       setWorkingTreeActionError(null);
       try {
-        await requestJson(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`, {
+        await requestJson(withWorktree(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`), {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ path: target.path, paths: target.paths, action }),
@@ -3145,7 +3204,8 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
           className="!min-h-8 !gap-1.5 !px-1.5 !py-0.5"
         >
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
-          {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
+          {repoAttached && !disabled && contextMode === 'branch' ? worktreeSwitcher : null}
+          {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' && !worktree ? (
             <UiToolbarSegmentedControl
               label="Branch change source"
               value={branchChangesMode}

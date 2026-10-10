@@ -7,6 +7,7 @@ import type { RepoPullChangeEntry } from './drone-repo';
 import { normalizeContainerPath } from './hub-format';
 import { LanguageServiceError } from './language-service';
 import { readJsonBody, sendJson as json } from './hub-http';
+import { droneEntryForWorktree, type RepoWorktrees } from './repo-worktrees';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
 import type { RepositoryRouteDependencies } from './routes/repository-operation-routes';
@@ -17,6 +18,15 @@ export class RepositoryOperationService {
   constructor(deps: RepositoryRouteDependencies) {
     this.handle = createRepositoryOperationServiceHandler(deps);
   }
+}
+
+/** GET changes/source/diff/commits/commits/:sha/(changes|diff) and POST changes/action. */
+function readsWorktree(method: string, parts: string[]): boolean {
+  if (parts[0] !== 'api' || parts[1] !== 'drones' || parts[3] !== 'repo') return false;
+  if (method === 'POST') return parts.length === 6 && parts[4] === 'changes' && parts[5] === 'action';
+  if (method !== 'GET') return false;
+  if (parts.length === 5) return ['changes', 'source', 'diff', 'commits'].includes(parts[4]);
+  return parts.length === 7 && parts[4] === 'commits' && (parts[6] === 'changes' || parts[6] === 'diff');
 }
 
 function createRepositoryOperationServiceHandler(
@@ -94,7 +104,7 @@ function createRepositoryOperationServiceHandler(
     reconcilePendingHostMirrorApply,
     repoBaseRefMatchesCurrentHostBranch,
     repoChangesScanCache,
-    resolveDroneOrRespond,
+    resolveDroneOrRespond: resolveDroneEntryOrRespond,
     resolveLanguageDefinition,
     resolveLanguageReferences,
     createDroneDaemonGitRunner,
@@ -109,6 +119,7 @@ function createRepositoryOperationServiceHandler(
     withLockedDroneContainer,
     withLockedDroneContainers,
   } = deps;
+  const repoWorktrees: Pick<RepoWorktrees, 'require'> | undefined = deps.repoWorktrees;
   const containerNameForDrone = (drone: any, fallback: string) =>
     String(drone?.containerName ?? drone?.name ?? fallback).trim() || fallback;
   const daemonError = (error: any) =>
@@ -154,6 +165,24 @@ function createRepositoryOperationServiceHandler(
     };
   };
   return async ({ req, res, url: u, method, parts }) => {
+    // The working tree and commit routes can read another worktree of the drone's repository (?worktree=<path>),
+    // but only one git lists for it. Every other route ignores the parameter.
+    const requestedWorktree =
+      repoWorktrees && readsWorktree(method, parts) ? String(u.searchParams.get('worktree') ?? '').trim() : '';
+    const resolveDroneOrRespond = async (response: ServerResponse, droneRef: string) => {
+      const resolved = await resolveDroneEntryOrRespond(response, droneRef);
+      if (!resolved || !requestedWorktree || !repoWorktrees) return resolved;
+      try {
+        const worktree = await repoWorktrees.require(resolved.id, resolved.drone, requestedWorktree);
+        if (worktree.main) return resolved;
+        const runtime = droneRuntime(resolved.drone) === 'host' ? 'host' : 'container';
+        return { ...resolved, drone: droneEntryForWorktree(resolved.drone, runtime, worktree.path) };
+      } catch (error: any) {
+        const status = typeof error?.status === 'number' ? error.status : 409;
+        json(response, status, { ok: false, error: error?.message ?? String(error), code: 'worktree_unavailable' });
+        return null;
+      }
+    };
     const handled = await (async (): Promise<false | void> => {
       // GET /api/drones/:name/repo/changes
       // Returns repo status in a machine-friendly shape for source-control style UIs.

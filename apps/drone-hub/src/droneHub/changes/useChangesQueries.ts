@@ -35,6 +35,8 @@ type ChangesQueryOptions = {
   externalPullRequestData?: boolean;
   /** The Hub is watching the repository and reports its changes; see useRepoLiveUpdates. */
   repoWatched?: boolean;
+  /** Another worktree of the repository to read the working tree and commits of; pull requests stay the repo's. */
+  worktree?: string | null;
 };
 
 export const changesQueryKeys = {
@@ -68,13 +70,17 @@ export function useChangesQueries(options: ChangesQueryOptions) {
     selectedCommitSha,
     externalPullRequestData = false,
     repoWatched = false,
+    worktree = null,
   } = options;
   const available = repoAttached && !disabled;
   const encodedDroneId = encodeURIComponent(droneId);
+  const checkout = worktree ?? repoPath;
+  const inCheckout = (url: string) =>
+    worktree ? `${url}${url.includes('?') ? '&' : '?'}worktree=${encodeURIComponent(worktree)}` : url;
 
   const workingTree = useChangesResourceQuery<Successful<RepoChangesPayload>>({
-    queryKey: changesQueryKeys.workingTree(droneId, repoPath),
-    url: `/api/drones/${encodedDroneId}/repo/changes`,
+    queryKey: changesQueryKeys.workingTree(droneId, checkout),
+    url: inCheckout(`/api/drones/${encodedDroneId}/repo/changes`),
     enabled: available && primaryView === 'changes' && dataMode === 'working-tree',
     refetchInterval: repoWatched ? WORKING_TREE_WATCHED_POLL_INTERVAL_MS : WORKING_TREE_POLL_INTERVAL_MS,
     // Nothing is read while the window is in the background, so coming back always is.
@@ -96,8 +102,8 @@ export function useChangesQueries(options: ChangesQueryOptions) {
       Boolean(pullRequestNumber),
   });
   const branchCommits = useChangesResourceQuery<Successful<RepoCommitListPayload>>({
-    queryKey: changesQueryKeys.branchCommits(droneId, repoPath),
-    url: `/api/drones/${encodedDroneId}/repo/commits?limit=100`,
+    queryKey: changesQueryKeys.branchCommits(droneId, checkout),
+    url: inCheckout(`/api/drones/${encodedDroneId}/repo/commits?limit=100`),
     enabled: available && primaryView === 'commits' && contextMode === 'branch',
   });
   const pullRequestCommits = useChangesResourceQuery<Successful<RepoPullRequestCommitListPayload>>({
@@ -111,8 +117,8 @@ export function useChangesQueries(options: ChangesQueryOptions) {
       Boolean(pullRequestNumber),
   });
   const branchCommit = useChangesResourceQuery<Successful<RepoCommitChangesPayload>>({
-    queryKey: changesQueryKeys.branchCommit(droneId, repoPath, selectedCommitSha),
-    url: `/api/drones/${encodedDroneId}/repo/commits/${encodeURIComponent(selectedCommitSha ?? '')}/changes`,
+    queryKey: changesQueryKeys.branchCommit(droneId, checkout, selectedCommitSha),
+    url: inCheckout(`/api/drones/${encodedDroneId}/repo/commits/${encodeURIComponent(selectedCommitSha ?? '')}/changes`),
     enabled: available && primaryView === 'commits' && contextMode === 'branch' && Boolean(selectedCommitSha),
   });
   const pullRequestCommit = useChangesResourceQuery<Successful<RepoPullRequestCommitChangesPayload>>({

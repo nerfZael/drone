@@ -328,6 +328,8 @@ import { registerReflexRoutes } from './reflex/reflex-routes';
 import { registerEntityRoutes } from './entity/entity-routes';
 import { AgentChatWorkspaces } from './assistant/chat-agent-workspaces';
 import { registerChatWorkspaceRoutes } from './routes/chat-workspace-routes';
+import { registerRepoWorktreeRoutes } from './routes/repo-worktree-routes';
+import { RepoWorktrees, type DroneRepoGit } from './repo-worktrees';
 import { registerUserWorkspaceRoutes } from './routes/user-workspace-routes';
 import { userWorkspaces } from './user-workspaces';
 import { registerFolderWorkspace, resolveFolderWorkspace } from './folder-workspaces';
@@ -1768,6 +1770,28 @@ function droneRepoPathInContainer(drone: any): string {
   const raw = String(drone?.repo?.dest ?? '/work/repo').trim();
   return normalizeContainerPath(raw || '/work/repo');
 }
+
+/** Git for each drone's repository where it lives: on this machine for a host drone, through the daemon otherwise. */
+const repoWorktrees = new RepoWorktrees((drone): DroneRepoGit => {
+  if (droneRuntime(drone) === 'host') {
+    return {
+      runtime: 'host',
+      mainPath: async () => {
+        const repoPath = String(drone?.repoPath ?? '').trim();
+        if (!repoPath) throw Object.assign(new Error('drone host repo path is not configured'), { status: 400 });
+        return await gitTopLevel(repoPath);
+      },
+      run: async (cwd, args) => await runHostCommand('git', ['-C', cwd, ...args]),
+    };
+  }
+  const container = String(drone?.containerName ?? drone?.name ?? '').trim();
+  const runGit = createDroneDaemonGitRunner(drone);
+  return {
+    runtime: 'container',
+    mainPath: async () => droneRepoPathInContainer(drone),
+    run: async (cwd, args) => await runGit({ container, repoPathInContainer: cwd, args }),
+  };
+});
 
 export function buildHostSkillProjectionTargets(drone: any): SkillProjectionTarget[] {
   const repoAttached = isRepoAttachedDrone(drone);
@@ -5703,6 +5727,29 @@ async function startDroneHubApiServerWithLifecycle(
       },
     }),
   );
+  // Worktrees of a drone's repository: the Changes explorer can show one, and agent chats report the one they work in.
+  registerRepoWorktreeRoutes(apiRouter, {
+    worktrees: repoWorktrees,
+    resolveRepoDrone: async (ref) => {
+      const resolved = await resolveCanonicalDroneOrPendingForReadRef(ref);
+      if (!resolved) throw Object.assign(new Error(`unknown drone: ${ref}`), { status: 404 });
+      if (resolved.kind === 'pending') throw Object.assign(new Error(`drone "${ref}" is still starting`), { status: 409 });
+      if (!isRepoAttachedDrone(resolved.drone)) throw Object.assign(new Error('drone has no repo attached'), { status: 400 });
+      return { id: resolved.id, drone: resolved.drone, runtime: droneRuntime(resolved.drone) === 'host' ? 'host' : 'container' };
+    },
+    readChatWorktree: async (chat) => readChatMetadataFromStore(chat).chat?.currentWorktree,
+    writeChatWorktree: async (chat, worktree) => {
+      if (!readChatMetadataFromStore(chat).chat) throw Object.assign(new Error(`unknown chat: ${chat.chatName}`), { status: 404 });
+      await updateChatInStore({
+        ...chat,
+        update: (current: any) => {
+          const { currentWorktree: _previous, ...rest } = current ?? {};
+          return worktree ? { ...rest, currentWorktree: worktree } : rest;
+        },
+      });
+      await projectCanonicalChatToRegistry(chat.droneId, chat.chatName);
+    },
+  });
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();
@@ -6117,6 +6164,7 @@ async function startDroneHubApiServerWithLifecycle(
   const handleLocalCheckoutRoute = createLocalCheckoutRouteHandler(localCheckoutService);
 
   const handleRepositoryRoute = createRepositoryRouteHandler({
+    repoWorktrees,
     GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS,
     PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS,
     applyBranchMergeNoCommitToMainWorkingTree,

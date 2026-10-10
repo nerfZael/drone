@@ -4061,13 +4061,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
   }, [currentDrone?.id, openMarkdownFileReference]);
   const resolveDroneRepoFilePath = React.useCallback(
-    (drone: DroneSummary | null, repoRelativePathRaw: string): string | null => {
+    (drone: DroneSummary | null, repoRelativePathRaw: string, repoRoot?: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')
         .trim()
         .replace(/\\/g, '/')
         .replace(/^\/+/, '');
       if (!relativePath) return null;
-      const basePath = drone && drone.id === currentDrone?.id
+      // A file in another worktree (the Changes explorer can show one) is under that worktree, not the drone's checkout.
+      const basePath = repoRoot?.trim()
+        ? repoRoot.trim()
+        : drone && drone.id === currentDrone?.id
         ? String(defaultFsPathForCurrentDrone ?? '').trim() || droneHomePath(drone)
         : droneHomePath(drone);
       return normalizeContainerPathInput(`${basePath.replace(/\/+$/g, '')}/${relativePath}`);
@@ -4075,12 +4078,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [currentDrone, defaultFsPathForCurrentDrone],
   );
   const resolveCurrentDroneRepoFilePath = React.useCallback(
-    (repoRelativePath: string) => resolveDroneRepoFilePath(currentDrone, repoRelativePath),
+    (repoRelativePath: string, repoRoot?: string) => resolveDroneRepoFilePath(currentDrone, repoRelativePath, repoRoot),
     [currentDrone, resolveDroneRepoFilePath],
   );
   const openChangesFileInEditor = React.useCallback(
-    (repoRelativePath: string) => {
-      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
+    (repoRelativePath: string, repoRoot?: string) => {
+      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath, repoRoot);
       if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
       openFileInFilesPane({ path: containerPath, name });
@@ -4088,8 +4091,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [openFileInFilesPane, resolveCurrentDroneRepoFilePath],
   );
   const revealChangesFileInFiles = React.useCallback(
-    (_pane: PaneKey, repoRelativePath: string) => {
-      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
+    (_pane: PaneKey, repoRelativePath: string, repoRoot?: string) => {
+      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath, repoRoot);
       if (!containerPath) return;
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
@@ -5916,8 +5919,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onRemapOpenedEditorFilesForPathChange={remapOpenedFileTabsForPathChange}
           onActivateOpenedEditorFileTab={activateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
-          onRevealChangesFileInFiles={isSelectedDrone ? revealChangesFileInFiles : (_pane, repoRelativePath) => {
-            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath);
+          onRevealChangesFileInFiles={isSelectedDrone ? revealChangesFileInFiles : (_pane, repoRelativePath, repoRoot) => {
+            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath, repoRoot);
             if (!containerPath) return;
             const slash = containerPath.lastIndexOf('/');
             setFsPathForDrone(drone, slash > 0 ? containerPath.slice(0, slash) : '/');
@@ -5925,8 +5928,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             showDroneWorkspace(drone.id);
             requestRightPanelTab('editor');
           }}
-          onOpenChangesFileInEditor={isSelectedDrone ? openChangesFileInEditor : (repoRelativePath) => {
-            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath);
+          onOpenChangesFileInEditor={isSelectedDrone ? openChangesFileInEditor : (repoRelativePath, repoRoot) => {
+            const containerPath = resolveDroneRepoFilePath(drone, repoRelativePath, repoRoot);
             if (!containerPath) return;
             openFileDictationTarget({ droneId: drone.id, path: containerPath, name: containerPath.split('/').filter(Boolean).pop() || containerPath });
           }}
