@@ -51,7 +51,7 @@ function ensureSource(): void {
     notifyConnected(false, true);
     return;
   }
-  source = new window.EventSource(`/api/desktop/events${window.droneHubDesktop?.showNotification ? '?notifications=1' : ''}`);
+  source = new window.EventSource(`/api/desktop/events${window.droneHubDesktop?.notificationDisplay ? '?notifications=1' : ''}`);
   source.addEventListener('connected', () => notifyConnected(true));
   for (const eventName of EVENT_NAMES) {
     source.addEventListener(eventName, (event) => {

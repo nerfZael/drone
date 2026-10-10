@@ -86,6 +86,8 @@ test('auto-dismiss uses visible time, pausing on hover/focus and resuming the re
 
 test('rejects untrusted main/card IPC and invalid durations; closes cards with the main window', () => {
   const f = fixture();
+  expect(f.handlers.get('drone-hub:notification-display')!(f.sender())).toBe('cards');
+  expect(f.handlers.get('drone-hub:notification-display')!({})).toBeNull();
   expect(() => f.handlers.get('drone-hub:notification-show')!({}, {})).toThrow('Untrusted');
   expect(() => f.show({ durationSeconds: -1 })).toThrow('duration');
   expect(() => f.show({ target: { droneId: 3 } })).toThrow('Invalid');
