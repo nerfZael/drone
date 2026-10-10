@@ -9,11 +9,12 @@ import {
 } from '../src/drones/mobile-html-preview-security';
 
 describe('mobile rendered HTML preview security', () => {
-  test('disables active WebView capabilities', () => {
+  test('runs page scripts but disables every other active WebView capability', () => {
     const androidPolicy = mobileHtmlPreviewWebViewPolicy('android');
     const iosPolicy = mobileHtmlPreviewWebViewPolicy('ios');
 
-    expect(androidPolicy.javaScriptEnabled).toBe(false);
+    expect(androidPolicy.javaScriptEnabled).toBe(true);
+    expect(iosPolicy.javaScriptEnabled).toBe(true);
     expect(androidPolicy.javaScriptCanOpenWindowsAutomatically).toBe(false);
     expect(androidPolicy.domStorageEnabled).toBe(false);
     expect(androidPolicy.cacheEnabled).toBe(false);
@@ -36,14 +37,15 @@ describe('mobile rendered HTML preview security', () => {
     expect(iosPolicy.dataDetectorTypes).toEqual(['none']);
   });
 
-  test('blocks script, network, form, object, and top navigation capabilities', () => {
+  test('allows inline scripts while blocking network, form, object, and navigation capabilities', () => {
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("default-src 'none'");
-    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'none'");
+    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline'");
+    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain('unsafe-eval');
+    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain('img-src data: blob:;');
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("connect-src 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("object-src 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("form-action 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("navigate-to 'none'");
-    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain("script-src 'unsafe-inline'");
   });
 
   test('places the security policy before user-authored markup', () => {

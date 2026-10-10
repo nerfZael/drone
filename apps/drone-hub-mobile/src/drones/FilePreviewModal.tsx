@@ -65,6 +65,7 @@ import {
   type MobileHtmlPreviewMode,
 } from './file-preview-model';
 import { RenderedHtmlPreview } from './RenderedHtmlPreview';
+import type { MobileHtmlImageReader } from './mobile-html-preview-images';
 import { MobileFileExplorer } from './MobileFileExplorer';
 import { ZoomableImageStage } from './ZoomableImageStage';
 import {
@@ -267,6 +268,7 @@ export function FilePreviewModal({
   explorerReveal,
   outsideWorkspace = false,
   requestDroneControl,
+  readPreviewImage,
   onOpenPath,
   onSave,
   onClose,
@@ -298,6 +300,7 @@ export function FilePreviewModal({
     operation: DroneControlOperation,
     payload?: any,
   ) => Promise<any>;
+  readPreviewImage?: MobileHtmlImageReader;
   onOpenPath(path: string, line?: number | null): void;
   onSave(content: string, expectedRevision?: string | null): Promise<boolean>;
   onClose(): void;
@@ -729,7 +732,9 @@ export function FilePreviewModal({
             </View>
             {!htmlRenderingAvailable ? (
               <Text style={styles.htmlFallback}>
-                Rendered HTML is unavailable for this file on this device. Showing source.
+                {isRenderedHtmlPreviewAvailable(Platform.OS)
+                  ? 'This file is too large to render on a phone. Showing source.'
+                  : 'Rendered HTML is unavailable on this device. Showing source.'}
               </Text>
             ) : null}
           </View>
@@ -786,7 +791,7 @@ export function FilePreviewModal({
               </View>
             ) : preview?.kind === 'text' && htmlPreview && htmlMode === 'rendered' ? (
               preview.content ? (
-                <RenderedHtmlPreview source={preview.content} />
+                <RenderedHtmlPreview source={preview.content} path={preview.path} readImage={readPreviewImage} />
               ) : (
                 <View style={styles.centerState}>
                   <Text style={styles.stateTitle}>Empty HTML file</Text>

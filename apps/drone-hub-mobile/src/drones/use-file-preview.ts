@@ -4,11 +4,10 @@ import {
   workspaceLinkIsDirectory,
   readWorkspaceFileFirst,
 } from '@drone/hub-model';
-import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
-import { fetch as streamingFetch } from 'expo/fetch';
 import { AppState } from 'react-native';
 import { File, FileMode, Paths, type FileHandle } from 'expo-file-system';
+import { readPreviewMediaBytes } from './read-preview-media-bytes';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import type { MobileFileReference } from '../local-assistant/file-reference';
 import {
@@ -300,55 +299,19 @@ export function useFilePreview({
             if (svg) chunks.push(bytes);
             else cacheHandle?.writeBytes(bytes);
           };
-          if (firstResult?.localFileUri && nextRequest.phoneTarget) {
-            const localFile = new File(String(firstResult.localFileUri));
-            const localHandle = localFile.open(FileMode.ReadOnly);
-            try {
-              while (offset < totalBytes) {
-                throwIfAborted(signal);
-                const bytes = localHandle.readBytes(Math.min(64 * 1024, totalBytes - offset));
-                if (!bytes.length) throw new Error('Phone preview ended early');
-                appendBytes(bytes);
-                offset += bytes.length;
-              }
-            } finally {
-              localHandle.close();
-            }
-            firstResult = null;
-          }
-          if (offset < totalBytes) {
-            const transfer = firstResult?.transfer;
-            if (!transfer?.url || !transfer?.token)
-              throw new Error('The device did not authorize an HTTP download');
-            mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferStarted');
-            const response = await streamingFetch(transfer.url, {
-              headers: { authorization: 'Bearer ' + transfer.token },
-              signal,
-              redirect: 'error',
-            });
-            if (!response.ok || !response.body)
-              throw new Error('HTTP download failed (' + response.status + ')');
-            const reader = response.body.getReader();
-            try {
-              while (true) {
-                const { value, done } = await reader.read();
-                throwIfAborted(signal);
-                if (value) {
-                  if (offset + value.byteLength > totalBytes)
-                    throw new Error('Download exceeds declared size');
-                  appendBytes(value);
-                  offset += value.byteLength;
-                }
-                if (done) break;
-              }
-            } finally {
-              await reader.cancel().catch(() => undefined);
-            }
-            if (offset !== totalBytes) throw new Error('The HTTP download was incomplete');
-            offset = totalBytes;
-            mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferFinished');
-            firstResult = null;
-          }
+          await readPreviewMediaBytes({
+            result: firstResult,
+            phoneTarget: nextRequest.phoneTarget,
+            totalBytes,
+            signal,
+            append: (bytes) => {
+              appendBytes(bytes);
+              offset += bytes.length;
+            },
+            onTransferStarted: () => mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferStarted'),
+            onTransferFinished: () => mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferFinished'),
+          });
+          firstResult = null;
         } catch (mediaError) {
           cacheHandle?.close();
           cacheHandle = null;
@@ -497,6 +460,38 @@ export function useFilePreview({
       }
     },
     [chatName, load, phoneTarget, selectedDrone, targetId],
+  );
+
+  // Local images for a rendered HTML page, read from the same workspace as the page.
+  const readImage = React.useCallback(
+    async (path: string, maxBytes: number, signal: AbortSignal): Promise<{ mime: string; bytes: Uint8Array }> => {
+      if (!request) throw new Error('No file is open');
+      const result = await requestDroneControl(
+        request.targetId,
+        'file.preview',
+        { droneId: request.droneId, chatName: request.chatName, path, contentOffset: 0 },
+        signal,
+      );
+      const metadata = result?.preview;
+      const mime = String(metadata?.mime ?? '');
+      const totalBytes = Number(metadata?.size);
+      if (result?.content || metadata?.kind !== 'image' || !mime.startsWith('image/')) throw new Error('Not an image');
+      if (!Number.isSafeInteger(totalBytes) || totalBytes <= 0 || totalBytes > maxBytes) throw new Error('Image too large');
+      const bytes = new Uint8Array(totalBytes);
+      let offset = 0;
+      await readPreviewMediaBytes({
+        result,
+        phoneTarget: request.phoneTarget,
+        totalBytes,
+        signal,
+        append: (chunk) => {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        },
+      });
+      return { mime, bytes };
+    },
+    [request, requestDroneControl],
   );
 
   const openExplorer = React.useCallback(() => {
@@ -674,6 +669,7 @@ export function useFilePreview({
     open,
     openExplorer,
     close,
+    readImage,
     retry: () => {
       if (request && requestIsCurrent) {
         void load(request, { background: previewRef.current != null });

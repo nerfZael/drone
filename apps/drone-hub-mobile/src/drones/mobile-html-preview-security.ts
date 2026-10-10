@@ -4,8 +4,9 @@ export const MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST = ['*'] as const;
 
 export const MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "script-src 'none'",
-  "script-src-attr 'none'",
+  // Inline scripts run as on desktop. Network, frames, forms and navigation stay blocked,
+  // and without an onMessage handler the WebView exposes no bridge to the app.
+  "script-src 'unsafe-inline'",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
   'font-src data:',
@@ -22,7 +23,7 @@ export const MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
 ].join('; ');
 
 const MOBILE_HTML_PREVIEW_SHARED_WEBVIEW_POLICY = {
-  javaScriptEnabled: false,
+  javaScriptEnabled: true,
   javaScriptCanOpenWindowsAutomatically: false,
   cacheEnabled: false,
   incognito: true,
