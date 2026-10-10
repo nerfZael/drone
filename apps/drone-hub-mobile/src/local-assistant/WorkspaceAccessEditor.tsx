@@ -18,7 +18,10 @@ import type {
   ChatWorkspaceCatalog,
   ChatWorkspaceOption,
 } from '@drone/assistant-chat';
-import { Button, ErrorBanner } from '../components/Ui';
+import { Button, ErrorBanner, TextInputDialog } from '../components/Ui';
+import FolderPlus from 'lucide-react-native/icons/folder-plus';
+import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
+import { userWorkspaceTargetId } from '../drones/mobile-workspaces';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
@@ -276,6 +279,32 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
         setSaving(false);
         callbacks.current.onSavingChange?.(false);
       }
+    }
+  }
+
+  // A workspace made here (on the Hub this picker is for) is ticked at once; Apply saves it like any other change.
+  const [creating, setCreating] = React.useState<{ name: string; error: string | null; busy: boolean } | null>(null);
+  async function createWorkspace() {
+    const hub = props.hubDeviceId;
+    const name = creating?.name.trim();
+    if (!hub || !name) return;
+    setCreating((current) => (current ? { ...current, busy: true, error: null } : current));
+    try {
+      const created: any = await mesh.request(hub, DRONE_CONTROL_CAPABILITY.id, 'workspaces.manage', { action: 'create', name });
+      const result = await callbacks.current.load(undefined);
+      if (!alive.current) return;
+      const option = result.workspaces.find((item) => item.id === userWorkspaceTargetId(String(created?.workspace?.id ?? '')));
+      setCatalog((current) =>
+        current && option ? { ...current, workspaces: [...current.workspaces.filter((item) => item.id !== option.id), option] } : current ?? result,
+      );
+      if (option)
+        setDraft((current) =>
+          current && !current.targets.some((target) => target.id === option.id) ? toggleSelection(current, option) : current,
+        );
+      setCreating(null);
+    } catch (createError: any) {
+      if (alive.current)
+        setCreating((current) => (current ? { ...current, busy: false, error: createError?.message ?? String(createError) } : current));
     }
   }
 
@@ -591,7 +620,32 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
               : 'No workspace selected. Private chat artifacts keep their existing setting.'}
           </Text>
         ) : null}
+        {props.hubDeviceId && catalog && !props.disabled ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New workspace"
+            disabled={disabled}
+            onPress={() => setCreating({ name: '', error: null, busy: false })}
+            style={({ pressed }) => [styles.newWorkspace, pressed && styles.pressed]}
+          >
+            <FolderPlus color={colors.accent} size={16} strokeWidth={2} />
+            <Text style={styles.newWorkspaceText}>New workspace</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
+      <TextInputDialog
+        visible={creating !== null}
+        title="New workspace"
+        message="A new folder on the Hub’s computer, selected here once it exists."
+        value={creating?.name ?? ''}
+        error={creating?.error}
+        confirmLabel="Create"
+        busy={creating?.busy}
+        maxLength={80}
+        onChangeText={(name) => setCreating((current) => (current ? { ...current, name, error: null } : current))}
+        onCancel={() => setCreating(null)}
+        onConfirm={() => void createWorkspace()}
+      />
       <View style={styles.footer}>
         <Text style={styles.footerHint} numberOfLines={1}>
           {needsDefault ? 'Star one workspace as the default.' : ''}
@@ -732,6 +786,8 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   inlineAction: { paddingHorizontal: 8, paddingVertical: 8 },
+  newWorkspace: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 4, marginTop: 8 },
+  newWorkspaceText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
   link: { color: colors.accent, fontSize: 12, fontWeight: '600' },
   footer: {
     flexDirection: 'row',

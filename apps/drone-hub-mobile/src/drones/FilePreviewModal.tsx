@@ -17,6 +17,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ViewProps,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronsDown from 'lucide-react-native/icons/chevrons-down';
@@ -274,7 +275,10 @@ export function FilePreviewModal({
   onClose,
   onRetry,
   onPreviewPathsChanged,
+  workspaceSwitcher,
 }: {
+  /** Chooses which workspace the explorer shows; stands in for the workspace name beside "Files". */
+  workspaceSwitcher?: ViewProps['children'];
   loadDiagnosticId?: string;
   embedded?: boolean;
   visible: boolean;
@@ -899,15 +903,16 @@ export function FilePreviewModal({
                           return (current + 1) % 3;
                         })
                       }
-                      style={({ pressed }) => [styles.explorerToggle, pressed && styles.pressed]}
+                      style={({ pressed }) => [styles.explorerToggle, workspaceSwitcher ? styles.explorerToggleCompact : null, pressed && styles.pressed]}
                     >
-                      <Text numberOfLines={1} style={styles.explorerTitle}>
+                      <Text numberOfLines={1} style={[styles.explorerTitle, workspaceSwitcher ? styles.explorerTitleCompact : null]}>
                         Files
-                        {workspaceName ? (
+                        {workspaceName && !workspaceSwitcher ? (
                           <Text style={styles.explorerWorkspace}> ({workspaceName})</Text>
                         ) : null}
                       </Text>
                     </Pressable>
+                    {workspaceSwitcher}
                     {actions}
                   </View>
                 </View>
@@ -1110,6 +1115,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingLeft: 4,
   },
+  explorerToggleCompact: { flex: 0 },
+  explorerTitleCompact: { flex: 0 },
   explorerTitle: {
     flex: 1,
     minWidth: 0,

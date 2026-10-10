@@ -189,6 +189,9 @@ import { MobileQuestionRequestCard } from '../local-assistant/MobileQuestionRequ
 import { MobileQuestionResultCard } from '../local-assistant/MobileQuestionResultCard';
 import { CodexApprovalCard } from '../drones/CodexApprovalCard';
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
+import { MobileWorkspaceSwitcher } from '../drones/MobileWorkspaceSwitcher';
+import { explorerWorkspaceDrone } from '../drones/mobile-workspaces';
+import { setMobileExplorerWorkspace, useMobileExplorerWorkspace } from '../drones/use-mobile-explorer-workspace';
 
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
@@ -526,6 +529,9 @@ export function DronesScreen({
   const [, setChatReadRevision] = React.useState(0);
   const [fullMessageBusyId, setFullMessageBusyId] = React.useState('');
   const [nativeChatId, setNativeChatId] = React.useState('');
+  // An agent chat (Claude Code, Codex…) on a Hub keeps its workspace selection on the chat itself; a built-in
+  // chat keeps it on its thread (nativeChatId).
+  const agentChatWorkspaces = !phoneTarget && !nativeChatId && chatAgentId !== null;
   const [chatSubscriptions, setChatSubscriptions] = React.useState<MobileChatSubscription[]>([]);
   const [nativeThread, setNativeThread] = React.useState<any | null>(null);
   const [accessOpen, setAccessOpen] = React.useState(false);
@@ -2645,6 +2651,41 @@ export function DronesScreen({
     requestDroneControl,
     subscribeFileChanges,
   });
+  // The Files page can show another workspace on the Hub's device, with its own preview state; the drone's own
+  // open file stays as it was for when it switches back. Phone-local drones have no Hub workspaces.
+  const explorerChoice = useMobileExplorerWorkspace(targetId, phoneTarget ? null : selected?.id);
+  const switchedDrone = React.useMemo(() => explorerWorkspaceDrone(explorerChoice, drones), [explorerChoice, drones]);
+  const switchedPreview = useFilePreview({
+    targetId,
+    selectedDrone: switchedDrone,
+    chatName,
+    phoneTarget: false,
+    requestDroneControl,
+    subscribeFileChanges,
+  });
+  const filesPreview = switchedDrone ? switchedPreview : filePreview;
+  const showOwnDroneFiles = React.useCallback(() => {
+    if (selected) setMobileExplorerWorkspace(targetId, selected.id, null);
+  }, [selected, targetId]);
+  const loadChatWorkspaceIds = React.useCallback(
+    async (signal: AbortSignal) => {
+      if (!selected) return [];
+      const catalog = await requestDroneControl(
+        targetId,
+        'chat.read',
+        {
+          droneId: selected.id,
+          chatName,
+          workspaceAccess: true,
+          ...(nativeChatId ? { nativeChatId } : { agentChatWorkspaces: true }),
+        },
+        signal,
+      );
+      const targets: Array<{ id?: unknown; kind?: unknown }> = Array.isArray(catalog?.access?.targets) ? catalog.access.targets : [];
+      return targets.filter((target) => target.kind !== 'remote').map((target) => String(target.id ?? '')).filter(Boolean);
+    },
+    [chatName, nativeChatId, requestDroneControl, selected, targetId],
+  );
   const [filesPageOpen, setFilesPageOpen] = React.useState(false);
   const [browserOpen, setBrowserOpen] = React.useState(false);
   const openBrowser = React.useCallback(() => {
@@ -2655,19 +2696,25 @@ export function DronesScreen({
   }, []);
   React.useEffect(() => { setBrowserOpen(false); }, [targetId, selected?.id, workspaceVisible]);
   const prepareFilesPage = React.useCallback(() => {
-    if (!filePreview.visible) filePreview.openExplorer();
-  }, [filePreview.visible, filePreview.openExplorer]);
+    if (!filesPreview.visible) filesPreview.openExplorer();
+  }, [filesPreview.visible, filesPreview.openExplorer]);
+  // Switching while the page is open shows the new workspace's explorer at once.
+  React.useEffect(() => {
+    if (filesPageOpen && switchedDrone && !switchedPreview.visible) switchedPreview.openExplorer();
+  }, [filesPageOpen, switchedDrone, switchedPreview.visible, switchedPreview.openExplorer]);
   const openFilesPage = React.useCallback(() => {
     Keyboard.dismiss();
     prepareFilesPage();
     setFilesPageOpen(true);
   }, [prepareFilesPage]);
+  // A file named in the chat is one of the drone's own: show the drone's files again first.
   const openFileReference = React.useCallback(
     (reference: Parameters<typeof filePreview.open>[0]) => {
+      showOwnDroneFiles();
       filePreview.open(reference);
       setFilesPageOpen(true);
     },
-    [filePreview.open],
+    [filePreview.open, showOwnDroneFiles],
   );
   React.useEffect(() => {
     setFilesPageOpen(false);
@@ -2681,14 +2728,15 @@ export function DronesScreen({
     drones,
     selectedDrone: selected,
     composerAvailable: Boolean(
-      workspaceVisible && selected && chats.length > 0 && !(accessOpen && nativeChatId),
+      workspaceVisible && selected && chats.length > 0 && !(accessOpen && (nativeChatId || agentChatWorkspaces)),
     ),
     workspaceVisible,
     chatName,
     prompt,
     setPrompt,
     openFile: {
-      visible: workspaceVisible && filesPageOpen && filePreview.visible,
+      // A file from another workspace is not one of this drone's.
+      visible: workspaceVisible && filesPageOpen && filePreview.visible && !switchedDrone,
       path: filePreview.displayPath,
       kind: filePreview.preview?.kind ?? 'loading',
     },
@@ -3551,33 +3599,44 @@ export function DronesScreen({
         onReveal={prepareFilesPage}
         renderFiles={(active) => (
           <FilePreviewModal
-            loadDiagnosticId={filePreview.loadDiagnosticId}
+            key={switchedDrone ? `workspace:${switchedDrone.id}` : 'own'}
+            loadDiagnosticId={filesPreview.loadDiagnosticId}
             embedded
             visible={active && workspaceVisible}
-            preview={filePreview.preview}
-            displayPath={filePreview.displayPath}
-            line={filePreview.line}
-            loading={filePreview.loading}
-            error={filePreview.error}
-            refreshError={filePreview.refreshError}
-            saving={filePreview.saving}
-            saveError={filePreview.saveError}
+            preview={filesPreview.preview}
+            displayPath={filesPreview.displayPath}
+            line={filesPreview.line}
+            loading={filesPreview.loading}
+            error={filesPreview.error}
+            refreshError={filesPreview.refreshError}
+            saving={filesPreview.saving}
+            saveError={filesPreview.saveError}
             targetId={targetId}
-            droneId={selected?.id ?? ''}
+            droneId={switchedDrone?.id ?? selected?.id ?? ''}
             chatName={chatName}
-            rootPath={filePreview.rootPath}
-            workspaceName={selected?.name ?? ''}
-            directoryReveal={filePreview.directoryReveal}
-            explorerReveal={filePreview.explorerReveal}
-            outsideWorkspace={filePreview.outsideWorkspace}
-            selectedPath={filePreview.selectedPath}
+            rootPath={filesPreview.rootPath}
+            workspaceName={switchedDrone?.name ?? selected?.name ?? ''}
+            directoryReveal={filesPreview.directoryReveal}
+            explorerReveal={filesPreview.explorerReveal}
+            outsideWorkspace={filesPreview.outsideWorkspace}
+            selectedPath={filesPreview.selectedPath}
             requestDroneControl={requestDroneControl}
-            readPreviewImage={filePreview.readImage}
-            onOpenPath={(path, line) => filePreview.open({ raw: path, path, line: line ?? null, column: null })}
-            onSave={filePreview.save}
+            readPreviewImage={filesPreview.readImage}
+            onOpenPath={(path, line) => filesPreview.open({ raw: path, path, line: line ?? null, column: null })}
+            onSave={filesPreview.save}
             onClose={() => setFilesPageOpen(false)}
-            onRetry={filePreview.retry}
-            onPreviewPathsChanged={filePreview.invalidatePaths}
+            onRetry={filesPreview.retry}
+            onPreviewPathsChanged={filesPreview.invalidatePaths}
+            workspaceSwitcher={selected && !phoneTarget && targetReachable ? (
+              <MobileWorkspaceSwitcher
+                targetId={targetId}
+                drone={selected}
+                current={switchedDrone ? explorerChoice : null}
+                requestDroneControl={requestDroneControl}
+                loadChatWorkspaceIds={selected.chats.length ? loadChatWorkspaceIds : undefined}
+                onChoose={(choice) => setMobileExplorerWorkspace(targetId, selected.id, choice)}
+              />
+            ) : undefined}
           />
         )}
       >
@@ -3676,17 +3735,17 @@ export function DronesScreen({
                 </View>
               ) : (
                 <>
-                  {!accessOpen && nativeChatId ? (
+                  {!accessOpen && (nativeChatId || agentChatWorkspaces) ? (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Choose chat workspaces"
-                      disabled={running || !targetReachable}
+                      disabled={(running && !agentChatWorkspaces) || !targetReachable}
                       onPress={() => setAccessOpen(true)}
                       style={{
                         minHeight: 44,
                         justifyContent: 'center',
                         paddingHorizontal: 16,
-                        opacity: running || !targetReachable ? 0.5 : 1,
+                        opacity: (running && !agentChatWorkspaces) || !targetReachable ? 0.5 : 1,
                       }}
                     >
                       <Text style={{ color: colors.accent, fontSize: 13 }}>
@@ -3699,7 +3758,7 @@ export function DronesScreen({
                       </Text>
                     </Pressable>
                   ) : null}
-                  {accessOpen && nativeChatId ? (
+                  {accessOpen && (nativeChatId || agentChatWorkspaces) ? (
                     <View style={{ flex: 1 }}>
                       {phoneTarget ? (
                         localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
@@ -3721,9 +3780,10 @@ export function DronesScreen({
                         ) : null
                       ) : (
                         <WorkspaceAccessEditor
-                          key={`${targetId}:${nativeChatId}`}
+                          key={`${targetId}:${nativeChatId || `${selected.id}:${chatName}`}`}
                           hubDeviceId={targetId}
-                          disabled={running || !targetReachable}
+                          // An agent chat checks its selection on every tool call, so it can change mid-run.
+                          disabled={(running && !agentChatWorkspaces) || !targetReachable}
                           load={(deviceId, signal) =>
                             requestDroneControl(
                               targetId,
@@ -3731,7 +3791,7 @@ export function DronesScreen({
                               {
                                 droneId: selected.id,
                                 chatName,
-                                nativeChatId,
+                                ...(nativeChatId ? { nativeChatId } : { agentChatWorkspaces: true }),
                                 workspaceAccess: true,
                                 ...(deviceId ? { workspaceDeviceId: deviceId } : {}),
                               },
@@ -3742,7 +3802,7 @@ export function DronesScreen({
                             const result = await requestDroneControl(targetId, 'chat.update', {
                               droneId: selected.id,
                               chatName,
-                              nativeChatId,
+                              ...(nativeChatId ? { nativeChatId } : { agentChatWorkspaces: true }),
                               workspaceAccess: access,
                               workspaceRevision: revision,
                             });

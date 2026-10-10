@@ -147,3 +147,14 @@ test('organization inherits equivalent sidebar authority and is not granted to c
   expect(migrateDeviceMeshGrants(organize)).toEqual(organize);
   expect(migrateDeviceMeshGrants([{ capability: 'drone-control', version: 1, operations: ['chat.read'] }])[0]!.operations).not.toContain('sidebar.organize');
 });
+
+test('devices that may create files on the Hub may also manage its workspaces; browsing follows listing files', async () => {
+  const { isGranted } = await import('@drone/device-protocol');
+  const migrated = migrateDeviceMeshGrants([{ capability: 'drone-control', version: 1, operations: ['files.list', 'file.action'] }]);
+  expect(migrated[0].operations).toContain('workspaces.manage');
+  expect(migrateDeviceMeshGrants([{ capability: 'drone-control', version: 1, operations: ['files.list'] }])[0].operations).not.toContain('workspaces.manage');
+  const listing = [{ capability: 'drone-control', version: 1, operations: ['files.list'] }];
+  expect(isGranted(listing, 'drone-control', 1, 'workspaces.browse')).toBe(true);
+  expect(isGranted(listing, 'drone-control', 1, 'workspaces.manage')).toBe(false);
+  expect(isGranted([{ capability: 'drone-control', version: 1, operations: ['chat.read'] }], 'drone-control', 1, 'workspaces.browse')).toBe(false);
+});

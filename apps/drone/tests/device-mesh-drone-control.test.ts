@@ -2871,3 +2871,51 @@ test('mobile organization reaches the same validated endpoint used by desktop Ap
     expect(calls).toEqual([{ url: 'http://127.0.0.1:7777/api/companion/organization', method: 'POST', body: operation }]);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('phones browse and manage workspaces through the same Hub routes as the desktop', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ path: url.pathname + url.search, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null });
+    return Response.json({ ok: true, workspaces: [], workspace: { id: 'w1' } });
+  }) as typeof fetch;
+  try {
+    const capability = createDroneControlCapability({ baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' });
+    await capability.invoke('workspaces.browse', {});
+    await capability.invoke('workspaces.manage', { action: 'list' });
+    await capability.invoke('workspaces.manage', { action: 'create', name: 'Notes' });
+    await capability.invoke('workspaces.manage', { action: 'link', path: '/data/notes' });
+    await capability.invoke('workspaces.manage', { action: 'rename', id: 'w1', name: 'Old notes' });
+    await capability.invoke('workspaces.manage', { action: 'remove', id: 'w1' });
+    await expect(capability.invoke('workspaces.manage', { action: 'nuke' })).rejects.toThrow('unknown workspaces action');
+    expect(calls).toEqual([
+      { path: '/api/workspaces/browse', method: 'GET', body: null },
+      { path: '/api/workspaces', method: 'GET', body: null },
+      { path: '/api/workspaces', method: 'POST', body: { name: 'Notes' } },
+      { path: '/api/workspaces/link', method: 'POST', body: { path: '/data/notes' } },
+      { path: '/api/workspaces/w1/rename', method: 'POST', body: { name: 'Old notes' } },
+      { path: '/api/workspaces/w1', method: 'DELETE', body: null },
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('an agent chat\'s workspaces are read and saved on the chat, without a native thread', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; method: string }> = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ path: url.pathname + url.search, method: init?.method ?? 'GET' });
+    return Response.json({ ok: true, access: { targets: [], defaultTargetId: null }, revision: 'r1' });
+  }) as typeof fetch;
+  try {
+    const capability = createDroneControlCapability({ baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' });
+    const context = { sourceDevice: { id: 'phone', grants: [{ capability: 'drone-control', version: 1, operations: ['drones.list', 'chat.read', 'chat.update'] }] } } as any;
+    await capability.invoke('chat.read', { droneId: 'd1', chatName: 'Gauntlet', workspaceAccess: true, agentChatWorkspaces: true, workspaceDeviceId: 'laptop' }, context);
+    await capability.invoke('chat.update', { droneId: 'd1', chatName: 'Gauntlet', agentChatWorkspaces: true, workspaceAccess: { targets: [], defaultTargetId: null }, workspaceRevision: 'r1' }, context);
+    expect(calls).toEqual([
+      { path: '/api/drones/d1/chats/Gauntlet/workspaces?deviceId=laptop', method: 'GET' },
+      { path: '/api/drones/d1/chats/Gauntlet/workspaces', method: 'POST' },
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});

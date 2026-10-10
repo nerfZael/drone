@@ -587,6 +587,26 @@ export function createDroneControlCapability(
       const operationSignal = context?.signal
         ? AbortSignal.any([readOwner.signal, context.signal])
         : readOwner.signal;
+      if (operation === 'workspaces.browse') {
+        return await localHubRequest(requestAccess, '/api/workspaces/browse', { signal: operationSignal });
+      }
+      if (operation === 'workspaces.manage') {
+        const action = optionalText(payload.action);
+        const json = (method: string, pathname: string, body?: unknown) =>
+          localHubRequest(requestAccess, pathname, {
+            method,
+            signal: operationSignal,
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          });
+        const id = () => encodeURIComponent(requiredText(payload.id, 'id'));
+        if (action === 'list') return await json('GET', '/api/workspaces');
+        if (action === 'create') return await json('POST', '/api/workspaces', { name: requiredText(payload.name, 'name') });
+        if (action === 'link')
+          return await json('POST', '/api/workspaces/link', { path: requiredText(payload.path, 'path'), ...(optionalText(payload.name) ? { name: optionalText(payload.name) } : {}) });
+        if (action === 'rename') return await json('POST', `/api/workspaces/${id()}/rename`, { name: requiredText(payload.name, 'name') });
+        if (action === 'remove') return await json('DELETE', `/api/workspaces/${id()}`);
+        throw Object.assign(new Error(`unknown workspaces action: ${action ?? ''}`), { code: 'INVALID_REQUEST' });
+      }
       if (operation === 'drones.list') {
         const createModelAgent = optionalText(payload.createModelAgent);
         if (createModelAgent) {
@@ -1307,8 +1327,10 @@ export function createDroneControlCapability(
       ) {
         if (!isGranted(context.sourceDevice.grants ?? [], 'drone-control', 1, 'drones.list'))
           throw new Error('Drone listing permission is required to configure chat workspaces.');
-        const { nativeChatId } = await resolveNativeChat(optionalText(payload.nativeChatId));
-        const pathname = `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/workspaces`;
+        // An agent chat (Claude Code, Codex…) keeps its selection on the chat; a built-in chat on its thread.
+        const pathname = payload.agentChatWorkspaces === true
+          ? `${chatPath}/workspaces`
+          : `/api/assistant/threads/${encodeURIComponent((await resolveNativeChat(optionalText(payload.nativeChatId))).nativeChatId)}/workspaces`;
         if (operation === 'chat.read') {
           const deviceId = optionalText(payload.workspaceDeviceId);
           return await localHubRequest(

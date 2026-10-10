@@ -40,6 +40,10 @@ export const DRONE_CONTROL_OPERATIONS = [
   'file.preview',
   'file.write',
   'file.action',
+  // Every local workspace the File Explorer can switch to (allowed wherever files.list is).
+  'workspaces.browse',
+  // List, create, add, rename and remove the workspaces the user added on the Hub's device.
+  'workspaces.manage',
   'browser.targets',
   'browser.open',
   'browser.close',
@@ -160,6 +164,9 @@ export function isGranted(
           grant.operations.includes('run.start')) ||
         // Reading the current workspace reveals nothing beyond the workspace catalog.
         (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
-          operation === 'workspaces.current' && grant.operations.includes('workspaces.list'))),
+          operation === 'workspaces.current' && grant.operations.includes('workspaces.list')) ||
+        // Naming the workspaces a device may already list files in reveals nothing more.
+        (capability === DRONE_CONTROL_CAPABILITY.id && version === DRONE_CONTROL_CAPABILITY.version &&
+          operation === 'workspaces.browse' && grant.operations.includes('files.list'))),
   );
 }

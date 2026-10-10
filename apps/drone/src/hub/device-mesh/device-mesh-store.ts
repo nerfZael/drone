@@ -56,6 +56,9 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
   if (droneControl?.operations.includes('chat.stop')) {
     operations.push('chat.interruption.resolve');
   }
+  // Adding a workspace makes or names a folder on the Hub's device, no more than a device allowed to
+  // create and rename files there can already do.
+  if (droneControl?.operations.includes('file.action')) operations.push('workspaces.manage');
   if (
     grants.some(
       (grant) =>
