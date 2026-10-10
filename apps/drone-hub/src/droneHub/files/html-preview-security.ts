@@ -86,29 +86,47 @@ const HTML_PREVIEW_LINK_GUARD = `<script>
       }
     }
 
-    // A preview must never navigate away from its isolated srcdoc document.
+    // A preview must never navigate away from its isolated document.
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
 })();
 </script>`;
 
-/**
- * The policy is emitted before any user-authored markup so it applies before a
- * script can run. The link guard preserves in-document fragments from absolute
- * development URLs while preventing the iframe from leaving the srcdoc page.
- * A later meta policy in the file can only further restrict the initial policy.
- */
-export function buildIsolatedHtmlPreviewDocument(source: string, allowExternalResources = false): string {
+/** Local images and video load from the Hub's preview route for this drone, nothing else. */
+export function htmlPreviewContentSecurityPolicy(allowExternalResources: boolean, localMediaBase?: string): string {
   const policy = allowExternalResources
     ? HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY
     : HTML_PREVIEW_CONTENT_SECURITY_POLICY;
+  if (!localMediaBase) return policy;
+  return policy
+    .replace(/(^|; )(img-src [^;]*)/, `$1$2 ${localMediaBase}`)
+    .replace(/(^|; )(media-src [^;]*)/, `$1$2 ${localMediaBase}`);
+}
+
+/**
+ * The policy is emitted before any user-authored markup so it applies before a
+ * script can run. The link guard preserves in-document fragments from absolute
+ * development URLs while preventing the iframe from leaving the preview page.
+ * A later meta policy in the file can only further restrict the initial policy.
+ * A base URL precedes the policy, whose `base-uri 'none'` blocks any later one.
+ */
+export function htmlPreviewDocumentPrefix(policy: string, baseHref?: string): string {
   return [
     '<!doctype html>',
+    baseHref ? `<base href="${baseHref.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` : '',
     `<meta http-equiv="Content-Security-Policy" content="${policy}">`,
     '<meta name="referrer" content="no-referrer">',
     '<meta http-equiv="x-dns-prefetch-control" content="off">',
     HTML_PREVIEW_LINK_GUARD,
-    String(source ?? ''),
   ].join('');
+}
+
+export function buildIsolatedHtmlPreviewDocument(
+  source: string,
+  allowExternalResources = false,
+  local?: { baseHref: string; mediaBase: string },
+): string {
+  const policy = htmlPreviewContentSecurityPolicy(allowExternalResources, local?.mediaBase);
+  return htmlPreviewDocumentPrefix(policy, local?.baseHref) + String(source ?? '');
 }

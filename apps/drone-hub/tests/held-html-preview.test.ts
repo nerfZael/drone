@@ -59,7 +59,7 @@ test('the editor asks before dropping unsaved edits and only HTML previews get a
   expect(panel).toContain('Discard my edits and reload');
   expect(panel).toContain('Save my edits');
   expect(panel).not.toContain('window.confirm');
-  expect(panel).toContain('source={heldHtmlPreview.source}');
+  expect(panel).toContain('source={openedFileIsLargeText ? null : heldHtmlPreview.source}');
   expect(panel.match(/aria-label="Reload preview"/g)?.length).toBe(1);
   expect(panel.indexOf('{openedFileShowsHtmlPreview ? (')).toBeLessThan(panel.indexOf('aria-label="Reload preview"'));
 });

@@ -1,33 +1,29 @@
 import React from 'react';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { UiButton } from '../../ui/components';
-import { HTML_PREVIEW_MAX_BYTES, HTML_PREVIEW_LIMIT_MESSAGE, checkHtmlPreviewSize, HtmlPreviewTooLargeError } from './html-preview-limits';
-import { LargeHtmlPreviewNotice } from './LargeHtmlPreviewNotice';
-import {
-  embedHtmlPreviewImages,
-  readHtmlPreviewImage,
-  resolveHtmlPreviewImagePath,
-  htmlPreviewImageBridge,
-  HTML_PREVIEW_IMAGE_REQUEST,
-  HTML_PREVIEW_IMAGE_RESPONSE,
-} from './html-preview-images';
 import {
   buildIsolatedHtmlPreviewDocument,
   HTML_PREVIEW_IFRAME_SANDBOX,
   HTML_PREVIEW_PERMISSIONS_POLICY,
 } from './html-preview-security';
+import { htmlPreviewMediaBase, useHtmlPreviewSession } from './use-html-preview-session';
 
 // React 18's iframe types predate this Chromium attribute. Its presence gives
 // the preview an ephemeral, credential-free network/storage context.
 const credentiallessIframeProps = { credentialless: '' };
 
+/**
+ * Renders `source` when given (an open editor buffer, including unsaved edits);
+ * otherwise the frame loads the file itself from the Hub, so file size is not
+ * bounded by the Hub page's memory. Sandboxed frames run in their own process.
+ */
 export function IsolatedHtmlPreview({
   source,
   fileName,
   droneId,
   filePath,
 }: {
-  source: string;
+  source: string | null;
   fileName?: string | null;
   droneId?: string;
   filePath?: string;
@@ -40,83 +36,26 @@ export function IsolatedHtmlPreview({
     current = { droneId, filePath, fileName, source, id: session.id + 1 };
     setSession(current);
   }
-  // This component also has callers which already have an in-memory source.
-  const tooLarge = React.useMemo(() => source.length > HTML_PREVIEW_MAX_BYTES || new TextEncoder().encode(source).byteLength > HTML_PREVIEW_MAX_BYTES, [source]);
-  if (tooLarge) return <div role="alert" className="p-3 text-12">{HTML_PREVIEW_LIMIT_MESSAGE}</div>;
   return <HtmlPreviewSession key={current.id} source={source} fileName={fileName} droneId={droneId} filePath={filePath} />;
 }
 
-function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: string; fileName?: string | null; droneId?: string; filePath?: string }) {
+function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: string | null; fileName?: string | null; droneId?: string; filePath?: string }) {
   const confirm = useAppConfirmDialog();
   const [allowExternalResources, setAllowExternalResources] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
-  const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const [imageToken] = React.useState(() => crypto.randomUUID());
-  const [dynamicFailures, setDynamicFailures] = React.useState(0);
-  const [imagesTooLarge, setImagesTooLarge] = React.useState(false);
-  const [images, setImages] = React.useState<{ source: string; failed: number } | null>(
-    droneId && filePath ? null : { source, failed: 0 },
-  );
-  React.useEffect(() => {
-    if (!droneId || !filePath) return;
-    const controller = new AbortController();
-    void embedHtmlPreviewImages(source, filePath, path => readHtmlPreviewImage(droneId, path, controller.signal))
-      .then(result => { if (!controller.signal.aborted) setImages(result); })
-      .catch(error => {
-        if (controller.signal.aborted) return;
-        if (error instanceof HtmlPreviewTooLargeError) { setImagesTooLarge(true); controller.abort(); }
-        else setImages({ source, failed: 1 });
-      });
-    return () => controller.abort();
-  }, [source, droneId, filePath]);
-  React.useEffect(() => {
-    if (!droneId || !filePath) return;
-    const controller = new AbortController();
-    const reads = new Map<string, Promise<string | null>>();
-    let imageBytes = new TextEncoder().encode(images?.source ?? source).byteLength;
-    const receive = (event: MessageEvent) => {
-      const frame = iframeRef.current?.contentWindow;
-      const data = event.data;
-      if (!frame || event.source !== frame || !data || data.type !== HTML_PREVIEW_IMAGE_REQUEST || data.token !== imageToken) return;
-      if (typeof data.id !== 'string' || data.id.length > 32 || typeof data.href !== 'string' || data.href.length > 8192) return;
-      const path = resolveHtmlPreviewImagePath(filePath, data.href);
-      if (!path) return;
-      let read = reads.get(path);
-      // Bound the number of distinct image requests made by preview scripts.
-      if (!read && reads.size >= 256) {
-        frame.postMessage({ type: HTML_PREVIEW_IMAGE_RESPONSE, token: imageToken, id: data.id, dataUrl: null }, '*');
-        return;
-      }
-      if (!read) {
-        read = readHtmlPreviewImage(droneId, path, controller.signal).then(dataUrl => {
-          imageBytes += dataUrl.length;
-          checkHtmlPreviewSize(imageBytes);
-          return dataUrl;
-        }).catch(error => {
-          if (error instanceof HtmlPreviewTooLargeError && !controller.signal.aborted) {
-            setImagesTooLarge(true); controller.abort();
-          }
-          if (!controller.signal.aborted) setDynamicFailures(count => count + 1);
-          return null;
-        });
-        reads.set(path, read);
-      }
-      void read.then(dataUrl => {
-        if (!controller.signal.aborted && iframeRef.current?.contentWindow === frame) {
-          frame.postMessage({ type: HTML_PREVIEW_IMAGE_RESPONSE, token: imageToken, id: data.id, dataUrl }, '*');
-        }
-      });
-    };
-    window.addEventListener('message', receive);
-    return () => { controller.abort(); window.removeEventListener('message', receive); };
-  }, [droneId, filePath, imageToken, allowExternalResources, images, source]);
-  const document = React.useMemo(
-    () => buildIsolatedHtmlPreviewDocument(
-      (droneId && filePath ? htmlPreviewImageBridge(imageToken) : '') + (images?.source ?? ''),
+  const local = Boolean(droneId && filePath);
+  const preview = useHtmlPreviewSession({ droneId, filePath, allowExternalResources });
+  const document = React.useMemo(() => {
+    if (source == null) return null;
+    if (!local) return buildIsolatedHtmlPreviewDocument(source, allowExternalResources);
+    // Without a session the page still renders; only its local images are missing.
+    if (!preview.url && !preview.error) return null;
+    return buildIsolatedHtmlPreviewDocument(
+      source,
       allowExternalResources,
-    ),
-    [images, allowExternalResources, droneId, filePath, imageToken],
-  );
+      preview.url ? { baseHref: preview.url, mediaBase: htmlPreviewMediaBase(droneId!) } : undefined,
+    );
+  }, [source, local, droneId, allowExternalResources, preview.url, preview.error]);
 
   async function enableExternalResources() {
     setConfirming(true);
@@ -132,8 +71,6 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
       setConfirming(false);
     }
   }
-
-  if (imagesTooLarge && droneId && filePath) return <LargeHtmlPreviewNotice droneId={droneId} path={filePath} />;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
@@ -154,18 +91,19 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath }: { source: s
           {allowExternalResources ? 'Return to isolated preview' : 'Enable external resources'}
         </UiButton>
       </div>
-      {(images?.failed ?? 0) + dynamicFailures > 0 ? <div role="status" className="shrink-0 bg-[var(--panel-alt)] px-3 py-1.5 text-10 text-[var(--muted)]">Local images could not be loaded. Check that the image files exist beside this HTML file at the referenced paths.</div> : null}
-      {images ? <iframe
-        ref={iframeRef}
+      {preview.error ? <div role={source == null ? 'alert' : 'status'} className="shrink-0 bg-[var(--panel-alt)] px-3 py-1.5 text-10 text-[var(--muted)]">
+        {source == null ? `Could not load the preview: ${preview.error}` : `Local images are unavailable: ${preview.error}`}
+      </div> : null}
+      {document != null || (source == null && preview.url) ? <iframe
         key={String(allowExternalResources)}
         title={`${fileName || 'HTML file'} preview`}
         sandbox={HTML_PREVIEW_IFRAME_SANDBOX}
         allow={HTML_PREVIEW_PERMISSIONS_POLICY}
         referrerPolicy="no-referrer"
-        srcDoc={document}
+        {...(document != null ? { srcDoc: document } : { src: preview.url! })}
         {...credentiallessIframeProps}
         className="min-h-0 w-full flex-1 border-0 bg-white"
-      /> : <div role="status" className="p-3 text-12 text-[var(--muted)]">Loading local images…</div>}
+      /> : preview.error ? null : <div role="status" className="p-3 text-12 text-[var(--muted)]">Loading preview…</div>}
     </div>
   );
 }

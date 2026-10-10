@@ -2,8 +2,8 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { readLargeHtmlSource } from '../src/droneHub/files/use-large-html-source';
-import { HTML_PREVIEW_MAX_BYTES } from '../src/droneHub/files/html-preview-limits';
+import { readLargeHtmlSource } from '../src/droneHub/files/read-large-html-source';
+import { HTML_COPY_MAX_BYTES } from '../src/droneHub/files/html-preview-limits';
 
 function chunk(bytes: Uint8Array, offset: number, eof: boolean) {
   return Response.json({ ok: true, dataBase64: Buffer.from(bytes).toString('base64'), offset, nextOffset: offset + bytes.length, eof });
@@ -37,7 +37,7 @@ test('rejects oversized metadata before fetching and enforces the byte limit whe
     await expect(readLargeHtmlSource('drone', '/huge.html', new AbortController().signal, 145766804)).rejects.toThrow('20 MiB');
     expect(requests).toBe(0);
     await expect(readLargeHtmlSource('drone', '/growing.html', new AbortController().signal, 1)).rejects.toThrow('20 MiB');
-    expect(requests).toBe(HTML_PREVIEW_MAX_BYTES / payload.length + 1);
+    expect(requests).toBe(HTML_COPY_MAX_BYTES / payload.length + 1);
   } finally { globalThis.fetch = original; }
 });
 
@@ -60,64 +60,71 @@ test('rejects failures and chunks that make no progress, and respects cancellati
   } finally { globalThis.fetch = original; }
 });
 
-test('large HTML opens as an isolated preview, switches to source, and retries failed loads', async () => {
-  const dom = new Window();
+async function withPanelDom(run: (input: { dom: Window; host: HTMLElement; root: ReturnType<typeof createRoot> }) => Promise<void>) {
+  const dom = new Window({ url: 'http://127.0.0.1:5173/' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
-  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'MutationObserver', 'DOMParser', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'fetch', 'IS_REACT_ACT_ENVIRONMENT']) {
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'MutationObserver', 'DOMParser', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT']) {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    if (key !== 'fetch') Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'IS_REACT_ACT_ENVIRONMENT' ? true : (dom as any)[key] });
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'IS_REACT_ACT_ENVIRONMENT' ? true : (dom as any)[key] });
   }
+  const originalFetch = globalThis.fetch;
   const host = dom.document.createElement('div');
   dom.document.body.append(host);
   const root = createRoot(host as unknown as HTMLElement);
-  let fail = true;
-  let htmlRequests = 0;
-  globalThis.fetch = (async (url: string) => {
-    if (url.includes('/fs/chunk?')) {
-      htmlRequests++;
-      if (fail) return Response.json({ ok: false, error: 'Temporary read failure' });
-      return chunk(new TextEncoder().encode('<h1>Complete page</h1>'), 0, true);
-    }
-    if (url.includes('/fs/text-chunk?')) return Response.json({ ok: true, content: '<h1>Complete page</h1>', nextOffset: 26, eof: true });
-    throw new Error(`Unexpected request: ${url}`);
-  }) as typeof fetch;
   try {
-    const { OpenedDroneFilePanel } = await import('../src/droneHub/files/OpenedDroneFilePanel');
-    const file = { path: '/index.html', name: 'index.html', kind: 'large-text' as const, mime: 'text/html', size: 15_000_000, content: '', loading: false, saving: false, error: null, dirty: false, mtimeMs: null, targetLine: null, targetColumn: null, navigationSeq: 0 };
-    await act(async () => { root.render(<OpenedDroneFilePanel droneId="test" droneName="test" file={file} />); });
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Temporary read failure');
-    fail = false;
-    await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="Reload preview"]')!.click(); });
-    expect(host.querySelector('iframe')?.getAttribute('srcdoc')).toContain('<h1>Complete page</h1>');
-    expect(host.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts');
-    const source = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Source');
-    expect(source).toBeDefined();
-    await act(async () => { source!.click(); });
-    expect(host.querySelector('iframe')).toBeNull();
-    expect(host.textContent).toContain('Large file');
-    const preview = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Preview');
-    await act(async () => { preview!.click(); });
-    expect(host.querySelector('iframe')?.getAttribute('srcdoc')).toContain('<h1>Complete page</h1>');
-    const previousRequests = htmlRequests;
-    let opened: unknown = null;
-    (dom as any).droneHubDesktop = { openHtmlPreview: async (input: unknown) => { opened = input; } };
-    await act(async () => {
-      root.render(<OpenedDroneFilePanel droneId="test" droneName="test" file={{ ...file, path: '/huge.html', size: 145766804 }} />);
-    });
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('20 MiB');
-    expect(host.querySelector('iframe')).toBeNull();
-    expect(htmlRequests).toBe(previousRequests);
-    const separate = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Open separate preview');
-    await act(async () => { separate!.click(); });
-    expect(opened).toEqual({ droneId: 'test', path: '/huge.html' });
-    await act(async () => { Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'View source')!.click(); });
-    expect(host.textContent).toContain('Large file');
+    await run({ dom, host: host as unknown as HTMLElement, root });
   } finally {
     await act(async () => root.unmount());
     await dom.happyDOM.close();
+    globalThis.fetch = originalFetch;
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else delete (globalThis as any)[key];
     }
   }
+}
+
+const SESSION_URL = '/api/drones/test/fs/html-preview/token-1/work/index.html';
+
+test('a large HTML file loads inside its sandboxed frame by URL, never into the Hub page', async () => {
+  await withPanelDom(async ({ host, root }) => {
+    const requests: Array<{ url: string; method: string; body: any }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requests.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url === '/api/drones/test/fs/html-preview') return Response.json({ ok: true, url: SESSION_URL });
+      if (init?.method === 'DELETE') return Response.json({ ok: true });
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+    const { OpenedDroneFilePanel } = await import('../src/droneHub/files/OpenedDroneFilePanel');
+    const file = { path: '/work/index.html', name: 'index.html', kind: 'large-text' as const, mime: 'text/html', size: 145_766_804, content: '', loading: false, saving: false, error: null, dirty: false, mtimeMs: null, targetLine: null, targetColumn: null, navigationSeq: 0 };
+    await act(async () => { root.render(<OpenedDroneFilePanel droneId="test" droneName="test" file={file} />); });
+    const frame = host.querySelector('iframe');
+    expect(frame?.getAttribute('src')).toBe(SESSION_URL);
+    expect(frame?.hasAttribute('srcdoc')).toBe(false);
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(requests.map(request => request.url).filter(url => url.startsWith('/api/drones/'))).toEqual(['/api/drones/test/fs/html-preview']);
+    const { body } = requests[0];
+    expect(body.path).toBe('/work/index.html');
+    expect(body.contentSecurityPolicy).toContain("connect-src 'none'");
+    expect(body.contentSecurityPolicy).toContain('img-src data: blob: http://127.0.0.1:5173/api/drones/test/fs/html-preview/;');
+    expect(body.documentPrefix).toContain("document.addEventListener('click'");
+    await act(async () => { root.render(<OpenedDroneFilePanel droneId="test" droneName="test" file={{ ...file, path: '/work/other.html' }} />); });
+    expect(requests.find(request => request.method === 'DELETE')?.url).toBe('/api/drones/test/fs/html-preview/token-1');
+  });
+});
+
+test('an open buffer renders in place and resolves its local images through the preview URL', async () => {
+  await withPanelDom(async ({ host, root }) => {
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === '/api/drones/test/fs/html-preview') return Response.json({ ok: true, url: SESSION_URL });
+      if (init?.method === 'DELETE') return Response.json({ ok: true });
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+    const { IsolatedHtmlPreview } = await import('../src/droneHub/files/IsolatedHtmlPreview');
+    await act(async () => { root.render(<IsolatedHtmlPreview source={'<img src="shot.png">'} droneId="test" filePath="/work/index.html" />); });
+    const document = host.querySelector('iframe')?.getAttribute('srcdoc') ?? '';
+    expect(document.startsWith(`<!doctype html><base href="${SESSION_URL}">`)).toBe(true);
+    expect(document.indexOf('<base')).toBeLessThan(document.indexOf("base-uri 'none'"));
+    expect(document).toEndWith('<img src="shot.png">');
+  });
 });

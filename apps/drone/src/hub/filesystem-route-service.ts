@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { markHubChatRouteEntry, measureHubRequestPhase, recordHubRequestPhase } from './hub-performance-diagnostics';
 
 import { browserCacheControlForFileRevision, buildContainerFsListScript } from './filesystem-media';
@@ -15,6 +16,7 @@ import {
   type ResolvedByteRange,
 } from './filesystem-media-range';
 import { hashHostFileWithSize } from './file-revision-watch';
+import { createHtmlPreviewSessions, htmlPreviewResponsePolicy } from './html-preview-sessions';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
@@ -162,7 +164,72 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
   };
   const hashHostFile = async (filePath: string): Promise<string> =>
     (await hashHostFileWithSize(filePath)).revision;
-  return async ({ req, res, url: u, method, parts }) => {
+  const htmlPreviewSessions = createHtmlPreviewSessions();
+  // Streams the file after the preview's prefix; the Hub never buffers the document.
+  const sendHtmlPreviewDocument = async (input: {
+    req: IncomingMessage;
+    res: ServerResponse;
+    drone: any;
+    droneRef: string;
+    targetPath: string;
+    prefix: string;
+    headOnly: boolean;
+  }) => {
+    const { req, res, drone, targetPath } = input;
+    const droneName = String(drone?.name ?? input.droneRef).trim() || input.droneRef;
+    let tmpDir: string | null = null;
+    try {
+      let sourcePath = path.resolve(targetPath);
+      if (droneRuntime(drone) !== 'host') {
+        tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-hub-html-preview-'));
+        await withReadonlyDroneContainer(
+          { requestedDroneName: droneName, droneEntry: drone },
+          async ({ containerName }: any) => {
+            await dvmCopyFromContainer(containerName, targetPath, tmpDir);
+          },
+        );
+        sourcePath = path.join(tmpDir, path.posix.basename(targetPath));
+      }
+      const stat = await fs.stat(sourcePath);
+      if (!stat.isFile()) {
+        json(res, 404, { ok: false, error: `file not found: ${targetPath}` });
+        return;
+      }
+      const prefix = Buffer.from(input.prefix, 'utf8');
+      res.statusCode = 200;
+      res.setHeader('content-type', 'text/html; charset=utf-8');
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('content-length', String(prefix.length + stat.size));
+      if (input.headOnly) {
+        res.end();
+        return;
+      }
+      if (!stat.size) {
+        res.end(prefix);
+        return;
+      }
+      res.write(prefix);
+      const abort = new AbortController();
+      req.once('aborted', () => abort.abort());
+      res.once('close', () => {
+        if (!res.writableEnded) abort.abort();
+      });
+      // Stop at the measured size so a file growing mid-read still matches content-length.
+      await pipeline(createReadStream(sourcePath, { end: stat.size - 1 }), res, { signal: abort.signal });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (res.headersSent) {
+        res.destroy(e as Error);
+        return;
+      }
+      const missing = /no such file|cannot stat|could not find|not found|lstat/i.test(msg) || looksLikeMissingContainerError(msg);
+      const code = droneRuntime(drone) === 'host' ? hostFsErrorStatus(e) : missing ? 404 : 500;
+      json(res, code, { ok: false, error: code === 500 ? 'failed reading HTML file' : msg, path: targetPath });
+    } finally {
+      if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+  const handle: LegacyRouteHandler = async ({ req, res, url: u, method, parts }) => {
     const traced = method === 'GET' && parts[3] === 'fs';
     if (traced) markHubChatRouteEntry(req);
     const measure = <T,>(name: string, run: () => Promise<T>) =>
@@ -196,6 +263,84 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       finally { if (traced) recordHubRequestPhase(req, 'fs_parse_list', performance.now() - started); }
     };
     const handled = await (async (): Promise<false | void> => {
+      // POST /api/drones/:id/fs/html-preview  { path, contentSecurityPolicy, documentPrefix }
+      // DELETE /api/drones/:id/fs/html-preview/:token
+      // GET/HEAD /api/drones/:id/fs/html-preview/:token/<absolute path>
+      // Serves one HTML file to a sandboxed preview, and other paths only as images or
+      // video, so relative image URLs resolve without the Hub page holding any bytes.
+      if (
+        parts.length >= 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'fs' &&
+        parts[4] === 'html-preview'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        if (method === 'POST' && parts.length === 5) {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const body = await readJsonBody(req).catch(() => null);
+          const targetPath = normalizeFsPathForRuntime(resolved.drone, String(body?.path ?? ''), {
+            fallbackToHome: false,
+          });
+          if (!targetPath || targetPath === '/' || !targetPath.startsWith('/')) {
+            json(res, 400, { ok: false, error: 'missing file path' });
+            return;
+          }
+          const token = htmlPreviewSessions.create({
+            droneId: resolved.id,
+            path: targetPath,
+            contentSecurityPolicy: body?.contentSecurityPolicy,
+            documentPrefix: body?.documentPrefix ?? '',
+          });
+          if (!token) {
+            json(res, 400, { ok: false, error: 'invalid preview policy' });
+            return;
+          }
+          const encodedPath = targetPath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/');
+          json(res, 200, {
+            ok: true,
+            path: targetPath,
+            url: `/api/drones/${encodeURIComponent(resolved.id)}/fs/html-preview/${token}${encodedPath}`,
+          });
+          return;
+        }
+        if (method === 'DELETE' && parts.length === 6) {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          htmlPreviewSessions.delete(parts[5], resolved.id);
+          json(res, 200, { ok: true });
+          return;
+        }
+        if ((method !== 'GET' && method !== 'HEAD') || parts.length < 7) return false;
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const session = htmlPreviewSessions.use(parts[5], resolved.id);
+        if (!session) {
+          json(res, 404, { ok: false, error: 'preview expired' });
+          return;
+        }
+        let requestedPath: string;
+        try {
+          requestedPath = `/${parts.slice(6).map((segment) => decodeURIComponent(segment)).join('/')}`;
+        } catch {
+          json(res, 400, { ok: false, error: 'invalid path' });
+          return;
+        }
+        // Applies to images too: a frame navigated to an SVG still gets an opaque origin.
+        res.setHeader('content-security-policy', htmlPreviewResponsePolicy(session.contentSecurityPolicy));
+        res.setHeader('x-content-type-options', 'nosniff');
+        res.setHeader('referrer-policy', 'no-referrer');
+        if (requestedPath !== session.path) {
+          const mediaUrl = new URL(u.toString());
+          mediaUrl.pathname = `/api/drones/${parts[2]}/fs/media`;
+          mediaUrl.search = new URLSearchParams({ path: requestedPath }).toString();
+          return (await handle({ req, res, url: mediaUrl, method, parts: ['api', 'drones', parts[2], 'fs', 'media'] })) ? undefined : false;
+        }
+        await sendHtmlPreviewDocument({ req, res, drone: resolved.drone, droneRef, targetPath: session.path, prefix: session.documentPrefix, headOnly: method === 'HEAD' });
+        return;
+      }
+
       // GET /api/drones/:id/ports
       // Exposes *all* host->container port mappings (like `dvm ports <container>`).
       // GET /api/drones/:id/fs/list?path=/...
@@ -2233,4 +2378,5 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     })();
     return handled !== false;
   };
+  return handle;
 }
