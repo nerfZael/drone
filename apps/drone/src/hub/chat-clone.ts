@@ -30,6 +30,8 @@ export function cloneChatEntryForDroneClone(entryRaw: any): any {
   delete cloned.agentMessageAutoContinueEnabledAt;
   delete cloned.agentSuggestionEnabled;
   delete cloned.agentSuggestionEnabledAt;
+  // Workspace grants name the source drone's own workspace; the clone's chats start with theirs instead.
+  delete cloned.workspaceAccess;
   if (Array.isArray(cloned.turns)) {
     cloned.turns = cloned.turns.map((turn: any) => {
       if (!turn || typeof turn !== 'object') return turn;

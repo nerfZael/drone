@@ -1,6 +1,7 @@
 import React from 'react';
 import type { SidebarContextMenuItem } from './SidebarContextMenu';
 import { requestSideChat } from './side-chat-events';
+import { openChatWorkspaces } from './chat-workspaces-store';
 import { formatShortcutBinding, type ShortcutBindingMap } from './shortcuts';
 import { useSideChatBusyStore } from './side-chat-busy-store';
 
@@ -44,6 +45,10 @@ export function chatActionMenuItems(
       },
     },
   ];
+  items.push({
+    id: 'chat-workspaces', label: 'Workspaces',
+    onSelect: () => openChatWorkspaces({ droneId: target.droneId, chatName: target.chatName }),
+  });
   const group = scope.closest('.dv-groupview') ?? scope.closest('[data-main-workspace-chat]');
   const move = [...(group?.querySelectorAll<HTMLButtonElement>('[data-side-chat-move]') ?? [])]
     .find(button => button.dataset.sideChatMove === target.chatName);

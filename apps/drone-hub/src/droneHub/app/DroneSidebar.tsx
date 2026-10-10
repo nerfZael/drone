@@ -1,5 +1,6 @@
 import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
 import React from 'react';
+import { openChatWorkspaces } from './chat-workspaces-store';
 import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
@@ -3759,6 +3760,19 @@ export function DroneSidebar({
                   pinnedChatContextMenu.droneId,
                   pinnedChatContextMenu.chatName,
                 ),
+            },
+            {
+              id: 'chat-workspaces',
+              label: 'Workspaces',
+              icon: <IconFolderOutline className="h-3.5 w-3.5 text-[var(--muted)]" />,
+              onSelect: () =>
+                openChatWorkspaces({
+                  droneId: pinnedChatContextMenu.droneId,
+                  chatName: pinnedChatContextMenu.chatName,
+                  ...(sidebarDroneById[pinnedChatContextMenu.droneId]
+                    ? { droneLabel: uiDroneName(sidebarDroneById[pinnedChatContextMenu.droneId].name) }
+                    : {}),
+                }),
             },
           ]}
           onClose={() => setPinnedChatContextMenu(null)}

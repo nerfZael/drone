@@ -54,6 +54,8 @@ import { normalizeMcpChatList, type McpChatListEntry } from './chat-catalog';
 import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
+import { registerAgentChatWorkspaceTools } from './mcp-workspace-tools';
+import type { WorkspaceToolDefinition } from './assistant/workspace-tool-definitions';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import { createHttpHubServices, type HubServices } from './application/hub-services';
 import {
@@ -234,7 +236,11 @@ async function requestJson(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const method = cleanString(init.method, 'GET').toUpperCase();
+  // A caller's signal (an MCP client cancelling its call) stops the request too.
+  const cancel = () => controller.abort();
+  init.signal?.addEventListener('abort', cancel, { once: true });
   try {
+    init.signal?.throwIfAborted();
     const response = await fetch(joinUrl(connection.baseUrl, pathname), {
       ...init,
       signal: controller.signal,
@@ -261,11 +267,13 @@ async function requestJson(
     }
     return data;
   } catch (error: any) {
+    if (init.signal?.aborted) throw new Error(`Drone Hub request cancelled: ${method} ${pathname}`);
     if (error?.name === 'AbortError')
       throw new Error(`Drone Hub request timed out after ${timeoutMs}ms: ${method} ${pathname}`);
     throw error;
   } finally {
     clearTimeout(timer);
+    init.signal?.removeEventListener('abort', cancel);
   }
 }
 
@@ -1414,6 +1422,8 @@ type McpToolRegistrationContext = {
   concealSpeechMuteStatus?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
   hubServices: HubServices;
+  /** Blip's workspace tool definitions; given for agent chats, whose workspace tools run in the Hub. */
+  workspaceToolDefinitions?: WorkspaceToolDefinition[];
 };
 
 function chatPrincipal(
@@ -2557,6 +2567,19 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   );
 
   registerWorkflowMcpTools(server, { requestJson, toolResult });
+
+  // Built-in (blip) chats have these tools natively; other agent chats reach their workspaces through here.
+  const workspaceChat = chatPrincipal(context);
+  if (workspaceChat && !context.nativeThreadId && context.workspaceToolDefinitions) {
+    registerAgentChatWorkspaceTools(server, {
+      chat: () => {
+        const principal = chatPrincipal(context) ?? workspaceChat;
+        return { droneId: principal.droneId, chatName: principal.chatName };
+      },
+      definitions: context.workspaceToolDefinitions,
+      requestJson,
+    });
+  }
 
   server.registerTool(
     'list_chats',
@@ -3991,6 +4014,9 @@ export function createDroneHubMcpServer(
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
+    ...(input?.workspaceToolDefinitions
+      ? { workspaceToolDefinitions: input.workspaceToolDefinitions }
+      : {}),
     hubServices: input?.hubServices ?? createHttpHubServices(requestJson),
     speechEnabled: input?.speechEnabled !== false,
     onSpeechToolRegistered: (tool) => {

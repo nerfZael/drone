@@ -28,6 +28,7 @@ import {
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneContainerStopped, isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconFolderGit, IconFolderOutline, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { openChatWorkspaces } from './chat-workspaces-store';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
@@ -920,6 +921,13 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
                 chatBusy ||
                 Boolean(cloningChatKeys[`${drone.id}:${chatName}`]),
               onSelect: () => void onCloneDroneChat(drone.id, chatName),
+            },
+            {
+              id: 'chat-workspaces',
+              label: 'Workspaces',
+              icon: <IconFolderOutline className="h-3.5 w-3.5 text-[var(--muted)]" />,
+              onSelect: () =>
+                openChatWorkspaces({ droneId: drone.id, chatName, droneLabel: uiDroneName(drone.name) }),
             },
             {
               id: 'rename-chat',

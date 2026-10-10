@@ -326,6 +326,8 @@ import { registerRecordingRoutes } from './recordings/registerRecordingRoutes';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { registerReflexRoutes } from './reflex/reflex-routes';
 import { registerEntityRoutes } from './entity/entity-routes';
+import { AgentChatWorkspaces } from './assistant/chat-agent-workspaces';
+import { registerChatWorkspaceRoutes } from './routes/chat-workspace-routes';
 import { registerFolderWorkspace, resolveFolderWorkspace } from './folder-workspaces';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { createFileRevisionWatcher } from './file-revision-watch';
@@ -5686,6 +5688,17 @@ async function startDroneHubApiServerWithLifecycle(
   registerFolderWorkspace({ id: COMPANION_HOME_TARGET_ID, name: 'Companion home', root: ensureCompanionHome });
   // The entity's sessions use the Companion's workspace service, each with its own selection.
   registerEntityRoutes(apiRouter, { createWorkspaceService: store => new CompanionWorkspaceService(assistantService, deviceMesh, store) });
+  // Agent chats choose their workspaces with the same service; the selection lives on the chat entry.
+  registerChatWorkspaceRoutes(
+    apiRouter,
+    new AgentChatWorkspaces(assistantService, deviceMesh, {
+      read: async (chat) => readChatMetadataFromStore(chat).chat?.workspaceAccess,
+      write: async (chat, access) => {
+        await updateChatInStore({ ...chat, update: (current: any) => ({ ...current, workspaceAccess: access }) });
+        await projectCanonicalChatToRegistry(chat.droneId, chat.chatName);
+      },
+    }),
+  );
   registerDesktopEventRoutes(apiRouter, {
     readNotificationStatus: async (target) => {
       const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ?? await loadCanonicalActiveModel();

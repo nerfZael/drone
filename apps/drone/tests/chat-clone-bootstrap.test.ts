@@ -96,6 +96,15 @@ describe('chat clone transcript bootstrap', () => {
     expect(first.chatId).toBe(source.chatId);
   });
 
+  test('does not carry workspace grants into a cloned drone', () => {
+    const access = {
+      targets: [{ id: 'drone:source', kind: 'drone', droneId: 'source', read: true, write: true, execute: true }],
+      defaultTargetId: 'drone:source',
+    };
+    const cloned = cloneChatEntryForDroneClone({ id: 'source-chat-id', workspaceAccess: access });
+    expect(cloned.workspaceAccess).toBeUndefined();
+  });
+
   test('preserves continuation ids while dropping source pending prompt state', () => {
     const cloned = cloneChatEntryForDroneClone({
       createdAt: '2026-03-17T10:00:00.000Z',

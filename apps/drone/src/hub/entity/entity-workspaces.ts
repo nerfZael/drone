@@ -1,7 +1,10 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { Channel, EffectSpec, Schema } from '@entity/core';
 import type { ChatWorkspaceAccess, ChatWorkspaceCatalog } from '@drone/assistant-chat';
-import { loadBlipTools } from '../assistant/blip-runtime-loader';
+import {
+  workspaceToolDefinitions as sharedWorkspaceToolDefinitions,
+  type WorkspaceToolDefinition,
+} from '../assistant/workspace-tool-definitions';
 
 /** The entity's own folder: always there, readable and writable, never a place to run commands. */
 export const ENTITY_HOME_TARGET_ID = 'entity-home';
@@ -100,39 +103,12 @@ const READ_TOOLS = new Set(['read_file', 'search_files', 'list_files', 'get_work
 export interface WorkspacesWorld { access: EntityWorkspaceView }
 
 /** Loads blip's tool definitions (names, descriptions, parameters); they are the same whatever is selected. */
-export async function workspaceToolDefinitions(): Promise<{ name: string; description: string; parameters: Record<string, unknown> }[]> {
-  const blip: any = await loadBlipTools();
-  return blip
-    .createWorkspaceTargetTools({
-      profile: 'no-shell-workspace-write',
-      includeShell: true,
-      resolveTarget: () => { throw new Error('definitions only'); },
-      exposeTargetParameter: true,
-    })
-    .map((tool: any) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
-    .concat(TRANSFER_DEFINITION);
+export function workspaceToolDefinitions(): Promise<WorkspaceToolDefinition[]> {
+  return sharedWorkspaceToolDefinitions({
+    transferExample: 'for example from a repository into your home folder',
+    transferDestinationHint: `${ENTITY_HOME_TARGET_ID} for your home folder`,
+  });
 }
-
-/**
- * Copying between workspaces (a file or folder from one to another). Blip builds this tool per selection, listing the
- * workspace ids it allows; the entity's tools are fixed for a session, so its ids are plain strings, and the service's
- * own tool checks read access on the source and write access on the destination at call time.
- */
-const TRANSFER_DEFINITION = {
-  name: 'transfer_files',
-  description: 'Copy one file or a folder between two workspaces (for example from a repository into your home folder). Needs Read on the source and Write on the destination.',
-  parameters: {
-    type: 'object', additionalProperties: false, required: ['sourceTarget', 'sourcePath', 'destinationTarget', 'destinationPath'],
-    properties: {
-      sourceTarget: { type: 'string', description: 'The workspace id to copy from' },
-      sourcePath: { type: 'string', description: 'Workspace-relative source file or folder' },
-      destinationTarget: { type: 'string', description: `The workspace id to copy to (${ENTITY_HOME_TARGET_ID} for your home folder)` },
-      destinationPath: { type: 'string', description: 'Workspace-relative destination path' },
-      overwrite: { type: 'boolean', description: 'Replace existing destination files. Defaults to false.' },
-      resumeToken: { type: 'string', description: 'Token returned by a partially completed transfer, to skip files already copied' },
-    },
-  } as Record<string, unknown>,
-};
 
 /** Files a write touches, for claims: `<target>:<path>`, so two workspaces never share a claim. */
 function writtenPaths(tool: string, args: Record<string, any>, world: WorkspacesWorld): string[] {

@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 
 import { readJsonBody, sendJson } from './hub-http';
 import { createDroneHubMcpServer } from './mcp-server';
+import { loadAgentChatWorkspaceToolDefinitions } from './mcp-workspace-tools';
 import type { HubServices } from './application/hub-services';
 import {
   authenticateMcpBearerToken,
@@ -81,10 +82,20 @@ export class DroneHubMcpHttpTransport {
     try {
       const body = await readJsonBody(req);
       mark('body');
+      const workspaceToolDefinitions =
+        identity.kind === 'chat'
+          ? await loadAgentChatWorkspaceToolDefinitions().catch((error: any) => {
+              this.opts.log('warn', 'mcp workspace tools unavailable', {
+                error: String(error?.message ?? error ?? ''),
+              });
+              return undefined;
+            })
+          : undefined;
       server = createDroneHubMcpServer({
         principal: identity,
         speechEnabled: this.opts.speechEnabled !== false,
         hubServices: this.opts.hubServices,
+        ...(workspaceToolDefinitions ? { workspaceToolDefinitions } : {}),
       });
       mark('catalog');
       const transport = new StreamableHTTPServerTransport({

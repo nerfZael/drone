@@ -14,6 +14,7 @@ import { detachChatMenuItems } from './DetachedChatIndicator';
 import { useChatContextMenu } from './use-chat-context-menu';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import React from 'react';
+import { openChatWorkspaces } from './chat-workspaces-store';
 import { useWorkspaceSideChats } from './use-workspace-side-chats';
 import { WorkspaceSideChatContent } from './WorkspaceSideChatContent';
 import { focusSideChat } from './side-chat-events';
@@ -69,6 +70,7 @@ import {
   IconCursorApp,
   IconDownload,
   IconFileDiff,
+  IconFolderOutline,
   IconGitCommitHorizontal,
   IconGitPullRequest,
   IconMonitor,
@@ -1447,6 +1449,18 @@ export function SelectedDroneWorkspace({
       icon: <IconNetwork className="h-3.5 w-3.5" />,
       active: droneHubPermissionsOpen,
       onSelect: () => setDroneHubPermissionsOpen(true),
+    },
+    {
+      id: 'chat-workspaces',
+      label: 'Workspaces',
+      title: 'Choose the workspaces this chat can read, write, or run commands in through the DroneHub MCP server.',
+      icon: <IconFolderOutline className="h-3.5 w-3.5" />,
+      onSelect: () =>
+        openChatWorkspaces({
+          droneId: currentDrone.id,
+          chatName: activeChatName,
+          droneLabel: currentDroneLabel,
+        }),
     },
     ...subagentsMenuAction({
       agentKey: currentAgentKey,
