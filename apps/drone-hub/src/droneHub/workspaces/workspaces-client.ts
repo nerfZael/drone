@@ -64,6 +64,11 @@ export async function setWorkspacesDirectory(directory: string | null, migrate: 
   return result;
 }
 
+/** Opens a workspace's folder in the system file manager of the device the Hub runs on. */
+export async function openWorkspaceFolder(browseId: string): Promise<void> {
+  await post('/api/workspaces/open-folder', { browseId });
+}
+
 /** The id the workspace pickers and grants use for a workspace the user added. */
 export const userWorkspaceTargetId = (id: string) => `host:workspace-${id}`;
 

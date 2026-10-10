@@ -6,12 +6,16 @@ import { IconSpinner } from '../icons';
 import { setExplorerWorkspace, type ExplorerWorkspace } from './explorer-workspace-store';
 import {
   loadBrowsableWorkspaces,
+  openWorkspaceFolder,
   openWorkspacesSettings,
   subscribeWorkspacesChanged,
   type BrowsableWorkspace,
 } from './workspaces-client';
 
 const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Host drones', 'Container drones'];
+const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Host drones', 'Container drones']);
+/** Drones shown per group before "more", as in the workspace picker; a search looks through all of them. */
+const DRONE_CAP = 5;
 
 /** The last list seen, so reopening shows it at once while a fresh one loads. */
 let lastWorkspaces: BrowsableWorkspace[] | null = null;
@@ -28,6 +32,23 @@ function ChevronIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 shrink-0" aria-hidden="true">
       <path d="m4.5 6.25 3.5 3.5 3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function OpenFolderIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M1.75 12.25v-8c0-.55.45-1 1-1h3.1l1.4 1.5h5c.55 0 1 .45 1 1v1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M1.75 12.25 3.4 7.6c.14-.4.52-.67.95-.67h9.4c.69 0 1.17.68.95 1.33l-1.3 3.6c-.14.4-.52.64-.94.64H2.75" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BackHomeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M2.25 7.25 8 2.5l5.75 4.75M3.75 6v7.25h3v-4h2.5v4h3V6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -52,8 +73,11 @@ export function ExplorerWorkspaceSwitcher({
   chatName,
   current,
   storeKey,
+  ownIsLocal = false,
 }: {
   droneId: string;
+  /** The drone's own files are a folder on this device (a host drone), so they can open in the file manager. */
+  ownIsLocal?: boolean;
   /** Where the choice is kept: the drone's id by default, a desktop Editor window's own key otherwise. */
   storeKey?: string;
   droneName: string;
@@ -63,6 +87,7 @@ export function ExplorerWorkspaceSwitcher({
   current: ExplorerWorkspace | null;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = React.useState('');
   const [workspaces, setWorkspaces] = React.useState<BrowsableWorkspace[] | null>(lastWorkspaces);
   const [chatIds, setChatIds] = React.useState<string[]>([]);
@@ -91,7 +116,10 @@ export function ExplorerWorkspaceSwitcher({
   }, [chatName, droneId]);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setExpanded(new Set());
+      return;
+    }
     void load();
     return subscribeWorkspacesChanged(() => void load());
   }, [load, open]);
@@ -104,12 +132,33 @@ export function ExplorerWorkspaceSwitcher({
     setQuery('');
   };
 
+  // Folders on this device open in the system file manager; a container drone's files are not one.
+  const openableId = current ? (current.kind === 'folder' ? current.browseId : null) : ownIsLocal ? droneId : null;
+  const [openError, setOpenError] = React.useState('');
+  React.useEffect(() => {
+    if (!openError) return;
+    const timer = window.setTimeout(() => setOpenError(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [openError]);
+  React.useEffect(() => setOpenError(''), [openableId]);
+  const openFolder = () => {
+    if (!openableId) return;
+    setOpenError('');
+    void openWorkspaceFolder(openableId).catch((cause) => setOpenError(cause instanceof Error ? cause.message : String(cause)));
+  };
+
   const needle = query.trim().toLowerCase();
   const matches = (workspace: BrowsableWorkspace) =>
     !needle || workspace.name.toLowerCase().includes(needle) || (workspace.path ?? '').toLowerCase().includes(needle);
   const list = (workspaces ?? []).filter((workspace) => !isOwn(workspace));
   const chatWorkspaces = chatIds.map((id) => list.find((workspace) => workspace.id === id)).filter((item): item is BrowsableWorkspace => Boolean(item) && matches(item!));
-  const groups = CATEGORIES.map((category) => ({ category, items: list.filter((workspace) => workspace.category === category && matches(workspace)) })).filter((group) => group.items.length > 0);
+  const groups = CATEGORIES.map((category) => {
+    const all = list.filter((workspace) => workspace.category === category && matches(workspace));
+    const capped = DRONE_CATEGORIES.has(category) && !needle && !expanded.has(category);
+    // The one shown now stays in the list even past the cap.
+    const items = capped ? all.filter((workspace, index) => index < DRONE_CAP || workspace.id === current?.id) : all;
+    return { category, items, hidden: all.length - items.length };
+  }).filter((group) => group.items.length > 0);
   const label = current ? current.name : droneName;
 
   const row = (key: string, workspace: BrowsableWorkspace | null, title: string, detail?: string) => {
@@ -186,6 +235,15 @@ export function ExplorerWorkspaceSwitcher({
                 <React.Fragment key={group.category}>
                   {heading(group.category)}
                   {group.items.map((workspace) => row(workspace.id, workspace, workspace.name, workspace.path ?? workspace.status))}
+                  {group.hidden > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setExpanded((previous) => new Set(previous).add(group.category))}
+                      className="px-2 py-1 text-xs text-[var(--accent)] hover:underline"
+                    >
+                      + {group.hidden} more
+                    </button>
+                  ) : null}
                 </React.Fragment>
               ))}
               {workspaces && needle && groups.length === 0 && chatWorkspaces.length === 0 ? (
@@ -207,6 +265,31 @@ export function ExplorerWorkspaceSwitcher({
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
+      {current ? (
+        <button
+          type="button"
+          onClick={() => setExplorerWorkspace(storeKey ?? droneId, null, droneId)}
+          title={`Back to ${droneName}`}
+          aria-label={`Back to ${droneName}`}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+        >
+          <BackHomeIcon />
+        </button>
+      ) : null}
+      {openableId ? (
+        <button
+          type="button"
+          onClick={openFolder}
+          title={openError || 'Open in file manager'}
+          aria-label="Open in file manager"
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] transition-colors hover:bg-[var(--hover)] ${
+            openError ? 'text-[var(--red)]' : 'text-[var(--muted)] hover:text-[var(--fg)]'
+          }`}
+        >
+          <OpenFolderIcon />
+        </button>
+      ) : null}
+      {openError ? <span role="alert" className="sr-only">{openError}</span> : null}
       <button
         type="button"
         onClick={openWorkspacesSettings}

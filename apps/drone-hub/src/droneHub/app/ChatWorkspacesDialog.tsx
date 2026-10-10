@@ -4,7 +4,7 @@ import { requestJson } from '../http';
 import { closeChatWorkspaces, useChatWorkspacesStore, type ChatWorkspacesTarget } from './chat-workspaces-store';
 import { IconFolder } from '../icons';
 
-type ChatInfo = { agent?: { kind?: string }; chatId?: string | null };
+type ChatInfo = { agent?: { kind?: string }; chatId?: string | null; name?: string };
 type Source = { endpoint: string; note: string | null } | { error: string };
 
 const chatPath = ({ droneId, chatName }: ChatWorkspacesTarget) =>
@@ -14,8 +14,10 @@ const chatPath = ({ droneId, chatName }: ChatWorkspacesTarget) =>
  * Where a chat's workspaces are chosen. A built-in chat keeps its own selection (its tools are blip's); any other
  * agent chat uses the selection the DroneHub MCP server's workspace tools are checked against.
  */
-async function loadSource(target: ChatWorkspacesTarget, signal: AbortSignal): Promise<Source> {
+async function loadSource(target: ChatWorkspacesTarget, signal: AbortSignal, onDroneName: (name: string) => void): Promise<Source> {
   const info = await requestJson<ChatInfo>(`${chatPath(target)}?turns=0`, { signal });
+  // Not every menu that opens this knows the drone's name; the chat's info does.
+  if (typeof info.name === 'string' && info.name.trim()) onDroneName(info.name.trim());
   if (info.agent?.kind === 'native') {
     if (!info.chatId) return { error: 'Send a message first to choose this chat’s workspaces.' };
     return {
@@ -44,6 +46,7 @@ function ChatWorkspacesPanel({ target }: { target: ChatWorkspacesTarget }) {
   const [source, setSource] = React.useState<Source | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState(false);
+  const [droneName, setDroneName] = React.useState<string | null>(target.droneLabel ?? null);
   const panel = React.useRef<HTMLElement>(null);
   // Only a press that starts on the backdrop closes it; a drag across the permission grid can end out there.
   const pressedBackdrop = React.useRef(false);
@@ -51,7 +54,7 @@ function ChatWorkspacesPanel({ target }: { target: ChatWorkspacesTarget }) {
   React.useEffect(() => {
     panel.current?.focus();
     const controller = new AbortController();
-    loadSource(target, controller.signal)
+    loadSource(target, controller.signal, (name) => { if (!target.droneLabel) setDroneName(name); })
       .then(setSource)
       .catch((error: any) => {
         if (!controller.signal.aborted) setSource({ error: error?.message ?? String(error) });
@@ -101,8 +104,8 @@ function ChatWorkspacesPanel({ target }: { target: ChatWorkspacesTarget }) {
             <div className="text-12 font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
               Workspaces
             </div>
-            <div className="mt-0.5 truncate text-10 text-[var(--muted)]" title={`${target.droneLabel ?? target.droneId} · ${target.chatName}`}>
-              {target.droneLabel ?? target.droneId} · {target.chatName}
+            <div className="mt-0.5 truncate text-10 text-[var(--muted)]" title={droneName ? `${target.chatName} (${droneName})` : target.chatName}>
+              {target.chatName}{droneName ? ` (${droneName})` : ''}
             </div>
           </div>
           <button

@@ -138,3 +138,14 @@ test('the explorer can browse homes, added workspaces, repositories, host drone 
   expect(by('drone:c1')).toMatchObject({ browseId: 'c1', kind: 'drone', category: 'Container drones', droneId: 'c1' });
   expect(by('drone:h1')).toBeUndefined();
 });
+
+test('a workspace folder opens with the file manager of the Hub\'s operating system', async () => {
+  const { fileManagerCommand, localFolderFor } = await import('../src/hub/open-folder');
+  expect(fileManagerCommand('linux', '/data/notes')).toEqual(['xdg-open', ['/data/notes']]);
+  expect(fileManagerCommand('darwin', '/data/notes')).toEqual(['open', ['/data/notes']]);
+  expect(fileManagerCommand('win32', 'C:\\notes')).toEqual(['explorer.exe', ['C:\\notes']]);
+  const { registerFolderWorkspace } = await import('../src/hub/folder-workspaces');
+  registerFolderWorkspace({ id: 'open-test-home', name: 'Home', root: async () => root });
+  expect(await localFolderFor('open-test-home')).toBe(root);
+  await expect(localFolderFor('')).rejects.toThrow('Choose a workspace');
+});

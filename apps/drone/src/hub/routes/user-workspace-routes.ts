@@ -5,6 +5,7 @@ import { listHostWorkspaces } from '../assistant/host-workspaces';
 import path from 'node:path';
 import { listedFolderWorkspaces } from '../folder-workspaces';
 import type { UserWorkspaces } from '../user-workspaces';
+import { openWorkspaceFolder } from '../open-folder';
 
 /** One workspace the explorer can show: `browseId` is what the file routes take for it. */
 export type BrowsableWorkspace = {
@@ -59,6 +60,8 @@ export function registerUserWorkspaceRoutes(
   router.post('/api/workspaces/:id/rename', handle(async ({ params, body }) => { await workspaces.rename(params.id, body?.name); }));
   router.delete('/api/workspaces/:id', handle(async ({ params }) => { await workspaces.remove(params.id); }));
   router.get('/api/workspaces/browse', handle(async () => ({ workspaces: await browsableWorkspaces(deps.inventory) })));
+  // The File Explorer's "Open in file manager": the folder opens on the device the Hub runs on.
+  router.post('/api/workspaces/open-folder', handle(async ({ body }) => await openWorkspaceFolder(String(body?.browseId ?? ''))));
 }
 
 export async function browsableWorkspaces(

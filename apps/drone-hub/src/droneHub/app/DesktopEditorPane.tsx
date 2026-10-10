@@ -50,6 +50,7 @@ export function DesktopEditorPane({ drone, currentDroneId, paneKey, droneById }:
           ownPath={droneHomePath(drone)}
           current={workspace}
           storeKey={storeKey}
+          ownIsLocal={drone.runtime === 'host'}
         />
       }
     />
@@ -75,6 +76,8 @@ export type StandaloneEditorControls = {
  */
 export function useStandaloneEditorPaneProps(
   drone: DroneSummary | null,
+  /** Runs whenever a file opens, so a host can bring its editor forward. */
+  onFileOpened?: () => void,
 ): { pane: Omit<EditorWorkspacePaneProps, 'drone' | 'paneKey' | 'currentDroneId'>; controls: StandaloneEditorControls } {
   const files = useFilesPaneState({ currentDrone: drone, requestJson, filesEnabled: Boolean(drone) });
   const revealUntitledRef = React.useRef<(path: string) => void>(() => {});
@@ -85,6 +88,8 @@ export function useStandaloneEditorPaneProps(
     onUntitledFileSaved: (path) => revealUntitledRef.current(path),
   });
   const revealSeq = React.useRef(0);
+  const onFileOpenedRef = React.useRef(onFileOpened);
+  onFileOpenedRef.current = onFileOpened;
   const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number; kind?: 'file' | 'directory' } | null>(null);
   const { setCurrentFsPath, defaultFsPathForCurrentDrone } = files;
   const { openEditorFile, openEditorLocation, setActiveOpenedFileTab, openedFileTabs, goBackLocation, goForwardLocation } = editor;
@@ -100,6 +105,7 @@ export function useStandaloneEditorPaneProps(
     const name = String(next.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
     revealFileInExplorer(path);
     openEditorFile({ ...next, path, name });
+    onFileOpenedRef.current?.();
   }, [drone, openEditorFile, revealFileInExplorer]);
   const activateTab = React.useCallback((tabId: string) => {
     const tab = openedFileTabs.find((entry) => entry.tabId === tabId);

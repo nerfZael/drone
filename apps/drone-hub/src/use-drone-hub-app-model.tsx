@@ -2014,7 +2014,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   // The selected drone's File Explorer can show another workspace, with an explorer and editor of its own; the
   // drone's own files and open tabs stay as they were for when it switches back.
   const { workspace: explorerWorkspace, drone: explorerWorkspaceDrone } = useExplorerWorkspaceDrone(currentDroneId, droneById);
-  const standaloneEditor = useStandaloneEditorPaneProps(explorerWorkspaceDrone);
+  // Set once the editor pane can be brought forward (below): opening a file shows the editor, as for the drone's own.
+  const focusEditorPaneRef = React.useRef<() => void>(() => {});
+  const standaloneEditor = useStandaloneEditorPaneProps(explorerWorkspaceDrone, () => focusEditorPaneRef.current());
   // Only while switched, so the tool panes do not re-render with every Hub render otherwise. The editor shortcuts
   // (quick open, new file, back and forward) act on whichever editor is shown.
   const switchedEditorProps = explorerWorkspaceDrone ? standaloneEditor.pane : null;
@@ -3799,6 +3801,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const focusEditorPane = React.useCallback(() => {
     requestRightPanelTab('editor');
   }, [requestRightPanelTab]);
+  focusEditorPaneRef.current = focusEditorPane;
   const pathNavigationVersion = React.useRef(0);
   const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number; kind?: 'file' | 'directory' } | null>(null);
   // Everything that reveals or opens one of the drone's files brings its explorer back to the drone's own files.
@@ -5942,6 +5945,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               ownPath={droneHomePath(drone)}
               chatName={selectedChat || 'default'}
               current={explorerWorkspace}
+              ownIsLocal={drone.runtime === 'host'}
             />
           ) : undefined}
           editorOverride={isSelectedDrone && explorerWorkspaceDrone && switchedEditorProps ? { ...switchedEditorProps, drone: explorerWorkspaceDrone } : null}
