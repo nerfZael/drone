@@ -73,7 +73,7 @@ export function registerEntityRoutes(router: HubRouter, overrides: { session?: E
     })());
   };
   // The explorer and editor browse the entity's home folder like a host drone's folder (see folder-workspaces.ts).
-  registerFolderWorkspace({ id: ENTITY_WORKSPACE_ID, name: 'Entity home', root: async () => (await current()).getConfig().workspace || defaultEntityWorkspace() });
+  registerFolderWorkspace({ id: ENTITY_WORKSPACE_ID, name: 'Entity home', root: async () => (await current()).getConfig().workspace || defaultEntityWorkspace(), listed: true });
 
   router.get('/api/entity/state', async ({ json }) => { json(200, { ok: true, ...(await current()).state() }); });
 

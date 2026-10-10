@@ -79,7 +79,7 @@ function DesktopToolWindowView({ window: item, props }: { window: DesktopToolWin
   if (!drone) {
     content = <UiPaneState kind="empty" title={pinned ? 'The pinned drone is gone.' : `Select a drone to show its ${label.toLowerCase()} here.`} />;
   } else if (item.tab === 'editor') {
-    content = <DesktopEditorPane key={drone.id} drone={drone} currentDroneId={currentDroneId} paneKey={paneKey} />;
+    content = <DesktopEditorPane key={drone.id} drone={drone} currentDroneId={currentDroneId} paneKey={paneKey} droneById={droneById} />;
   } else {
     const chatsPaneOptions: DroneChatsPaneOptions | undefined = item.tab === 'chats' ? {
       sideChatNames: (drone.sideChats ?? []).map((chat) => chat.name),

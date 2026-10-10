@@ -143,6 +143,7 @@ const DRONE_HUB_ELECTRON_FILES = [
   'hub-notification.html',
   'hub-notification-renderer.js',
   'hub-electron-companion.cjs',
+  'hub-electron-folder-dialog.cjs',
   'hub-electron-snipping.cjs',
   'hub-capture-cursor.cjs',
   'hub-x11-cursor.py',

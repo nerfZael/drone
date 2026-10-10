@@ -256,6 +256,10 @@ type RightPanelTabContentProps = {
   onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
   onShowChanges: () => void;
+  /** Chooses which workspace the Editor's File Explorer shows. */
+  explorerSwitcher?: React.ReactNode;
+  /** The Editor's props when its File Explorer is switched to another workspace (that workspace as `drone`). */
+  editorOverride?: Omit<EditorWorkspacePaneProps, 'paneKey' | 'currentDroneId' | 'explorerSwitcher'> | null;
 };
 
 export function RightPanelTabContent(props: RightPanelTabContentProps) {
@@ -471,7 +475,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
       );
 
     case 'editor':
-      return <EditorWorkspacePane {...props} />;
+      return <EditorWorkspacePane {...props} {...(props.editorOverride ?? {})} />;
 
     case 'preview':
       return (
@@ -604,7 +608,7 @@ export type EditorWorkspacePaneProps = Pick<RightPanelTabContentProps,
   | 'onOpenedEditorFileContentChange' | 'onSaveOpenedEditorFile' | 'onAppendFileDictationLine'
   | 'onOpenFileDictationTarget' | 'onCloseOpenedEditorFile' | 'onConfirmCloseOpenedEditorFilesForPaths'
   | 'onCloseOpenedEditorFilesForPaths' | 'onRemapOpenedEditorFilesForPathChange'
-  | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs'>;
+  | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs' | 'explorerSwitcher'>;
 
 /** The Editor tool: file explorer beside the editor, both bound to one drone's editor state. */
 export function EditorWorkspacePane({
@@ -643,6 +647,7 @@ export function EditorWorkspacePane({
   onRemapOpenedEditorFilesForPathChange,
   onActivateOpenedEditorFileTab,
   onReorderOpenedEditorFileTabs,
+  explorerSwitcher,
 }: EditorWorkspacePaneProps) {
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
   const renderFileExplorer = (explorerZoom: number) => (
@@ -721,7 +726,7 @@ export function EditorWorkspacePane({
   return (
     <PaneModule tab="editor" load={loadDroneEditorWorkspace}>
       {(DroneEditorWorkspace) => (
-        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
+        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} switcher={explorerSwitcher} />
       )}
     </PaneModule>
   );

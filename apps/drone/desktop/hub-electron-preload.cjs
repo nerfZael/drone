@@ -101,6 +101,16 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
     return () => ipcRenderer.removeListener('drone-hub:notification-error', listener);
   },
   writeClipboardText: (text) => ipcRenderer.invoke('drone-hub:clipboard-write-text', text),
+  /** A folder on this computer from the system dialog, or null when cancelled. */
+  async chooseFolder(options) {
+    try { return await ipcRenderer.invoke('drone-hub:choose-folder', options); }
+    catch (error) {
+      if (String(error?.message || error).includes("No handler registered for 'drone-hub:choose-folder'")) {
+        throw new Error('Choosing a folder needs the updated desktop app. Fully quit and reopen Drone Hub, or type the path instead.');
+      }
+      throw error;
+    }
+  },
   companionWindow: {
     control(action, size) {
       if (['show', 'hide', 'close', 'attach', 'resize', 'focus-owner', 'focus'].includes(action)) ipcRenderer.send('drone-hub:companion-window', action, size);

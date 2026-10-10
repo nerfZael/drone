@@ -10,6 +10,7 @@ const registryListeners = new Set<Listener<void>>();
 const summaryListeners = new Set<Listener<void>>();
 const chatListeners = new Set<Listener<DroneChatChange>>();
 const resourceDeliveryListeners = new Set<Listener<void>>();
+const userWorkspaceListeners = new Set<Listener<void>>();
 
 export const hubChangeEvents = {
   emitDesktopNotification(event: DesktopNotificationEvent): void {
@@ -33,6 +34,16 @@ export const hubChangeEvents = {
   onResourceDeliveryChange(listener: Listener<void>): () => void {
     resourceDeliveryListeners.add(listener);
     return () => resourceDeliveryListeners.delete(listener);
+  },
+  /** Workspaces were added, removed, renamed or moved (Settings → Workspaces). */
+  emitUserWorkspacesChange(): void {
+    for (const listener of userWorkspaceListeners) {
+      try { listener(); } catch { /* A disconnected UI must not interrupt event delivery. */ }
+    }
+  },
+  onUserWorkspacesChange(listener: Listener<void>): () => void {
+    userWorkspaceListeners.add(listener);
+    return () => userWorkspaceListeners.delete(listener);
   },
   emitRegistryWrite(): void {
     for (const listener of registryListeners) listener();

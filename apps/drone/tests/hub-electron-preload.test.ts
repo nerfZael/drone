@@ -45,3 +45,12 @@ test('Companion preload forwards recording focus through the allowed control cha
   bridge.companionWindow.control('unknown');
   expect(sent).toEqual([['drone-hub:companion-window', 'focus', undefined]]);
 });
+
+test('folder chooser returns the chosen path and explains an older desktop process', async () => {
+  const calls: unknown[][] = [];
+  const bridge = desktopBridge(async (...args: any[]) => { calls.push(args); return '/home/me/notes'; });
+  expect(await bridge.chooseFolder({ title: 'Add folder' })).toBe('/home/me/notes');
+  expect(calls).toEqual([['drone-hub:choose-folder', { title: 'Add folder' }]]);
+  const old = desktopBridge(async () => { throw new Error("No handler registered for 'drone-hub:choose-folder'"); });
+  await expect(old.chooseFolder()).rejects.toThrow('type the path instead');
+});

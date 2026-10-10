@@ -6,6 +6,8 @@ import {
 } from './workspace-explorer-preferences';
 
 type WorkspaceExplorerHeaderProps = {
+  /** Shown in place of the "Files" label (the workspace switcher). */
+  title?: React.ReactNode;
   zoom: number;
   onDecreaseZoom: () => void;
   onIncreaseZoom: () => void;
@@ -18,6 +20,7 @@ type WorkspaceExplorerHeaderProps = {
 };
 
 export function WorkspaceExplorerHeader({
+  title,
   zoom,
   onDecreaseZoom,
   onIncreaseZoom,
@@ -35,7 +38,7 @@ export function WorkspaceExplorerHeader({
           dragHandle ? 'cursor-grab active:cursor-grabbing' : ''
         }`}
       >
-        <span className="text-ui font-[var(--weight-emphasis)] text-[var(--fg-secondary)]">Files</span>
+        {title ?? <span className="text-ui font-[var(--weight-emphasis)] text-[var(--fg-secondary)]">Files</span>}
       </div>
       <UiToolbarGroup label="Explorer zoom">
         <UiToolbarButton

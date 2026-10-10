@@ -5,6 +5,7 @@ import path from 'node:path';
 import { hostDroneWorkspacePath } from '../../host/runtime';
 import { listCanonicalRepositories } from '../groups-repositories';
 import { loadDroneSummaryRegistry } from '../drone-summary-registry';
+import { userWorkspaces, userWorkspaceTargetId } from '../user-workspaces';
 
 export type HostWorkspace = {
   id: string;
@@ -14,6 +15,8 @@ export type HostWorkspace = {
   repository: boolean;
   /** Set when the folder is the private workspace generated for one host drone. */
   droneName?: string;
+  /** Set when the user added this workspace (Settings → Workspaces). */
+  userWorkspace?: true;
 };
 
 export function hostWorkspaceFilesystemEntry(workspace: HostWorkspace) {
@@ -65,6 +68,7 @@ export function hostWorkspaceId(root: string): string {
 export function buildHostWorkspaces(
   drones: Array<{ id?: string; name?: string; runtime?: string; cwd?: string; repoPath?: string }>,
   repositories: string[],
+  added: Array<{ id: string; name: string; root: string }> = [],
 ): HostWorkspace[] {
   const repoPaths = new Set(
     [...repositories, ...drones.map((drone) => drone.repoPath ?? '')]
@@ -83,7 +87,12 @@ export function buildHostWorkspaces(
     if (!privateWorkspaceDroneNames.has(root))
       privateWorkspaceDroneNames.set(root, String(drone.name || drone.id));
   }
-  return [...roots]
+  const user: HostWorkspace[] = added.map((workspace) => {
+    const id = userWorkspaceTargetId(workspace.id);
+    const root = path.resolve(workspace.root);
+    return { id, workspaceId: id.slice('host:'.length), name: workspace.name, path: root, repository: repoPaths.has(root), userWorkspace: true };
+  });
+  const discovered: HostWorkspace[] = [...roots]
     .map((root) => {
       const id = hostWorkspaceId(root);
       const droneName = privateWorkspaceDroneNames.get(root);
@@ -95,18 +104,20 @@ export function buildHostWorkspaces(
         repository: repoPaths.has(root),
         ...(droneName ? { droneName } : {}),
       };
-    })
-    .sort((a, b) => a.path.localeCompare(b.path));
+    });
+  return [...discovered, ...user].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /** Resolve from the device's catalog, never from a client-supplied filesystem path. */
 export async function listHostWorkspaces(): Promise<HostWorkspace[]> {
-  const [registry, repositories] = await Promise.all([
+  const [registry, repositories, added] = await Promise.all([
     loadDroneSummaryRegistry(),
     listCanonicalRepositories(),
+    userWorkspaces().available(),
   ]);
   return buildHostWorkspaces(
     [...Object.values(registry.drones ?? {}), ...Object.values(registry.pending ?? {})] as any[],
     repositories.map((repo) => repo.path),
+    added,
   );
 }

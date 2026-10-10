@@ -18,6 +18,7 @@ import { SkillLibrarySection } from './SkillLibrarySection';
 import { SyncSettingsTab } from './SyncSettingsTab';
 import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
+import { WorkspacesSettingsTab } from '../workspaces/WorkspacesSettingsTab';
 import { NextActionsSettingsTab } from './NextActionsSettingsTab';
 import { useNextActionsSettingsDraft } from './use-next-actions-settings';
 import { ChatAsksSettingsTab } from './ChatAsksSettingsTab';
@@ -279,6 +280,7 @@ export function SettingsView({
     if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} speech={speech} />;
     if (activeTab === 'next-actions') return <NextActionsSettingsTab settings={nextActions} />;
     if (activeTab === 'asks') return <ChatAsksSettingsTab settings={chatAsks} />;
+    if (activeTab === 'workspaces') return <WorkspacesSettingsTab />;
     if (activeTab === 'recordings') return <RecordingsSettingsTab />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;

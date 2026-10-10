@@ -27,12 +27,14 @@ type StoredExplorerLayout = {
 type DroneEditorWorkspaceProps = {
   explorer: (zoom: number) => React.ReactNode;
   editor: React.ReactNode;
+  /** Chooses which workspace the explorer shows; heads the explorer in every layout. */
+  switcher?: React.ReactNode;
 };
 
 const EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLayout');
 const EXPLORER_DRAG_TYPE = 'application/x-drone-hub-editor-explorer';
 
-export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceProps) {
+export function DroneEditorWorkspace({ explorer, editor, switcher }: DroneEditorWorkspaceProps) {
   const pane = React.useContext(EditorPaneContext);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = React.useRef<number | null>(null);
@@ -158,6 +160,7 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       aria-label="File Explorer"
     >
       {pane === 'combined' ? <WorkspaceExplorerHeader
+        title={switcher}
         zoom={explorerZoom}
         onDecreaseZoom={() =>
           setExplorerZoom((current) => clampWorkspaceExplorerZoom(current - WORKSPACE_EXPLORER_ZOOM_STEP))
@@ -171,7 +174,9 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
           onDragEnd: handleExplorerDragEnd,
           title: 'Drag to move the File Explorer to the other side',
         } : undefined}
-      /> : null}
+      /> : switcher ? (
+        <div className="dh-utility-panel-chrome flex h-8 shrink-0 items-center border-b border-[var(--border-subtle)] px-2">{switcher}</div>
+      ) : null}
       <div className="min-h-0 flex-1">{explorer(explorerZoom)}</div>
     </aside>
   );

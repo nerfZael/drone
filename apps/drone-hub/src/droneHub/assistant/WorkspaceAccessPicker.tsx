@@ -3,6 +3,8 @@ import type { ChatWorkspaceAccess, ChatWorkspaceCatalog, ChatWorkspaceOption } f
 import { subscribeDesktopEvents } from '../app/desktop-events';
 import { subscribeDeviceMeshChanges } from '../app/device-mesh-events';
 import { IconSpinner } from '../icons';
+import { AddWorkspaceControls } from '../workspaces/AddWorkspaceControls';
+import { subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
 import {
   WORKSPACE_CATEGORIES,
   addWorkspace,
@@ -188,7 +190,9 @@ export function WorkspaceAccessPicker({
         if (loadedRef.current.has(event.sourceDeviceId)) schedule(`device:${event.sourceDeviceId}`, () => void loadDevice(event.sourceDeviceId));
       },
     });
-    return () => { unsubscribeRegistry(); unsubscribeMesh(); for (const timer of timers.values()) window.clearTimeout(timer); };
+    // Workspaces added or removed in Settings, or from another picker in this window.
+    const unsubscribeWorkspaces = subscribeWorkspacesChanged(refreshBase);
+    return () => { unsubscribeRegistry(); unsubscribeMesh(); unsubscribeWorkspaces(); for (const timer of timers.values()) window.clearTimeout(timer); };
   }, [loadDevice, reload]);
 
   /** Browsing or searching reaches folders other devices share: load each once. */
@@ -266,6 +270,19 @@ export function WorkspaceAccessPicker({
         .slice(0, MATCH_LIMIT)
     : [];
   const add = (option: ChatWorkspaceOption) => update((current) => addWorkspace(current, option));
+  /** A workspace made from this picker is selected at once, so it is ready for whoever this picker is for. */
+  const addCreated = async (workspace: UserWorkspace) => {
+    try {
+      const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(endpoint));
+      if (!alive.current) return;
+      const option = result.workspaces.find((item) => item.id === userWorkspaceTargetId(workspace.id));
+      setCatalog((current) => (current ? { ...current, workspaces: [...current.workspaces.filter((item) => item.id !== option?.id), ...(option ? [option] : [])] } : result));
+      if (option) update((current) => addWorkspace(current, option));
+      setMode('inuse');
+    } catch (loadError: any) {
+      if (alive.current) setError(loadError?.message ?? String(loadError));
+    }
+  };
 
   const setCell = (option: ChatWorkspaceOption, key: Permission, value: boolean) => {
     const granted = draftRef.current?.targets.find((target) => target.id === option.id) as ChatWorkspaceOption | undefined;
@@ -439,7 +456,11 @@ export function WorkspaceAccessPicker({
           })}
         </div>
       )}
-
+      {!locked ? (
+        <div className="border-t border-[var(--border-subtle)] px-3 pb-1 pt-2">
+          <AddWorkspaceControls onAdded={(workspace) => void addCreated(workspace)} />
+        </div>
+      ) : null}
     </div>
   );
 }

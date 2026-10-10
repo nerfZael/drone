@@ -49,6 +49,8 @@ interface Window {
     onNotificationError?(callback: (error: string) => void): () => void;
     /** Write-only; works while the Hub window is unfocused, unlike the web clipboard API. */
     writeClipboardText?(text: string): Promise<boolean>;
+    /** A folder from the system dialog, or null when cancelled. Main window only. */
+    chooseFolder?(options?: { title?: string; defaultPath?: string }): Promise<string | null>;
     companionWindow?: {
       control(action: 'show' | 'hide' | 'close' | 'attach' | 'resize' | 'focus-owner' | 'focus', size?: CompanionWindowSize): void;
       onClose(callback: () => void): () => void;

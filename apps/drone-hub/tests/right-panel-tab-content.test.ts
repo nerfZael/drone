@@ -57,7 +57,7 @@ describe('right panel tab content', () => {
       }
     }
     // The editor case hands off to EditorWorkspacePane, whose loader names its tab outright.
-    expect(source).toContain("case 'editor':\n      return <EditorWorkspacePane {...props} />;");
+    expect(source).toContain("case 'editor':\n      return <EditorWorkspacePane {...props} {...(props.editorOverride ?? {})} />;");
     expect(source).toContain('<PaneModule tab="editor" load={loadDroneEditorWorkspace}>');
     expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 1);
   });
