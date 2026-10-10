@@ -10,17 +10,11 @@ export const AGENT_CHAT_WORKSPACE_LIST_TOOL = 'list_workspaces';
  * An agent chat's workspaces: the picker reads and saves the selection, and the DroneHub MCP server runs the chat's
  * workspace tools here, so every call is checked against the selection as it is now.
  */
-export function registerChatWorkspaceRoutes(router: HubRouter, workspaces: AgentChatWorkspaces) {
-  const resolveChat = async (params: Readonly<Record<string, string>>): Promise<AgentChat> => {
-    const resolved = await resolveCanonicalDroneOrPendingForReadRef(params.drone);
-    if (!resolved) throw Object.assign(new Error(`unknown drone: ${params.drone}`), { status: 404 });
-    if (resolved.kind === 'pending')
-      throw Object.assign(new Error(`drone "${params.drone}" is still starting`), { status: 409 });
-    const chatName = params.chat || 'default';
-    if (!readChatMetadataFromStore({ droneId: resolved.id, chatName }).chat)
-      throw Object.assign(new Error(`unknown chat: ${chatName}`), { status: 404 });
-    return { droneId: resolved.id, chatName };
-  };
+export function registerChatWorkspaceRoutes(
+  router: HubRouter,
+  workspaces: Pick<AgentChatWorkspaces, 'catalog' | 'save' | 'list' | 'run'>,
+  resolveChat: (params: Readonly<Record<string, string>>) => Promise<AgentChat> = resolveStoredChat,
+) {
   const statusOf = (error: any) => (typeof error?.status === 'number' ? error.status : 400);
 
   router.get('/api/drones/:drone/chats/:chat/workspaces', async ({ params, url, json, fail }) => {
@@ -34,8 +28,8 @@ export function registerChatWorkspaceRoutes(router: HubRouter, workspaces: Agent
 
   router.post('/api/drones/:drone/chats/:chat/workspaces', async ({ params, readJson, json, fail }) => {
     try {
-      const chat = await resolveChat(params);
       const body = await readJson<{ access?: unknown; revision?: unknown }>();
+      const chat = await resolveChat(params);
       json(200, await workspaces.save(chat, body?.access, String(body?.revision ?? '')));
     } catch (error: any) {
       fail(statusOf(error), error?.message ?? String(error));
@@ -45,14 +39,14 @@ export function registerChatWorkspaceRoutes(router: HubRouter, workspaces: Agent
   // A tool that fails answers 200 with its error, so the agent sees the reason rather than an HTTP failure.
   router.post(
     '/api/drones/:drone/chats/:chat/workspaces/tools/:tool',
-    async ({ params, req, res, readJson, json, fail }) => {
+    async ({ params, res, readJson, json, fail }) => {
+      const body = await readJson<{ args?: Record<string, unknown> }>();
       let chat: AgentChat;
       try {
         chat = await resolveChat(params);
       } catch (error: any) {
         return fail(statusOf(error), error?.message ?? String(error));
       }
-      const body = await readJson<{ args?: Record<string, unknown> }>();
       const args = body?.args && typeof body.args === 'object' ? body.args : {};
       const aborted = new AbortController();
       res.on('close', () => {
@@ -65,9 +59,21 @@ export function registerChatWorkspaceRoutes(router: HubRouter, workspaces: Agent
             : await workspaces.run(chat, params.tool, args, aborted.signal);
         json(200, { ok: true, result });
       } catch (error: any) {
-        if (aborted.signal.aborted || req.destroyed) return;
+        // Nobody is waiting for an answer to a cancelled call. (A request whose body was read reports destroyed.)
+        if (aborted.signal.aborted) return;
         json(200, { ok: true, error: error?.message ?? String(error) });
       }
     },
   );
+}
+
+async function resolveStoredChat(params: Readonly<Record<string, string>>): Promise<AgentChat> {
+  const resolved = await resolveCanonicalDroneOrPendingForReadRef(params.drone);
+  if (!resolved) throw Object.assign(new Error(`unknown drone: ${params.drone}`), { status: 404 });
+  if (resolved.kind === 'pending')
+    throw Object.assign(new Error(`drone "${params.drone}" is still starting`), { status: 409 });
+  const chatName = params.chat || 'default';
+  if (!readChatMetadataFromStore({ droneId: resolved.id, chatName }).chat)
+    throw Object.assign(new Error(`unknown chat: ${chatName}`), { status: 404 });
+  return { droneId: resolved.id, chatName };
 }
