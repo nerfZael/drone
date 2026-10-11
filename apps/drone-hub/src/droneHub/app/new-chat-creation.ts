@@ -18,6 +18,8 @@ export type NewChatConfiguration = {
 
 export function buildNewChatCreatePayload(input: {
   name: string;
+  /** Chosen by the client, from `newChatId`. */
+  chatId?: string;
   draft?: boolean;
   copyFromChat?: string;
   mode?: 'copy-config' | 'fork';
@@ -25,6 +27,7 @@ export function buildNewChatCreatePayload(input: {
   const copyFromChat = String(input.copyFromChat ?? '').trim();
   return {
     name: input.name,
+    ...(input.chatId ? { chatId: input.chatId } : {}),
     ...(copyFromChat ? { copyFromChat, mode: input.mode === 'fork' ? 'fork' : 'copy-config' } : {}),
     ...(input.draft === true ? { draft: true } : {}),
   };

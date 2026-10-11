@@ -10,8 +10,8 @@ type ChatIdSource = { id: string; chatIds?: Record<string, string> };
 
 // From the drone summaries, with this client's not-yet-reported renames applied.
 let idsByDrone = new Map<string, ChatIds>();
-// Renames made here, before the summaries show them.
-const renamedIdsByDrone = new Map<string, Record<string, string>>();
+// IDs this client knows before the summaries do: chats it renamed or is creating.
+const localIdsByDrone = new Map<string, Record<string, string>>();
 
 export type ChatRename = { droneId: string; oldName: string; newName: string };
 // Renames seen in the summaries, from this client or anywhere else, not yet followed.
@@ -49,13 +49,13 @@ export function publishChatIds(drones: readonly ChatIdSource[]): void {
     }
   }
   idsByDrone = next;
-  for (const [droneId, renamed] of renamedIdsByDrone) {
+  for (const [droneId, local] of localIdsByDrone) {
     const listed = next.get(droneId) ?? {};
-    for (const [chatName, chatId] of Object.entries(renamed)) {
+    for (const [chatName, chatId] of Object.entries(local)) {
       // The summary caught up: it lists that ID, under this name or a later one.
-      if (Object.values(listed).includes(chatId)) delete renamed[chatName];
+      if (Object.values(listed).includes(chatId)) delete local[chatName];
     }
-    if (Object.keys(renamed).length === 0) renamedIdsByDrone.delete(droneId);
+    if (Object.keys(local).length === 0) localIdsByDrone.delete(droneId);
   }
 }
 
@@ -70,10 +70,35 @@ export function takeSeenChatRenames(): ChatRename[] {
 export function renameChatId(droneId: string, oldName: string, newName: string): void {
   const chatId = chatIdFor(droneId, oldName);
   if (!droneId || !chatId) return;
-  const renamed = renamedIdsByDrone.get(droneId) ?? {};
-  renamed[chatNameOf(newName)] = chatId;
-  renamedIdsByDrone.set(droneId, renamed);
+  const local = localIdsByDrone.get(droneId) ?? {};
+  local[chatNameOf(newName)] = chatId;
+  localIdsByDrone.set(droneId, local);
   rememberRenamedTo(droneId, chatNameOf(oldName), chatNameOf(newName));
+}
+
+/**
+ * The ID for a chat this client is about to create, sent with the create. The
+ * chat resolves to it from its first render, and a retried create reuses it.
+ * Never an ID the summaries list: that chat exists already.
+ */
+export function newChatId(droneId: string, chatName: string): string {
+  const name = chatNameOf(chatName);
+  const local = localIdsByDrone.get(droneId) ?? {};
+  const pending = local[name];
+  if (pending && !Object.values(idsByDrone.get(droneId) ?? {}).includes(pending)) return pending;
+  const chatId = crypto.randomUUID();
+  local[name] = chatId;
+  localIdsByDrone.set(droneId, local);
+  return chatId;
+}
+
+/** A create that failed: the name no longer stands for that ID. */
+export function forgetNewChatId(droneId: string, chatName: string, chatId: string): void {
+  const local = localIdsByDrone.get(droneId);
+  const name = chatNameOf(chatName);
+  if (local?.[name] !== chatId) return;
+  delete local[name];
+  if (Object.keys(local).length === 0) localIdsByDrone.delete(droneId);
 }
 
 /** The chat's name now: a name no chat holds any more leads to the chat it was renamed to. */
@@ -91,7 +116,7 @@ export function chatIdFor(droneId: string | null | undefined, chatName: string |
   const id = String(droneId ?? '').trim();
   if (!id) return null;
   const name = chatNameOf(chatName);
-  return renamedIdsByDrone.get(id)?.[name] ?? idsByDrone.get(id)?.[name] ?? null;
+  return localIdsByDrone.get(id)?.[name] ?? idsByDrone.get(id)?.[name] ?? null;
 }
 
 /**
@@ -126,7 +151,7 @@ export function continuesChat(previousKey: string, nextKey: string): boolean {
 export const chatIdentityTesting = {
   reset() {
     idsByDrone = new Map();
-    renamedIdsByDrone.clear();
+    localIdsByDrone.clear();
     renamedToByDrone.clear();
     seenRenames = [];
   },

@@ -19,7 +19,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
-import { currentChatName, renameChatId, takeSeenChatRenames, chatPathRef } from './droneHub/app/chat-identity';
+import { chatPathRef, currentChatName, forgetNewChatId, newChatId, renameChatId, takeSeenChatRenames } from './droneHub/app/chat-identity';
 import { moveChatCanvasCards, moveChatClientState } from './droneHub/app/follow-chat-rename';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
@@ -3440,31 +3440,45 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             return { droneId: operation.droneId, name: operation.newName };
           },
           createChat: async (operation) => {
-            await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                name: operation.chatName,
-                ...(operation.copyFromChat ? { copyFromChat: operation.copyFromChat } : {}),
-                ...(operation.copyFromChat ? { mode: 'copy-config' } : {}),
-                ...(operation.draft ? { draft: true } : {}),
-              }),
-            });
+            const chatId = newChatId(operation.droneId, operation.chatName);
+            try {
+              await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  name: operation.chatName,
+                  chatId,
+                  ...(operation.copyFromChat ? { copyFromChat: operation.copyFromChat } : {}),
+                  ...(operation.copyFromChat ? { mode: 'copy-config' } : {}),
+                  ...(operation.draft ? { draft: true } : {}),
+                }),
+              });
+            } catch (error) {
+              forgetNewChatId(operation.droneId, operation.chatName, chatId);
+              throw error;
+            }
             await configureProposedChat(operation.droneId, operation.chatName, operation);
             return { droneId: operation.droneId, chatName: operation.chatName };
           },
           cloneChat: async (operation) => {
-            await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                name: operation.chatName,
-                copyFromChat: operation.sourceChat,
-                mode: 'fork',
-                ...(operation.sideChat === true ? { sideChat: true } : {}),
-                ...(operation.draft ? { draft: true } : {}),
-              }),
-            });
+            const chatId = newChatId(operation.droneId, operation.chatName);
+            try {
+              await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  name: operation.chatName,
+                  chatId,
+                  copyFromChat: operation.sourceChat,
+                  mode: 'fork',
+                  ...(operation.sideChat === true ? { sideChat: true } : {}),
+                  ...(operation.draft ? { draft: true } : {}),
+                }),
+              });
+            } catch (error) {
+              forgetNewChatId(operation.droneId, operation.chatName, chatId);
+              throw error;
+            }
             return {
               droneId: operation.droneId,
               sourceChat: operation.sourceChat,
@@ -4564,12 +4578,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         ? (opts?.configuration ?? resolveNewChatConfiguration(drone))
         : null;
       let createdChat = false;
+      const chatId = newChatId(droneId, chatName);
       try {
         await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(buildNewChatCreatePayload({
             name: chatName,
+            chatId,
             copyFromChat,
             mode: opts?.mode,
             draft: opts?.draft,
@@ -4618,6 +4634,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             // Preserve the configuration error; rollback is best-effort.
           }
         }
+        forgetNewChatId(droneId, chatName, chatId);
         return { ok: false, error: err?.message ?? String(err) };
       }
     },
@@ -4897,6 +4914,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       creationPromise: null as Promise<boolean> | null,
     };
     newDraftChatsRef.current.set(key, tracked);
+    // Before the chat shows, so it is known by the ID it will be created with from its first render.
+    newChatId(latestDrone.id, chatName);
     addOptimisticDraftChat(latestDrone.id, chatName);
     rememberStartupSeed([{ id: latestDrone.id, name: latestDrone.name }], {
       runtime: latestDrone.runtime === 'host' ? 'host' : 'container',

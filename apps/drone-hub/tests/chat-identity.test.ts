@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chatIdFor, chatIdentityTesting, chatPathRef, continuesChat, currentChatName, publishChatIds, renameChatId, takeSeenChatRenames } from '../src/droneHub/app/chat-identity';
+import { chatIdFor, chatIdentityTesting, chatPathRef, continuesChat, currentChatName, forgetNewChatId, newChatId, publishChatIds, renameChatId, takeSeenChatRenames } from '../src/droneHub/app/chat-identity';
 import { droneChatEventMatches } from '../src/droneHub/app/chat-api';
 import { chatSelectionKey } from '../src/droneHub/app/chat-selection-model';
 
@@ -68,4 +68,21 @@ test('requests name a chat by its ID once known, and events match it by ID acros
   expect(droneChatEventMatches(event, 'drone', 'Notes')).toBe(false);
   // Events from hubs that send no ID match by name.
   expect(droneChatEventMatches({ chats: [{ droneId: 'drone', chatName: 'Notes' }] }, 'drone', 'Notes')).toBe(true);
+});
+
+test('a chat this client creates is known by its chosen ID from the start', () => {
+  // A deleted chat's ID may still be listed under the name; a new chat never takes it.
+  publishChatIds([{ id: 'drone', chatIds: { 'Untitled 1': 'deleted-chat' } }]);
+  const chatId = newChatId('drone', 'Untitled 1');
+  expect(chatId).not.toBe('deleted-chat');
+  expect(chatIdFor('drone', 'Untitled 1')).toBe(chatId);
+  // A retried create reuses it until the summary lists the chat.
+  expect(newChatId('drone', 'Untitled 1')).toBe(chatId);
+  publishChatIds([{ id: 'drone', chatIds: { 'Untitled 1': chatId } }]);
+  expect(chatIdFor('drone', 'Untitled 1')).toBe(chatId);
+  expect(newChatId('drone', 'Untitled 1')).not.toBe(chatId);
+
+  const failed = newChatId('drone', 'Untitled 2');
+  forgetNewChatId('drone', 'Untitled 2', failed);
+  expect(chatIdFor('drone', 'Untitled 2')).toBeNull();
 });
