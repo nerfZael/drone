@@ -4,6 +4,8 @@
  * can key a chat by what survives a rename.
  */
 
+import { profileStorageKey } from '../../profile-storage';
+
 type ChatIds = Readonly<Record<string, string>>;
 
 type ChatIdSource = { id: string; chatIds?: Record<string, string> };
@@ -14,11 +16,19 @@ let idsByDrone = new Map<string, ChatIds>();
 const localIdsByDrone = new Map<string, Record<string, string>>();
 
 export type ChatRename = { droneId: string; oldName: string; newName: string };
-// Renames seen in the summaries, from this client or anywhere else, not yet followed.
-let seenRenames: ChatRename[] = [];
+// Renames seen in the summaries and not yet followed, one batch per summary: a
+// batch's renames happened together, so two chats in it may have swapped names.
+let seenRenames: ChatRename[][] = [];
+// Renames this client made and already followed: "droneId\0chatId\0newName".
+const followedRenames = new Set<string>();
 // Old name -> the name it was renamed to, so a reference by the old name finds the chat.
 const renamedToByDrone = new Map<string, Record<string, string>>();
 const RENAMED_TO_LIMIT = 50;
+// The last IDs seen, kept across launches so a rename made while the app was
+// closed is noticed in the first summary, like one made while it is open.
+const STORED_CHAT_IDS_KEY = profileStorageKey('droneHub.chatIds');
+let storedChatIdsLoaded = false;
+let storedChatIdsJson = '';
 
 function rememberRenamedTo(droneId: string, oldName: string, newName: string): void {
   const renamedTo = renamedToByDrone.get(droneId) ?? {};
@@ -33,22 +43,64 @@ function chatNameOf(chatName: string | null | undefined): string {
   return String(chatName ?? '').trim() || 'default';
 }
 
+function followedRenameKey(droneId: string, chatId: string, newName: string): string {
+  return `${droneId}\u0000${chatId}\u0000${newName}`;
+}
+
+function readStoredChatIds(): Map<string, ChatIds> {
+  try {
+    const raw = JSON.parse(globalThis.localStorage?.getItem(STORED_CHAT_IDS_KEY) ?? '{}');
+    const out = new Map<string, ChatIds>();
+    for (const [droneId, chatIds] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+      if (!chatIds || typeof chatIds !== 'object') continue;
+      const valid = Object.entries(chatIds as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1]),
+      );
+      if (valid.length > 0) out.set(droneId, Object.fromEntries(valid));
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+function storeChatIds(chatIds: Map<string, ChatIds>): void {
+  const json = JSON.stringify(Object.fromEntries(chatIds));
+  if (json === storedChatIdsJson) return;
+  storedChatIdsJson = json;
+  try {
+    globalThis.localStorage?.setItem(STORED_CHAT_IDS_KEY, json);
+  } catch {
+    // Without it, renames made while the app is closed are not followed.
+  }
+}
+
 /** Called while the app renders its drone summaries, so the views below see the same IDs. */
 export function publishChatIds(drones: readonly ChatIdSource[]): void {
   const next = new Map<string, ChatIds>();
   for (const drone of drones) if (drone.chatIds) next.set(drone.id, drone.chatIds);
+  if (!storedChatIdsLoaded) {
+    storedChatIdsLoaded = true;
+    if (idsByDrone.size === 0) idsByDrone = readStoredChatIds();
+  }
   for (const [droneId, chatIds] of next) {
     const previous = idsByDrone.get(droneId);
     if (!previous || previous === chatIds) continue;
     const nameById = new Map(Object.entries(previous).map(([chatName, chatId]) => [chatId, chatName]));
+    const batch: ChatRename[] = [];
     for (const [newName, chatId] of Object.entries(chatIds)) {
       const oldName = nameById.get(chatId);
       if (oldName === undefined || oldName === newName) continue;
-      seenRenames.push({ droneId, oldName, newName });
       rememberRenamedTo(droneId, oldName, newName);
+      // Made here and followed already; following it again could move what a
+      // chat that took the old name since then keeps under it.
+      if (followedRenames.delete(followedRenameKey(droneId, chatId, newName))) continue;
+      batch.push({ droneId, oldName, newName });
     }
+    if (batch.length > 0) seenRenames.push(batch);
   }
   idsByDrone = next;
+  storeChatIds(next);
   for (const [droneId, local] of localIdsByDrone) {
     const listed = next.get(droneId) ?? {};
     for (const [chatName, chatId] of Object.entries(local)) {
@@ -59,8 +111,8 @@ export function publishChatIds(drones: readonly ChatIdSource[]): void {
   }
 }
 
-/** Renames the summaries showed since the last call, in the order they happened. */
-export function takeSeenChatRenames(): ChatRename[] {
+/** Renames the summaries showed since the last call, in batches that each happened together. */
+export function takeSeenChatRenames(): ChatRename[][] {
   const renames = seenRenames;
   seenRenames = [];
   return renames;
@@ -74,6 +126,7 @@ export function renameChatId(droneId: string, oldName: string, newName: string):
   local[chatNameOf(newName)] = chatId;
   localIdsByDrone.set(droneId, local);
   rememberRenamedTo(droneId, chatNameOf(oldName), chatNameOf(newName));
+  followedRenames.add(followedRenameKey(droneId, chatId, chatNameOf(newName)));
 }
 
 /**
@@ -153,6 +206,9 @@ export const chatIdentityTesting = {
     idsByDrone = new Map();
     localIdsByDrone.clear();
     renamedToByDrone.clear();
+    followedRenames.clear();
     seenRenames = [];
+    storedChatIdsLoaded = false;
+    storedChatIdsJson = '';
   },
 };

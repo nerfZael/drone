@@ -20,7 +20,7 @@ import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
 import { chatPathRef, currentChatName, forgetNewChatId, newChatId, renameChatId, takeSeenChatRenames } from './droneHub/app/chat-identity';
-import { moveChatCanvasCards, moveChatClientState } from './droneHub/app/follow-chat-rename';
+import { moveChatCanvasCards, moveChatClientState, moveRenamedChatsClientState } from './droneHub/app/follow-chat-rename';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -569,7 +569,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [selectedChat, setSelectedChat, storedSelectedChat]);
   React.useEffect(() => {
     // Renamed anywhere (another device, an agent): what this client keeps under the old name follows.
-    for (const rename of takeSeenChatRenames()) moveChatClientState(rename.droneId, rename.oldName, rename.newName);
+    for (const batch of takeSeenChatRenames()) moveRenamedChatsClientState(batch);
   }, [drones]);
   React.useEffect(() => {
     setOptimisticChatRenames((current) => pruneOptimisticChatRenames(current, polledDrones));

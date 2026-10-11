@@ -5,6 +5,7 @@ import { useDetachedChatStore } from './detached-chat-store';
 import { chatInputDraftKeyForDroneChat } from './helpers';
 import { renameSideChatWorkspaceChat } from './side-chat-workspace-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import type { ChatRename } from './chat-identity';
 
 /** Every board that can show the chat keeps its card where it was. */
 export function moveChatCanvasCards(droneId: string, oldName: string, newName: string): void {
@@ -48,4 +49,18 @@ export function moveChatClientState(droneId: string, oldName: string, newName: s
     if (!order?.includes(oldName)) return prev;
     return { ...prev, [droneId]: order.map((name) => (name === oldName ? newName : name)) };
   });
+  if (ui.selectedDrone === droneId && (String(ui.selectedChat ?? '').trim() || 'default') === oldName) {
+    ui.setSelectedChat(newName);
+  }
+}
+
+/**
+ * Follows renames that happened together, such as two chats swapping names.
+ * Each chat's state first moves to a name no chat can have (the hub refuses
+ * control characters), then to its new name, so none lands on another's.
+ */
+export function moveRenamedChatsClientState(renames: readonly ChatRename[]): void {
+  const parked = renames.map((rename, index) => ({ ...rename, parkedName: `\u0000renaming:${index}` }));
+  for (const rename of parked) moveChatClientState(rename.droneId, rename.oldName, rename.parkedName);
+  for (const rename of parked) moveChatClientState(rename.droneId, rename.parkedName, rename.newName);
 }
