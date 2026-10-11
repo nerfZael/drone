@@ -1,4 +1,5 @@
 import { chatExecutionOrder } from './chat-execution-order';
+import { chatPathRef } from './chat-identity';
 import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { NextActionsRow } from '../chat/NextActionsRow';
@@ -848,7 +849,7 @@ export function SelectedDroneWorkspace({
       });
       try {
         await requestJson(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/approvals/${encodeURIComponent(approval.promptId)}/${encodeURIComponent(approval.id)}/${decision}`,
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${chatPathRef(currentDrone.id, activeChatName)}/approvals/${encodeURIComponent(approval.promptId)}/${encodeURIComponent(approval.id)}/${decision}`,
           { method: 'POST' },
         );
         setResolvedCodexApprovalIds((current) => new Set(current).add(approval.id));
@@ -1103,7 +1104,7 @@ export function SelectedDroneWorkspace({
       try {
         setChatInfoError(null);
         await requestJson(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/transcript/${encodeURIComponent(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${chatPathRef(currentDrone.id, activeChatName)}/transcript/${encodeURIComponent(
             promptId,
           )}/docker-snapshot/${encodeURIComponent(snapshotId)}/rollback`,
           { method: 'POST' },

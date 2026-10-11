@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chatIdFor, chatIdentityTesting, continuesChat, currentChatName, publishChatIds, renameChatId, takeSeenChatRenames } from '../src/droneHub/app/chat-identity';
+import { chatIdFor, chatIdentityTesting, chatPathRef, continuesChat, currentChatName, publishChatIds, renameChatId, takeSeenChatRenames } from '../src/droneHub/app/chat-identity';
+import { droneChatEventMatches } from '../src/droneHub/app/chat-api';
 import { chatSelectionKey } from '../src/droneHub/app/chat-selection-model';
 
 afterEach(() => chatIdentityTesting.reset());
@@ -53,4 +54,18 @@ test('renames made anywhere are seen in the summaries, and an old name leads to 
   // A new chat that takes an old name is that chat, not the renamed one.
   publishChatIds([{ id: 'drone', chatIds: { 'Roadmap v2': 'chat-1', Notes: 'chat-2', Plan: 'chat-3' } }]);
   expect(currentChatName('drone', 'Plan')).toBe('Plan');
+});
+
+test('requests name a chat by its ID once known, and events match it by ID across a rename', () => {
+  expect(chatPathRef('drone', 'Plan A')).toBe('Plan%20A');
+  publishChatIds([{ id: 'drone', chatIds: { 'Plan A': 'chat-1', Notes: 'chat-2' } }]);
+  expect(chatPathRef('drone', 'Plan A')).toBe('chat-1');
+
+  // The event still names the chat by its old name; the view already holds the new one.
+  renameChatId('drone', 'Plan A', 'Roadmap');
+  const event = { chats: [{ droneId: 'drone', chatName: 'Plan A', chatId: 'chat-1' }] };
+  expect(droneChatEventMatches(event, 'drone', 'Roadmap')).toBe(true);
+  expect(droneChatEventMatches(event, 'drone', 'Notes')).toBe(false);
+  // Events from hubs that send no ID match by name.
+  expect(droneChatEventMatches({ chats: [{ droneId: 'drone', chatName: 'Notes' }] }, 'drone', 'Notes')).toBe(true);
 });

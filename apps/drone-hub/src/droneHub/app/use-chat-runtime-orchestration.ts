@@ -1,4 +1,5 @@
 import { selectableDroneChats } from './drone-selection-helpers';
+import { chatPathRef } from './chat-identity';
 import React from 'react';
 import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
 import type { ChatAgentConfig, ChatInfo } from '../../domain';
@@ -474,7 +475,7 @@ export function useChatRuntimeOrchestration({
 
       try {
         const data = await requestJson<{ ok: true; cancelled: boolean; retained?: boolean; alreadySubmitted: boolean }>(
-          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(id)}`,
+          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chatName)}/pending/${encodeURIComponent(id)}`,
           { method: 'DELETE' },
         );
         if (data.cancelled) {
@@ -605,7 +606,7 @@ export function useChatRuntimeOrchestration({
       if (!hasSelectedDroneSummary) return { key, pending: [] };
       if (!shouldReadChatRuntimeForHubPhase(selectedDroneHubPhase)) return { key, pending: [] };
       const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, selectedChat || 'default')}/pending`,
       );
       return { key, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
@@ -867,7 +868,7 @@ export function useChatRuntimeOrchestration({
         stoppedPromptIds?: string[];
         clearedPromptIds?: string[];
       }>(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/stop`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, selectedChat || 'default')}/stop`,
         {
           method: 'POST',
         },
@@ -1192,7 +1193,7 @@ export function useChatRuntimeOrchestration({
           qs.set('view', 'screen');
           qs.set('tail', '2000');
           const data = await fetchJson<{ ok: true; text: string }>(
-            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/output?${qs.toString()}`,
+            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, selectedChat)}/output?${qs.toString()}`,
           );
           if (!mounted) return;
           const nextText = typeof data?.text === 'string' ? data.text : '';
@@ -1220,7 +1221,7 @@ export function useChatRuntimeOrchestration({
             qs.set('maxBytes', '200000');
           }
           const data = await fetchJson<{ ok: true; offsetBytes: number; text: string }>(
-            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/output?${qs.toString()}`,
+            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, selectedChat)}/output?${qs.toString()}`,
           );
           if (!mounted) return;
           const nextOffset =

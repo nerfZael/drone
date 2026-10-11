@@ -1,4 +1,5 @@
 import { sameAgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
+import { chatIdFor, chatPathRef } from './chat-identity';
 import type { ChatSendPayload } from '../chat';
 import { mimeForChatAttachmentFile } from '../chat/chat-input-attachments';
 import { requestJsonConditional } from '../http';
@@ -73,6 +74,8 @@ export type FetchDroneChatStateCachedResult =
 export type DroneChatEventRef = {
   droneId?: string;
   chatName?: string;
+  /** The chat's stable ID, from hubs that send it. */
+  chatId?: string;
 };
 
 export type DroneChatDeltaEvent = {
@@ -97,11 +100,15 @@ export function droneChatEventMatches(
     ...(Array.isArray(data?.chats) ? data.chats : []),
     ...(Array.isArray(data?.removed) ? data.removed : []),
   ];
-  return refs.some(
-    (ref) =>
-      normalizeEventText(ref?.droneId) === droneId &&
-      (normalizeEventText(ref?.chatName) || 'default') === chatName,
-  );
+  // By ID where both sides know it: the event and the view may each hold either
+  // name of a chat renamed in between.
+  const chatId = chatIdFor(droneId, chatName);
+  return refs.some((ref) => {
+    if (normalizeEventText(ref?.droneId) !== droneId) return false;
+    const refChatId = normalizeEventText(ref?.chatId);
+    if (chatId && refChatId) return refChatId === chatId;
+    return (normalizeEventText(ref?.chatName) || 'default') === chatName;
+  });
 }
 
 function sameOptionalText(left: unknown, right: unknown): boolean {
@@ -281,7 +288,7 @@ export async function sendDroneChatPrompt(
   const submittedAt = String(opts.submittedAt ?? '').trim() || new Date().toISOString();
   const userTimeZone = clientTimeZone();
   return await requestJson<SendDroneChatPromptResponse>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/prompt`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/prompt`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -312,7 +319,7 @@ export async function sendInNewDroneChatAction(
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   return await requestJson<SendInNewChatActionResponse>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/new-chat-action`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/new-chat-action`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -334,7 +341,7 @@ export async function promoteNewDroneChatAction(
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const actionId = String(opts.actionId ?? '').trim();
   return await requestJson<PromoteNewChatActionResponse>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(actionId)}/create-now`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/pending/${encodeURIComponent(actionId)}/create-now`,
     { method: 'POST' },
   );
 }
@@ -362,7 +369,7 @@ export async function fetchDroneChatTranscript(
   // activity for every historical turn.
   qs.set('activity', 'none');
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[] }>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/state?${qs.toString()}`,
   );
   return Array.isArray(data?.transcripts) ? data.transcripts : [];
 }
@@ -377,7 +384,7 @@ export async function fetchDroneChatTurnActivity(opts: {
     ok: true;
     activity?: TranscriptItem['activity'] | null;
   }>(
-    `/api/drones/${encodeURIComponent(opts.droneId)}/chats/${encodeURIComponent(
+    `/api/drones/${encodeURIComponent(opts.droneId)}/chats/${chatPathRef(opts.droneId,
       opts.chatName,
     )}/turns/${encodeURIComponent(opts.turnId)}/activity`,
     { signal: opts.signal },
@@ -414,7 +421,7 @@ export async function fetchDroneChatState(
     subscriptions?: unknown;
     transcript?: { total?: unknown };
   }>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/state?${qs.toString()}`,
   );
   const transcriptTotal = data?.transcript?.total;
   return {
@@ -457,7 +464,7 @@ export async function fetchDroneChatStateCached(opts: {
   qs.set('transcriptMeta', '0');
   qs.set('activity', 'summary');
   if (opts.includeConfig) qs.set('config', 'true');
-  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/state?${qs.toString()}`;
   const response = await fetchJsonCached<{
     ok: true;
     transcripts: TranscriptItem[];
@@ -492,7 +499,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
   qs.set('pending', 'none');
   qs.set('transcriptMeta', '0');
   qs.set('activity', 'summary');
-  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/state?${qs.toString()}`;
   const response = await fetchJsonCached<{ ok: true; transcripts: TranscriptItem[] }>(
     url,
     opts.etag,

@@ -1,4 +1,5 @@
 import { normalizeChangeRequestPermissions, type NativeChatAccessScope } from '@drone/assistant-chat';
+import { chatPathRef } from './chat-identity';
 import React from 'react';
 
 import { requestJson } from '../http';
@@ -110,7 +111,7 @@ export function useChatMcpAccess(droneIdRaw: string, chatNameRaw: string, enable
     const controller = new AbortController();
     setState({ ...emptyState(identity, droneId), loading: true });
     void requestJson<ChatMcpAccessPayload>(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/mcp-access`,
+      `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/mcp-access`,
       { signal: controller.signal },
     )
       .then((data) => {
@@ -151,7 +152,7 @@ export function useChatMcpAccess(droneIdRaw: string, chatNameRaw: string, enable
         desiredAccessScopeRef.current = null;
         try {
           const data = await requestJson<ChatMcpAccessPayload>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/mcp-access`,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/mcp-access`,
             {
               method: 'PUT',
               headers: { 'content-type': 'application/json' },

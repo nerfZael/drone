@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatPathRef } from '../app/chat-identity';
 import { useUsageData } from './useUsageData';
 import { usageCost, usageNumber, usagePartialReason } from './usage-format';
 
@@ -7,7 +8,7 @@ import { usageCost, usageNumber, usagePartialReason } from './usage-format';
  * Hovering shows the full usage breakdown.
  */
 export function ChatUsageBadge({ droneId, chatName, className = '' }: { droneId: string; chatName: string; className?: string }) {
-  const { data, error } = useUsageData(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/usage`);
+  const { data, error } = useUsageData(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/usage`);
   const totals = data?.totals;
   const baseClass = `dh-chat-usage-badge shrink-0 font-normal text-[var(--muted-dim)] ${className}`;
   if (!totals) {

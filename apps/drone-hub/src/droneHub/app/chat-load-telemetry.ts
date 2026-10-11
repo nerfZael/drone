@@ -1,4 +1,5 @@
 import { setWorkspaceNavigationContext } from './workspace-navigation-context';
+import { chatPathRef } from './chat-identity';
 import { recordUiAction } from '../../ui-diagnostics';
 import {
   collectChatLoadResourceTiming,
@@ -462,7 +463,7 @@ function requestName(url: URL): string {
 }
 
 function requestMatchesTarget(url: URL, target: ChatLoadTarget): boolean {
-  const expected = `/api/drones/${encodeURIComponent(target.droneId)}/chats/${encodeURIComponent(
+  const expected = `/api/drones/${encodeURIComponent(target.droneId)}/chats/${chatPathRef(target.droneId,
     target.chatName,
   )}`;
   return url.pathname === expected || url.pathname.startsWith(`${expected}/`);

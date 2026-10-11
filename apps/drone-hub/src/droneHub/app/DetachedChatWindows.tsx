@@ -1,4 +1,5 @@
 import { ChatDeletingOverlay } from './ChatDeletingOverlay';
+import { chatPathRef } from './chat-identity';
 import { useDesktopChatRequests } from './desktop-chat-requests';
 import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
@@ -58,7 +59,7 @@ export function DetachedChatContent({ chat, drone, context, desktop = false }: {
     const controller = new AbortController();
     setError('');
     void requestJson<{ agent: { kind: string; id?: string } }>(
-      `/api/drones/${encodeURIComponent(chat.droneId)}/chats/${encodeURIComponent(chat.chatName)}/state?turn=last&config=true&activity=summary`,
+      `/api/drones/${encodeURIComponent(chat.droneId)}/chats/${chatPathRef(chat.droneId, chat.chatName)}/state?turn=last&config=true&activity=summary`,
       { signal: controller.signal },
     ).then((data) => { if (!controller.signal.aborted) setAgent(data.agent); })
       .catch((err) => { if (!controller.signal.aborted) setError(String(err?.message ?? err)); });
@@ -70,7 +71,7 @@ export function DetachedChatContent({ chat, drone, context, desktop = false }: {
     setPublishError('');
     try {
       const base = `/api/drones/${encodeURIComponent(chat.droneId)}`;
-      await requestJson(draftDrone ? `${base}/publish` : `${base}/chats/${encodeURIComponent(chat.chatName)}/publish`, {
+      await requestJson(draftDrone ? `${base}/publish` : `${base}/chats/${chatPathRef(chat.droneId, chat.chatName)}/publish`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
       });
       return true;

@@ -1,4 +1,5 @@
 import type { ChatModelOverrides } from '../chat/selected-chat-model-overrides';
+import { chatPathRef } from './chat-identity';
 import { SelectedChatsComposer } from '../chat/SelectedChatsComposer';
 import type { CanvasSendPrompt } from '../canvas/canvas-messaging';
 import type { ChatInputProps } from '../chat/ChatInput';
@@ -58,7 +59,7 @@ function ChatListRow({ drone, name, active, selected, onSelect, onContextMenu, o
   const droneId = drone.id;
   const { value, loading, error } = usePoll(
     async (signal) => {
-      const base = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(name)}`;
+      const base = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, name)}`;
       const payload = await requestJson<ChatPreviewPayload>(`${base}/messages?limit=20&maxChars=300`, { signal });
       if (payload.pendingTruncated) {
         const state = await requestJson<Pick<ChatPreviewPayload, 'pending'>>(`${base}/state?transcript=none`, { signal });

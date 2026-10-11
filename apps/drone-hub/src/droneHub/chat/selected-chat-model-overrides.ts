@@ -1,4 +1,5 @@
 import { chatRuntimeCacheKey, readFreshChatRuntimeCache, writeChatRuntimeCache } from '../app/chat-runtime-cache';
+import { chatPathRef } from '../app/chat-identity';
 
 /** Missing fields preserve that chat's settings; null explicitly chooses the agent default. */
 export type ChatModelOverrides = { model?: string | null; reasoning?: string | null };
@@ -15,7 +16,7 @@ export async function applyChatModelOverrides(
     ...(overrides.reasoning !== undefined ? { reasoning: overrides.reasoning } : {}),
   };
   if (Object.keys(settings).length === 0) return;
-  await requestJson(`/api/drones/${encodeURIComponent(target.droneId)}/chats/${encodeURIComponent(target.chatName)}/config`, {
+  await requestJson(`/api/drones/${encodeURIComponent(target.droneId)}/chats/${chatPathRef(target.droneId, target.chatName)}/config`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings),
   });
   const key = chatRuntimeCacheKey(target.droneId, target.chatName);

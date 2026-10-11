@@ -1,6 +1,6 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { chatSelectionKey } from '../app/chat-selection-model';
-import { continuesChat } from '../app/chat-identity';
+import { continuesChat, chatPathRef } from '../app/chat-identity';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import React from 'react';
 import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
@@ -761,7 +761,7 @@ function NativeAssistantDock({
       const requestSeq = snapshotRequestSeqRef.current;
       try {
         const next = await requestJson<AssistantBootstrapSnapshot>(
-          `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(nativeChatName)}/native${
+          `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${chatPathRef(nativeDroneId, nativeChatName)}/native${
             options.includeHistory ? '?includeHistory=1' : ''
           }`,
           { method: 'POST', signal: options.signal },
@@ -2056,7 +2056,7 @@ function NativeAssistantDock({
         void (async () => {
           const nextAutoApprove = !autoApprove;
           await requestJson(
-            `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(
+            `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${chatPathRef(nativeDroneId,
               nativeChatName,
             )}/config`,
             {

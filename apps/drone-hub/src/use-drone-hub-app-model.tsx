@@ -19,7 +19,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
-import { currentChatName, renameChatId, takeSeenChatRenames } from './droneHub/app/chat-identity';
+import { currentChatName, renameChatId, takeSeenChatRenames, chatPathRef } from './droneHub/app/chat-identity';
 import { moveChatCanvasCards, moveChatClientState } from './droneHub/app/follow-chat-rename';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
@@ -2292,7 +2292,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               latestAgentRevision?: number;
             };
           }>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/read`,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/read`,
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -2349,7 +2349,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         void (async () => {
           try {
             const data = await requestJson<{ ok: true; transcripts: Array<{ output?: string }> }>(
-              `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${encodeURIComponent(chatRef.chatName)}/state?turn=last&transcript=selected&pending=none`,
+              `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${chatPathRef(chatRef.droneId, chatRef.chatName)}/state?turn=last&transcript=selected&pending=none`,
             );
             const output = String(data?.transcripts?.[0]?.output ?? '').trim();
             if (!output) return;
@@ -2459,7 +2459,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       tracked.cleanupInFlight = true;
       clearStartupSeedForChat(tracked.droneId, tracked.chatName);
       forgetDeletedChat(tracked.droneId, tracked.chatName);
-      const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
+      const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${chatPathRef(tracked.droneId, tracked.chatName)}`;
       void requestJson<{ ok: true }>(url, { method: 'DELETE' })
         .then(() => {
           tracked.cleanupInFlight = false;
@@ -2565,7 +2565,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return false;
       }
 
-      const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`;
+      const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/publish`;
       return await publishThenSendShortcutDraftChat({
         publish: async () => {
           await requestJson<{ ok: true }>(url, {
@@ -2750,7 +2750,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         void requestJson<{
           readState?: { unread?: boolean; latestAgentRevision?: number };
         }>(
-          `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${encodeURIComponent(chatRef.chatName)}/read`,
+          `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${chatPathRef(chatRef.droneId, chatRef.chatName)}/read`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -3179,7 +3179,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       );
       if (!hasOverrides) return;
       const agent = overrides.agent ? resolveProposalAgent(overrides.agent) : undefined;
-      const chatPath = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`;
+      const chatPath = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}`;
       await requestJson(`${chatPath}/config`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -3473,7 +3473,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
           deleteChat: async (operation) => {
             await requestJson(
-              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName)}`,
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${chatPathRef(operation.droneId, operation.chatName)}`,
               { method: 'DELETE' },
             );
             deleteChatRuntimeCache(
@@ -3484,7 +3484,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
           renameChat: async (operation) => {
             await requestJson(
-              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName)}/rename`,
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${chatPathRef(operation.droneId, operation.chatName)}/rename`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -3510,7 +3510,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               promptId: string;
               pendingState?: string;
             }>(
-              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(chatName)}/prompt`,
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${chatPathRef(operation.droneId, chatName)}/prompt`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -4196,7 +4196,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           if (tracked || drone.draftChats?.[resolvedChat] === true) {
             try {
               await requestJson<{ ok: true }>(
-                `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/publish`,
+                `/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, resolvedChat)}/publish`,
                 { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
               );
               newDraftChatsRef.current.delete(draftKey);
@@ -4250,7 +4250,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       await requestJson<{ ok: true }>(
         isDraftDrone
           ? `/api/drones/${encodeURIComponent(droneId)}/publish`
-          : `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`,
+          : `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/publish`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -4403,7 +4403,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
       try {
         await requestJson<{ ok: true; chat: string }>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/rename`,
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/rename`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -4475,7 +4475,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           }
           try {
             await requestJson<{ ok: true; chat: string }>(
-              `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/rename`,
+              `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/rename`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -4578,7 +4578,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         createdChat = true;
         if (configuration) {
           await requestJson(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/config`,
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -4609,7 +4609,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         if (createdChat) {
           try {
             await requestJson(
-              `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
+              `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}`,
               { method: 'DELETE' },
             );
             deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
@@ -5068,7 +5068,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         }
         try {
           await requestJson<{ ok: true }>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/publish`,
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -5558,7 +5558,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         newDraftChatsRef.current.delete(droneChatQueueKey(droneId, chatName));
         try {
           const deletion = await requestJson<{ ok: true; deletedChat: string; chats: string[] }>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}`,
             { method: 'DELETE' },
           );
           deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));

@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatPathRef } from './chat-identity';
 import { setSideChatBusy } from './side-chat-busy-store';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { requestJson } from '../http';
@@ -156,7 +157,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         if (!workspace.active) return;
         setStatus(null);
         await requestJson(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}${keep ? '/keep' : ''}`,
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, chatName)}${keep ? '/keep' : ''}`,
           { method: keep ? 'POST' : 'DELETE' },
         );
         if (!keep) useDroneCanvasStore.getState().dropOptimisticBoardMembers(drone.id, [chatName]);

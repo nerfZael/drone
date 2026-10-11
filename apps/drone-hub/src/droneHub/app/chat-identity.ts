@@ -94,6 +94,14 @@ export function chatIdFor(droneId: string | null | undefined, chatName: string |
   return renamedIdsByDrone.get(id)?.[name] ?? idsByDrone.get(id)?.[name] ?? null;
 }
 
+/**
+ * The chat's segment in a hub route: its ID once known, so the request reaches
+ * this chat even if it is renamed meanwhile; its name until then.
+ */
+export function chatPathRef(droneId: string | null | undefined, chatName: string | null | undefined): string {
+  return encodeURIComponent(chatIdFor(droneId, chatName) ?? chatNameOf(chatName));
+}
+
 /** One chat's identity within its drone: its ID once known, its name until then. */
 export function chatIdentity(droneId: string | null | undefined, chatName: string | null | undefined): string {
   const chatId = chatIdFor(droneId, chatName);

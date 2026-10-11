@@ -1,6 +1,6 @@
 import { chatExecutionOrder } from './chat-execution-order';
 import { chatSelectionKey } from './chat-selection-model';
-import { continuesChat } from './chat-identity';
+import { continuesChat, chatPathRef } from './chat-identity';
 import { EarlierRequestWorkingNotice } from '../chat/ChatExecutionNotice';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
@@ -540,7 +540,7 @@ export function GroupMultiChatColumn({
     async () => {
       if (isDroneStartingOrSeeding(drone.hubPhase)) return { key: chatCacheKey, pending: [] };
       const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-        `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
+        `/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, chatName)}/pending`,
       );
       return { key: chatCacheKey, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
@@ -589,7 +589,7 @@ export function GroupMultiChatColumn({
           cancelled: boolean;
           alreadySubmitted: boolean;
         }>(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(promptId)}`,
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, chatName)}/pending/${encodeURIComponent(promptId)}`,
           { method: 'DELETE' },
         );
         if (!result.cancelled) {
@@ -773,7 +773,7 @@ export function GroupMultiChatColumn({
         ok: true;
         stoppedPromptIds?: string[];
         clearedPromptIds?: string[];
-      }>(`/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/stop`, {
+      }>(`/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, chatName)}/stop`, {
         method: 'POST',
       });
       const stoppedSet = new Set(

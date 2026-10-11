@@ -1,4 +1,5 @@
 import type { ChatModelOverrides } from '../chat/selected-chat-model-overrides';
+import { chatPathRef } from '../app/chat-identity';
 import type { ChatSendPayload, ChatSendContext } from '../chat/ChatInput';
 import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
 import type { CanvasSendPrompt, CanvasDraftCreation } from './canvas-messaging';
@@ -956,7 +957,7 @@ export function DroneCanvasDock({
       agentPermissionMode: configuration.agentPermissionMode,
       ...(configuration.approvalPolicy ? { approvalPolicy: configuration.approvalPolicy } : {}),
     };
-    void requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`, {
+    void requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/config`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(settings),
