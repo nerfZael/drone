@@ -21,6 +21,8 @@ export type CreateDroneChatInput = {
   queuedOrigin?: QueuedChatOrigin;
   sideChat?: boolean;
   checkpointId?: string;
+  /** The ID the client chose; a create retried with it returns the chat it made. */
+  chatId?: string;
 };
 
 export type CreateDroneChatResult = {
@@ -56,6 +58,7 @@ export type DroneChatCreationDependencies = {
   createChatInStore: (input: {
     droneId: string;
     chatName: string;
+    chatId?: string;
     copyFromChatName?: string;
     implicitDefaultEntry?: unknown;
     createEntry: (source: any | null) => unknown;
@@ -182,7 +185,8 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
     let created: { chat: any; chats: string[] };
     let wasCreated = false;
     if (existing.chat) {
-      if (!queuedOriginMatches(existing.chat, input.queuedOrigin)) {
+      const sameChatId = Boolean(input.chatId) && String(existing.chat.id ?? '') === input.chatId;
+      if (!sameChatId && !queuedOriginMatches(existing.chat, input.queuedOrigin)) {
         throw new Error(`chat already exists: ${input.chatName}`);
       }
       created = {
@@ -195,6 +199,7 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       created = await deps.createChatInStore({
         droneId: input.droneId,
         chatName: input.chatName,
+        ...(input.chatId ? { chatId: input.chatId } : {}),
         ...(sourceChatName
           ? { copyFromChatName: sourceChatName, implicitDefaultEntry: defaultEntry }
           : {}),
@@ -240,6 +245,7 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
                 };
             }
           }
+          if (input.chatId) entry.id = input.chatId;
           if (input.draft) entry.draft = true;
           if (input.queuedOrigin) entry.queuedChatOrigin = input.queuedOrigin;
           if (input.sideChat && checkpoint) {

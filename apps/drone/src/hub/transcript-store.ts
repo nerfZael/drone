@@ -1476,12 +1476,20 @@ export class ChatTranscriptRepository {
   async createChat(opts: {
     droneId: string;
     chatName: string;
+    /** Chosen by the client; it must not belong to any other chat, active or archived. */
+    chatId?: string;
     copyFromChatName?: string;
     implicitDefaultEntry?: unknown;
     createEntry: (source: any | null) => unknown;
   }): Promise<CreateChatStoreResult> {
     return await this.database.writeTransaction('create canonical chat', (connection) => {
       if (this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`chat already exists: ${opts.chatName}`);
+      if (opts.chatId && (
+        connection.prepare(`SELECT 1 FROM canonical_chats WHERE json_extract(metadata_json, '$.id') = ?`).get(opts.chatId)
+        || connection.prepare(`SELECT 1 FROM canonical_archived_chats WHERE json_extract(chat_json, '$.id') = ?`).get(opts.chatId)
+      )) {
+        throw new Error(`chat id already exists: ${opts.chatId}`);
+      }
       let source: any | null = null;
       if (opts.copyFromChatName) {
         source = this.projectChatWithConnection(connection, opts.droneId, opts.copyFromChatName);
@@ -2125,6 +2133,16 @@ export class ChatTranscriptRepository {
 
   listChats(opts: { droneId: string }): ChatStoreListResult {
     return this.database.read((connection) => this.listChatsWithConnection(connection, opts.droneId));
+  }
+
+  /** The current name of the chat with this stable ID, or null when the drone has no such chat. */
+  chatNameForId(opts: { droneId: string; chatId: string }): string | null {
+    return this.database.read((connection) => {
+      const row = connection
+        .prepare(`SELECT chat_name FROM canonical_chats WHERE drone_id = ? AND json_extract(metadata_json, '$.id') = ?`)
+        .get(opts.droneId, opts.chatId) as { chat_name: string } | undefined;
+      return row?.chat_name ?? null;
+    });
   }
 
   readChat(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
@@ -2979,6 +2997,7 @@ export async function importChatFromRegistry(opts: { droneId: string; chatName: 
 export async function createChatInStore(opts: {
   droneId: string;
   chatName: string;
+  chatId?: string;
   copyFromChatName?: string;
   implicitDefaultEntry?: unknown;
   createEntry: (source: any | null) => unknown;
@@ -2986,6 +3005,9 @@ export async function createChatInStore(opts: {
   const store = repository();
   if (store) return await store.createChat(opts);
   if (memoryReadChat(opts.droneId, opts.chatName).chat) throw new Error(`chat already exists: ${opts.chatName}`);
+  if (opts.chatId && [...memoryChats.values()].some((row) => String(row.metadata?.id ?? '') === opts.chatId)) {
+    throw new Error(`chat id already exists: ${opts.chatId}`);
+  }
   let source: any | null = null;
   if (opts.copyFromChatName) {
     source = memoryReadChat(opts.droneId, opts.copyFromChatName).chat;
@@ -3425,6 +3447,16 @@ async function cancelResourceSubscriptionsForDrone(
   const database = getHubDatabase();
   if (!database) return;
   await new ResourceSubscriptionRepository(database).cancelForDrone(droneId, chatIds);
+}
+
+export function chatNameForIdFromStore(opts: { droneId: string; chatId: string }): string | null {
+  const store = repository();
+  if (store) return store.chatNameForId(opts);
+  const prefix = `${opts.droneId}\u0000`;
+  for (const [key, row] of memoryChats) {
+    if (key.startsWith(prefix) && String(row.metadata?.id ?? '') === opts.chatId) return key.slice(prefix.length);
+  }
+  return null;
 }
 
 export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResult {

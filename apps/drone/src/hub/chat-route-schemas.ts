@@ -28,6 +28,7 @@ export const chatCreateBodySchema = z
     mode: z.enum(['fork', 'copy-config']).optional(),
     sideChat: z.boolean().optional(),
     checkpointId: z.string().trim().min(1).optional(),
+    chatId: z.string().trim().min(1).optional(),
     draft: z.unknown().optional(),
     isDraft: z.unknown().optional(),
   })

@@ -1,4 +1,5 @@
 import { queuedChatNames } from './queued-chat-names';
+import { resolveChatIdInPath } from './chat-path-ref';
 import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion/companion-attachments';
 import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
@@ -159,6 +160,7 @@ import {
   listChatReadStatesForDronesFromStore,
   listChatReadStatesFromStore,
   listArchivedChatsFromStore,
+  chatNameForIdFromStore,
   listChatsFromStore,
   listExpiredArchivedChatsFromStore,
   markChatReadInStore,
@@ -6488,6 +6490,7 @@ async function startDroneHubApiServerWithLifecycle(
       if (prepareHubHttpRequest(req, res, allowedOrigins, json)) return;
 
       const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+      resolveChatIdInPath(u, chatNameForIdFromStore);
       const pathname = u.pathname;
       if (await deviceMesh.handleHttp(req, res, u)) return;
       if (pathname === '/mcp') {
