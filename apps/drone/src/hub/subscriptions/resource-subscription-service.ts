@@ -70,9 +70,17 @@ type SessionSubscriber = {
   subscriptionsChanged?(subscriptions: ResourceSubscription[]): void;
 };
 
+export type ChatPendingQuestions = {
+  requestId: string;
+  createdAt: string;
+  questions: Array<{ id: string; question: string }>;
+};
+
 export type ChatSubscriptionStatus = {
   idle: boolean;
   reason: string;
+  /** Unanswered ask_questions requests from the chat. */
+  pendingQuestions?: ChatPendingQuestions[];
   latest: {
     id?: string;
     role?: string;
@@ -1309,7 +1317,12 @@ function chatCursor(
       status.latest?.status === 'failed'
         ? String(status.latest?.id ?? '').trim()
         : '',
+    seenQuestionIds: pendingQuestionIds(status),
   };
+}
+
+function pendingQuestionIds(status: ChatSubscriptionStatus): string[] {
+  return (status.pendingQuestions ?? []).map((request) => request.requestId);
 }
 
 function normalizeChatCursor(
@@ -1327,6 +1340,10 @@ function normalizeChatCursor(
     lastLatestId: String(raw.lastLatestId ?? '').trim(),
     idleCauseId: String(raw.idleCauseId ?? '').trim(),
     lastFailureId: String(raw.lastFailureId ?? '').trim(),
+    // Cursors from before question events existed treat current questions as already seen.
+    seenQuestionIds: Array.isArray(raw.seenQuestionIds)
+      ? raw.seenQuestionIds.map((id) => String(id))
+      : pendingQuestionIds(status),
   };
 }
 
@@ -1351,6 +1368,17 @@ export function detectChatSubscriptionChanges(
     events.push(chatEvent(subscription, location, status, 'chat.failed', latestId));
     cursor.lastFailureId = latestId;
   }
+
+  const seenQuestionIds = new Set<string>(cursor.seenQuestionIds);
+  if (subscription.events.includes('chat.questions_asked')) {
+    for (const request of status.pendingQuestions ?? []) {
+      if (!seenQuestionIds.has(request.requestId)) {
+        events.push(chatQuestionsEvent(subscription, location, request));
+      }
+    }
+  }
+  // Only open requests are kept; request ids are never reused, so this stays bounded.
+  cursor.seenQuestionIds = pendingQuestionIds(status);
 
   if (!status.idle) {
     cursor.idleArmed = true;
@@ -1381,6 +1409,36 @@ export function detectChatSubscriptionChanges(
   cursor.lastIdle = status.idle;
   cursor.lastLatestId = latestId;
   return { cursor, events };
+}
+
+function chatQuestionsEvent(
+  subscription: ResourceSubscription,
+  location: ChatResourceLocation,
+  request: ChatPendingQuestions,
+): ResourceEvent {
+  const chatLabel = chatResourceSubscriptionLabel(location);
+  return {
+    id: crypto.randomUUID(),
+    providerEventId: `drone-hub:${subscription.resourceId}:chat.questions_asked:${request.requestId}`,
+    provider: 'drone-hub',
+    resourceType: 'chat',
+    resourceId: subscription.resourceId,
+    parentResourceId: null,
+    eventType: 'chat.questions_asked',
+    occurredAt: validIso(request.createdAt, new Date().toISOString()),
+    summary: `${chatLabel} asked ${request.questions.length === 1 ? 'a question' : `${request.questions.length} questions`}.`,
+    providerContent: {
+      chatLabel,
+      chatId: location.chatId,
+      droneId: location.droneId,
+      droneName: String(location.droneName ?? '').trim() || location.droneId,
+      chatName: location.chatName,
+      requestId: request.requestId,
+      questions: request.questions,
+      answerWith:
+        'Use read_chat to see the full questions and answer_questions to reply, or leave them for the user.',
+    },
+  };
 }
 
 function chatEvent(
@@ -1426,6 +1484,13 @@ function chatEvent(
           }
         : {}),
       reason: status.reason,
+      ...(eventType === 'chat.idle' && status.pendingQuestions?.length
+        ? {
+            pendingQuestionRequestIds: pendingQuestionIds(status),
+            pendingQuestionsHint:
+              'The chat is waiting on unanswered questions. Use read_chat to see them and answer_questions to reply.',
+          }
+        : {}),
     },
   };
 }

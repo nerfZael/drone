@@ -28,6 +28,7 @@ export function AssistantQuestionResultCard({
     result.status === 'submitted'
       ? new Map(result.responses.map((response) => [response.questionId, response]))
       : null;
+  const respondedBy = result.status === 'submitted' ? result.respondedBy : undefined;
 
   if (!responses) {
     return (
@@ -61,7 +62,11 @@ export function AssistantQuestionResultCard({
       data-assistant-question-result="true"
     >
       <div className="mb-2 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-        {deliveryStatus ? 'Answers saved' : 'Answers submitted'}
+        {respondedBy
+          ? `Answered by chat ${respondedBy.chatName}`
+          : deliveryStatus
+            ? 'Answers saved'
+            : 'Answers submitted'}
         {deliveryStatus ? ` · ${deliveryStatus}` : ''}
       </div>
       <dl className="space-y-2.5">
@@ -76,7 +81,9 @@ export function AssistantQuestionResultCard({
       </dl>
       {result.notes ? (
         <div className="mt-3 border-t border-[var(--border-subtle)] pt-2.5">
-          <div className="text-[var(--fg-secondary)]">Additional notes</div>
+          <div className="text-[var(--fg-secondary)]">
+            {respondedBy ? 'Response' : 'Additional notes'}
+          </div>
           <div className="mt-0.5 whitespace-pre-wrap break-words text-[var(--fg-strong)]">
             {result.notes}
           </div>

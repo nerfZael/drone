@@ -4,6 +4,7 @@ import type {
   ChatQuestion,
   ChatQuestionRequest,
   ChatQuestionRequestResult,
+  ChatQuestionResponder,
   ChatQuestionResponse,
 } from '@drone/assistant-chat';
 
@@ -113,6 +114,7 @@ export type CreateChatQuestionRequestInput = {
 export type ResolveChatQuestionRequestInput = {
   responses: unknown;
   notes?: unknown;
+  respondedBy?: unknown;
 };
 
 export type NativeQuestionResultResolver = (
@@ -234,6 +236,18 @@ function requestFromRow(row: Row): ChatQuestionRequest {
     updatedAt: row.updated_at,
     status: row.status,
     ...(result ? { result } : {}),
+  };
+}
+
+function normalizeResponder(raw: unknown): ChatQuestionResponder | undefined {
+  if (raw == null) return undefined;
+  const value = raw as any;
+  if (value?.kind !== 'chat') throw new Error('respondedBy.kind must be chat');
+  return {
+    kind: 'chat',
+    chatId: text(value.chatId, 200, 'respondedBy.chatId'),
+    droneId: text(value.droneId, 200, 'respondedBy.droneId'),
+    chatName: text(value.chatName, 200, 'respondedBy.chatName'),
   };
 }
 
@@ -516,6 +530,7 @@ export class ChatQuestionRequestService {
     const request = this.get(requestId);
     if (!request) throw new Error(`unknown question request: ${requestId}`);
     if (request.result) return request.result;
+    const respondedBy = normalizeResponder(input.respondedBy);
     const result: ChatQuestionRequestResult = {
       status: 'submitted',
       requestId,
@@ -523,6 +538,7 @@ export class ChatQuestionRequestService {
       ...(optionalText(input.notes, 8_000, 'notes')
         ? { notes: optionalText(input.notes, 8_000, 'notes') }
         : {}),
+      ...(respondedBy ? { respondedBy } : {}),
     };
     return await this.finish(request, result);
   }

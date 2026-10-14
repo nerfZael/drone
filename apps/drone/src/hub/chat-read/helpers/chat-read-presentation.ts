@@ -1,19 +1,29 @@
 /** Bounded model-facing presentation, shared by the chat read endpoint and MCP. */
 export function pendingChatSummary(response: any, limit: number, maxCharsPerField: number) {
   const pendingMessages = Array.isArray(response?.pending) ? response.pending : [];
+  const positions = queuePositions(pendingMessages);
+  const native = response?.agent?.kind === 'native';
   const pending = pendingMessages.slice(0, limit).map((item: any) => {
     const prompt = truncateString(String(item?.prompt ?? ''), maxCharsPerField);
+    const id = cleanString(item?.id);
+    const sentBy = pendingSender(item?.sentBy);
     return {
-      id: cleanString(item?.id),
+      id,
       at: cleanString(item?.at),
       state: cleanString(item?.state, 'queued'),
       status: response?.draft === true ? 'held_in_draft' : cleanString(item?.state, 'queued'),
+      phase: pendingPhase(item, native),
+      deliveryMode: item?.deliveryMode === 'asap' ? 'asap' : 'queue',
+      ...(positions.has(id) ? { queuePosition: positions.get(id) } : {}),
+      ...(sentBy ? { sentBy } : {}),
+      ...(cleanString(item?.runId) ? { runId: cleanString(item.runId) } : {}),
       prompt: prompt.value,
       promptOriginalLength: prompt.originalLength,
       ...(prompt.truncated ? { promptTruncated: true } : {}),
     };
   });
   return {
+    status: chatStatus(response, pendingMessages, native),
     draft: response?.draft === true,
     pending,
     pendingCount: pendingMessages.length,
@@ -25,6 +35,63 @@ export function pendingChatSummary(response: any, limit: number, maxCharsPerFiel
         }
       : {}),
   };
+}
+
+/**
+ * Where a pending message is in delivery. Only "waiting" can still be cancelled or edited:
+ * "delivered" sits in the agent's own queue and can no longer be pulled back.
+ */
+function pendingPhase(item: any, native: boolean): string {
+  const state = cleanString(item?.state, 'queued');
+  if (item?.queueInterruption?.state === 'blocked') return 'blocked_by_interruption';
+  if (state === 'queued') return 'waiting';
+  // A native chat holds its claim for the whole run and marks the prompt sent when it ends.
+  if (state === 'sending') return native ? 'running' : 'delivering';
+  if (state === 'sent') return item?.executionState === 'queued' ? 'delivered' : 'running';
+  return state;
+}
+
+/**
+ * 1-based order in which waiting messages will be claimed, matching the queue's claim rule:
+ * ASAP messages go first, then FIFO, but nothing moves past a queued "send in new chat"
+ * action, so each action closes a segment that is ordered on its own.
+ */
+function queuePositions(items: any[]): Map<string, number> {
+  const ordered: any[] = [];
+  let segment: any[] = [];
+  const flush = () => {
+    ordered.push(
+      ...segment.filter((item) => item?.deliveryMode === 'asap'),
+      ...segment.filter((item) => item?.deliveryMode !== 'asap'),
+    );
+    segment = [];
+  };
+  for (const item of items) {
+    if (cleanString(item?.state, 'queued') !== 'queued') continue;
+    segment.push(item);
+    if (item?.action?.type === 'send-in-new-chat') flush();
+  }
+  flush();
+  return new Map(ordered.map((item, index) => [cleanString(item?.id), index + 1]));
+}
+
+function pendingSender(raw: any) {
+  if (raw?.kind !== 'chat' || !cleanString(raw?.chatId)) return null;
+  return {
+    kind: 'chat' as const,
+    chatId: cleanString(raw.chatId),
+    droneId: cleanString(raw.droneId),
+    chatName: cleanString(raw.chatName),
+  };
+}
+
+function chatStatus(response: any, pending: any[], native: boolean): string {
+  if (response?.draft === true) return 'draft';
+  const phases = pending.map((item) => pendingPhase(item, native));
+  if (phases.includes('blocked_by_interruption')) return 'blocked';
+  if (phases.some((phase) => ['delivering', 'delivered', 'running'].includes(phase))) return 'working';
+  if (phases.includes('waiting')) return 'queued';
+  return 'idle';
 }
 
 export function boundedTranscriptTurn(

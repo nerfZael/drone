@@ -15,6 +15,8 @@ import {
 import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   getPromptQueueRepository,
+  type PromptQueueEditResult,
+  type PromptSender,
   type PromptSubmissionSource,
 } from '../host/prompt-queue-repository';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
@@ -48,6 +50,7 @@ export type PendingPrompt = {
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
   deliveryMode?: 'queue' | 'asap';
+  sentBy?: PromptSender;
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PendingPromptState;
@@ -72,7 +75,11 @@ export type PendingPrompt = {
   updatedAt?: string;
 };
 
-export type CancelQueuedPendingPromptStatus = 'cancelled' | 'already-submitted' | 'not-found';
+export type CancelQueuedPendingPromptStatus =
+  | 'cancelled'
+  | 'already-submitted'
+  | 'not-found'
+  | 'not-owner';
 
 export type CancelQueuedPendingPromptResult = {
   status: CancelQueuedPendingPromptStatus;
@@ -927,6 +934,8 @@ export function createDronePendingPromptStore(deps: {
     chatName: string;
     promptId: string;
     entireBundle?: boolean;
+    /** Refuse unless this chat sent the prompt. Senders never change, so checking first is safe. */
+    requireSentByChatId?: string;
   }): Promise<CancelQueuedPendingPromptResult> {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = deps.normalizeChatName(opts.chatName);
@@ -934,6 +943,13 @@ export function createDronePendingPromptStore(deps: {
     if (!droneId || !chatName || !promptId) return { status: 'not-found', pendingState: null };
 
     const queue = promptQueueForActiveDrone();
+    if (opts.requireSentByChatId) {
+      const current = queue?.get({ droneId, chatName, promptId });
+      if (!current || current.state === 'cancelled') return { status: 'not-found', pendingState: null };
+      if (current.sentBy?.chatId !== opts.requireSentByChatId) {
+        return { status: 'not-owner', pendingState: current.state as PendingPromptState };
+      }
+    }
     if (queue) {
       const cancelled = await queue.cancelQueued({ droneId, chatName, promptId, entireBundle: opts.entireBundle });
       if (cancelled.cancelled) {
@@ -1020,8 +1036,51 @@ export function createDronePendingPromptStore(deps: {
     return { status: 'not-found', pendingState: null };
   }
 
+  async function stampPendingPromptSender(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    sentBy: PromptSender;
+  }): Promise<boolean> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const queue = promptQueueForActiveDrone();
+    if (!queue || !droneId) return false;
+    return await queue.stampSender({
+      droneId,
+      chatName: deps.normalizeChatName(opts.chatName),
+      promptId: opts.promptId,
+      sentBy: opts.sentBy,
+    });
+  }
+
+  async function editQueuedPendingPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    text: string;
+    mode?: 'replace' | 'append';
+    requireSentByChatId?: string;
+  }): Promise<PromptQueueEditResult> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = deps.normalizeChatName(opts.chatName);
+    const queue = promptQueueForActiveDrone();
+    if (!queue || !droneId) throw new Error('editing queued messages requires the canonical prompt queue');
+    const result = await queue.editQueued({
+      droneId,
+      chatName,
+      promptId: String(opts.promptId ?? '').trim(),
+      text: opts.text,
+      mode: opts.mode,
+      requireSentByChatId: opts.requireSentByChatId,
+    });
+    if (result.status === 'edited') notifyPendingPromptChanged(droneId, chatName);
+    return result;
+  }
+
   return {
     cancelQueuedPendingPrompt,
+    editQueuedPendingPrompt,
+    stampPendingPromptSender,
     claimQueuedPendingPromptForPromotion,
     claimQueuedPendingPromptForSending,
     isSafePromptId,

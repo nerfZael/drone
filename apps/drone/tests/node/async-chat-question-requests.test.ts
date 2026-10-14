@@ -154,6 +154,38 @@ test('explicit skip publishes one event, while failed answer publication rolls b
   }
 });
 
+test('an answer from another chat is attributed to that chat in the result and the event', async () => {
+  const { database, close } = memoryHubDatabase();
+  const questions = new ChatQuestionRequestService(database);
+  try {
+    const asked = await questions.askAsync(input);
+    const respondedBy = { kind: 'chat', chatId: 'chat-lead', droneId: 'drone-a', chatName: 'lead' };
+    await assert.rejects(
+      questions.submit(asked.requestId, { ...answers, respondedBy: { kind: 'user' } }),
+      /respondedBy.kind must be chat/,
+    );
+    const result = await questions.submit(asked.requestId, {
+      responses: [{ questionId: 'scope', outcome: 'skipped' }],
+      notes: 'Go small; the user wants a quick fix.',
+      respondedBy,
+    });
+    assert.equal(result.status, 'submitted');
+    assert.deepEqual(result.status === 'submitted' && result.respondedBy, respondedBy);
+    assert.deepEqual(questions.get(asked.requestId)?.result, result);
+    const batch = await new ResourceSubscriptionRepository(database).claimBatch({
+      ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      batchWindowMs: 0,
+    });
+    assert.equal(batch?.items[0]?.event.summary, 'Chat "lead" answered your questions on the user\'s behalf.');
+    const prompt = renderSubscriptionPrompt(batch!);
+    assert.match(prompt, /chat-lead/);
+    assert.match(prompt, /another chat when result\.respondedBy names one/);
+  } finally {
+    questions.close();
+    close();
+  }
+});
+
 test('subscription limits and insert failures cannot leave orphan question forms or subscriptions', async () => {
   const { database, close } = memoryHubDatabase();
   const questions = new ChatQuestionRequestService(database);

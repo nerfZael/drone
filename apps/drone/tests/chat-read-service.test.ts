@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { ChatReadService } from '../src/hub/chat-read/ChatReadService';
+import { pendingChatSummary } from '../src/hub/chat-read/helpers/chat-read-presentation';
 import {
   chatReadSnapshotFromRegistry,
   readVisibleChatHistory,
@@ -192,5 +193,110 @@ test('legacy turns without IDs keep stable identities across history limits and 
   expect(tail.messages[0].id).toBe(full.messages.at(-1)!.id);
   expect(summarizeChatActivity({ ...snapshot, transcripts })).toMatchObject({
     latest: { id: 'agent:turn-9', turnId: 'turn-9' },
+  });
+});
+
+test('pending summary reports phase, claim order, and sender for each message', () => {
+  const lead = { kind: 'chat', chatId: 'chat-lead', droneId: 'drone', chatName: 'lead' };
+  const summary = pendingChatSummary(
+    {
+      pending: [
+        { id: 'running', state: 'sent', executionState: 'running', prompt: 'now' },
+        { id: 'delivered', state: 'sent', executionState: 'queued', prompt: 'in agent queue' },
+        { id: 'phase-2', state: 'queued', deliveryMode: 'queue', sentBy: lead, prompt: 'two' },
+        { id: 'fix', state: 'queued', deliveryMode: 'asap', prompt: 'urgent' },
+        { id: 'phase-3', state: 'queued', prompt: 'three', sentBy: { kind: 'chat' } },
+      ],
+    },
+    10,
+    100,
+  );
+  expect(summary.status).toBe('working');
+  expect(
+    summary.pending.map(({ id, phase, deliveryMode, queuePosition }: any) => ({
+      id,
+      phase,
+      deliveryMode,
+      queuePosition,
+    })),
+  ).toEqual([
+    { id: 'running', phase: 'running', deliveryMode: 'queue', queuePosition: undefined },
+    { id: 'delivered', phase: 'delivered', deliveryMode: 'queue', queuePosition: undefined },
+    { id: 'phase-2', phase: 'waiting', deliveryMode: 'queue', queuePosition: 2 },
+    { id: 'fix', phase: 'waiting', deliveryMode: 'asap', queuePosition: 1 },
+    { id: 'phase-3', phase: 'waiting', deliveryMode: 'queue', queuePosition: 3 },
+  ]);
+  expect(summary.pending[2].sentBy).toEqual(lead);
+  expect(summary.pending[4].sentBy).toBeUndefined();
+  expect(pendingChatSummary({ pending: [] }, 10, 100).status).toBe('idle');
+  expect(pendingChatSummary({ draft: true, pending: [{ id: 'x', state: 'queued' }] }, 10, 100).status).toBe('draft');
+  expect(
+    pendingChatSummary({ pending: [{ id: 'x', state: 'queued', queueInterruption: { state: 'blocked' } }] }, 10, 100).status,
+  ).toBe('blocked');
+});
+
+test('read service lists the chat\'s unanswered questions with their choices', async () => {
+  const asked: Array<[string, string]> = [];
+  const service = new ChatReadService(
+    async () => ({ ...snapshot, ok: true, chat: 'worker' }),
+    (droneId, chatName) => {
+      asked.push([droneId, chatName]);
+      return [{
+        id: 'questions_1',
+        createdAt: '2026-10-14T10:00:00.000Z',
+        questions: [{
+          id: 'scope',
+          question: 'Which scope?',
+          detailedExplanation: 'Small ships today.',
+          choices: [{ id: 'small', label: 'Small', recommended: true }, { id: 'large', label: 'Large' }],
+        }],
+      }];
+    },
+  );
+  const result = await service.read({ droneRef: 'drone', chatName: 'worker' });
+  expect(asked).toEqual([['drone', 'worker']]);
+  expect(result).toMatchObject({
+    pendingQuestions: [{
+      requestId: 'questions_1',
+      questions: [{
+        id: 'scope',
+        detailedExplanation: 'Small ships today.',
+        choices: [{ id: 'small', label: 'Small', recommended: true }, { id: 'large', label: 'Large' }],
+      }],
+    }],
+  });
+});
+
+test('a native chat\'s claimed message is reported as running, not delivering', () => {
+  const summary = pendingChatSummary(
+    { agent: { kind: 'native' }, pending: [{ id: 'now', state: 'sending', prompt: 'work' }] },
+    10,
+    100,
+  );
+  expect(summary.pending[0].phase).toBe('running');
+  expect(summary.status).toBe('working');
+  expect(pendingChatSummary({ pending: [{ id: 'now', state: 'sending' }] }, 10, 100).pending[0].phase).toBe('delivering');
+});
+
+test('queue positions never move a message past a queued new-chat action', () => {
+  const summary = pendingChatSummary(
+    {
+      pending: [
+        { id: 'first', state: 'queued' },
+        { id: 'early-asap', state: 'queued', deliveryMode: 'asap' },
+        { id: 'new-chat', state: 'queued', action: { type: 'send-in-new-chat' } },
+        { id: 'after', state: 'queued' },
+        { id: 'late-asap', state: 'queued', deliveryMode: 'asap' },
+      ],
+    },
+    10,
+    100,
+  );
+  expect(Object.fromEntries(summary.pending.map((item: any) => [item.id, item.queuePosition]))).toEqual({
+    'early-asap': 1,
+    first: 2,
+    'new-chat': 3,
+    'late-asap': 4,
+    after: 5,
   });
 });

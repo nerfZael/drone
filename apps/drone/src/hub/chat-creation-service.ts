@@ -11,6 +11,14 @@ export type QueuedChatOrigin = {
 
 export type DroneChatCreationMode = 'empty' | 'clone-history' | 'copy-config';
 
+/** The chat that created this chat through a Drone Hub MCP tool. */
+export type ChatCreator = {
+  kind: 'chat';
+  chatId: string;
+  droneId: string;
+  chatName: string;
+};
+
 export type CreateDroneChatInput = {
   droneId: string;
   droneEntry: any;
@@ -21,6 +29,7 @@ export type CreateDroneChatInput = {
   queuedOrigin?: QueuedChatOrigin;
   sideChat?: boolean;
   checkpointId?: string;
+  createdBy?: ChatCreator;
 };
 
 export type CreateDroneChatResult = {
@@ -242,6 +251,7 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
           }
           if (input.draft) entry.draft = true;
           if (input.queuedOrigin) entry.queuedChatOrigin = input.queuedOrigin;
+          if (input.createdBy) entry.createdBy = input.createdBy;
           if (input.sideChat && checkpoint) {
             entry.visibility = 'side-chat';
             entry.sideChatOrigin = { sourceChatName, checkpointId: checkpoint.checkpointId };

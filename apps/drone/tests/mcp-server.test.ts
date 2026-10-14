@@ -489,7 +489,8 @@ describe('Drone Hub assistant MCP transport', () => {
       expect(sendMessageDescription).toContain('injected into the execution in progress');
       expect(sendMessageDescription).toContain('gets no separate reply');
       expect(sendMessageDescription).toContain('Otherwise it starts as the next execution');
-      expect(sendMessageDescription).toContain('Neither mode stops or cancels');
+      expect(sendMessageDescription).toContain('Neither mode stops a running execution');
+      expect(sendMessageDescription).toContain('only while it is still waiting in the queue');
       const hostAskResult = await client.callTool({
         name: 'ask_questions',
         arguments: {

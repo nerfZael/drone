@@ -1648,6 +1648,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
   const {
     cancelQueuedPendingPrompt,
+    editQueuedPendingPrompt,
+    stampPendingPromptSender,
     claimQueuedPendingPromptForPromotion,
     claimQueuedPendingPromptForSending,
     isSafePromptId,
@@ -3708,6 +3710,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     attachmentOnlyPromptLabel,
     busyChatNamesForDrone,
     cancelQueuedPendingPrompt,
+    editQueuedPendingPrompt,
+    stampPendingPromptSender,
     chatHasActivePendingPromptsForSummary,
     chatHasReconcilablePendingPrompts,
     chatRequiresCodexApprovalForSummary,

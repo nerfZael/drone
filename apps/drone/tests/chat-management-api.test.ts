@@ -204,7 +204,7 @@ describeSocketSuite('chat management api', () => {
       expect(read.isError).not.toBe(true);
       expect(read.structuredContent).toMatchObject({
         draft: true, historyKind: 'messages', messages: [], pendingCount: 1, pendingTruncated: false,
-        pending: [{ id: (sent.structuredContent as any).runId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
+        pending: [{ id: (sent.structuredContent as any).messageId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
       });
     } finally {
       await client?.close();

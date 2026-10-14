@@ -1,6 +1,7 @@
 export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'chat.idle',
   'chat.failed',
+  'chat.questions_asked',
   'pull_request.opened',
   'pull_request.comment.created',
   'pull_request.merged',

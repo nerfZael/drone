@@ -30,12 +30,21 @@ export type ChatQuestionResponse =
       outcome: 'skipped';
     };
 
+/** Another chat that answered on the user's behalf. Absent when the user answered. */
+export type ChatQuestionResponder = {
+  kind: 'chat';
+  chatId: string;
+  droneId: string;
+  chatName: string;
+};
+
 export type ChatQuestionRequestResult =
   | {
       status: 'submitted';
       requestId: string;
       responses: ChatQuestionResponse[];
       notes?: string;
+      respondedBy?: ChatQuestionResponder;
     }
   | {
       status: 'skipped';

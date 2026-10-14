@@ -23,6 +23,7 @@ export function MobileQuestionResultCard({ request }: { request: ChatQuestionReq
   const result = request.result;
   if (!result) return null;
   const submitted = result.status === 'submitted';
+  const respondedBy = result.status === 'submitted' ? result.respondedBy : undefined;
   const responses = submitted
     ? new Map(result.responses.map((response) => [response.questionId, response]))
     : null;
@@ -42,7 +43,11 @@ export function MobileQuestionResultCard({ request }: { request: ChatQuestionReq
           )}
         </View>
         <Text style={[styles.title, comfortable && styles.titleComfortable]}>
-          {submitted ? 'Answers submitted' : skippedTitle(request)}
+          {respondedBy
+            ? `Answered by chat ${respondedBy.chatName}`
+            : submitted
+              ? 'Answers submitted'
+              : skippedTitle(request)}
         </Text>
       </View>
       {responses ? (
@@ -62,7 +67,7 @@ export function MobileQuestionResultCard({ request }: { request: ChatQuestionReq
       {result.notes ? (
         <View style={[styles.notes, responses && styles.notesSeparated]}>
           <Text style={[styles.question, comfortable && styles.questionComfortable]}>
-            Additional notes
+            {respondedBy ? 'Response' : 'Additional notes'}
           </Text>
           <Text style={[styles.response, comfortable && styles.responseComfortable]}>
             {result.notes}

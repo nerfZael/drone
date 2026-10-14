@@ -60,7 +60,7 @@ export async function createQuestionRequestSubscription(
       resourceId: request.id,
       events: ['question_request.resolved'],
       intent:
-        'Review the user’s answers and notes to these questions and continue the task as appropriate. A skipped question is not approval.',
+        'Review the answers and notes to these questions and continue the task as appropriate. They come from the user, or from another chat when result.respondedBy names one. A skipped question is not approval.',
       resourceConfig: { label: request.questions[0]?.question ?? 'Questions' },
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
@@ -104,7 +104,9 @@ export function questionRequestResolvedEvent(
     occurredAt,
     summary:
       result.status === 'submitted'
-        ? 'The user submitted answers to your questions.'
+        ? result.respondedBy
+          ? `Chat "${result.respondedBy.chatName}" answered your questions on the user's behalf.`
+          : 'The user submitted answers to your questions.'
         : 'The user skipped your questions.',
     providerContent: { requestId: request.id, questions: request.questions, result },
   };

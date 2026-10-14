@@ -28,9 +28,24 @@ type SnapshotReader = (input: {
   activityMode: 'summary' | 'full';
 }) => Promise<SnapshotResult>;
 
+/** Unanswered ask_questions requests, so a reader can answer them for the user. */
+export type PendingQuestionsReader = (droneId: string, chatName: string) => ReadonlyArray<{
+  id: string;
+  createdAt: string;
+  questions: ReadonlyArray<{
+    id: string;
+    question: string;
+    detailedExplanation?: string;
+    choices: ReadonlyArray<{ id: string; label: string; recommended?: boolean }>;
+  }>;
+}>;
+
 /** One bounded, model-facing read contract; provider transcripts remain available separately. */
 export class ChatReadService {
-  constructor(private readonly readSnapshot: SnapshotReader) {}
+  constructor(
+    private readonly readSnapshot: SnapshotReader,
+    private readonly readPendingQuestions: PendingQuestionsReader = () => [],
+  ) {}
 
   async read(input: ReadOptions) {
     const limit = bound(input.limit, 10, 20);
@@ -85,6 +100,22 @@ export class ChatReadService {
         limit,
         maxChars,
       ),
+      pendingQuestions: this.readPendingQuestions(snapshot.id, snapshot.chat).map((request) => ({
+        requestId: request.id,
+        createdAt: request.createdAt,
+        questions: request.questions.map((question) => ({
+          id: question.id,
+          question: question.question,
+          ...(question.detailedExplanation
+            ? { detailedExplanation: question.detailedExplanation }
+            : {}),
+          choices: question.choices.map((choice) => ({
+            id: choice.id,
+            label: choice.label,
+            ...(choice.recommended ? { recommended: true } : {}),
+          })),
+        })),
+      })),
       limit,
       maxCharsPerField: maxChars,
       ...(messages.some((message) => message.textTruncated) ||

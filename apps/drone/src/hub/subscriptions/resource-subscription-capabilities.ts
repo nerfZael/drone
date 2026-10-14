@@ -6,7 +6,7 @@ import type {
   ResourceSubscriptionType,
 } from './resource-subscription-types';
 
-const CHAT_EVENTS = ['chat.idle', 'chat.failed'] as const;
+const CHAT_EVENTS = ['chat.idle', 'chat.failed', 'chat.questions_asked'] as const;
 const GITHUB_REPOSITORY_EVENTS = [
   'pull_request.opened',
   'pull_request.comment.created',

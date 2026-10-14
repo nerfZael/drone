@@ -312,6 +312,7 @@ export function createChatManagementRouteHandler(
             draft: createAsDraft,
             sideChat: body?.sideChat === true,
             checkpointId: body?.checkpointId,
+            ...(body?.createdBy ? { createdBy: body.createdBy } : {}),
           });
 
           json(res, 201, {

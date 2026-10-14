@@ -4,6 +4,7 @@ import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
 import { readChatIdleStatus } from './chat-idle-status';
+import { getChatQuestionRequestService } from './chat-question-requests';
 import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
@@ -4134,6 +4135,7 @@ async function startDroneHubApiServerWithLifecycle(
     createOrEnqueueNewChatAction,
     createOrEnqueuePromptUnified,
     dequeueProvisioning,
+    editQueuedPendingPrompt,
     enqueuePendingPromptPump,
     enqueueProvisioning,
     enqueueProvisioningForAllPending,
@@ -4155,6 +4157,7 @@ async function startDroneHubApiServerWithLifecycle(
     stopChatResponse,
     stopPromptRuntimeBackgroundWork,
     stopSingleDroneChatActivity,
+    stampPendingPromptSender,
   } = promptRuntime;
   let releaseMcpProjectionConfig = () => {};
   let releaseNativeChatRuntimePort = () => {};
@@ -5658,7 +5661,15 @@ async function startDroneHubApiServerWithLifecycle(
   const readIdleStatus = async (target: { droneId: string; chatName: string }) => {
     const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ??
       await loadCanonicalActiveModel();
-    return readChatIdleStatus(registry, target, nativeChatIsBusy);
+    const status = await readChatIdleStatus(registry, target, nativeChatIsBusy);
+    const pendingQuestions = getChatQuestionRequestService()
+      .listPending(target.droneId, target.chatName)
+      .map((request) => ({
+        requestId: request.id,
+        createdAt: request.createdAt,
+        questions: request.questions.map(({ id, question }) => ({ id, question })),
+      }));
+    return pendingQuestions.length > 0 ? { ...status, pendingQuestions } : status;
   };
   const resourceSubscriptionDatabase = getHubDatabase();
   const resourceSubscriptionRepository = resourceSubscriptionDatabase
@@ -5924,7 +5935,12 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
   });
   registerBackgroundResource('change request events', changeRequestFeature.stop);
-  registerChatReadRoutes(apiRouter, new ChatReadService(readChatSnapshot));
+  registerChatReadRoutes(
+    apiRouter,
+    new ChatReadService(readChatSnapshot, (droneId, chatName) =>
+      getChatQuestionRequestService().listPending(droneId, chatName),
+    ),
+  );
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),
@@ -6278,6 +6294,7 @@ async function startDroneHubApiServerWithLifecycle(
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
     deleteActiveChatFromStore,
+    editQueuedPendingPrompt,
     deleteNativeChatSession: (nativeChatId: string) => nativeChatLifecycle.delete(nativeChatId),
     discoverAndRememberModelsForBuiltinAgent,
     dockerSnapshotAfterAgentMessageEnabledForChat,
@@ -6354,6 +6371,7 @@ async function startDroneHubApiServerWithLifecycle(
     restoreDockerSnapshotForTranscriptTurn,
     setChatAgentConfig,
     shouldAutoRenameChatOnPrompt,
+    stampPendingPromptSender,
     stopChatResponse,
     stopSingleDroneChatActivity,
     updateStoredUserTimeZone,

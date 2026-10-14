@@ -263,6 +263,7 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
   const labels: Record<string, string> = {
     'chat.idle': 'Chat idle',
     'chat.failed': 'Chat failed',
+    'chat.questions_asked': 'Chat asked questions',
     'pull_request.opened': 'PR opened',
     'pull_request.comment.created': 'PR comment added',
     'pull_request.merged': 'PR merged',

@@ -58,6 +58,22 @@ export interface AssistantRuntimeDependencies {
   };
 }
 
+/** The text an approval shows for tools that deliver new text to another chat. */
+export function nativeApprovalMessage(tool: string, args: any): string {
+  if (tool === 'edit_message') {
+    const text = String(args?.text ?? '');
+    return args?.mode === 'append'
+      ? `Append to queued message ${args?.messageId}:\n${text}`
+      : `Replace queued message ${args?.messageId} with:\n${text}`;
+  }
+  const answers = Array.isArray(args?.answers)
+    ? args.answers.map((item: any) => `${item?.questionId}: ${item?.answer}`)
+    : [];
+  return [`Answer questions ${args?.requestId}:`, String(args?.response ?? ''), ...answers]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   const {
     assistantFilesystemService,
@@ -913,6 +929,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           if (toolName === 'send_message') {
             toolName = 'message_drone';
             args = { ...args, droneId: args.drone, chatName: args.chat };
+          } else if (toolName === 'edit_message' || toolName === 'answer_questions') {
+            // Both put new text in front of another chat, so they need the same approval
+            // as send_message; otherwise an approved message could be rewritten afterwards.
+            const message = nativeApprovalMessage(toolName, args);
+            toolName = 'message_drone';
+            args = { ...args, droneId: args.drone, chatName: args.chat, message };
           } else if (blipTools.capabilityForWorkspaceTool(toolName)) {
             const target = targetCatalog.resolve(args.target);
             if (targetCatalog.size() > 1) args.target = target.descriptor.id;
