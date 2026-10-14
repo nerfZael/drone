@@ -8,7 +8,7 @@ import { ASSISTANT_OPEN_DRONE_CHAT_EVENT } from '../src/droneHub/assistant/open-
 
 function Consumer() { useDesktopNotifications(); return null; }
 
-test('live delivery respects changes to preferences, deduplicates, navigates, and cleans up', async () => {
+test.each(['cards', 'legacy', 'old-main'])('notification transport %s respects desktop implementation', async (mode) => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const listeners = new Map<string, Function>();
@@ -23,6 +23,7 @@ test('live delivery respects changes to preferences, deduplicates, navigates, an
     close() { closed = true; }
   }
   Object.assign(dom, { EventSource: Source, droneHubDesktop: {
+    notificationDisplay: mode === 'legacy' ? undefined : async () => { if (mode === 'old-main') throw new Error('No handler registered'); return 'cards'; },
     clearNotifications: async () => { cleared++; },
     showNotification: async (payload: any) => { sent.push(payload); },
     onNotificationClick: (fn: any) => { clicked = fn; return () => { clicked = null; }; },
@@ -37,6 +38,12 @@ test('live delivery respects changes to preferences, deduplicates, navigates, an
   try {
     useDesktopNotificationSettings.setState({ enabled: true, finished: true });
     await act(async () => { root.render(<Consumer />); });
+    if (mode !== 'cards') {
+      expect(listeners.size).toBe(0);
+      expect(sent).toHaveLength(0);
+      expect(clicked).toBeNull();
+      return;
+    }
     const event = { id: 'one', kind: 'finished', droneId: 'drone', droneName: 'Worker', chatName: 'review' };
     const emit = (data: any) => listeners.get('desktop_notification')!({ data: JSON.stringify(data) });
     emit(event); emit(event);
