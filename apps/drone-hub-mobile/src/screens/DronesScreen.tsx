@@ -3622,6 +3622,7 @@ export function DronesScreen({
             selectedPath={filesPreview.selectedPath}
             requestDroneControl={requestDroneControl}
             readPreviewImage={filesPreview.readImage}
+            openPreviewMediaSession={filesPreview.openHtmlMediaSession}
             onOpenPath={(path, line) => filesPreview.open({ raw: path, path, line: line ?? null, column: null })}
             onSave={filesPreview.save}
             onClose={() => setFilesPageOpen(false)}
