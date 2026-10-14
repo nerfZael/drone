@@ -48,6 +48,9 @@ export const HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY = HTML_PREVIEW_CONTEN
   .replace('media-src data: blob:', 'media-src data: blob: http: https:')
   .replace("connect-src 'none'", 'connect-src http: https: ws: wss:');
 
+/** Posted by the preview frame when the user clicks a link that leaves the document. */
+export const HTML_PREVIEW_LINK_MESSAGE = 'drone-hub:html-preview-link';
+
 const HTML_PREVIEW_LINK_GUARD = `<script>
 (() => {
   document.addEventListener('click', (event) => {
@@ -59,15 +62,14 @@ const HTML_PREVIEW_LINK_GUARD = `<script>
     const rawHref = anchor.getAttribute('href')?.trim() ?? '';
     if (!rawHref || rawHref.startsWith('#')) return;
 
-    let target;
+    let target = null;
     try {
       target = new URL(rawHref, document.baseURI);
     } catch {
-      event.preventDefault();
-      return;
+      // The Hub resolves the authored href against the file itself.
     }
 
-    if (target.hash) {
+    if (target?.hash) {
       let fragment = target.hash.slice(1);
       try {
         fragment = decodeURIComponent(fragment);
@@ -86,9 +88,11 @@ const HTML_PREVIEW_LINK_GUARD = `<script>
       }
     }
 
-    // A preview must never navigate away from its isolated document.
+    // A preview must never navigate away from its isolated document. The Hub
+    // decides what a clicked link opens, such as another file in the editor.
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (event.isTrusted) parent.postMessage({ type: '${HTML_PREVIEW_LINK_MESSAGE}', href: rawHref }, '*');
   }, true);
 })();
 </script>`;

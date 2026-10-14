@@ -818,7 +818,7 @@ export function OpenedDroneFilePanel({
     editorRef.current?.focus?.();
   }, [activeFilePath, fileLoading, fileTargetLine, openedFileEditorVisible]);
 
-  const openMarkdownPreviewLink = React.useCallback(
+  const openPreviewLink = React.useCallback(
     (href: string): boolean => {
       if (!onOpenResolvedFile) return false;
       const resolved = resolveMarkdownPreviewLinkTarget(activeFilePath, href);
@@ -1335,7 +1335,7 @@ export function OpenedDroneFilePanel({
                 key={activeFileViewModeKey}
                 searchRequest={previewSearchRequest}
                 text={fileContent ?? ''}
-                onOpenLink={openMarkdownPreviewLink}
+                onOpenLink={openPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}
                 alignment={markdownPreviewAlignment}
                 targetLine={fileTargetLine}
@@ -1344,7 +1344,7 @@ export function OpenedDroneFilePanel({
             ) : openedFileShowsHtmlPreview && htmlPreviewLoading ? (
               <UiCenteredLoadingState message="Loading HTML file…" />
             ) : openedFileShowsHtmlPreview ? (
-              <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={openedFileIsLargeText ? null : heldHtmlPreview.source} fileName={fileName} droneId={droneId} filePath={activeFilePath} />
+              <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={openedFileIsLargeText ? null : heldHtmlPreview.source} fileName={fileName} droneId={droneId} filePath={activeFilePath} onOpenLink={openPreviewLink} />
             ) : openedFileEditorVisible ? (
               <AppShortcutBoundary
                 data-editor-zoom-surface="file-editor"
