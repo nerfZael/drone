@@ -38,6 +38,7 @@ import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 import { useHeldHtmlPreview } from './use-held-html-preview';
 import { readLargeHtmlSource } from './read-large-html-source';
 import { shouldRecoverPreviewAsSource, rememberPreviewRecovery } from './preview-recovery';
+import { desktopFileMediaUrl } from './file-read-url';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
@@ -597,10 +598,7 @@ export function OpenedDroneFilePanel({
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
-    const revisionQuery = fileRevision
-      ? `&revision=${encodeURIComponent(fileRevision)}`
-      : '';
-    return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(activeFilePath)}${revisionQuery}`;
+    return desktopFileMediaUrl(droneId, activeFilePath, fileRevision);
   }, [activeFilePath, droneId, fileKind, fileRevision]);
   const clearEditorTargetHighlight = React.useCallback(() => {
     if (editorTargetHighlightTimerRef.current != null) {
