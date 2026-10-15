@@ -40,6 +40,7 @@ export const WORKSPACE_TOOLS = {
   requests: { label: 'Change requests', header: true, lazy: true },
   prs: { label: 'Pull requests', header: true, lazy: true },
   canvas: { label: 'Canvas', header: true, lazy: true },
+  channels: { label: 'Channels', header: true, lazy: true },
   whiteboard: { label: 'Whiteboard', header: true, lazy: true },
   workflows: { label: 'Workflows', header: true, lazy: true },
 } as const;

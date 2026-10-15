@@ -10,7 +10,8 @@ export type PresentedChatResourceSubscription = {
     | 'change_request'
     | 'cron'
     | 'question_request'
-    | 'custom_event';
+    | 'custom_event'
+    | 'channel';
   resourceId: string;
   resourceLabel: string;
   resourceDroneId?: string;
@@ -80,6 +81,9 @@ export function presentedChatSubscriptionResourceLabel(
   if (subscription.resourceType === 'custom_event') {
     return `Custom event · ${subscription.resourceId}`;
   }
+  if (subscription.resourceType === 'channel') {
+    return `Channel · ${subscription.resourceLabel || 'Channel'}`;
+  }
   if (subscription.resourceType === 'question_request') {
     return `Questions · ${subscription.resourceLabel || 'Awaiting answers'}`;
   }
@@ -113,7 +117,9 @@ export function presentedChatSubscriptionSummary(
         : subscription.resourceType === 'change_request' ||
             subscription.resourceType === 'question_request'
           ? subscription.resourceLabel || `#${subscription.resourceId}`
-          : subscription.resourceId;
+          : subscription.resourceType === 'channel'
+            ? subscription.resourceLabel || 'Channel'
+            : subscription.resourceId;
   return [events, resource].filter(Boolean).join(' · ');
 }
 
@@ -182,7 +188,8 @@ function presentedResourceType(raw: unknown): PresentedChatResourceSubscription[
     value === 'change_request' ||
     value === 'cron' ||
     value === 'question_request' ||
-    value === 'custom_event'
+    value === 'custom_event' ||
+    value === 'channel'
   ) {
     return value;
   }

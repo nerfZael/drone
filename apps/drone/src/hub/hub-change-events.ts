@@ -11,6 +11,10 @@ const summaryListeners = new Set<Listener<void>>();
 const chatListeners = new Set<Listener<DroneChatChange>>();
 const resourceDeliveryListeners = new Set<Listener<void>>();
 const userWorkspaceListeners = new Set<Listener<void>>();
+/** What changed in a channel, so open windows refetch only that. */
+export type ChannelChangeScope = 'all' | 'messages' | 'members' | 'read';
+type ChannelChange = { channelId: string | null; scope: ChannelChangeScope };
+const channelListeners = new Set<Listener<ChannelChange>>();
 
 export const hubChangeEvents = {
   emitDesktopNotification(event: DesktopNotificationEvent): void {
@@ -44,6 +48,16 @@ export const hubChangeEvents = {
   onUserWorkspacesChange(listener: Listener<void>): () => void {
     userWorkspaceListeners.add(listener);
     return () => userWorkspaceListeners.delete(listener);
+  },
+  /** A channel changed (null: the channel list as a whole did); `scope` says which part. */
+  emitChannelsChange(channelId: string | null = null, scope: ChannelChangeScope = 'all'): void {
+    for (const listener of channelListeners) {
+      try { listener({ channelId, scope }); } catch { /* A disconnected UI must not interrupt a channel write. */ }
+    }
+  },
+  onChannelsChange(listener: Listener<ChannelChange>): () => void {
+    channelListeners.add(listener);
+    return () => channelListeners.delete(listener);
   },
   emitRegistryWrite(): void {
     for (const listener of registryListeners) listener();

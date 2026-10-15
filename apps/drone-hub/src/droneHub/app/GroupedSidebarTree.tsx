@@ -27,7 +27,8 @@ import {
 } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneContainerStopped, isDroneStartingOrSeeding } from './helpers';
-import { IconChevron, IconColumns, IconFolderGit, IconFolderOutline, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { IconChevron, IconColumns, IconCopy, IconFolderGit, IconFolderOutline, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { useChatClipboardStore } from './chat-clipboard-store';
 import { openChatWorkspaces } from './chat-workspaces-store';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
@@ -921,6 +922,17 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
                 chatBusy ||
                 Boolean(cloningChatKeys[`${drone.id}:${chatName}`]),
               onSelect: () => void onCloneDroneChat(drone.id, chatName),
+            },
+            {
+              // Pastes into a channel's members, a composer, a canvas, or the Chats window.
+              id: 'copy-chat',
+              label: selectedChatNames.length > 1 ? `Copy ${selectedChatNames.length} chats` : 'Copy chat',
+              icon: <IconCopy className="h-3.5 w-3.5 text-[var(--muted)]" />,
+              onSelect: () =>
+                useChatClipboardStore.getState().copy({
+                  chats: selectedChatNames.map((name) => ({ droneId: drone.id, chatName: name })),
+                  droneNames: { [drone.id]: uiDroneName(drone.name) },
+                }),
             },
             {
               id: 'chat-workspaces',

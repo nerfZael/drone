@@ -15,6 +15,7 @@ export const useDesktopNotificationSettings = create<State>()(persist((set) => (
   finished: true,
   failed: true,
   messages: false,
+  channelMentions: true,
   eventNames: 'chat_message',
   sound: false,
   durationSeconds: 8,
@@ -23,6 +24,6 @@ export const useDesktopNotificationSettings = create<State>()(persist((set) => (
   setError: (error) => set({ error }),
 }), {
   name: profileStorageKey('droneHub.desktopNotifications'),
-  partialize: ({ enabled, finished, failed, messages, eventNames, sound, durationSeconds }) =>
-    ({ enabled, finished, failed, messages, eventNames, sound, durationSeconds }),
+  partialize: ({ enabled, finished, failed, messages, channelMentions, eventNames, sound, durationSeconds }) =>
+    ({ enabled, finished, failed, messages, channelMentions, eventNames, sound, durationSeconds }),
 }));

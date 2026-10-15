@@ -379,6 +379,9 @@ import {
 } from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
+import { ChannelRepository } from './channels/channel-repository';
+import { ChannelService } from './channels/channel-service';
+import { registerChannelRoutes } from './channels/channel-routes';
 import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
@@ -5675,6 +5678,11 @@ async function startDroneHubApiServerWithLifecycle(
   const resourceSubscriptionRepository = resourceSubscriptionDatabase
     ? new ResourceSubscriptionRepository(resourceSubscriptionDatabase)
     : null;
+  // Channels share the Hub database with subscriptions: a message and its events commit together.
+  const channelRepository =
+    resourceSubscriptionDatabase && resourceSubscriptionRepository
+      ? new ChannelRepository(resourceSubscriptionDatabase)
+      : null;
   const resourceSubscriptionService = resourceSubscriptionRepository
     ? new ResourceSubscriptionService({
         repository: resourceSubscriptionRepository,
@@ -5689,11 +5697,14 @@ async function startDroneHubApiServerWithLifecycle(
           getChangeRequestRepository().getByNumbers(requestNumbers),
         readCustomEventHistorySourceIds:
           createCustomEventHistorySourceReader(loadCanonicalActiveModel),
+        resolveChannelName: (channelId) => channelRepository?.getChannel(channelId)?.name ?? null,
         authorizeDelivery: createResourceSubscriptionDeliveryAuthorizer({
           resolveChatResource: (resourceId) =>
             resourceSubscriptionRepository.resolveChatResource(resourceId),
           resolveChangeRequest: (requestNumber) =>
             getChangeRequestRepository().getByNumber(requestNumber),
+          canReadChannel: (channelId, chatId) =>
+            Boolean(channelRepository?.getMember(channelId, chatId)?.canRead),
           loadRegistry: loadCanonicalActiveModel,
         }),
         log: hubLog,
@@ -6063,6 +6074,31 @@ async function startDroneHubApiServerWithLifecycle(
   });
 
   registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);
+  registerChannelRoutes(
+    apiRouter,
+    channelRepository && resourceSubscriptionRepository
+      ? new ChannelService({
+          repository: channelRepository,
+          subscriptions: resourceSubscriptionService,
+          appendEventInTransaction: (connection, event) =>
+            resourceSubscriptionRepository.appendEventInTransaction(connection, event),
+          resolveChats: (chatIds) => resourceSubscriptionRepository.resolveChatResources(chatIds),
+          notifyUserMention: ({ channel, message, author }) =>
+            hubChangeEvents.emitDesktopNotification({
+              id: `channel:${message.id}`,
+              kind: 'channel_mention',
+              droneId: author.droneId,
+              droneName: author.droneName || author.droneId,
+              chatName: author.chatName,
+              channelId: channel.id,
+              channelName: channel.name,
+              body: message.text.slice(0, 500),
+            }),
+          log: hubLog,
+        })
+      : null,
+    (chatId) => resourceSubscriptionRepository?.resolveChatResource(chatId) ?? null,
+  );
 
   registerFleetRoutes(apiRouter, {
     fleet: hubApplication.fleet,

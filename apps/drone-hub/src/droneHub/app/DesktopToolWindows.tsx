@@ -11,6 +11,9 @@ import { desktopToolWindowLabel } from './DockTabShell';
 import { dispatchAssistantOpenDroneChat } from '../assistant/open-drone-chat-event';
 import { IconPin } from '../overview/icons';
 import { UiPaneState } from '../../ui/components';
+import { droneIndependentToolTab } from './desktop-tool-windows';
+
+const ChannelsDock = React.lazy(async () => ({ default: (await import('../channels/ChannelsDock')).ChannelsDock }));
 
 export type DesktopToolWindowsProps = {
   droneById: Record<string, DroneSummary>;
@@ -32,7 +35,7 @@ export function desktopToolPinTooltip(droneName: string, pinned: boolean): strin
 }
 
 function DesktopToolWindowBar({ label, drone, pinned, onTogglePin }: {
-  label: string; drone: DroneSummary | null; pinned: boolean; onTogglePin: () => void;
+  label: string; drone: DroneSummary | null; pinned: boolean; onTogglePin: (() => void) | null;
 }) {
   // A pinned drone that was deleted still needs the pin, or the window could never follow the selection again.
   const droneName = drone?.name ?? (pinned ? 'a deleted drone' : '');
@@ -46,7 +49,7 @@ function DesktopToolWindowBar({ label, drone, pinned, onTogglePin }: {
           </span>
         ) : null}
       </span>
-      {drone || pinned ? (
+      {onTogglePin && (drone || pinned) ? (
         <button
           type="button"
           className="dh-dock-tab-button"
@@ -76,6 +79,20 @@ function DesktopToolWindowView({ window: item, props }: { window: DesktopToolWin
     useDesktopToolWindows.getState().setPinnedDrone(item.id, pinned ? null : (drone?.id ?? null));
   };
   let content: React.ReactNode;
+  if (droneIndependentToolTab(item.tab)) {
+    // Channels belong to the Hub: the window shows the same channels whichever drone is selected.
+    return (
+      <DesktopChatWindow kind="tool" chatKey={item.id} title={label}
+        request={item.request} onClose={() => useDesktopToolWindows.getState().close(item.id)}>
+        <DesktopToolWindowBar label={label} drone={null} pinned={false} onTogglePin={null} />
+        <div className="relative min-h-0 flex-1" data-desktop-tool-content={item.tab}>
+          <React.Suspense fallback={<UiPaneState kind="loading" title={`Loading ${label.toLowerCase()}…`} />}>
+            <ChannelsDock droneById={droneById} onOpenChat={(droneId, chatName) => dispatchAssistantOpenDroneChat(droneId, chatName)} />
+          </React.Suspense>
+        </div>
+      </DesktopChatWindow>
+    );
+  }
   if (!drone) {
     content = <UiPaneState kind="empty" title={pinned ? 'The pinned drone is gone.' : `Select a drone to show its ${label.toLowerCase()} here.`} />;
   } else if (item.tab === 'editor') {

@@ -102,6 +102,8 @@ import {
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { CHANGES_OPEN_AGENT_RUN_EVENT, hasRequestedAgentRunChanges, requestChangesPullRequest } from '../changes/navigation';
+import { OPEN_CHANNELS_PANE_EVENT } from '../channels/channels-ui-store';
+import { useChannelMentionCount } from '../channels/channels-api';
 import {
   OPEN_CHANGE_REQUEST_EVENT,
   type OpenChangeRequestDetail,
@@ -1198,6 +1200,16 @@ export function SelectedDroneWorkspace({
     window.addEventListener(OPEN_CHANGE_REQUEST_EVENT, openChangeRequest);
     return () => window.removeEventListener(OPEN_CHANGE_REQUEST_EVENT, openChangeRequest);
   }, [currentDrone.id, requestRightPanelTab]);
+  React.useEffect(() => {
+    const openChannels = (event: Event) => {
+      event.preventDefault();
+      requestRightPanelTab('channels');
+    };
+    window.addEventListener(OPEN_CHANNELS_PANE_EVENT, openChannels);
+    return () => window.removeEventListener(OPEN_CHANNELS_PANE_EVENT, openChannels);
+  }, [requestRightPanelTab]);
+  // Agents that @mention you or reply to you show on the Channels button, even with the window closed.
+  const channelMentionCount = useChannelMentionCount();
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(
@@ -2411,9 +2423,15 @@ export function SelectedDroneWorkspace({
           >
             {rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) => {
               const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+              const mentionCount = tab === 'channels' ? channelMentionCount : 0;
               const open = visibleToolTabs.includes(tab);
               const label = rightPanelTabLabels[tab];
-              const tooltip = tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
+              const tooltip =
+                tab === 'prs' && prCount > 0
+                  ? `${label} (${prCount} open)`
+                  : mentionCount > 0
+                    ? `${label} (${mentionCount} unread mention${mentionCount === 1 ? '' : 's'} of you)`
+                    : label;
               return (
                 <UiTooltip
                   key={tab}
@@ -2445,6 +2463,14 @@ export function SelectedDroneWorkspace({
                         className="absolute right-px top-px flex h-3 min-w-3 items-center justify-center rounded-full border border-[var(--app-header-bg)] bg-[var(--accent)] px-[2px] font-mono text-[7px] font-[var(--weight-bold)] leading-none tabular-nums text-[var(--accent-contrast)]"
                       >
                         {prCount > 99 ? '99+' : prCount}
+                      </span>
+                    ) : null}
+                    {mentionCount > 0 ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute right-px top-px flex h-3 min-w-3 items-center justify-center rounded-full border border-[var(--app-header-bg)] bg-[var(--red)] px-[2px] font-mono text-[7px] font-[var(--weight-bold)] leading-none tabular-nums text-white"
+                      >
+                        {mentionCount > 99 ? '99+' : mentionCount}
                       </span>
                     ) : null}
                   </HeaderActionButton>

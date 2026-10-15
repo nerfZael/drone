@@ -732,7 +732,7 @@ function ToolPanel({ api, containerApi, params }: IDockviewPanelProps<{ tab?: un
         <TerminalHeaderControlsContext.Provider value>
           <ChangesExplorerContext.Provider value={tab === 'changes' ? ctx.changesExplorerHost : undefined}>
             {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : (
-              <React.Fragment key={tab === 'canvas' ? 'canvas' : ctx.droneId}>
+              <React.Fragment key={tab === 'canvas' || tab === 'channels' ? tab : ctx.droneId}>
                 {ctx.renderToolPane(tab, paneKey)}
               </React.Fragment>
             )}
@@ -2064,7 +2064,7 @@ export function DockableDroneWorkspace({
                 </UiPanel>
               ) : (
                 <UiPanel flush surface="alternate" className="h-full">
-                  <React.Fragment key={activeToolTab === 'canvas' ? 'canvas' : currentDrone.id}>
+                  <React.Fragment key={activeToolTab === 'canvas' || activeToolTab === 'channels' ? activeToolTab : currentDrone.id}>
                     {renderToolPane(activeToolTab, 'single')}
                   </React.Fragment>
                 </UiPanel>

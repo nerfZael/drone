@@ -4,10 +4,13 @@ type ChatRef = { droneId: string; chatName: string };
 type Status = ChatSubscriptionStatus & { droneName: string };
 export type DesktopNotificationEvent = ChatRef & {
   id: string;
-  kind: 'finished' | 'failed' | 'message';
+  kind: 'finished' | 'failed' | 'message' | 'channel_mention';
   droneName: string;
   body?: string;
   eventName?: string;
+  /** For channel_mention: the channel where a chat mentioned the user. */
+  channelId?: string;
+  channelName?: string;
 };
 
 /** One live connection: establish a baseline, serialize reads, and never replay history. */

@@ -306,3 +306,38 @@ test('in the canvas full-view chat panel, shortcuts act on the canvas composer, 
   expect(actions).toEqual(['canvas:q']);
   expect(editorTarget()).toBe('canvas-editor');
 });
+
+describe('composer scopes', () => {
+  test('working anywhere in a channel sends Q, W, E and S to its composer, then back to the chat', () => {
+    const h = fixture();
+    h.register('channel', true);
+    const channel = h.doc.append({ 'data-composer-scope': 'channel' });
+    const messages = channel.append();
+    const message = messages.append();
+    channel.append({ 'data-active-composer-id': 'channel', 'data-editor-mode-target-id': 'channel-editor' });
+    h.focus(message);
+    expect(h.editorTarget()).toBe('channel-editor');
+    h.shortcuts();
+    expect(h.actions).toEqual(['channel:q', 'channel:w', 'channel:e', 'channel:s']);
+    // Clicking anywhere else (the chat's transcript, the sidebar) hands the shortcuts back to the chat.
+    h.actions.length = 0;
+    h.focus(h.outside);
+    h.shortcuts();
+    expect(h.actions).toEqual(['main:q', 'main:w', 'main:e', 'main:s']);
+    // Once back, clicks elsewhere leave the target alone, as before.
+    h.actions.length = 0;
+    h.focus(h.second.tab);
+    h.focus(h.outside);
+    h.focus(h.outside);
+    h.shortcuts();
+    expect(h.actions).toEqual(['main:q', 'main:w', 'main:e', 'main:s']);
+  });
+
+  test('a scope without its composer yet leaves the target alone', () => {
+    const h = fixture();
+    h.doc.append({ 'data-composer-scope': 'channel' }).append();
+    h.focus(h.doc.children.at(-1)!.children[0]!);
+    h.shortcuts();
+    expect(h.actions).toEqual(['main:q', 'main:w', 'main:e', 'main:s']);
+  });
+});

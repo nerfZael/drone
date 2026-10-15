@@ -31,6 +31,8 @@ export function NotificationsSettingsTab() {
         <label className="flex items-center gap-2"><input type="checkbox" checked={settings.finished} onChange={(e) => settings.update({ finished: e.target.checked })} />Drone finished</label>
         <p className="text-[var(--muted)]">When a chat finishes its work. Clicking opens that drone and chat.</p>
         <label className="flex items-center gap-2"><input type="checkbox" checked={settings.failed} onChange={(e) => settings.update({ failed: e.target.checked })} />Drone failed</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={settings.channelMentions !== false} onChange={(e) => settings.update({ channelMentions: e.target.checked })} />Channel mentions</label>
+        <p className="text-[var(--muted)]">When an agent chat mentions you (@user) or replies to your message in a channel. Clicking opens the channel.</p>
         <label className="flex items-center gap-2"><input type="checkbox" checked={settings.messages} onChange={(e) => settings.update({ messages: e.target.checked })} />Chat messages from custom events</label>
         <p className="text-[var(--muted)]">Let agents or custom subscriptions announce selected messages by emitting one of the event names below with a text field named message. This does not notify for every assistant reply or start another agent run.</p>
         <label className="flex flex-col gap-1">Custom event names (canonical names, one per line)

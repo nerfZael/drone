@@ -255,6 +255,7 @@ export function eventNotificationResourceTypeLabel(resourceTypeRaw: unknown): st
   if (resourceType === 'cron') return 'Schedule';
   if (resourceType === 'question_request') return 'Questions';
   if (resourceType === 'custom_event') return 'Custom event';
+  if (resourceType === 'channel') return 'Channel';
   return resourceType.replace(/_/g, ' ') || 'Resource';
 }
 
@@ -274,6 +275,8 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
     'cron.triggered': 'Scheduled run',
     'question_request.resolved': 'Question responses',
     'custom.emitted': 'Custom event emitted',
+    'channel.message': 'Channel message',
+    'channel.mention': 'Channel mention',
   };
   return (
     labels[eventType] ||
@@ -366,6 +369,16 @@ export function eventNotificationResourceLabel(input: {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(droneLabel);
       return `${type} · ${legacyOpaqueDroneId ? chatName : summaryTarget}`;
     }
+  }
+  if (String(input.resourceType ?? '').trim() === 'channel') {
+    try {
+      const content = JSON.parse(String(input.providerContentText ?? ''));
+      const name = String(content?.channel?.name ?? '').trim();
+      if (name) return `${type} · #${name}`;
+    } catch {
+      // Truncated content still shows the resource type.
+    }
+    return type;
   }
   if (String(input.resourceType ?? '').trim() === 'question_request') {
     try {

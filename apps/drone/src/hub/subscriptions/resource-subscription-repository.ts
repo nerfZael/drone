@@ -9,6 +9,7 @@ import {
 import { PROMPT_QUEUE_MIGRATIONS } from '../../host/prompt-queue-repository';
 import crypto from 'node:crypto';
 import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
+import { channelEventReachesSubscriber, type ChannelEventRouting } from '../channels/channel-model';
 
 import {
   applyHubDatabaseMigrations,
@@ -408,6 +409,26 @@ export class ResourceSubscriptionRepository {
         `,
         )
         .all(subscriberChatId) as SubscriptionRow[];
+      return rows.map(subscriptionFromRow).filter(isPresent);
+    });
+  }
+
+  /** Active and paused subscriptions to one resource, from any subscriber. */
+  listForResource(
+    provider: ResourceSubscriptionProvider,
+    resourceType: ResourceSubscriptionType,
+    resourceId: string,
+  ): ResourceSubscription[] {
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `
+          SELECT * FROM resource_subscriptions
+          WHERE provider = ? AND resource_type = ? AND resource_id = ? AND status IN ('active', 'paused')
+          ORDER BY created_at, id
+        `,
+        )
+        .all(provider, resourceType, resourceId) as SubscriptionRow[];
       return rows.map(subscriptionFromRow).filter(isPresent);
     });
   }
@@ -990,6 +1011,16 @@ export class ResourceSubscriptionRepository {
       if (
         event.resourceType === 'custom_event' &&
         !customEventMatchesSource(parseObject(row.resource_config_json), event)
+      )
+        continue;
+      if (
+        event.resourceType === 'channel' &&
+        !channelEventReachesSubscriber(
+          event.eventType,
+          event.providerContent.routing as Partial<ChannelEventRouting> | undefined,
+          row.subscriber_chat_id,
+          parseEvents(row.events_json),
+        )
       )
         continue;
       insertDelivery.run(crypto.randomUUID(), row.id, event.id, now, now, now, now);

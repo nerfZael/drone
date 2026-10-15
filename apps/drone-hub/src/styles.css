@@ -2043,6 +2043,19 @@ code, pre {
   color: var(--link-strong);
   text-decoration-color: var(--link-strong);
 }
+/* Channels: @mentions read as names, not links. */
+.dh-channel-message-body .dh-markdown button.dh-markdown-text-mention {
+  border-radius: 4px;
+  padding: 0 3px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.dh-channel-message-body .dh-markdown button.dh-markdown-text-mention:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+}
 .dh-markdown a.dh-inline-code-link {
   text-decoration: none;
 }

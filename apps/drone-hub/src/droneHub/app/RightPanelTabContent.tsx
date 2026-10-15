@@ -43,6 +43,7 @@ const loadDronePullRequestsDock = async () =>
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 const loadWhiteboardDock = async () => (await import('../whiteboard/WhiteboardDock')).WhiteboardDock;
 const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
+const loadChannelsDock = async () => (await import('../channels/ChannelsDock')).ChannelsDock;
 const loadDroneEditorDock = async () => (await import('./DroneEditorDock')).DroneEditorDock;
 const loadDroneEditorWorkspace = async () => (await import('./DroneEditorWorkspace')).DroneEditorWorkspace;
 
@@ -371,6 +372,12 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
             <DroneChatsDock drone={drone} selectedChat={selectedChat} options={chatsPaneOptions} onDeleteChats={onDeleteCanvasChats} onSendToChats={onSendCanvasPrompt}
               onCloneChat={onCloneCanvasChat} droneById={droneById} />
           ) : <UiPaneState kind="empty" title="Select a drone to view its chats." />}
+        </PaneModule>
+      );
+    case 'channels':
+      return (
+        <PaneModule tab={tab} load={loadChannelsDock}>
+          {(ChannelsDock) => <ChannelsDock droneById={droneById} onOpenChat={onActivateChatFromCanvas} />}
         </PaneModule>
       );
     case 'workflows':

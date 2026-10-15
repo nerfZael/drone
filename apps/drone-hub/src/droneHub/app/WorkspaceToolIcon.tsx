@@ -115,6 +115,13 @@ export function WorkspaceToolIcon({
           <path d="m10.9 7-4.8 9M13.1 7l4.8 9M7.25 18h9.5" />
         </ActivityIcon>
       );
+    case 'channels':
+      return (
+        <ActivityIcon tab={tab} className={className}>
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A1.5 1.5 0 0 1 4 14.5Z" />
+          <path d="M9.5 6.5 8.5 13M14.5 6.5l-1 6.5M7.5 8.5h9M7 11h9" />
+        </ActivityIcon>
+      );
     case 'whiteboard':
       return (
         <ActivityIcon tab={tab} className={className}>

@@ -428,7 +428,7 @@ export function ChatInput({
     return activeComposer.registerComposer({
       id: activeComposerTargetId,
       ownerDocument: () => composerRootRef.current?.ownerDocument ?? null,
-      requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
+      requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer], [data-composer-scope]')),
       isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
@@ -897,7 +897,7 @@ export function ChatInput({
     () =>
       registerChatComposerEditorModeTarget({
         id: editorModeShortcutTargetId,
-        requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer]')),
+        requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name], [data-selected-chats-composer], [data-composer-scope]')),
         primary: focusTargetId === 'primary-chat',
         isEligible: () => {
           const root = composerRootRef.current;

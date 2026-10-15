@@ -6,6 +6,8 @@ import type { ChangeRequestSubscriptionTarget } from './change-request-subscript
 export function createResourceSubscriptionDeliveryAuthorizer(deps: {
   resolveChatResource: (resourceId: string) => ChatResourceLocation | null;
   resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
+  /** Channel events reach members whose read access is on; drone read scopes do not apply. */
+  canReadChannel?: (channelId: string, chatId: string) => boolean;
   loadRegistry: () => Promise<any>;
 }) {
   return async (
@@ -13,6 +15,9 @@ export function createResourceSubscriptionDeliveryAuthorizer(deps: {
     subscriber: ChatResourceLocation,
     event?: ResourceEvent,
   ): Promise<boolean> => {
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'channel') {
+      return Boolean(deps.canReadChannel?.(subscription.resourceId, subscriber.chatId));
+    }
     const registry = await deps.loadRegistry();
     const canReadDrone = sourceDroneReader(registry, subscriber);
     if (!canReadDrone) return false;

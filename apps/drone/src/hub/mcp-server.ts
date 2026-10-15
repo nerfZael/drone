@@ -56,6 +56,7 @@ import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { registerAgentChatWorkspaceTools } from './mcp-workspace-tools';
 import { registerCurrentWorktreeTool } from './mcp-worktree-tools';
+import { CHANNEL_READ_ONLY_MCP_TOOL_NAMES, registerChannelMcpTools } from './channels/channel-mcp-tools';
 import type { WorkspaceToolDefinition } from './assistant/workspace-tool-definitions';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import { createHttpHubServices, type HubServices } from './application/hub-services';
@@ -2619,6 +2620,18 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     });
   }
 
+  // Channels the user added this chat to: read, post, and choose what wakes it.
+  if (workspaceChat) {
+    registerChannelMcpTools(server, {
+      chat: () => {
+        const principal = chatPrincipal(context) ?? workspaceChat;
+        return { chatId: principal.chatId, droneId: principal.droneId, chatName: principal.chatName };
+      },
+      requestJson,
+      toolResult,
+    });
+  }
+
   server.registerTool(
     'list_chats',
     {
@@ -4080,6 +4093,7 @@ const READ_ONLY_MCP_TOOLS = new Set([
   'get_workflow',
   'list_workflow_runs',
   'get_workflow_run',
+  ...CHANNEL_READ_ONLY_MCP_TOOL_NAMES,
 ]);
 
 const DESTRUCTIVE_MCP_TOOLS = new Set([
