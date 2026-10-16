@@ -2,7 +2,7 @@ import React from 'react';
 import { markCurrentChatComposerEditorModeTarget } from './chat-composer-editor-mode-shortcut';
 import { routeComposerFocus } from './composer-focus-routing';
 import type { CompanionTextSnapshot } from '@drone/assistant-chat';
-import type { ChatMessageDeliveryMode } from './chat-send-shortcuts';
+import type { ChatMessageDeliveryMode, SideChatKind } from './chat-send-shortcuts';
 import type { ChatVoiceRecordingStatus } from './use-chat-voice-recorder';
 
 export type ActiveComposer = {
@@ -17,6 +17,7 @@ export type ActiveComposer = {
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
   sendMessage?(deliveryMode?: ChatMessageDeliveryMode): boolean;
   sendRecordingInClonedChat?(): boolean;
+  sendRecordingInSideChat?(kind: SideChatKind): boolean;
   toggleVoiceRecording?(): boolean;
   voiceRecordingStatus?(): ChatVoiceRecordingStatus;
   toggleVoiceRecordingPause?(): boolean;
@@ -46,6 +47,7 @@ type ActiveComposerContextValue = {
   ): { ok: true; revision: string };
   sendMessage(deliveryMode?: ChatMessageDeliveryMode): boolean;
   sendRecordingInClonedChat(): boolean;
+  sendRecordingInSideChat(kind: SideChatKind): boolean;
   toggleVoiceRecording(): boolean;
   toggleVoiceRecordingPause(): boolean;
   discardVoiceRecording(): boolean;
@@ -183,6 +185,11 @@ export class ActiveComposerRegistry {
     return this.runRecordingAction('sendRecordingInClonedChat');
   }
 
+  sendRecordingInSideChat(kind: SideChatKind): boolean {
+    const recording = this.recordingComposer();
+    return recording?.sendRecordingInSideChat?.(kind) ?? false;
+  }
+
   toggleVoiceRecording(): boolean {
     return this.runActiveAction('toggleVoiceRecording');
   }
@@ -227,14 +234,17 @@ export class ActiveComposerRegistry {
   }
 
   private runRecordingAction(action: 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'sendRecordingInClonedChat'): boolean {
+    return this.recordingComposer()?.[action]?.() ?? false;
+  }
+
+  private recordingComposer(): ActiveComposer | undefined {
     const composers = [...this.composers.values()];
-    const recording = composers.find((composer) => {
+    // Recording ownership survives focus changes and hidden windows. The
+    // recorder itself decides which operations its current state permits.
+    return composers.find((composer) => {
       const status = composer.voiceRecordingStatus?.();
       return status === 'starting' || status === 'recording' || status === 'paused';
     }) ?? composers.find((composer) => composer.voiceRecordingStatus?.() === 'transcribing');
-    // Recording ownership survives focus changes and hidden windows. The
-    // recorder itself decides which operations its current state permits.
-    return recording?.[action]?.() ?? false;
   }
 
   private runActiveAction(
@@ -308,6 +318,10 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
     [registry],
   );
   const sendRecordingInClonedChat = React.useCallback(() => registry.sendRecordingInClonedChat(), [registry]);
+  const sendRecordingInSideChat = React.useCallback(
+    (kind: SideChatKind) => registry.sendRecordingInSideChat(kind),
+    [registry],
+  );
   const toggleVoiceRecording = React.useCallback(() => registry.toggleVoiceRecording(), [registry]);
   const toggleVoiceRecordingPause = React.useCallback(
     () => registry.toggleVoiceRecordingPause(),
@@ -332,6 +346,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       applyComposer,
       sendMessage,
       sendRecordingInClonedChat,
+      sendRecordingInSideChat,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
       discardVoiceRecording,
@@ -352,6 +367,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       registerComposer,
       sendMessage,
       sendRecordingInClonedChat,
+      sendRecordingInSideChat,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
     ],

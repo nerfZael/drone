@@ -116,6 +116,7 @@ import {
   buildSidebarChatGroupDeleteConfirmation,
   type DeleteDroneChatOptions,
 } from './sidebar-chat-delete-confirmation';
+import { sideChatDescendantNames } from './composer-side-chats';
 import { alertDialog, confirmDeleteDialog, promptDialog, useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   droneActionState,
@@ -2806,6 +2807,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       deleteMode: props.deleteMode,
       draftChatNames: names.filter((chatName) => drone?.draftChats?.[chatName] === true),
       defaultChatKept,
+      sideChatCount: sideChatDescendantNames(drone?.sideChats, names).length,
     }));
     if (!confirmed) return;
     const deletedIds = new Set<string>();
@@ -2832,6 +2834,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       draftChatCount: names.filter((chatName) =>
         droneById[droneId]?.draftChats?.[chatName] === true).length,
       defaultChatKept: allChatNames.includes('default') && !names.includes('default'),
+      sideChatCount: sideChatDescendantNames(droneById[droneId]?.sideChats, names).length,
     }));
     if (!confirmed) return;
     const deletedIds = new Set<string>();

@@ -6,6 +6,7 @@ import { isShortcutMatch } from './shortcuts';
 import { useOptionalActiveComposer } from '../chat/ActiveComposerContext';
 import { markCurrentChatComposerEditorModeTarget, toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
+import { recordingSideChatShortcut } from '../chat/chat-send-shortcuts';
 import { useSideChatBusyStore } from './side-chat-busy-store';
 
 const NATIVE_MENU_TARGETS =
@@ -66,6 +67,11 @@ export function useChatContextMenu(label: string, getItems: () => SidebarContext
     if (element.ownerDocument.querySelector('[role="dialog"][aria-modal="true"]')) return;
     if (target && event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey &&
       composer?.sendRecordingInClonedChat()) {
+      event.preventDefault();
+      return;
+    }
+    const sideChatKind = recordingSideChatShortcut(event);
+    if (target && sideChatKind && composer?.sendRecordingInSideChat(sideChatKind)) {
       event.preventDefault();
       return;
     }

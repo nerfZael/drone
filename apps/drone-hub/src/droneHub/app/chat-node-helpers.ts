@@ -220,8 +220,14 @@ export function unreadChatNodeIdsForDrone(
   const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
   const readStates = drone?.chatReadStates ?? {};
   const hasReadStates = Object.keys(readStates).length > 0;
+  // A composer side chat is read by opening it as the main chat, so it has an
+  // unread dot of its own. Floating side chats are never the main chat and would
+  // never be marked read.
+  const composerSideChats = (drone?.sideChats ?? [])
+    .filter((sideChat) => sideChat.presentation === 'composer')
+    .map((sideChat) => sideChat.name);
   const unreadChats = hasReadStates
-    ? chats.filter((chatName) => readStates[chatName]?.unread === true)
+    ? [...chats, ...composerSideChats].filter((chatName) => readStates[chatName]?.unread === true)
     : (drone?.unreadChats ?? []).filter((chatName) => chats.includes(chatName));
   const out: string[] = [];
   for (const chatName of unreadChats) {

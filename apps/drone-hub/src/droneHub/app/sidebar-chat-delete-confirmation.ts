@@ -11,12 +11,15 @@ export function buildSidebarChatDeleteConfirmation({
   deleteMode,
   draftChatNames = [],
   defaultChatKept = false,
+  sideChatCount = 0,
 }: {
   chatNames: readonly string[];
   droneLabel: string;
   deleteMode: DroneDeleteMode;
   draftChatNames?: readonly string[];
   defaultChatKept?: boolean;
+  /** Side chats of these chats, which go with them. */
+  sideChatCount?: number;
 }): AppConfirmationOptions {
   const count = chatNames.length;
   const droneLabel = String(droneLabelRaw ?? '').trim() || 'this drone';
@@ -31,13 +34,14 @@ export function buildSidebarChatDeleteConfirmation({
     ? ' You can restore archived chats from Settings > Archive before they auto-delete.'
     : '';
   const defaultNotice = defaultChatKept ? ' The default chat will be kept.' : '';
+  const sideChatNotice = sideChatNoticeText(sideChatCount, archiveCount > 0 ? 'archived' : 'deleted', count);
 
   if (mixedDisposition) {
     const archivedLabel = `${archiveCount} chat${archiveCount === 1 ? '' : 's'}`;
     const deletedLabel = `${draftCount} draft chat${draftCount === 1 ? '' : 's'}`;
     return {
       title: `Archive and delete ${count} chats?`,
-      message: `Archive ${archivedLabel} and permanently delete ${deletedLabel} from “${droneLabel}”?${recovery}${defaultNotice}`,
+      message: `Archive ${archivedLabel} and permanently delete ${deletedLabel} from “${droneLabel}”?${sideChatNotice}${recovery}${defaultNotice}`,
       confirmLabel: 'Archive and delete',
       destructive: true,
     };
@@ -45,7 +49,7 @@ export function buildSidebarChatDeleteConfirmation({
 
   return {
     title: `${action} ${count === 1 ? 'chat' : `${count} chats`}?`,
-    message: `${action} ${subject} from “${droneLabel}”?${recovery}${defaultNotice}`,
+    message: `${action} ${subject} from “${droneLabel}”?${sideChatNotice}${recovery}${defaultNotice}`,
     confirmLabel: count === 1 ? `${action} chat` : `${action} chats`,
     destructive: true,
   };
@@ -58,6 +62,7 @@ export function buildSidebarChatGroupDeleteConfirmation({
   deleteMode,
   draftChatCount = 0,
   defaultChatKept = false,
+  sideChatCount = 0,
 }: {
   chatCount: number;
   groupLabel: string;
@@ -65,6 +70,8 @@ export function buildSidebarChatGroupDeleteConfirmation({
   deleteMode: DroneDeleteMode;
   draftChatCount?: number;
   defaultChatKept?: boolean;
+  /** Side chats of these chats, which go with them. */
+  sideChatCount?: number;
 }): AppConfirmationOptions {
   const count = Number.isFinite(chatCount) ? Math.max(0, Math.floor(chatCount)) : 0;
   const drafts = Number.isFinite(draftChatCount)
@@ -81,13 +88,14 @@ export function buildSidebarChatGroupDeleteConfirmation({
     ? ' You can restore archived chats from Settings > Archive before they auto-delete.'
     : '';
   const defaultNotice = defaultChatKept ? ' The default chat will be kept.' : '';
+  const sideChatNotice = sideChatNoticeText(sideChatCount, archiveCount > 0 ? 'archived' : 'deleted', count);
 
   if (mixedDisposition) {
     const archivedLabel = `${archiveCount} chat${archiveCount === 1 ? '' : 's'}`;
     const deletedLabel = `${drafts} draft chat${drafts === 1 ? '' : 's'}`;
     return {
       title: `Archive and delete chats in “${groupLabel}”?`,
-      message: `Archive ${archivedLabel} and permanently delete ${deletedLabel} in this group and its subgroups from “${droneLabel}”?${recovery} The group and its subgroups are not deleted.${defaultNotice}`,
+      message: `Archive ${archivedLabel} and permanently delete ${deletedLabel} in this group and its subgroups from “${droneLabel}”?${sideChatNotice}${recovery} The group and its subgroups are not deleted.${defaultNotice}`,
       confirmLabel: 'Archive and delete',
       destructive: true,
     };
@@ -95,7 +103,7 @@ export function buildSidebarChatGroupDeleteConfirmation({
 
   return {
     title: `${action} chats in “${groupLabel}”?`,
-    message: `${action} ${countText} in this group and its subgroups from “${droneLabel}”?${recovery} The group and its subgroups are not deleted.${defaultNotice}`,
+    message: `${action} ${countText} in this group and its subgroups from “${droneLabel}”?${sideChatNotice}${recovery} The group and its subgroups are not deleted.${defaultNotice}`,
     confirmLabel: `${action} chats`,
     destructive: true,
   };
@@ -111,11 +119,14 @@ export function buildCanvasChatDeleteConfirmation({
   droneLabelById,
   deleteMode,
   isDraft,
+  sideChatCount = 0,
 }: {
   targets: ReadonlyArray<{ droneId: string; chatName: string }>;
   droneLabelById: (droneId: string) => string;
   deleteMode: DroneDeleteMode;
   isDraft: (droneId: string, chatName: string) => boolean;
+  /** Side chats of the targets that are not targets themselves; they go with them. */
+  sideChatCount?: number;
 }): AppConfirmationOptions {
   const droneIds = [...new Set(targets.map((target) => target.droneId))];
   const chatNames = targets.map((target) => target.chatName);
@@ -126,6 +137,7 @@ export function buildCanvasChatDeleteConfirmation({
       droneLabel: droneLabelById(droneIds[0] ?? ''),
       deleteMode,
       draftChatNames,
+      sideChatCount,
     });
   }
   const count = chatNames.length;
@@ -135,17 +147,18 @@ export function buildCanvasChatDeleteConfirmation({
   const recovery = archiveCount > 0
     ? ' You can restore archived chats from Settings > Archive before they auto-delete.'
     : '';
+  const sideChatNotice = sideChatNoticeText(sideChatCount, archiveCount > 0 ? 'archived' : 'deleted', count);
   if (archiveCount > 0 && draftCount > 0) {
     return {
       title: `Archive and delete ${count} chats?`,
-      message: `Archive ${archiveCount} chat${archiveCount === 1 ? '' : 's'} and permanently delete ${draftCount} draft chat${draftCount === 1 ? '' : 's'} across ${droneIds.length} drones?${recovery}`,
+      message: `Archive ${archiveCount} chat${archiveCount === 1 ? '' : 's'} and permanently delete ${draftCount} draft chat${draftCount === 1 ? '' : 's'} across ${droneIds.length} drones?${sideChatNotice}${recovery}`,
       confirmLabel: 'Archive and delete',
       destructive: true,
     };
   }
   return {
     title: `${action} ${count} chats?`,
-    message: `${action} ${count} selected chats across ${droneIds.length} drones?${recovery}`,
+    message: `${action} ${count} selected chats across ${droneIds.length} drones?${sideChatNotice}${recovery}`,
     confirmLabel: `${action} chats`,
     destructive: true,
   };
@@ -166,4 +179,13 @@ export function chatIsUntouchedDraft(input: {
 }): boolean {
   if (!input.draft || input.sending || input.queuedOrBusy || input.localQueuedCount > 0) return false;
   return !String(input.composerText ?? '').trim();
+}
+
+function sideChatNoticeText(countRaw: number, disposition: 'archived' | 'deleted', sourceCount: number): string {
+  const count = Number.isFinite(countRaw) ? Math.max(0, Math.floor(countRaw)) : 0;
+  if (count === 0) return '';
+  const owner = sourceCount === 1 ? 'Its' : 'Their';
+  return count === 1
+    ? ` ${owner} side chat will be ${disposition} too.`
+    : ` ${owner} ${count} side chats will be ${disposition} too.`;
 }

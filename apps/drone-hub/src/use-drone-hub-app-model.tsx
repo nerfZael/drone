@@ -19,6 +19,14 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { renameSideChatWorkspaceChat, saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
+import {
+  addPendingComposerSideChat,
+  isGeneratedSideChatName,
+  newComposerSideChatName,
+  removePendingComposerSideChat,
+  sideChatDescendantNames,
+} from './droneHub/app/composer-side-chats';
+import type { SideChatKind } from './droneHub/chat/chat-send-shortcuts';
 import { useDesktopChatRequests } from './droneHub/app/desktop-chat-requests';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
@@ -933,6 +941,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones]);
+  const sideChatNodeIdSet = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const drone of drones) {
+      for (const sideChat of drone.sideChats ?? []) {
+        if (sideChat.presentation !== 'composer') continue;
+        const nodeId = createCanvasChatNodeId(drone.id, sideChat.name);
+        if (nodeId) out.add(nodeId);
+      }
+    }
+    return out;
+  }, [drones]);
   const markChatsUnread = React.useMemo(
     () =>
       (chatNodeIdsRaw: string[]): number => {
@@ -986,7 +1005,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const next: Record<string, boolean> = {};
     for (const drone of drones) {
       for (const nodeId of unreadChatNodeIdsForDrone(drone)) {
-        if (nodeId && validChatNodeIdSet.has(nodeId)) next[nodeId] = true;
+        if (nodeId && (validChatNodeIdSet.has(nodeId) || sideChatNodeIdSet.has(nodeId))) next[nodeId] = true;
       }
     }
     for (const [nodeId, marker] of manuallyMarkedUnreadChatsRef.current) {
@@ -1019,6 +1038,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     dronesError,
     dronesLoading,
     setUnreadAgentMessageByChatNodeId,
+    sideChatNodeIdSet,
     validChatNodeIdSet,
   ]);
   React.useEffect(() => {
@@ -4451,8 +4471,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim();
       const prompt = String(promptRaw ?? '').trim();
-      if (!droneId || !isGeneratedChatName(chatName) || !prompt) return;
-      let originalChatSeen = (droneByIdRef.current[droneId]?.chats ?? []).includes(chatName);
+      if (!droneId || !(isGeneratedChatName(chatName) || isGeneratedSideChatName(chatName)) || !prompt) return;
+      const listsChat = (drone: DroneSummary | undefined) =>
+        Boolean(drone?.chats?.includes(chatName) || drone?.sideChats?.some((chat) => chat.name === chatName));
+      let originalChatSeen = listsChat(droneByIdRef.current[droneId]);
       try {
         const data = await requestJson<{ ok: true; name: string }>(
           '/api/drones/name-from-message',
@@ -4480,8 +4502,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         let candidateIndex = 1;
         let lastError = '';
         for (let attempt = 1; attempt <= 180; attempt += 1) {
-          const currentChats = droneByIdRef.current[droneId]?.chats ?? [];
-          if (currentChats.includes(chatName)) originalChatSeen = true;
+          if (listsChat(droneByIdRef.current[droneId])) originalChatSeen = true;
           else if (originalChatSeen) return;
           const candidate = buildSuggestedChatNameCandidate(base, candidateIndex);
           if (!candidate) {
@@ -4500,6 +4521,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             );
             followChatRename(droneId, chatName, candidate);
+            removePendingComposerSideChat(droneId, chatName);
             const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
             const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
             if (oldCanvasNodeId && newCanvasNodeId) {
@@ -4853,6 +4875,69 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     },
     [cloneDroneChat, requestJson, selectDroneChat, selectedChat, selectedDrone, showShortcutToast],
+  );
+  /**
+   * Sends to a new side chat of the source: a fork at its last completed answer,
+   * or a new chat with its agent, model, and reasoning. The side chat appears as a
+   * chip beside the source's composer and is not opened.
+   */
+  const sendPromptInSideChat = React.useCallback(
+    async (
+      drone: DroneSummary,
+      payload: ChatSendPayload,
+      context: ChatSendContext,
+      kind: SideChatKind,
+      sourceChatNameRaw?: string,
+    ): Promise<boolean> => {
+      const droneId = String(drone?.id ?? '').trim();
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!droneId || (!prompt && attachments.length === 0)) return false;
+      const sourceChatName = String(sourceChatNameRaw ?? '').trim() || resolveChatNameForDrone(
+        droneByIdRef.current[droneId] ?? drone,
+        selectedChat,
+      );
+      const chatName = newComposerSideChatName();
+      const createdAt = new Date().toISOString();
+      addPendingComposerSideChat(droneId, { name: chatName, sourceChatName, kind, createdAt });
+      let created = false;
+      try {
+        await requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: chatName,
+            copyFrom: sourceChatName,
+            mode: kind === 'fork' ? 'fork' : 'copy-config',
+            sideChat: true,
+            sideChatPresentation: 'composer',
+          }),
+        });
+        created = true;
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId,
+          chatName,
+          prompt,
+          attachments,
+          promptId: payload.promptId || makeId(),
+          submittedAt: createdAt,
+          deliveryMode: context.deliveryMode,
+          // Renamed here, like a new chat, so an open side chat stays open under its new name.
+          autoRenameHandledByClient: Boolean(prompt),
+        });
+        if (data.autoRenameChat) autoRenameChatFromFirstPromptRef.current(droneId, chatName, prompt);
+        return true;
+      } catch (error: any) {
+        // A created chat stays: its chip shows it, empty, and it can be archived from there.
+        if (!created) removePendingComposerSideChat(droneId, chatName);
+        showShortcutToast(
+          error?.message ?? String(error),
+          kind === 'fork' ? 'Fork to side chat failed' : 'New side chat failed',
+        );
+        return false;
+      }
+    },
+    [requestJson, selectedChat, showShortcutToast],
   );
   const createQueuedNewChatNow = React.useCallback(
     async (actionIdRaw: string, source?: { droneId: string; chatName: string }): Promise<void> => {
@@ -5563,6 +5648,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const allUntouched = kept.every((target) => untouched.has(droneChatQueueKey(target.droneId, target.chatName)));
       if (opts?.confirmed !== true && !allUntouched) {
         const defaultChatKept = deletable.some((target) => target.chatName === 'default' && !kept.includes(target));
+        const targetNames = new Set(kept.map((target) => `${target.droneId}\u0000${target.chatName}`));
+        const sideChatCount = [...new Set(kept.map((target) => target.droneId))].reduce((count, droneId) => {
+          const drone = drones.find((item) => item.id === droneId) ?? null;
+          const sources = kept.filter((target) => target.droneId === droneId).map((target) => target.chatName);
+          return count + sideChatDescendantNames(drone?.sideChats, sources)
+            .filter((chatName) => !targetNames.has(`${droneId}\u0000${chatName}`)).length;
+        }, 0);
         const question = buildCanvasChatDeleteConfirmation({
           targets: kept,
           droneLabelById: (droneId) => {
@@ -5572,6 +5664,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           deleteMode,
           isDraft: (droneId, chatName) =>
             drones.find((item) => item.id === droneId)?.draftChats?.[chatName] === true,
+          sideChatCount,
         });
         const confirmed = await confirmDelete(
           defaultChatKept
@@ -6340,6 +6433,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupBroadcastPromptError,
     sendGroupBroadcastPrompt,
     sendPromptInNewDroneChat,
+    sendPromptInSideChat,
+    deleteCanvasChat,
     createQueuedNewChatNow,
     focusedNewChatActionId,
     consumeNewChatActionAutoFocus,

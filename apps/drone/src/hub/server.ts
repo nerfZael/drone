@@ -5289,21 +5289,14 @@ async function startDroneHubApiServerWithLifecycle(
         isThreadBusy,
       }),
     ]);
-    const sideChats = sideChatEntries.map(([name, entry]: [string, any]) => ({
-      name,
-      ...entry.sideChatOrigin,
-      ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
-      agent: inferChatAgent(entry, d),
-      busy: busySideChats.includes(name),
-    }));
-    const approvalChats = chats.flatMap((chatName) => {
+    const chatRequiresApproval = (chatName: string): boolean => {
       const chatEntry = d.chats?.[chatName];
       const agent = inferChatAgent(chatEntry, d);
       if (agent.kind === 'native') {
         const threadId = String(chatEntry?.id ?? '').trim();
-        return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+        return Boolean(threadId && assistantService.threadRequiresApproval(threadId));
       }
-      if (
+      return (
         agent.kind === 'builtin' &&
         agent.id === 'codex' &&
         chatRequiresCodexApprovalForSummary({
@@ -5312,13 +5305,24 @@ async function startDroneHubApiServerWithLifecycle(
           entry: chatEntry,
           preferEntry: true,
         })
-      ) {
-        return [chatName];
-      }
-      return [];
-    });
+      );
+    };
+    const sideChats = sideChatEntries.map(([name, entry]: [string, any]) => ({
+      name,
+      ...entry.sideChatOrigin,
+      ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
+      ...(entry?.createdAt ? { createdAt: String(entry.createdAt) } : {}),
+      agent: inferChatAgent(entry, d),
+      busy: busySideChats.includes(name),
+      // Its own unread and approval state: a side chat does not mark the drone in the sidebar.
+      unread: storedReadStates[name]?.unread === true,
+      approval: chatRequiresApproval(name),
+    }));
+    const approvalChats = chats.filter(chatRequiresApproval);
+    // Side chats have read states of their own (opening one marks it read) but
+    // stay out of `unreadChats`, which describes the drone.
     const chatReadStates = Object.fromEntries(
-      chats.map((chatName) => {
+      [...chats, ...sideChatNames].map((chatName) => {
         const state = storedReadStates[chatName];
         return [
           chatName,

@@ -6,6 +6,7 @@ import type { DroneSummary } from '../types';
 import { placeClonedChatOnDroneBoard } from '../canvas/drone-board';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 import { OPEN_SIDE_CHAT_EVENT, consumePendingSideChat, type OpenSideChatDetail } from './side-chat-events';
+import { withoutComposerSideChats } from './composer-side-chats';
 
 export type WorkspaceSideChat = NonNullable<DroneSummary['sideChats']>[number];
 
@@ -47,7 +48,8 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
   const sideChats = React.useMemo(() => {
     const added = local.droneId === drone.id ? local.added : [];
     const removed = new Set(local.droneId === drone.id ? local.removed : []);
-    const byName = new Map([...added, ...(drone.sideChats ?? [])].map((chat) => [chat.name, chat]));
+    // Composer side chats are chips beside their source's composer, never floating windows.
+    const byName = new Map([...added, ...withoutComposerSideChats(drone.sideChats)].map((chat) => [chat.name, chat]));
     return [...byName.values()].filter((chat) => !removed.has(chat.name));
   }, [drone.id, drone.sideChats, local]);
 

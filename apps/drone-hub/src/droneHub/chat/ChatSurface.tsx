@@ -83,7 +83,7 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
   const adapter = useAgentChatSurfaceAdapter();
   const { attachments, sendWhileWaiting } = adapter.capabilities;
   const references = useComposerPastedReferences(composer.resetKey);
-  const { onSend, onSendInNewChat } = composer;
+  const { onSend, onSendInNewChat, onSendInSideChat } = composer;
   const { send: sendWithReferences } = references;
   const onSendWithReferences = React.useCallback<ChatInputProps['onSend']>(
     (payload, context) => sendWithReferences(onSend, payload, context),
@@ -93,6 +93,13 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
     () => onSendInNewChat ? (payload, context) => sendWithReferences(onSendInNewChat, payload, context) : undefined,
     [onSendInNewChat, sendWithReferences],
   );
+  const onSendInSideChatWithReferences = React.useMemo<ChatInputProps['onSendInSideChat']>(
+    () => onSendInSideChat
+      ? (payload, context, kind) =>
+          sendWithReferences((next, nextContext) => onSendInSideChat(next, nextContext, kind), payload, context)
+      : undefined,
+    [onSendInSideChat, sendWithReferences],
+  );
 
   return (
     <div className="relative flex-shrink-0" onPasteCapture={references.onPasteCapture}>
@@ -101,6 +108,7 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
         {...composer}
         onSend={onSendWithReferences}
         onSendInNewChat={onSendInNewChatWithReferences}
+        onSendInSideChat={onSendInSideChatWithReferences}
         referenceTiles={references.tiles}
         attachmentsEnabled={attachments !== 'none'}
         attachmentMode={attachments === 'files' ? 'files' : 'images'}

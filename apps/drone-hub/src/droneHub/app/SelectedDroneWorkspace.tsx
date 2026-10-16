@@ -160,6 +160,8 @@ import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 import { WorkspaceToolIcon } from './WorkspaceToolIcon';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
+import { ComposerSideChatChips } from './ComposerSideChatChips';
+import type { SideChatKind } from '../chat/chat-send-shortcuts';
 import { agentAccessChoiceGroups } from './agent-access-choice-groups';
 import { subagentsMenuAction } from './subagents-menu-action';
 import { ADD_CUSTOM_AGENT_MENU_VALUE } from './use-drone-hub-toolbar-menu-state';
@@ -537,6 +539,14 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext, sourceChatName?: string) => Promise<boolean>;
+  onSendPromptInSideChat: (
+    payload: ChatSendPayload,
+    context: ChatSendContext,
+    kind: SideChatKind,
+    sourceChatName?: string,
+  ) => Promise<boolean>;
+  /** Archives or deletes (per the delete setting, after asking) a side chat of this drone. */
+  onDeleteSideChat: (chatName: string) => Promise<{ ok: boolean; error?: string | null }>;
   publishSelectedDraft: () => Promise<boolean>;
   publishingDraft: boolean;
   canStopResponse: boolean;
@@ -669,6 +679,8 @@ export function SelectedDroneWorkspace({
   promptError,
   sendPromptText,
   onSendPromptInNewChat,
+  onSendPromptInSideChat,
+  onDeleteSideChat,
   publishSelectedDraft,
   publishingDraft,
   canStopResponse,
@@ -1024,6 +1036,18 @@ export function SelectedDroneWorkspace({
   const openSideChatSource = (chat: typeof mainSideChat) => {
     if (chat && !focusSideChat(currentDrone.id, chat.sourceChatName)) setSelectedChat(chat.sourceChatName);
   };
+  // Composer side chats are sent from whichever chat is open, a side chat included.
+  const sendInComposerSideChat = (payload: ChatSendPayload, context: ChatSendContext, kind: SideChatKind) =>
+    onSendPromptInSideChat(payload, context, kind, activeChatName);
+  const composerSideChatChips = currentChatIsDraft ? null : (
+    <ComposerSideChatChips
+      drone={currentDrone}
+      chatName={activeChatName}
+      onSelectChat={setSelectedChat}
+      onDeleteChat={onDeleteSideChat}
+      deleteMode={deleteMode}
+    />
+  );
 
   const chatConfigResolution = chatConfigResolutionState({
     currentChatIsDraft,
@@ -2718,6 +2742,7 @@ export function SelectedDroneWorkspace({
                     }
                     onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
                     onSendPromptInNewChat={onSendPromptInNewChat}
+                    onSendPromptInSideChat={sendInComposerSideChat}
                     onCreateQueuedNewChatNow={onCreateQueuedNewChatNow}
                     focusedNewChatActionId={focusedNewChatActionId}
                     onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
@@ -2731,6 +2756,7 @@ export function SelectedDroneWorkspace({
                         chatId={chatId}
                         initialSubscriptions={chatSubscriptions}
                         branch={currentDrone.repoBranch}
+                        sideChatChips={composerSideChatChips}
                       />
                     }
                     composerRuntimePicker={composerRuntimePicker}
@@ -2878,6 +2904,7 @@ export function SelectedDroneWorkspace({
                       chatId={chatId}
                       initialSubscriptions={chatSubscriptions}
                       branch={currentDrone.repoBranch}
+                      sideChatChips={composerSideChatChips}
                     />
                   }
                   composerLeadingControls={externalLeadingComposerControls}
@@ -2897,6 +2924,7 @@ export function SelectedDroneWorkspace({
                     return sent;
                   }}
                   onSendInNewChat={onSendPromptInNewChat}
+                  onSendInSideChat={sendInComposerSideChat}
                 />
               ) : null}
               {fileOpenToast ? (

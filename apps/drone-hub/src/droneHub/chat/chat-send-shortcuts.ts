@@ -31,3 +31,20 @@ export function chatSendShortcut(input: ChatSendShortcutInput): ChatComposerShor
   if (input.ctrlKey || input.metaKey) return 'new-chat';
   return DEFAULT_CHAT_MESSAGE_DELIVERY_MODE;
 }
+
+/** A side chat is a fork of its source, or a new chat with the source's agent, model, and reasoning. */
+export type SideChatKind = 'fork' | 'new';
+
+/**
+ * While a voice message records, F sends it to a forked side chat and G to a new one.
+ * Like R (clone and send), these are recording-only keys, not app shortcuts.
+ */
+export function recordingSideChatShortcut(
+  input: Pick<ChatSendShortcutInput, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey'>,
+): SideChatKind | null {
+  if (input.shiftKey || input.ctrlKey || input.metaKey || input.altKey) return null;
+  const key = input.key.toLowerCase();
+  if (key === 'f') return 'fork';
+  if (key === 'g') return 'new';
+  return null;
+}

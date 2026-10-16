@@ -14,7 +14,7 @@ import { readJsonBody, sendJson as json } from '../hub-http';
 import { normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import { parseRequestSchema } from '../request-schema';
 import { isWorkflowChatEntry } from '../workflows/workflow-chat-metadata';
-import { isSideChatEntry } from '../side-chat-checkpoint';
+import { isSideChatEntry, sideChatDescendantNames } from '../side-chat-checkpoint';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
 type ChatManagementRouteDependencyName =
@@ -211,6 +211,103 @@ export function createChatManagementRouteHandler(
     return nativeChatId || null;
   };
 
+  const deleteChatPermanently = async (input: { droneId: string; chatName: string; droneEntry: any }) => {
+    const { droneId, chatName, droneEntry } = input;
+    const deleted = await deleteActiveChatFromStore({
+      droneId,
+      chatName,
+      fallbackChat: {
+        chatName: 'default',
+        chatEntry: buildNewChatEntry({ droneEntry, createdAt: nowIso() }),
+      },
+    });
+    const snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(deleted.deletedChat);
+    if (inferChatAgent(deleted.deletedChat, droneEntry).kind === 'native') {
+      const nativeChatId = String(deleted.deletedChat?.id ?? '').trim();
+      if (nativeChatId) await deleteNativeChatSession(nativeChatId);
+    }
+    await projectCanonicalChatsToRegistry(droneId);
+    await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, {
+      droneId,
+      chatName,
+      reason: 'delete-chat',
+    });
+    return deleted;
+  };
+
+  /**
+   * The source's side chats, read from the chat store: the resolved drone does not
+   * always carry chat metadata (a canonical drone has none).
+   */
+  const sideChatsOf = (droneId: string, chatName: string, droneEntry: any): string[] => {
+    const listed = listChatsFromStore({ droneId });
+    if (!listed.available) return sideChatDescendantNames(droneEntry?.chats, chatName);
+    const chats = Object.fromEntries(
+      listed.chats.map((name: string) => [name, readChatMetadataFromStore({ droneId, chatName: name }).chat]),
+    );
+    return sideChatDescendantNames(chats, chatName);
+  };
+
+  /**
+   * Stop side chats before their source goes. Nothing has been removed yet, so a
+   * side chat that cannot stop fails the request and keeps its source with it.
+   */
+  const stopSideChats = async (input: { droneId: string; droneEntry: any }, chatNames: string[]) => {
+    for (const chatName of chatNames) {
+      try {
+        await stopSingleDroneChatActivity({ droneId: input.droneId, chatName, droneEntry: input.droneEntry });
+      } catch (error: any) {
+        throw new Error(`could not stop side chat ${chatName}: ${error?.message ?? String(error)}`);
+      }
+    }
+  };
+
+  /**
+   * Archive or delete stopped side chats after their source went the same way.
+   * Each one stands alone: a failure is reported and the rest still go.
+   */
+  const removeSideChats = async (
+    input: { droneId: string; droneEntry: any; mode: 'archive' | 'delete'; archiveRetention?: unknown },
+    chatNames: string[],
+  ): Promise<{ removed: string[]; failed: Array<{ chat: string; error: string }>; chats?: string[] }> => {
+    const removed: string[] = [];
+    const failed: Array<{ chat: string; error: string }> = [];
+    let chats: string[] | undefined;
+    for (const chatName of chatNames) {
+      try {
+        if (input.mode === 'archive') {
+          const result = await archiveChatById({
+            droneId: input.droneId,
+            chatName,
+            archiveRetention: input.archiveRetention,
+          });
+          // Already gone (for example removed by a concurrent request) is the goal reached.
+          if (!result.hadChat) continue;
+          if (!result.archived) throw new Error(`could not archive chat: ${chatName}`);
+          chats = result.chats;
+        } else {
+          chats = (await deleteChatPermanently({ droneId: input.droneId, chatName, droneEntry: input.droneEntry }))
+            .chats;
+        }
+        removed.push(chatName);
+      } catch (error: any) {
+        if (/unknown chat/i.test(String(error?.message ?? ''))) continue;
+        failed.push({ chat: chatName, error: error?.message ?? String(error) });
+      }
+    }
+    return { removed, failed, ...(chats ? { chats } : {}) };
+  };
+
+  const sideChatResponseFields = (
+    result: { removed: string[]; failed: Array<{ chat: string; error: string }> },
+    mode: 'archive' | 'delete',
+  ) => ({
+    ...(result.removed.length
+      ? { [mode === 'archive' ? 'archivedSideChats' : 'deletedSideChats']: result.removed }
+      : {}),
+    ...(result.failed.length ? { sideChatErrors: result.failed } : {}),
+  });
+
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
       // POST /api/drones/:id/chats/:chat/approvals/:promptId/:approvalId/:decision
@@ -311,6 +408,7 @@ export function createChatManagementRouteHandler(
             ...(copyFrom ? { sourceChatName: copyFrom } : {}),
             draft: createAsDraft,
             sideChat: body?.sideChat === true,
+            ...(body?.sideChatPresentation === 'composer' ? { sideChatPresentation: 'composer' as const } : {}),
             checkpointId: body?.checkpointId,
             ...(body?.createdBy ? { createdBy: body.createdBy } : {}),
           });
@@ -333,7 +431,7 @@ export function createChatManagementRouteHandler(
             ? 404
             : /already exists|stop this chat|not supported|checkpoint|completed assistant|currently supported/i.test(msg)
               ? 409
-              : /missing |requires a source|cannot specify a source|unsupported chat creation mode/i.test(msg)
+              : /missing |requires a source|requires an existing source|requires a side chat|cannot be drafts|cannot specify a source|unsupported chat creation mode/i.test(msg)
                 ? 400
                 : 500;
           json(res, code, { ok: false, error: msg });
@@ -530,6 +628,9 @@ export function createChatManagementRouteHandler(
         }
 
         try {
+          // Side chats belong to their source: listed before it goes, so a renamed source still finds them.
+          const sideChats = sideChatsOf(droneId, chatName, resolved.drone);
+          await stopSideChats({ droneId, droneEntry: resolved.drone }, sideChats);
           await stopSingleDroneChatActivity({
             droneId,
             chatName,
@@ -540,6 +641,10 @@ export function createChatManagementRouteHandler(
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
+          const sideChatResults = await removeSideChats(
+            { droneId, droneEntry: resolved.drone, mode: 'archive', archiveRetention },
+            sideChats,
+          );
 
           json(res, 200, {
             ok: true,
@@ -549,7 +654,8 @@ export function createChatManagementRouteHandler(
             archiveRetention: result.archiveRetention,
             archivedAt: result.archivedAt,
             deleteAt: result.deleteAt,
-            chats: result.chats,
+            chats: sideChatResults.chats ?? result.chats,
+            ...sideChatResponseFields(sideChatResults, 'archive'),
           });
           return;
         } catch (e: any) {
@@ -588,6 +694,9 @@ export function createChatManagementRouteHandler(
 
         try {
           const chatWasDraft = isDraftChatEntry(resolved.drone?.chats?.[chatName]);
+          // Side chats belong to their source: listed before it goes, so a renamed source still finds them.
+          const sideChats = sideChatsOf(droneId, chatName, resolved.drone);
+          await stopSideChats({ droneId, droneEntry: resolved.drone }, sideChats);
           await stopSingleDroneChatActivity({
             droneId,
             chatName,
@@ -604,6 +713,15 @@ export function createChatManagementRouteHandler(
               json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
               return;
             }
+            const sideChatResults = await removeSideChats(
+              {
+                droneId,
+                droneEntry: resolved.drone,
+                mode: 'archive',
+                archiveRetention: deleteSettings.archiveRetention,
+              },
+              sideChats,
+            );
 
             json(res, 200, {
               ok: true,
@@ -613,43 +731,30 @@ export function createChatManagementRouteHandler(
               archiveRetention: result.archiveRetention,
               archivedAt: result.archivedAt,
               deleteAt: result.deleteAt,
-              chats: result.chats,
+              chats: sideChatResults.chats ?? result.chats,
+              ...sideChatResponseFields(sideChatResults, 'archive'),
             });
             return;
           }
 
           await importDroneChatsFromRegistry({ droneId, chats: resolved.drone?.chats });
-          const deleted = await deleteActiveChatFromStore({
+          const deleted = await deleteChatPermanently({
             droneId,
             chatName,
-            fallbackChat: {
-              chatName: 'default',
-              chatEntry: buildNewChatEntry({
-                droneEntry: resolved.drone,
-                createdAt: nowIso(),
-              }),
-            },
+            droneEntry: resolved.drone,
           });
-          const snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(
-            deleted.deletedChat,
+          const sideChatResults = await removeSideChats(
+            { droneId, droneEntry: resolved.drone, mode: 'delete' },
+            sideChats,
           );
-          if (inferChatAgent(deleted.deletedChat, resolved.drone).kind === 'native') {
-            const nativeChatId = String(deleted.deletedChat?.id ?? '').trim();
-            if (nativeChatId) await deleteNativeChatSession(nativeChatId);
-          }
-          await projectCanonicalChatsToRegistry(droneId);
-          await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, {
-            droneId,
-            chatName,
-            reason: 'delete-chat',
-          });
 
           json(res, 200, {
             ok: true,
             id: droneId,
             name: droneName,
             deletedChat: chatName,
-            chats: deleted.chats,
+            chats: sideChatResults.chats ?? deleted.chats,
+            ...sideChatResponseFields(sideChatResults, 'delete'),
           });
           return;
         } catch (e: any) {

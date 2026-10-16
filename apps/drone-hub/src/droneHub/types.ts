@@ -48,10 +48,21 @@ export type DroneSummary = {
   sideChats?: Array<{
     name: string;
     sourceChatName: string;
-    checkpointId: string;
+    sourceChatId?: string;
+    /** The fork point; a new side chat has none. */
+    checkpointId?: string;
+    /** `new` started empty with its source's agent, model, and reasoning. */
+    kind?: 'fork' | 'new';
+    /** `composer` side chats show as chips beside their source's composer, not as floating windows. */
+    presentation?: 'composer';
+    createdAt?: string;
     agent: { kind: string; id?: string };
     /** Its agent is answering. Side chats are not counted in `busyChats`, which describes the drone. */
     busy?: boolean;
+    /** It has an answer not yet seen. Side chats are not counted in `unreadChats`, which describes the drone. */
+    unread?: boolean;
+    /** It waits for a tool approval. Side chats are not counted in `approvalChats`, which describes the drone. */
+    approval?: boolean;
   }>;
   /** Chat name -> the chat it was cloned from, for sidebar clones and side chats alike. */
   chatCloneSources?: Record<string, string>;

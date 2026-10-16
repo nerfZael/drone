@@ -43,6 +43,7 @@ import {
   DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
   chatSendShortcut,
   type ChatMessageDeliveryMode,
+  type SideChatKind,
 } from './chat-send-shortcuts';
 import {
   restoreChatComposerDraftSnapshot,
@@ -255,6 +256,8 @@ export type ChatInputProps = {
   uploadAttachmentFile?: (file: File) => Promise<string>;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  /** Sends to a new side chat of this chat: shown as a chip beside the composer, not opened. */
+  onSendInSideChat?: (payload: ChatSendPayload, context: ChatSendContext, kind: SideChatKind) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
   publishing?: boolean;
   onStop?: () => Promise<void> | void;
@@ -315,6 +318,7 @@ export function ChatInput({
   uploadAttachmentFile,
   onSend,
   onSendInNewChat,
+  onSendInSideChat,
   onPublish,
   publishing = false,
   onStop,
@@ -346,6 +350,7 @@ export function ChatInput({
   });
   const sendMessageShortcutRef = React.useRef<(deliveryMode?: ChatMessageDeliveryMode) => boolean>(() => false);
   const sendRecordingInClonedChatRef = React.useRef<() => boolean>(() => false);
+  const sendRecordingInSideChatRef = React.useRef<(kind: SideChatKind) => boolean>(() => false);
   const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const voiceRecordingStatusRef = React.useRef<ReturnType<typeof useChatVoiceRecorder>['status']>('idle');
   const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
@@ -436,6 +441,7 @@ export function ChatInput({
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
       sendMessage: (deliveryMode) => sendMessageShortcutRef.current(deliveryMode),
       sendRecordingInClonedChat: () => sendRecordingInClonedChatRef.current(),
+      sendRecordingInSideChat: (kind) => sendRecordingInSideChatRef.current(kind),
       toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
       voiceRecordingStatus: () => voiceRecordingStatusRef.current,
       toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
@@ -1362,6 +1368,17 @@ export function ChatInput({
     // Reserve R while recording even when this composer cannot clone chats.
     if (onSendInNewChat) {
       sendNow({ trigger: 'keyboard', deliveryMode: 'queue', cloneImmediately: true }, onSendInNewChat);
+    }
+    return true;
+  };
+
+  sendRecordingInSideChatRef.current = (kind) => {
+    if (!voiceRecordingActive) return false;
+    // Like R, reserved while recording even where side chats are unavailable.
+    if (onSendInSideChat) {
+      sendNow({ trigger: 'keyboard', deliveryMode: 'queue' }, (payload, context) =>
+        onSendInSideChat(payload, context, kind),
+      );
     }
     return true;
   };
