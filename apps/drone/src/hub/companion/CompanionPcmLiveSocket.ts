@@ -1,6 +1,7 @@
 import type { HubLiveTiming } from './companion-live-telemetry';
 import { WebSocket } from 'ws';
 import { companionLiveSessionInstructions } from './companion-live-settings';
+import { liveTimingReason } from '@drone/assistant-chat';
 
 type Dependencies = {
   timing?: HubLiveTiming;
@@ -137,6 +138,13 @@ export class CompanionPcmLiveSocket {
         this.deps.timing?.mark('provider_delegation_received', { delegationId: typeof delegation?.id === 'string' ? delegation.id : undefined });
       }
       if (event.type === 'session.output_audio.delta') this.deps.timing?.once('hub_first_output_audio');
+      if (event.type === 'error') {
+        // The browser ends the conversation on a provider error; keep the cause in the hub log and timing.
+        const detail = event.error && typeof event.error === 'object' ? event.error as Record<string, unknown> : {};
+        const code = [detail.type, detail.code].filter((value) => typeof value === 'string' && value).join(':') || 'unknown';
+        this.deps.timing?.mark('hub_provider_error', { reason: liveTimingReason(code) });
+        console.warn('[companion-live] Live provider error', { code, message: typeof detail.message === 'string' ? detail.message.slice(0, 300) : undefined });
+      }
       if (event.type === 'session.started' && !this.ready) {
         this.deps.timing?.mark('provider_session_started');
         this.ready = true;

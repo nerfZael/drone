@@ -88,14 +88,26 @@ test('browser stops a microphone granted after cancellation', async () => {
   } finally { h.restore(); }
 });
 
-test('browser playback limit includes the incoming chunk', async () => {
+test('browser playback limit includes the incoming chunk and drops it without ending Live', async () => {
   const h = harness();
   try {
     const audio = await h.open();
     const threeSeconds = Buffer.alloc(48_000 * 3).toString('base64');
-    audio.play(threeSeconds); audio.play(threeSeconds);
-    expect(h.scheduled()).toBe(1);
-    expect(h.errors).toEqual(['Live voice playback fell behind. Start again.']);
+    for (let i = 0; i < 4; i++) audio.play(threeSeconds);
+    expect(h.scheduled()).toBe(3);
+    expect(h.errors).toEqual([]);
+    expect(h.playback.at(-1)).toEqual({ stage: 'dropped', queueMs: 9_250, durationMs: 3_000 });
+    await audio.release();
+  } finally { h.restore(); }
+});
+
+test('browser ignores an empty Live audio chunk', async () => {
+  const h = harness();
+  try {
+    const audio = await h.open();
+    audio.play('');
+    expect(h.scheduled()).toBe(0);
+    expect(h.errors).toEqual([]);
     await audio.release();
   } finally { h.restore(); }
 });
@@ -138,10 +150,10 @@ test('browser backlog bound includes the reserve', async () => {
   const h = harness();
   try {
     const audio = await h.open();
-    audio.play(Buffer.alloc(48_000 * 3).toString('base64'));
-    audio.play(Buffer.alloc(48_000 * 1.8).toString('base64'));
-    expect(h.starts).toHaveLength(1);
-    expect(h.errors).toEqual(['Live voice playback fell behind. Start again.']);
+    for (let i = 0; i < 3; i++) audio.play(Buffer.alloc(48_000 * 3).toString('base64'));
+    audio.play(Buffer.alloc(48_000 * 0.8).toString('base64'));
+    expect(h.starts).toHaveLength(3);
+    expect(h.errors).toEqual([]);
     await audio.release();
   } finally { h.restore(); }
 });

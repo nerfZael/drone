@@ -5,6 +5,10 @@ import { connectCompanionVolume } from './companion-volume';
 // Keep a small playout reserve for network/JS scheduling jitter. Rebuild it only
 // after the queue drains; adding it to every chunk would accumulate latency.
 const PLAYBACK_RESERVE_SECONDS = 0.25;
+// Live streams speech ahead of real time (several seconds is normal), and a stalled
+// renderer receives its backlog all at once. Past this bound, chunks are dropped:
+// ending the conversation would lose the audio and the conversation with it.
+const MAX_PLAYBACK_BACKLOG_SECONDS = 10;
 
 export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
   onPlaybackBlocked: (blocked: boolean) => void,
@@ -20,6 +24,7 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
   let processor: ScriptProcessorNode | undefined;
   let closed = false;
   let playbackEnd = 0;
+  let droppedPlayback = false;
   const playing = new Set<AudioBufferSourceNode>();
   let resolveStopped!: (error: Error) => void;
   const stopped = new Promise<Error>((resolve) => { resolveStopped = resolve; });
@@ -89,7 +94,8 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
         try {
           if (audio.length > 256_000) throw new Error('Live audio chunk is too large.');
           const binary = atob(audio);
-          if (!binary.length || binary.length % 2) throw new Error('Invalid Live audio.');
+          if (!binary.length) return;
+          if (binary.length % 2) throw new Error('Invalid Live audio.');
           const buffer = context.createBuffer(1, binary.length / 2, 24_000);
           const samples = buffer.getChannelData(0);
           let energy = 0;
@@ -102,8 +108,11 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           const silent = Math.sqrt(energy / samples.length) < 0.003;
           const now = context.currentTime;
           const start = playbackEnd > now ? playbackEnd : now + PLAYBACK_RESERVE_SECONDS;
-          if (start - now + binary.length / 48_000 > 5) {
-            throw new Error('Live voice playback fell behind. Start again.');
+          if (start - now + binary.length / 48_000 > MAX_PLAYBACK_BACKLOG_SECONDS) {
+            if (!droppedPlayback) console.warn('[CompanionLive] Playback backlog is full; dropping Live audio');
+            droppedPlayback = true;
+            callbacks.onPlayback?.({ stage: 'dropped', queueMs: (start - now) * 1_000, durationMs: buffer.duration * 1_000 });
+            return;
           }
           const node = context.createBufferSource();
           node.buffer = buffer;

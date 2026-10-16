@@ -2,7 +2,7 @@ import { CompanionLiveTiming, type CompanionClientTelemetry } from '@drone/assis
 import React from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { CompanionLiveConversation, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
+import { CompanionLiveConversation, CompanionLiveReconnectBackoff, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
 import { MobileCompanionLiveConnection } from './MobileCompanionLiveConnection';
 import { openMobileLiveAudio, prepareMobileLiveAudio } from './openMobileLiveAudio';
@@ -30,7 +30,8 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   const [shortcutArmed, setShortcutArmed] = React.useState(false);
   const shortcut = React.useRef(shortcutCallbacks); shortcut.current = shortcutCallbacks;
   const mediaAction = React.useRef<(action: LiveMediaAction) => void>(() => {});
-  const reconnectAttempt = React.useRef(0);
+  // Phone Live keeps retrying (it also waits out backgrounding); failures soon after ready still back off.
+  const [backoff] = React.useState(() => new CompanionLiveReconnectBackoff(undefined, Infinity));
   const reconnectGeneration = React.useRef(0);
   const cancelScheduledReconnect = React.useRef<(() => void) | null>(null);
   const startAttempt = React.useRef<(target: Target, reconnecting: boolean) => Promise<void>>(async () => {});
@@ -39,8 +40,8 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     reconnectGeneration.current += 1;
     cancelScheduledReconnect.current?.();
     cancelScheduledReconnect.current = null;
-    if (resetAttempts) reconnectAttempt.current = 0;
-  }, []);
+    if (resetAttempts) backoff.reset();
+  }, [backoff]);
 
   const endConnection = React.useCallback(() => {
     preparing.current?.abort(); preparing.current = null;
@@ -116,7 +117,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     if (target.current !== expectedTarget) return;
     cancelScheduledReconnect.current?.();
     const generation = ++reconnectGeneration.current;
-    const delay = companionLiveReconnectDelay(reconnectAttempt.current++);
+    const delay = backoff.next() ?? 30_000;
     setState((value) => ({
       ...value,
       hasStarted: true,
@@ -138,7 +139,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         void startAttempt.current(expectedTarget, true);
       });
     }, delay);
-  }, []);
+  }, [backoff]);
 
   startAttempt.current = async (requestedTarget, reconnecting) => {
     if (active.current || preparing.current || target.current !== requestedTarget) return;
@@ -206,7 +207,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         onReady: (backendModel) => {
           if (active.current !== session) return;
           console.info('[CompanionLive] Remote Live session ready');
-          reconnectAttempt.current = 0;
+          backoff.ready();
           session.replies?.ready();
           update({ status: 'listening', error: '', backendModel });
         },

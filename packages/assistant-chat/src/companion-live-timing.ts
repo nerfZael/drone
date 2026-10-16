@@ -1,7 +1,7 @@
 import type { CompanionClientTelemetry } from './companion.js';
 
-export type LivePlaybackTiming = { stage: 'scheduled' | 'started' | 'completed' | 'native_enqueued'; queueMs?: number; durationMs?: number; sampleId?: number };
-export type LiveTimingFields = { delegationId?: string | null; dispatchMs?: number; eventType?: string; eventId?: string; queueMs?: number; durationMs?: number; startMs?: number; endMs?: number };
+export type LivePlaybackTiming = { stage: 'scheduled' | 'started' | 'completed' | 'native_enqueued' | 'dropped'; queueMs?: number; durationMs?: number; sampleId?: number };
+export type LiveTimingFields = { delegationId?: string | null; dispatchMs?: number; eventType?: string; eventId?: string; reason?: string; queueMs?: number; durationMs?: number; startMs?: number; endMs?: number };
 export type LiveTimingEvent = LiveTimingFields & { sessionId: string; sequence: number; stage: string; elapsedMs: number; resultSequence: number };
 export const LIVE_TIMING_STAGES = [
   'session_started', 'capture_started', 'first_input_audio_sent', 'live_ready', 'session_closed', 'delegation_received',
@@ -12,6 +12,7 @@ export const LIVE_TIMING_STAGES = [
   'provider_socket_open', 'provider_session_started', 'hub_append_received', 'hub_append_forwarded',
   'provider_append_acknowledged', 'provider_delegation_received', 'hub_first_input_audio',
   'hub_first_input_forwarded', 'hub_first_output_audio', 'hub_close_requested', 'provider_session_closed', 'provider_disconnected', 'hub_error',
+  'session_failed', 'playback_dropped', 'hub_provider_error',
 ] as const;
 
 /** Bounded diagnostics. Separate clock domains; audio chronology never establishes which words were spoken. */
@@ -87,6 +88,7 @@ export class CompanionLiveTiming {
     return this.resultSequence;
   }
   playback(event: LivePlaybackTiming): void {
+    if (event.stage === 'dropped') { this.once('playback_dropped', { queueMs: event.queueMs, durationMs: event.durationMs }); return; }
     if (event.sampleId !== undefined) {
       this.mark(`first_playback_${event.stage}`, { queueMs: event.queueMs, durationMs: event.durationMs }, event.sampleId);
     } else this.once(`first_playback_${event.stage}`, { queueMs: event.queueMs, durationMs: event.durationMs });
@@ -102,5 +104,12 @@ export class CompanionLiveTiming {
       });
     }
   }
+  /** Record why the client ended the session, before close() stops recording. */
+  failed(error: string): void { this.mark('session_failed', { reason: liveTimingReason(error) }); }
   close(): void { if (this.stopped) return; this.mark('session_closed'); this.stopped = true; this.flush(); }
+}
+
+/** A short, identifier-safe code for a failure message (never audio, transcripts or credentials). */
+export function liveTimingReason(message: string): string {
+  return message.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'unknown';
 }

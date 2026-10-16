@@ -17,7 +17,7 @@ export function validateLiveTiming(value: unknown, sessionId: string): LiveTimin
   const event: LiveTimingEvent = { sessionId, sequence: Number(v.sequence), stage: v.stage,
     elapsedMs: v.elapsedMs, resultSequence: Number(v.resultSequence) };
   for (const key of ['dispatchMs', 'queueMs', 'durationMs', 'startMs', 'endMs'] as const) if (numeric(v[key])) event[key] = v[key];
-  for (const key of ['eventId', 'delegationId'] as const) if (id(v[key])) event[key] = v[key];
+  for (const key of ['eventId', 'delegationId', 'reason'] as const) if (id(v[key])) event[key] = v[key];
   if (v.delegationId === null) event.delegationId = null;
   if (typeof v.eventType === 'string' && /^session\.(thinking|commentary|instructions)\.append(ed)?$/.test(v.eventType)) event.eventType = v.eventType;
   return event;
