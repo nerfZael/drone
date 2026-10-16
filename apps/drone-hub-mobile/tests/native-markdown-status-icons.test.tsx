@@ -37,16 +37,29 @@ test('draws status emoji as coloured icons sized to the text they sit in', async
   let root!: ReturnType<typeof create>;
   try {
     await act(async () => {
-      root = create(<NativeMarkdown text={'# ⏳ Waiting\n\n- ✅ done\n- ~~⏭️ skipped~~\n\nUse `✅` literally 🚀'} />);
+      root = create(
+        <NativeMarkdown
+          text={'# ⏳ Waiting\n\n- ✅ done\n- ~~⏭️ skipped~~\n- plain 🔄 item\n\n1. ❌ numbered\n\nUse `✅` literally 🚀'}
+        />,
+      );
     });
+    // An opening status emoji replaces the bullet and leaves the item text.
     const done = root.root.findByType('icon:circle-check' as any);
-    expect(done.props).toMatchObject({ accessibilityLabel: 'Done', color: colors.online, size: 16 });
+    expect(done.props).toMatchObject({ accessibilityLabel: 'Done', color: colors.online, size: 17 });
+    expect(done.props.style).toEqual([false, false]);
+    const skipped = root.root.findByType('icon:skip-forward' as any);
+    expect(skipped.props.style).toEqual([false, { opacity: 0.7 }]);
+    const json = JSON.stringify(root.toJSON());
+    expect(json).toContain('"done"');
+    expect(json).toContain('"skipped"');
+    expect(json.match(/"•"/g)).toHaveLength(1);
+    // Elsewhere the icon stays inline, sized to its text and dropped onto the text's middle.
     const waiting = root.root.findByType('icon:hourglass' as any);
     expect(waiting.props).toMatchObject({ color: colors.warning, size: 23 });
-    const skipped = root.root.findByType('icon:skip-forward' as any);
-    expect(done.props.style).toEqual([{ transform: [{ translateY: 3 }] }, false]);
-    expect(skipped.props.style).toEqual([{ transform: [{ translateY: 3 }] }, { opacity: 0.7 }]);
-    const json = JSON.stringify(root.toJSON());
+    expect(waiting.props.style).toEqual([{ transform: [{ translateY: 3 }] }, false]);
+    root.root.findByType('icon:refresh-cw' as any);
+    expect(json).toContain('"1."');
+    root.root.findByType('icon:circle-x' as any);
     expect(json).toContain('✅');
     expect(json).toContain('🚀');
     expect(json).not.toContain('⏳');

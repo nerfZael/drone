@@ -184,3 +184,23 @@ export function splitMarkdownStatusEmoji(text: string): MarkdownStatusSegment[] 
   }
   return segments;
 }
+
+export type LeadingMarkdownStatus = {
+  status: MarkdownStatus;
+  /** The emoji and the whitespace after it, as written. */
+  marker: string;
+  rest: string;
+};
+
+const LEADING_STATUS_PATTERN = new RegExp(`^${STATUS_EMOJI_SOURCE}(?:\\s+|$)`, 'u');
+
+/** A status emoji that opens the text, so a list can draw it in place of its bullet. */
+export function leadingMarkdownStatus(text: string): LeadingMarkdownStatus | null {
+  const match = LEADING_STATUS_PATTERN.exec(text);
+  if (!match) return null;
+  return {
+    status: STATUS_BY_EMOJI.get(match[1] ?? '')!,
+    marker: match[0],
+    rest: text.slice(match[0].length),
+  };
+}

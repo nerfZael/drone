@@ -8,6 +8,7 @@ import {
   buildNativeMarkdownOutline,
   nativeMarkdownHasCodeBlock,
   nativeMarkdownInlineText,
+  nativeMarkdownLeadingStatus,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
 } from '../src/local-assistant/native-markdown-model';
@@ -180,5 +181,27 @@ const ready = true;
     expect(source).toContain('style={styles.scrollFrame}');
     expect(source).toContain("maxWidth: '100%'");
     expect(source).toContain('flexShrink: 1');
+  });
+});
+
+describe('nativeMarkdownLeadingStatus', () => {
+  test('takes an opening status emoji out of the item, inside or outside formatting', () => {
+    expect(nativeMarkdownLeadingStatus('✅ Shipped')).toEqual({
+      status: expect.objectContaining({ kind: 'done' }),
+      dimmed: false,
+      text: 'Shipped',
+    });
+    expect(nativeMarkdownLeadingStatus('~~⏭️ Skipped~~')).toEqual({
+      status: expect.objectContaining({ kind: 'skipped' }),
+      dimmed: true,
+      text: '~~Skipped~~',
+    });
+    expect(nativeMarkdownLeadingStatus('**🔄 Running**')?.text).toBe('**Running**');
+  });
+
+  test('leaves items alone when the emoji does not open them', () => {
+    expect(nativeMarkdownLeadingStatus('Shipped ✅')).toBeNull();
+    expect(nativeMarkdownLeadingStatus('✅Shipped')).toBeNull();
+    expect(nativeMarkdownLeadingStatus('~~✅~~ done')).toBeNull();
   });
 });
