@@ -139,4 +139,24 @@ describe('Hub request infrastructure', () => {
       ['error', 'request handler crashed', { method: 'POST', path: '/api/drones', error: 'boom' }],
     ]);
   });
+
+  test('logs an error with a client status as a refused request', () => {
+    const res = response();
+    const logs: unknown[] = [];
+    handleHubRequestFailure({
+      req: request({ url: '/api/drones/host%3Aworkspace-1/fs/file?path=%2Fwork' }),
+      res,
+      error: Object.assign(new Error('That path is outside this workspace.'), { code: 'EACCES', statusCode: 403 }),
+      log: (...args) => logs.push(args),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: false, error: 'That path is outside this workspace.' });
+    expect(logs).toEqual([
+      ['warn', 'request refused', {
+        method: 'GET', path: '/api/drones/host%3Aworkspace-1/fs/file?path=%2Fwork', status: 403,
+        error: 'That path is outside this workspace.',
+      }],
+    ]);
+  });
 });
