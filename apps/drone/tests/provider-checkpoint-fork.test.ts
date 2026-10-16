@@ -190,6 +190,31 @@ describe('Claude checkpoint validation in the provider environment', () => {
     });
   });
 
+  test('finds a checkpoint past long lines in a transcript read in chunks', () => {
+    withClaudeTranscript((config, file, sessionId, messageId) => {
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      // Two MiB of one line ahead of the answer, so both cross the reader's chunk boundaries.
+      const long = JSON.stringify({
+        uuid: '55555555-5555-4555-8555-555555555555',
+        type: 'assistant',
+        sessionId,
+        message: { content: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024 - 40) }] },
+      });
+      fs.writeFileSync(file, [long, ...lines].join('\n'));
+      const run = (id: string) =>
+        spawnSync(nodePath, ['-e', claudeCheckpointValidationScript(sessionId, id)], {
+          encoding: 'utf8',
+          env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+        });
+      expect(run(messageId).status).toBe(0);
+      expect(run('55555555-5555-4555-8555-555555555555').status).toBe(0);
+      expect(run('33333333-3333-4333-8333-333333333333').status).not.toBe(0);
+      // The answer as the last line, with no newline after it.
+      fs.writeFileSync(file, [long, lines[0]].join('\n'));
+      expect(run(messageId).status).toBe(0);
+    });
+  });
+
   test('rejects missing UUIDs, API message IDs, and user-message checkpoints', () => {
     withClaudeTranscript((config, file, sessionId) => {
       for (const messageId of [

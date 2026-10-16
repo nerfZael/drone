@@ -20,34 +20,58 @@ export function validateClaudeCheckpoint(sessionId: string, messageId: string): 
   const directories = fs
     .readdirSync(projects, { withFileTypes: true })
     .filter((entry) => entry.isDirectory());
+  // A long session's transcript can outgrow the longest string Node can hold, so it is
+  // read in chunks, and only lines that mention the message are parsed.
+  const needle = Buffer.from(messageId);
+  const isCheckpoint = (line: Buffer): boolean => {
+    if (line.indexOf(needle) < 0) return false;
+    let entry: any;
+    try {
+      entry = JSON.parse(line.toString('utf8'));
+    } catch {
+      return false;
+    } // The live tail may be an incomplete line.
+    return (
+      entry?.uuid === messageId &&
+      entry.type === 'assistant' &&
+      !entry.isSidechain &&
+      entry.sessionId === sessionId &&
+      Array.isArray(entry.message?.content) &&
+      entry.message.content.some(
+        (part: any) => part?.type === 'text' && typeof part.text === 'string' && part.text.trim(),
+      )
+    );
+  };
   for (const directory of directories) {
     const file = path.join(projects, directory.name, `${sessionId}.jsonl`);
-    let transcript: string;
+    let fd: number;
     try {
-      transcript = fs.readFileSync(file, 'utf8');
+      fd = fs.openSync(file, 'r');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
-    for (const line of transcript.split('\n')) {
-      let entry: any;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      } // The live tail may be an incomplete line.
-      if (
-        entry?.uuid === messageId &&
-        entry.type === 'assistant' &&
-        !entry.isSidechain &&
-        entry.sessionId === sessionId &&
-        Array.isArray(entry.message?.content) &&
-        entry.message.content.some(
-          (part: any) => part?.type === 'text' && typeof part.text === 'string' && part.text.trim(),
-        )
-      ) {
-        return;
+    try {
+      const chunk = Buffer.alloc(1 << 20);
+      // The start of a line that continues in the next chunk.
+      let partial: Buffer[] = [];
+      for (;;) {
+        const read = fs.readSync(fd, chunk, 0, chunk.length, null);
+        if (read === 0) break;
+        const data = chunk.subarray(0, read);
+        let start = 0;
+        for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
+          const piece = data.subarray(start, end);
+          const line = partial.length ? Buffer.concat([...partial, piece]) : piece;
+          partial = [];
+          if (isCheckpoint(line)) return;
+          start = end + 1;
+        }
+        if (start < read) partial.push(Buffer.from(data.subarray(start)));
       }
+      if (partial.length && isCheckpoint(Buffer.concat(partial))) return;
+    } finally {
+      fs.closeSync(fd);
     }
   }
   throw new Error(
