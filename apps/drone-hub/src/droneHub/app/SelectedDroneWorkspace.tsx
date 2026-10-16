@@ -1045,6 +1045,7 @@ export function SelectedDroneWorkspace({
       chatName={activeChatName}
       onSelectChat={setSelectedChat}
       onDeleteChat={onDeleteSideChat}
+      onRenameChat={(name, newName) => onRenameDroneChat(currentDrone.id, name, newName)}
       deleteMode={deleteMode}
     />
   );

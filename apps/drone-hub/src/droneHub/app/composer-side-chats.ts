@@ -51,6 +51,19 @@ export function removePendingComposerSideChat(droneId: string, chatName: string)
   });
 }
 
+/** A side chat whose chip should turn into its rename input: F2 over its open chat asks for it. */
+export const useComposerSideChatRenameStore = create<{ target: { droneId: string; chatName: string } | null }>(
+  () => ({ target: null }),
+);
+
+export function requestComposerSideChatRename(droneId: string, chatName: string): void {
+  useComposerSideChatRenameStore.setState({ target: { droneId, chatName } });
+}
+
+export function clearComposerSideChatRename(): void {
+  useComposerSideChatRenameStore.setState({ target: null });
+}
+
 export type ComposerSideChatChip = {
   name: string;
   /** The label: the chat name, or "Fork 2" / "New chat 3" until the chat is named. */

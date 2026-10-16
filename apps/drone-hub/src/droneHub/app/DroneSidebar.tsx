@@ -1,4 +1,5 @@
 import { DetachedChatIndicator, detachChatMenuItems } from './DetachedChatIndicator';
+import { requestComposerSideChatRename } from './composer-side-chats';
 import React from 'react';
 import { openChatWorkspaces } from './chat-workspaces-store';
 import type { SidebarMoveCommandResult } from '@drone/device-protocol';
@@ -2426,7 +2427,9 @@ export function DroneSidebar({
           (editableTarget && !chatContext) ||
           Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')) ||
           isWithinElement(event.target, '[role="dialog"], [role="menu"]') ||
-          isWithinElement(event.target, '[role="tree"][aria-label="File Explorer"]')
+          isWithinElement(event.target, '[role="tree"][aria-label="File Explorer"]') ||
+          // A side chat chip renames itself.
+          isWithinElement(event.target, '[data-composer-side-chats]')
         ) return;
 
         if (sidebarTargeted || (!chatContext && sidebarHovered)) {
@@ -2463,6 +2466,17 @@ export function DroneSidebar({
         }
 
         if (!chatContext) return;
+        // An open side chat has no sidebar row: its chip beside the composer takes the new name.
+        const openDroneId = String(selectedDrone ?? '').trim();
+        const openSideChat = sidebarDroneById[openDroneId]?.sideChats?.find(
+          (chat) => chat.name === activeChatName && chat.presentation === 'composer',
+        );
+        if (openSideChat && selectedDroneIds.length <= 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          requestComposerSideChatRename(openDroneId, openSideChat.name);
+          return;
+        }
         const renameTarget = resolveAgentChatF2RenameTarget({
           selectedDroneIds,
           selectedDroneId: selectedDrone,
