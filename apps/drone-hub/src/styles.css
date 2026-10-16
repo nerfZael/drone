@@ -3462,7 +3462,8 @@ select:disabled optgroup {
   display: contents;
 }
 
-.dh-dock-tab-controls:empty + .dh-dock-tab-divider {
+.dh-dock-tab-controls:empty + .dh-dock-tab-divider,
+.dh-dock-tab-controls:not(:has(button)) + .dh-dock-tab-divider {
   display: none;
 }
 

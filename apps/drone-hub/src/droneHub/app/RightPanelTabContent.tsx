@@ -262,8 +262,11 @@ type RightPanelTabContentProps = {
   onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string, repoRoot?: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string, repoRoot?: string) => void;
   onShowChanges: () => void;
-  /** Chooses which workspace the Editor's File Explorer shows, or adds one as a root. */
-  explorerSwitcher?: React.ReactNode;
+  /**
+   * Chooses which workspace the Editor's File Explorer shows, or adds one as a root: in the explorer's header row, or
+   * in its dock tab when it has one.
+   */
+  explorerSwitcher?: (placement: 'header' | 'tab') => React.ReactNode;
   /** Other workspaces the File Explorer shows as roots below the drone's own files, with tabs in the drone's editor. */
   explorerRoots?: ExplorerRootsProps | null;
   /** What the other workspaces of the editor's tabs are, by file route id. */

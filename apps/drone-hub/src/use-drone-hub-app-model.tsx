@@ -6185,8 +6185,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!isSelectedDrone) showDroneWorkspace(drone.id);
             requestRightPanelTab('changes');
           }}
-          explorerSwitcher={isSelectedDrone && tab === 'editor' ? (
+          explorerSwitcher={isSelectedDrone && tab === 'editor' ? (placement) => (
             <ExplorerWorkspaceSwitcher
+              placement={placement}
               droneId={drone.id}
               droneName={uiDroneName(drone.name)}
               ownPath={droneHomePath(drone)}

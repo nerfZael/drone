@@ -43,8 +43,9 @@ export function DesktopEditorPane({ drone, currentDroneId, paneKey, droneById }:
       drone={target}
       paneKey={paneKey}
       currentDroneId={currentDroneId}
-      explorerSwitcher={
+      explorerSwitcher={(placement) =>
         <ExplorerWorkspaceSwitcher
+          placement={placement}
           droneId={drone.id}
           droneName={uiDroneName(drone.name)}
           ownPath={droneHomePath(drone)}

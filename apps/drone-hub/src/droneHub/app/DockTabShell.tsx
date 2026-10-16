@@ -11,9 +11,11 @@ import { expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPre
  * Middle-click closes, like dockview's stock tab; double-click expands the
  * window over its neighbours until the next double-click.
  */
-export function DockTabShell({ api, children }: {
+export function DockTabShell({ api, children, expandable = true }: {
   api: IDockviewPanelHeaderProps['api'];
   children?: React.ReactNode;
+  /** False for a window that never expands over its neighbours: no expand switch, and double-click does nothing. */
+  expandable?: boolean;
 }) {
   const title = usePanelTitle(api);
   const middleButtonDown = React.useRef(false);
@@ -34,13 +36,13 @@ export function DockTabShell({ api, children }: {
         middleButtonDown.current = false;
       }}
       onDoubleClick={(event) => {
-        if ((event.target as Element).closest('button, .dv-default-tab-action')) return;
+        if (!expandable || (event.target as Element).closest('button, .dv-default-tab-action')) return;
         if (api.group) requestPanelExpansionToggle(api.group.id);
       }}
     >
       <span className="dv-default-tab-content">{title}</span>
       {/* Controls that render nothing (outside the desktop app) leave the slot empty, and CSS drops the divider with it. */}
-      <span className="dh-dock-tab-controls"><ExpandOnFocusButton panelId={api.id} />{children}</span>
+      <span className="dh-dock-tab-controls">{expandable ? <ExpandOnFocusButton panelId={api.id} /> : null}{children}</span>
       <span className="dh-dock-tab-divider" aria-hidden="true" />
       <div
         className="dv-default-tab-action"
