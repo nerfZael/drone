@@ -700,6 +700,7 @@ export function EditorWorkspacePane({
         <DroneEditorDock
           droneId={drone.id}
           droneName={drone.name}
+          homePath={defaultFsPathForCurrentDrone}
           openedFile={openedFile}
           quickOpen={quickOpen}
           openedFileTabs={openedFileTabs}

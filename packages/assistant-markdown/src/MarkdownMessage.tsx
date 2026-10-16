@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import {
@@ -535,7 +535,29 @@ export type MarkdownFileReference = {
   path: string;
   line: number | null;
   column: number | null;
+  /**
+   * Set for a link to a file in a workspace (`workspace://Guides/notes.md#L4`), which the app resolves; `path` is then
+   * `<workspace>/<path>`, for showing.
+   */
+  link?: string;
 };
+
+/** A workspace link, as a reference to open. The app parses it fully; this only reads it for showing. */
+function parseWorkspaceLinkReference(raw: string): MarkdownFileReference | null {
+  const text = String(raw ?? '').trim();
+  const match = /^workspace:\/\/([^#?]+)(?:\?[^#]*)?(?:#L(\d+)(?:C(\d+))?)?/i.exec(text);
+  if (!match || /\s/.test(text)) return null;
+  let shown: string;
+  try { shown = decodeURIComponent(match[1]).replace(/\/+$/, ''); } catch { return null; }
+  if (!shown) return null;
+  const line = parsePositiveInt(match[2]);
+  return { raw: text, path: shown, line, column: line == null ? null : parsePositiveInt(match[3]), link: text };
+}
+
+/** Workspace links are the app's own; every other URL goes through react-markdown's safety check. */
+function markdownUrlTransform(url: string): string {
+  return /^workspace:\/\//i.test(url) ? url : defaultUrlTransform(url);
+}
 
 export type MarkdownTextMentionLink = {
   key: string;
@@ -843,7 +865,7 @@ function StableMarkdownCode({
     );
   }
 
-  const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
+  const fileRef = isInline ? parseWorkspaceLinkReference(raw) ?? parseInlineCodeFileReference(raw) : null;
   if (fileRef && context?.onOpenFileReference) {
     const targetDescription =
       fileRef.line == null
@@ -1035,7 +1057,7 @@ function StableMarkdownAnchor({
   const context = React.useContext(MarkdownCodeRenderContext);
   const hrefText = typeof href === 'string' ? href : '';
   const hrefFileRef = context?.onOpenFileReference
-    ? parseInlineCodeFileReference(hrefText, true)
+    ? parseWorkspaceLinkReference(hrefText) ?? parseInlineCodeFileReference(hrefText, true)
     : null;
   if (hrefFileRef && context?.onOpenFileReference) {
     const targetDescription =
@@ -1272,6 +1294,7 @@ export function MarkdownMessage({
           <ReactMarkdown
             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
             components={STABLE_MARKDOWN_COMPONENTS}
+            urlTransform={markdownUrlTransform}
           >
             {normalizedText}
           </ReactMarkdown>

@@ -67,6 +67,8 @@ export type StandaloneEditorControls = {
   quickOpenOpen: boolean;
   /** Opens a file of any drone or folder this editor has shown, whichever it shows now. */
   openLocation(location: { droneId: string; path: string; name: string }): void;
+  /** Opens a file of what it shows now, at a line when given, and reveals it in the explorer. */
+  openFile(target: { path: string; name?: string; line?: number | null; column?: number | null }): void;
 };
 
 /**
@@ -125,6 +127,7 @@ export function useStandaloneEditorPaneProps(
     goForward: () => revealLocation(goForwardLocation()),
     quickOpenOpen: editor.quickOpenOpen,
     openLocation: openEditorLocation,
+    openFile: (target) => openFile({ ...target, name: target.name ?? '' }),
   };
   const pane: Omit<EditorWorkspacePaneProps, 'drone' | 'paneKey' | 'currentDroneId'> = {
     defaultFsPathForCurrentDrone: files.defaultFsPathForCurrentDrone,

@@ -13,6 +13,7 @@ import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { copyText } from '../app/clipboard';
 import { requestJson } from '../http';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
+import { openWorkspaceLink, workspaceLinkForPath } from '../workspaces/workspace-links';
 import type { DroneFsTextChunkPayload } from '../types';
 import type { DroneOpenedFileState } from './opened-file-types';
 import {
@@ -277,6 +278,8 @@ function LargeTextFileViewer({
 type OpenedDroneFilePanelProps = {
   droneId: string;
   droneName: string;
+  /** Where its explorer starts, for workspace links to the file. */
+  workspaceHomePath?: string;
   file: DroneOpenedFileState;
   fileTabs?: DroneOpenedFileTabState[];
   activeTabId?: string | null;
@@ -304,6 +307,7 @@ type OpenedDroneFilePanelProps = {
 export function OpenedDroneFilePanel({
   droneId,
   droneName,
+  workspaceHomePath,
   file,
   fileTabs = [],
   activeTabId = null,
@@ -711,6 +715,15 @@ export function OpenedDroneFilePanel({
   // commands must read the current tab's save handler, not the first one's.
   const onSaveFileRef = React.useRef(onSaveFile);
   onSaveFileRef.current = onSaveFile;
+  // A link to this file at the cursor's line, to paste into documents and chats.
+  const copyWorkspaceLinkRef = React.useRef<(line: number | null) => void>(() => {});
+  copyWorkspaceLinkRef.current = (line) => {
+    const path = activeFilePath;
+    if (!path) return;
+    void workspaceLinkForPath({ shownId: droneId, homePath: workspaceHomePath ?? '', path, line })
+      .then((link) => (link ? copyText(link) : false))
+      .catch(() => false);
+  };
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
@@ -728,6 +741,13 @@ export function OpenedDroneFilePanel({
       });
       editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
         languageActionsRef.current?.findReferences();
+      });
+      editor.addAction({
+        id: 'drone-hub.copy-workspace-link',
+        label: 'Copy Workspace Link',
+        contextMenuGroupId: '9_cutcopypaste',
+        contextMenuOrder: 10,
+        run: (current) => copyWorkspaceLinkRef.current(current.getPosition()?.lineNumber ?? null),
       });
       applyEditorCursorTarget();
       syncIncomingEditorValue(editor);
@@ -818,6 +838,8 @@ export function OpenedDroneFilePanel({
 
   const openPreviewLink = React.useCallback(
     (href: string): boolean => {
+      // A file in a workspace, this one or another: the Hub's window opens it.
+      if (openWorkspaceLink(href)) return true;
       if (!onOpenResolvedFile) return false;
       const resolved = resolveMarkdownPreviewLinkTarget(activeFilePath, href);
       if (!resolved) return false;

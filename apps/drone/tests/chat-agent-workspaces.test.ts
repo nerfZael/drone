@@ -97,6 +97,37 @@ describe('agent chat workspaces', () => {
     ]);
   });
 
+  test('lists a link for each workspace, and tools follow workspace links as paths', async () => {
+    const { workspaces, calls } = fixture();
+    const chat = { droneId: 'box', chatName: 'default' };
+    const catalog = await workspaces.catalog(chat);
+    const other = catalog.workspaces.find((option) => option.id === 'drone:other')!;
+    await workspaces.save(
+      chat,
+      { targets: [...catalog.access.targets, { ...other, read: true, write: false, execute: false }], defaultTargetId: 'drone:box' },
+      catalog.revision,
+    );
+    expect((await workspaces.list(chat)).workspaces.map(({ id, link }) => ({ id, link }))).toEqual([
+      { id: 'drone:box', link: 'workspace://box/' },
+      { id: 'drone:other', link: 'workspace://other/' },
+    ]);
+
+    await workspaces.run(chat, 'read_file', { path: 'workspace://other/docs/a%20b.txt#L3' });
+    await workspaces.run(chat, 'read_file', { path: 'workspace://drone:other/docs/c.txt', target: 'drone:other' });
+    await workspaces.run(chat, 'list_files', { path: 'workspace://other/' });
+    expect(calls.map(({ id, tool, args }) => [id, tool, args.path ?? null])).toEqual([
+      ['other', 'read_file', 'docs/a b.txt'],
+      ['other', 'read_file', 'docs/c.txt'],
+      ['other', 'list_files', null],
+    ]);
+    await expect(workspaces.run(chat, 'read_file', { path: 'workspace://Guides/a.md' })).rejects.toThrow(
+      'This chat has no workspace "Guides"',
+    );
+    await expect(
+      workspaces.run(chat, 'read_file', { path: 'workspace://other/a.md', target: 'drone:box' }),
+    ).rejects.toThrow('is in workspace drone:other, not drone:box');
+  });
+
   test('a selection changed between calls applies to the next call', async () => {
     const { workspaces, stored, calls } = fixture();
     const chat = { droneId: 'box', chatName: 'default' };

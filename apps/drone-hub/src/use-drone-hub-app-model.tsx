@@ -264,6 +264,14 @@ import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-ta
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
 import { setExplorerWorkspace, useExplorerWorkspaceDrone } from './droneHub/workspaces/explorer-workspace-store';
+import {
+  OPEN_WORKSPACE_LINK_EVENT,
+  browsableWorkspacesForLinks,
+  openWorkspaceLink,
+  ownWorkspaceOf,
+  resolveWorkspaceLink,
+  type OpenWorkspaceLinkDetail,
+} from './droneHub/workspaces/workspace-links';
 import { ExplorerWorkspaceSwitcher } from './droneHub/workspaces/ExplorerWorkspaceSwitcher';
 import { useStandaloneEditorPaneProps } from './droneHub/app/DesktopEditorPane';
 import type {
@@ -4055,6 +4063,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
       recordUiAction({ action: 'chat-file-link', droneId: currentDrone?.id, path: ref.path, line: ref.line, column: ref.column });
+      if (ref.link) {
+        openWorkspaceLink(ref.link);
+        return;
+      }
       const containerPath = resolveDroneFileOpenPath(currentDrone, ref.path);
       if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
@@ -4080,6 +4092,58 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     window.addEventListener(CHAT_OPEN_FILE_EVENT, openFile);
     return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
   }, [currentDrone?.id, openMarkdownFileReference]);
+  // Workspace links (`workspace://Guides/notes.md#L4`) from chats, previews and windows: a file of the drone's own
+  // workspace opens as any of its files; another workspace's opens in the File Explorer switched to it, once the
+  // switched explorer and editor are there.
+  const pendingWorkspaceLinkOpenRef = React.useRef<{
+    browseId: string; path: string; name: string; line: number | null; column: number | null;
+  } | null>(null);
+  const switchedEditorControlsRef = React.useRef(switchedEditorControls);
+  switchedEditorControlsRef.current = switchedEditorControls;
+  const openPendingWorkspaceLink = React.useCallback(() => {
+    const pending = pendingWorkspaceLinkOpenRef.current;
+    const controls = switchedEditorControlsRef.current;
+    if (!pending || !controls || explorerWorkspaceDrone?.id !== pending.browseId) return;
+    pendingWorkspaceLinkOpenRef.current = null;
+    controls.openFile(pending);
+  }, [explorerWorkspaceDrone?.id]);
+  React.useEffect(() => { openPendingWorkspaceLink(); }, [openPendingWorkspaceLink, switchedEditorControls]);
+  React.useEffect(() => {
+    if (!currentDrone) return;
+    const drone = currentDrone;
+    const onOpen = (event: Event) => {
+      const raw = (event as CustomEvent<OpenWorkspaceLinkDetail>).detail?.link ?? '';
+      void (async () => {
+        try {
+          const resolved = await resolveWorkspaceLink(raw, droneByIdRef.current);
+          if (!resolved.ok) {
+            showShortcutToast(resolved.error, 'Workspace link');
+            return;
+          }
+          const { workspace, path, root, link } = resolved.target;
+          const name = path.split('/').filter(Boolean).pop() || path;
+          const own = ownWorkspaceOf(drone, await browsableWorkspacesForLinks());
+          recordUiAction({ action: 'workspace-link', droneId: drone.id, path: `${workspace.id}:${path}`, line: link.line });
+          if (own?.id === workspace.id) {
+            if (root) showOwnDroneFiles();
+            else openFileInFilesPane({ path, name, line: link.line, column: link.column });
+            return;
+          }
+          setExplorerWorkspace(drone.id, workspace);
+          if (root) {
+            requestRightPanelTab('editor');
+            return;
+          }
+          pendingWorkspaceLinkOpenRef.current = { browseId: workspace.browseId, path, name, line: link.line, column: link.column };
+          openPendingWorkspaceLink();
+        } catch (error: any) {
+          showShortcutToast(error?.message ?? String(error), 'Workspace link');
+        }
+      })();
+    };
+    window.addEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
+  }, [currentDrone, openFileInFilesPane, openPendingWorkspaceLink, requestRightPanelTab, showOwnDroneFiles, showShortcutToast]);
   const resolveDroneRepoFilePath = React.useCallback(
     (drone: DroneSummary | null, repoRelativePathRaw: string, repoRoot?: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')

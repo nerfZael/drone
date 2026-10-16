@@ -1,5 +1,11 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import type { ChatWorkspaceAccess, ChatWorkspaceCatalog } from '@drone/assistant-chat';
+import {
+  formatWorkspaceLink,
+  parseWorkspaceLink,
+  resolveWorkspaceRef,
+  workspaceLinkRef,
+} from '@drone/assistant-chat';
 import type { HubAssistantService } from '../assistant';
 import {
   CompanionWorkspaceService,
@@ -19,6 +25,16 @@ export type AgentChatWorkspaceStore = {
 type Mesh = ConstructorParameters<typeof CompanionWorkspaceService>[1];
 
 const EMPTY: ChatWorkspaceAccess = { targets: [], defaultTargetId: null };
+
+/** Tool arguments that hold a path, each with the argument naming its workspace. */
+const PATH_ARGUMENTS: Array<{ path: string; workspace: string }> = [
+  { path: 'path', workspace: 'target' },
+  { path: 'from', workspace: 'target' },
+  { path: 'to', workspace: 'target' },
+  { path: 'cwd', workspace: 'target' },
+  { path: 'sourcePath', workspace: 'sourceTarget' },
+  { path: 'destinationPath', workspace: 'destinationTarget' },
+];
 const TOOLS_TTL_MS = 30_000;
 // Services keep no state beyond serializing one chat's saves, so the oldest are simply dropped.
 const MAX_SERVICES = 200;
@@ -56,6 +72,8 @@ export class AgentChatWorkspaces {
   /** The chat's workspaces as the agent sees them: ids to pass to the other tools, and what each allows. */
   async list(chat: AgentChat) {
     const [catalog, own] = await Promise.all([this.catalog(chat), this.ownWorkspace(chat)]);
+    // Named as the Hub's apps resolve links: against every workspace on this device, not only the chat's.
+    const named = [...catalog.workspaces, ...catalog.access.targets.filter((target) => !catalog.workspaces.some((item) => item.id === target.id))];
     const workspaces = catalog.access.targets.map((target) => {
       const option = catalog.workspaces.find((item) => item.id === target.id);
       const device = catalog.devices.find((item) => item.id === target.deviceId);
@@ -69,6 +87,8 @@ export class AgentChatWorkspaces {
         write: target.write,
         execute: target.execute,
         default: target.id === catalog.access.defaultTargetId,
+        // Links to its files: append a path relative to its root (and #L12 for a line).
+        link: formatWorkspaceLink({ workspace: workspaceLinkRef(target, named), path: '', line: null, column: null }),
         ...(target.id === own?.defaultTargetId ? { ownWorkspace: true } : {}),
         ...(target.kind !== 'remote' && !option ? { unavailable: 'Workspace not found' } : {}),
         ...(device?.error ? { unavailable: device.error } : {}),
@@ -84,6 +104,7 @@ export class AgentChatWorkspaces {
     args: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<AgentToolResult<unknown>> {
+    args = await this.resolveWorkspaceLinks(chat, args);
     for (let attempt = 0; ; attempt += 1) {
       const found = (await this.toolsByName(chat)).get(tool);
       if (!found) {
@@ -101,6 +122,35 @@ export class AgentChatWorkspaces {
         this.tools.delete(chatKey(chat));
       }
     }
+  }
+
+  /**
+   * A path argument may be a workspace link (`workspace://Guides/notes.md`): it becomes the path inside that workspace,
+   * and the workspace argument beside it names the workspace, so links in documents can be followed as written.
+   */
+  private async resolveWorkspaceLinks(chat: AgentChat, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const linked = PATH_ARGUMENTS.filter(({ path }) => typeof args?.[path] === 'string' && parseWorkspaceLink(args[path]));
+    if (!linked.length) return args;
+    const catalog = await this.catalog(chat);
+    const next: Record<string, unknown> = { ...args };
+    for (const { path, workspace } of linked) {
+      const link = parseWorkspaceLink(args[path])!;
+      const target = resolveWorkspaceRef(link.workspace, catalog.access.targets);
+      if (!target) {
+        throw new Error(
+          `This chat has no workspace "${link.workspace}" (from ${String(args[path])}). See list_workspaces; ask the user to add it to this chat's workspaces.`,
+        );
+      }
+      const named = next[workspace];
+      if (typeof named === 'string' && named.trim() && named !== target.id) {
+        throw new Error(`${String(args[path])} is in workspace ${target.id}, not ${named}.`);
+      }
+      next[workspace] = target.id;
+      // The root itself: the tools take no path for it.
+      if (link.path) next[path] = link.path;
+      else delete next[path];
+    }
+    return next;
   }
 
   private service(chat: AgentChat): CompanionWorkspaceService {

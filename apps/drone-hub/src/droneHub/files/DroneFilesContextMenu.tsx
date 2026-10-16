@@ -26,6 +26,8 @@ type DroneFilesContextMenuProps = {
   onCopy: () => void;
   onPaste: () => void;
   onDownload: () => void;
+  /** Copies a workspace link to the entry, for documents and chats. */
+  onCopyLink?: () => void;
   onRefresh: () => void;
   onGoToPath: () => void;
   onActionInputChange: (next: string) => void;
@@ -70,6 +72,7 @@ export function DroneFilesContextMenu({
   onCopy,
   onPaste,
   onDownload,
+  onCopyLink,
   onRefresh,
   onGoToPath,
   onActionInputChange,
@@ -176,6 +179,11 @@ export function DroneFilesContextMenu({
               <button type="button" role="menuitem" disabled={busy} onClick={onDownload} className={itemClassName}>
                 Download
               </button>
+              {onCopyLink ? (
+                <button type="button" role="menuitem" onClick={onCopyLink} className={itemClassName}>
+                  Copy Link
+                </button>
+              ) : null}
               {!readOnly ? (
                 <>
                   <MenuDivider />

@@ -13,6 +13,8 @@ type OpenFileTarget = {
 type DroneEditorDockProps = {
   droneId: string;
   droneName: string;
+  /** Where the explorer starts, for links to the files it shows. */
+  homePath?: string;
   openedFile: DroneOpenedFileState;
   quickOpen: {
     open: boolean;
@@ -54,6 +56,7 @@ type DroneEditorDockProps = {
 export function DroneEditorDock({
   droneId,
   droneName,
+  homePath,
   openedFile,
   quickOpen,
   openedFileTabs,
@@ -86,6 +89,7 @@ export function DroneEditorDock({
         <OpenedDroneFilePanel
           droneId={droneId}
           droneName={droneName}
+          workspaceHomePath={homePath}
           file={openedFile}
           fileTabs={openedFileTabs}
           activeTabId={activeOpenedFileTabId}

@@ -15,7 +15,7 @@ const RENAMED_PARAMETERS: Record<string, string> = {
   destinationTarget: 'destinationWorkspace',
 };
 const PARAMETER_DESCRIPTIONS: Record<string, string> = {
-  workspace: 'Workspace id from list_workspaces; omitted calls use the default workspace.',
+  workspace: 'Workspace id from list_workspaces; omitted calls use the default workspace, or the workspace a workspace:// path names.',
   sourceWorkspace: 'Workspace id from list_workspaces to copy from.',
   destinationWorkspace: 'Workspace id from list_workspaces to copy to.',
 };
@@ -151,7 +151,7 @@ export function registerAgentChatWorkspaceTools(
     {
       title: 'List workspaces',
       description:
-        "List the workspaces this chat may use through the other DroneHub workspace tools: repositories and folders on this device, drone containers, and folders shared by other devices. Shows each workspace's id, what it allows (read, write, execute), the default, and which one is your own workspace.",
+        "List the workspaces this chat may use through the other DroneHub workspace tools: repositories and folders on this device, drone containers, and folders shared by other devices. Shows each workspace's id, what it allows (read, write, execute), the default, which one is your own workspace, and its link. To link to a file in a workspace from Markdown you write (a README, a report, a chat reply), append the path relative to the workspace's root to its link, percent-encoding spaces, and #L12 for a line: [the loop](workspace://Guides/gauntlet-loop.md#L40). The user opens these links in DroneHub, and every path argument of these tools accepts one as written.",
       inputSchema: {},
       annotations: annotations('list_workspaces'),
     },
