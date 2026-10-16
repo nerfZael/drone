@@ -203,6 +203,8 @@ type CanvasEdgesLayerProps = {
   fleetParentIdByDroneId: Record<string, string>;
   fleetAssignedIdsByDroneId: Record<string, string[]>;
   forkSourceNodeIdByNodeId: Record<string, string>;
+  /** Chats created by another chat of the board: a solid line, where a copy's is dashed. */
+  createdSourceNodeIdByNodeId?: Record<string, string>;
 };
 
 /** Lines between related cards. Follows positions itself, so moving cards does not render the dock. */
@@ -217,6 +219,7 @@ export function CanvasEdgesLayer({
   fleetParentIdByDroneId,
   fleetAssignedIdsByDroneId,
   forkSourceNodeIdByNodeId,
+  createdSourceNodeIdByNodeId,
 }: CanvasEdgesLayerProps) {
   const perfStart = canvasPerf.renderStart();
   React.useLayoutEffect(() => canvasPerf.renderEnd('edges', perfStart));
@@ -237,8 +240,10 @@ export function CanvasEdgesLayer({
     fleetParentIdByDroneId,
     fleetAssignedIdsByDroneId,
     forkSourceNodeIdByNodeId,
+    createdSourceNodeIdByNodeId,
   }), [
     chatNodesByDroneId,
+    createdSourceNodeIdByNodeId,
     droneNodeByDroneId,
     fleetAssignedIdsByDroneId,
     fleetParentIdByDroneId,

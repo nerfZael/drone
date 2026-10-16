@@ -606,6 +606,7 @@ import {
   isDraftChatEntry,
   isDraftDroneEntry,
   resolveChatCloneSources,
+  resolveChatCreators,
   resolveChatCreatedAt,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
@@ -5376,6 +5377,7 @@ async function startDroneHubApiServerWithLifecycle(
       workflowChats,
       sideChats,
       chatCloneSources,
+      chatCreators: resolveChatCreators(d.chats, droneId),
       chatCreatedAt: resolveChatCreatedAt(d.chats),
       unreadChats,
       chatReadStates,

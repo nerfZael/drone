@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveChatCloneSources, resolveChatCreatedAt, summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
+import { resolveChatCloneSources, resolveChatCreatedAt, resolveChatCreators, summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
 
 describe('drone summary helpers', () => {
   test('reports each chat\'s creation time, skipping missing or invalid ones', () => {
@@ -26,6 +26,20 @@ describe('drone summary helpers', () => {
       'clone-of-clone': 'clone',
       'kept-side-chat': 'clone',
     });
+  });
+
+  test('resolves the chat that created each chat in the same drone, by ID first', () => {
+    expect(
+      resolveChatCreators({
+        reviewer: { id: 'reviewer-id' },
+        lava: { id: 'w1', createdBy: { kind: 'chat', chatId: 'reviewer-id', droneId: 'mech', chatName: 'old name' } },
+        terrain: { id: 'w2', createdBy: { kind: 'chat', chatId: 'gone', droneId: 'mech', chatName: 'reviewer' } },
+        elsewhere: { id: 'w3', createdBy: { kind: 'chat', chatId: 'reviewer-id', droneId: 'other', chatName: 'reviewer' } },
+        orphan: { id: 'w4', createdBy: { kind: 'chat', chatId: 'gone', droneId: 'mech', chatName: 'deleted' } },
+        self: { id: 'w5', createdBy: { kind: 'chat', chatId: 'w5', droneId: 'mech', chatName: 'self' } },
+      }, 'mech'),
+    ).toEqual({ lava: 'reviewer', terrain: 'reviewer' });
+    expect(resolveChatCreators(null, 'mech')).toEqual({});
   });
 
   test('includes canonical native-chat messages in drone activity', () => {

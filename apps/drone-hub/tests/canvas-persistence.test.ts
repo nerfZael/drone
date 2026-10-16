@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { EMPTY_CANVAS_BOARD, getCanvasBoardActions, useDroneCanvasStore } from '../src/droneHub/canvas/use-drone-canvas-store';
+import { EMPTY_CANVAS_BOARD, getCanvasBoardActions, organizedBoardKey, useDroneCanvasStore } from '../src/droneHub/canvas/use-drone-canvas-store';
 
 test('canvas persistence waits for changes to pause, saves in idle time, and saves the latest boards without selections', async () => {
   const dom = new Window({ url: 'http://localhost' });
@@ -35,6 +35,9 @@ test('canvas persistence waits for changes to pause, saves in idle time, and sav
     const actions = getCanvasBoardActions('alpha');
     actions.upsertNodes([{ droneId: 'chat:a', label: 'chat', x: 5, y: 6 }]);
     actions.setSelectedDroneIds(['chat:a']);
+    // The organized layout is worked out each time it shows: only whether it is on is kept.
+    getCanvasBoardActions(organizedBoardKey('alpha')).upsertNodes([{ droneId: 'chat:a', label: 'chat', x: 900, y: 900 }]);
+    useDroneCanvasStore.getState().setOrganizedDroneBoard(false);
     useDroneCanvasStore.getState().setDraftPromptForNode('draft:a', 'Keep this prompt');
     useDroneCanvasStore.getState().setSelectedDroneIds(['draft:a']);
     for (let i = 0; i < 100; i++) useDroneCanvasStore.getState().setPan(i, i * 2);
@@ -64,6 +67,8 @@ test('canvas persistence waits for changes to pause, saves in idle time, and sav
     expect(saved.state.droneBoards.alpha.selectedDroneIds).toBeUndefined();
     expect(saved.state.droneBoards.alpha.nodesByDroneId['chat:a']).toMatchObject({ x: 30, y: 40 });
     expect(saved.state.optimisticMembersByDroneId).toBeUndefined();
+    expect(Object.keys(saved.state.droneBoards)).toEqual(['alpha']);
+    expect(saved.state.organizedDroneBoard).toBe(false);
 
     // Rehydrating with an unflushed edit reads the newest snapshot, not the older disk copy.
     useDroneCanvasStore.getState().setPan(500, 600);
@@ -74,7 +79,7 @@ test('canvas persistence waits for changes to pause, saves in idle time, and sav
     expect(timers.size).toBe(0);
     expect(dom.localStorage.getItem(key)).toBeNull();
   } finally {
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone', organizedDroneBoard: true });
     useDroneCanvasStore.persist.clearStorage();
     Date.now = originalNow;
     for (const [key, descriptor] of descriptors) {

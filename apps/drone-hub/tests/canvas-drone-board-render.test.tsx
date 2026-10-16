@@ -178,7 +178,7 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
   useDroneCanvasStore
     .getState()
     .upsertNodes([{ droneId: createCanvasChatNodeId('beta', 'default'), label: 'default', x: 0, y: 0 }]);
@@ -341,7 +341,7 @@ test('a drone board fills itself, follows new chats, and leaves the global board
     expect(nodeIds().sort()).toEqual(['default', 'review'].map((name) => createCanvasChatNodeId('beta', name)).sort());
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -414,7 +414,7 @@ test('global canvas drags only show agent chat drop actions while over that chat
     expect(useDroneCanvasStore.getState().nodesByDroneId[alpha('default')]!.x).not.toBe(0);
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -445,7 +445,7 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -612,7 +612,7 @@ test('side chat cards copy, paste and delete like any other card, and a rename i
   } finally {
     dom.removeEventListener(FOCUS_SIDE_CHAT_EVENT, onFocusSideChat);
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -670,7 +670,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -856,7 +856,7 @@ test('canvas composer sends queued and ASAP messages, retains attachments, and r
     await act(async () => root.unmount());
     // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -879,7 +879,7 @@ test('dragging a card onto the canvas composer references it in the message with
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -936,7 +936,7 @@ test('dragging a card onto the canvas composer references it in the message with
     expect(board().nodesByDroneId[alpha('plan')]).toMatchObject({ x: released.x, y: released.y });
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1013,7 +1013,7 @@ test('a drone card shows its runtime as an icon, and chats linked to it leave re
     expect(card(chatCard).textContent).toContain('dvm/work');
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1143,7 +1143,7 @@ test('detailed cards show state, time and cost, and spread the stored arrangemen
     expect((card().parentElement as unknown as HTMLElement).style.translate).toBe(`${120 * DETAILED_CARD_SPREAD.x}px ${220 * DETAILED_CARD_SPREAD.y}px`);
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1170,7 +1170,7 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: {
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, newCardSettings: {
     agentKey: 'builtin:codex', model: '', reasoning: '', permissionMode: 'write', approvalPolicy: 'auto',
   } });
   const container = dom.document.createElement('div');
@@ -1239,7 +1239,7 @@ test('the canvas keeps its own settings for new cards, and a new chat follows ch
     // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
     await new Promise((resolve) => setTimeout(resolve, 5));
     dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1338,7 +1338,7 @@ test('rectangle selection opens exactly one selected card only after release', a
     expect(opened).toEqual(['alpha:fork']);
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1548,7 +1548,7 @@ test('back and forward switch between the global and this drone boards, and a do
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', panX: 0, panY: 0, scale: 1 });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, panX: 0, panY: 0, scale: 1 });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -1603,7 +1603,7 @@ test('back and forward switch between the global and this drone boards, and a do
     expect(scope()).toBe('drone');
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1626,7 +1626,7 @@ test('a topic shows its drones with all of their chats; Delete takes a drone off
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', topics: [], activeTopicId: null });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, topics: [], activeTopicId: null });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -1698,7 +1698,7 @@ test('a topic shows its drones with all of their chats; Delete takes a drone off
     await act(async () => root.unmount());
     // A closed popover hands focus back on a timer; let it run while this window is still the DOM.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', topics: [], activeTopicId: null });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, topics: [], activeTopicId: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1720,7 +1720,7 @@ test('pasting the same text twice in the canvas composer puts it in the message 
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, value });
   }
-  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+  useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
   const container = dom.document.createElement('div');
   dom.document.body.append(container);
   const root = createRoot(container as unknown as HTMLElement);
@@ -1762,7 +1762,7 @@ test('pasting the same text twice in the canvas composer puts it in the message 
   } finally {
     await act(async () => root.unmount());
     await new Promise((resolve) => setTimeout(resolve, 5));
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', newCardSettings: null });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false, newCardSettings: null });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -1866,7 +1866,7 @@ test('middle-click holds the cursor in the canvas: it edge-pans, clicks reach th
   } finally {
     await act(async () => root.unmount());
     dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -2020,7 +2020,7 @@ test('in the desktop app middle-click holds the real cursor: the app walls it in
   } finally {
     await act(async () => root.unmount());
     dom.HTMLElement.prototype.getBoundingClientRect = originalRect;
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -2060,7 +2060,7 @@ test('the open chat has its accent edge, except in the full view while its panel
     expect(edge()).not.toBeNull();
   } finally {
     await act(async () => root.unmount());
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone' });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, scope: 'drone', organizedDroneBoard: false });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

@@ -71,10 +71,23 @@ export type CanvasTopic = {
 };
 
 const TOPIC_BOARD_KEY_PREFIX = 'topic:';
+const ORGANIZED_BOARD_KEY_PREFIX = 'organized:';
 
 /** A topic's board is kept with the drone boards, under this key. */
 export function topicBoardKey(topicId: string): string {
   return `${TOPIC_BOARD_KEY_PREFIX}${topicId}`;
+}
+
+/**
+ * A drone's organized board: positions worked out from its chats, kept beside the drone's own board so turning the
+ * organized layout off brings the free one back as it was. Never saved; it is laid out again when shown.
+ */
+export function organizedBoardKey(droneId: string): string {
+  return `${ORGANIZED_BOARD_KEY_PREFIX}${droneId}`;
+}
+
+function isOrganizedBoardKey(key: string): boolean {
+  return key.startsWith(ORGANIZED_BOARD_KEY_PREFIX);
 }
 
 /**
@@ -116,6 +129,9 @@ type DroneCanvasState = DroneCanvasBoard &
     /** Null until the canvas first takes the app's defaults; after that only the canvas composer changes it. */
     newCardSettings: CanvasNewCardSettings | null;
     setNewCardSettings: (settings: CanvasNewCardSettings) => void;
+    /** Drone boards lay their chats out themselves instead of keeping them where they were put. One setting for all. */
+    organizedDroneBoard: boolean;
+    setOrganizedDroneBoard: (organized: boolean) => void;
   };
 
 type DroneCanvasPersistedBoard = Omit<DroneCanvasBoard, 'selectedDroneIds'>;
@@ -125,6 +141,7 @@ type DroneCanvasPersistedState = DroneCanvasPersistedBoard & {
   topics: CanvasTopic[];
   activeTopicId: string | null;
   newCardSettings: CanvasNewCardSettings | null;
+  organizedDroneBoard: boolean;
 };
 
 const BOARD_KEYS = [
@@ -272,7 +289,7 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
   const droneBoards: Record<string, DroneCanvasPersistedBoard> = {};
   for (const [rawId, rawBoard] of Object.entries(rawDroneBoards)) {
     const droneId = String(rawId ?? '').trim();
-    if (droneId) droneBoards[droneId] = normalizePersistedBoard(rawBoard);
+    if (droneId && !isOrganizedBoardKey(droneId)) droneBoards[droneId] = normalizePersistedBoard(rawBoard);
   }
   const topics = normalizeTopics(raw.topics);
   const storedActiveTopicId = String(raw.activeTopicId ?? '').trim();
@@ -287,6 +304,7 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
     topics,
     activeTopicId,
     newCardSettings: normalizeCanvasNewCardSettings(raw.newCardSettings),
+    organizedDroneBoard: raw.organizedDroneBoard !== false,
   };
 }
 
@@ -440,8 +458,11 @@ function toPersistedState(state: DroneCanvasState): DroneCanvasPersistedState {
     topics: state.topics,
     activeTopicId: state.activeTopicId,
     newCardSettings: state.newCardSettings,
+    organizedDroneBoard: state.organizedDroneBoard,
     droneBoards: Object.fromEntries(
-      Object.entries(state.droneBoards).map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
+      Object.entries(state.droneBoards)
+        .filter(([droneId]) => !isOrganizedBoardKey(droneId))
+        .map(([droneId, board]) => [droneId, toPersistedBoard(board)]),
     ),
   };
 }
@@ -728,6 +749,8 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
         activeTopicId: null,
         newCardSettings: null,
         setNewCardSettings: (settings) => set((state) => ({ ...state, newCardSettings: settings })),
+        organizedDroneBoard: true,
+        setOrganizedDroneBoard: (organized) => set((state) => ({ ...state, organizedDroneBoard: organized })),
         createTopic: (input) => {
           const id = createTopicId();
           set((state) => ({
@@ -825,7 +848,7 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
                 return kept.length === topic.droneIds.length ? topic : { ...topic, droneIds: kept };
               })
               : state.topics;
-            const ids = requested.filter(
+            const ids = requested.flatMap((id) => [id, organizedBoardKey(id)]).filter(
               (id) => state.droneBoards[id] || state.optimisticMembersByDroneId[id],
             );
             if (ids.length === 0) return inTopics ? { ...state, topics } : state;

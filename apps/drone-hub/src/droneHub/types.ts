@@ -66,6 +66,8 @@ export type DroneSummary = {
   }>;
   /** Chat name -> the chat it was cloned from, for sidebar clones and side chats alike. */
   chatCloneSources?: Record<string, string>;
+  /** Chat name -> the chat of this drone that created it through the DroneHub tools (an orchestrator's workers). */
+  chatCreators?: Record<string, string>;
   /** Chat name -> ISO creation time, where the hub recorded one. */
   chatCreatedAt?: Record<string, string>;
   unreadChats?: string[];

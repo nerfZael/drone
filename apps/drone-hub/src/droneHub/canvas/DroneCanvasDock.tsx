@@ -86,11 +86,19 @@ import {
   DRAFT_CANVAS_NODE_PREFIX,
   getCanvasBoardActions,
   isCanvasDraftNodeId,
+  organizedBoardKey,
   selectCanvasBoard,
   topicBoardKey,
   useCanvasBoardNodeMeta,
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
+import {
+  layoutOrganizedBoard,
+  sideChatSquaresByChat,
+  sideChatSquaresWidthPx,
+  type OrganizedLayout,
+} from './organized-board-layout';
+import { buildSidebarChatTree, flattenSidebarChatTreeChatNodeIds, orderSidebarEntries } from '@drone/hub-model/sidebar';
 import {
   OPTIMISTIC_MEMBER_TTL_MS,
   buildDroneBoardMembers,
@@ -109,7 +117,7 @@ import {
   getNodeWidthPx,
   nodeLabelWidthPx,
 } from './node-metrics';
-import { CanvasNodeCard, type CanvasNodeActions, type DroneCanvasIndicatorState } from './CanvasNodeCard';
+import { CanvasNodeCard, type CanvasNodeActions, type CanvasSideChatSquare, type DroneCanvasIndicatorState } from './CanvasNodeCard';
 import { CANVAS_STEPS_PANEL_WIDTH_PX, CanvasStepsPanel } from './CanvasStepsPanel';
 import {
   CanvasCardsLayer,
@@ -133,7 +141,7 @@ import { createCardHover, HoveredCard } from './card-hover';
 import { useCanvasWheelZoom } from './use-canvas-wheel-zoom';
 import { CanvasEmptyState } from './CanvasEmptyState';
 import { CanvasEdgePanControls, CanvasEdgePanOverlay } from './CanvasEdgePan';
-import { isEdgePanLockedEvent, useCanvasEdgePanLock } from './use-canvas-edge-pan-lock';
+import { DOUBLE_MIDDLE_CLICK_MS, isEdgePanLockedEvent, useCanvasEdgePanLock } from './use-canvas-edge-pan-lock';
 import { closeCanvasChatPanel, leaveCanvasFullView, showCanvasChatPanel, toggleCanvasFullView, useCanvasFullViewStore } from './canvas-full-view';
 
 const DROP_STACK_SPACING_Y_PX = 48;
@@ -177,6 +185,18 @@ type MarqueeDragState = {
   baseSelectedIds: string[];
   moved: boolean;
 };
+
+/** Three cards in a tree: the organized layout. */
+function OrganizedLayoutIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+      <rect x="1.75" y="2.5" width="5" height="3" rx="0.8" />
+      <rect x="9.25" y="2.5" width="5" height="3" rx="0.8" />
+      <rect x="9.25" y="10.5" width="5" height="3" rx="0.8" />
+      <path d="M6.75 4h2.5M7.75 4v8h1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function resolveCanvasAssignmentDropTarget(
   nodeIds: string[],
@@ -364,8 +384,14 @@ export function DroneCanvasDock({
   const activeTopicId = activeTopic?.id ?? null;
   const boardDroneId = scope === 'drone' ? String(boardDrone?.id ?? '').trim() || null : null;
   const droneScope = Boolean(boardDroneId);
-  // Where this board's cards are stored: a drone's board, the active topic's, or the global one.
-  const boardKey = boardDroneId ?? (activeTopicId ? topicBoardKey(activeTopicId) : null);
+  const organizedSetting = useDroneCanvasStore((s) => s.organizedDroneBoard);
+  const setOrganizedDroneBoard = useDroneCanvasStore((s) => s.setOrganizedDroneBoard);
+  // A drone board laid out for the user: its positions are worked out, not stored, and its cards are not moved.
+  const organized = droneScope && organizedSetting;
+  // Where this board's cards are stored: a drone's board (or its organized one), the active topic's, or the global one.
+  const boardKey = boardDroneId
+    ? (organized ? organizedBoardKey(boardDroneId) : boardDroneId)
+    : (activeTopicId ? topicBoardKey(activeTopicId) : null);
   // Members of a topic are every chat of its drones, each drone with its own card.
   const topicDrones = React.useMemo(
     () => (activeTopic ? activeTopic.droneIds.flatMap((droneId) => (droneById[droneId] ? [droneById[droneId]] : [])) : []),
@@ -503,14 +529,32 @@ export function DroneCanvasDock({
     // Keyed like boardMembers: the summary object is rebuilt on every refresh.
   }, [boardDroneId, boardMemberKey]);
 
+  // On the organized board side chats are squares on the card they came from, not cards of their own.
+  const boardSideChatNameKey = (boardSideChats ?? []).map((chat) => chat.name).join('\u0000');
+  const cardMembers = React.useMemo(() => {
+    if (!organized) return boardMembers;
+    const sideChatNames = new Set(boardSideChatNameKey ? boardSideChatNameKey.split('\u0000') : []);
+    for (const member of optimisticMembers ?? []) if (member.sideChat) sideChatNames.add(member.chatName);
+    return boardMembers.filter((member) => !sideChatNames.has(member.chatName));
+  }, [boardMembers, boardSideChatNameKey, optimisticMembers, organized]);
   // Stored positions outlive a chat briefly (renames land in two steps), so a
   // drone board renders members only instead of pruning the store.
   const boardMemberIds = React.useMemo(() => {
     if (!autoMembers) return null;
-    const ids = new Set(boardMembers.map((member) => member.nodeId));
+    const ids = new Set(cardMembers.map((member) => member.nodeId));
     for (const drone of topicDrones) ids.add(createCanvasDroneNodeId(drone.id));
     return ids;
-  }, [autoMembers, boardMembers, topicDrones]);
+  }, [autoMembers, cardMembers, topicDrones]);
+  // Side chats of each card's chat, by its node id; side chats of side chats go on the same card.
+  const sideChatSquaresByNodeId = React.useMemo(() => {
+    if (!organized || !boardDroneId) return {} as Record<string, Array<{ nodeId: string; chatName: string; sourceChatName: string }>>;
+    const byChat = sideChatSquaresByChat(boardSideChats, new Set(cardMembers.map((member) => member.chatName)));
+    return Object.fromEntries(Object.entries(byChat).map(([chatName, squares]) => [
+      createCanvasChatNodeId(boardDroneId, chatName),
+      squares.map((square) => ({ ...square, nodeId: createCanvasChatNodeId(boardDroneId, square.chatName) })),
+    ]));
+    // The summary is rebuilt on every refresh; its side chats are in the member key.
+  }, [boardDroneId, boardMemberKey, cardMembers, organized]);
   // A topic also holds drafts: double-click makes a new drone there, as on the global board.
   const isShownNode = React.useCallback(
     (nodeId: string) => !boardMemberIds || boardMemberIds.has(nodeId) || (topicScope && isCanvasDraftNodeId(nodeId)),
@@ -549,9 +593,16 @@ export function DroneCanvasDock({
   const pendingClonesRef = React.useRef(new Map<string, Promise<boolean>>());
   const pendingChatPlacementRef = React.useRef<{ x: number; y: number } | null>(null);
   const getView = React.useCallback(() => selectCanvasBoard(useDroneCanvasStore.getState(), boardKey), [boardKey]);
+  // The organized board's view is the layout's: no zoom and no pan, so every card and its notes stay in view.
+  const organizedRef = React.useRef(organized);
+  organizedRef.current = organized;
+  const isViewLocked = React.useCallback(() => organizedRef.current, []);
+  const setPanUnlessLocked = React.useCallback((panX: number, panY: number) => {
+    if (!organizedRef.current) setPan(panX, panY);
+  }, [setPan]);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const edgePan = useCanvasEdgePanLock({
-    regionRef: panelRef, getView, setPan,
+    regionRef: panelRef, getView, setPan: setPanUnlessLocked,
     // A double middle-click fills the workspace with the canvas, or leaves that again.
     onDoubleMiddleClick: toggleCanvasFullView,
   });
@@ -683,10 +734,10 @@ export function DroneCanvasDock({
       out[node.droneId] = detailedCardWidthPx(nodeLabelWidthPx(label), {
         runtimeIcon: Boolean(canvasDroneId),
         stateSlot: !canvasDroneId || droneCardShowsState(canvasDroneId),
-      });
+      }) + sideChatSquaresWidthPx(sideChatSquaresByNodeId[node.droneId]?.length ?? 0);
     }
     return out;
-  }, [droneCardShowsState, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes]);
+  }, [droneCardShowsState, effectiveDroneNameById, inlineRenameDraft, inlineRenamingDroneId, nodes, sideChatSquaresByNodeId]);
   // What every chat on the canvas has cost, each counted once: a drone card stands for all its chats.
   const canvasCost = React.useMemo(() => {
     const chatIds = new Set<string>();
@@ -867,9 +918,21 @@ export function DroneCanvasDock({
       nextCache[node.droneId] = cached && cached.key === key ? cached : { key, card };
       out[node.droneId] = nextCache[node.droneId].card;
     }
+    // A side chat's square says its state like a card would. Its approval is its own, not the drone's.
+    for (const square of Object.values(sideChatSquaresByNodeId).flat()) {
+      const chatRef = parseCanvasChatNodeId(square.nodeId);
+      if (!chatRef) continue;
+      const input = chatInput(chatRef.droneId, chatRef.chatName);
+      const sideChat = droneById[chatRef.droneId]?.sideChats?.find((chat) => chat.name === chatRef.chatName);
+      const card = sideChat?.approval && input.card.state !== 'need' ? { ...input.card, state: 'need' as const, icon: 'approval' as const } : input.card;
+      const key = JSON.stringify(card);
+      const cached = cache[square.nodeId];
+      nextCache[square.nodeId] = cached && cached.key === key ? cached : { key, card };
+      out[square.nodeId] = nextCache[square.nodeId].card;
+    }
     detailCacheRef.current = nextCache;
     return out;
-  }, [busySeenAt, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, droneCardShowsState, nodes]);
+  }, [busySeenAt, cardNowMs, chatActivityByNodeId, chatNodeStateById, chatNodesByDroneId, chatStepsByNodeId, draftPromptByNodeId, droneById, droneCardShowsState, nodes, sideChatSquaresByNodeId]);
   const selectedDraftNodeId = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
     const id = String(selectedDroneIds[0] ?? '').trim();
@@ -1036,6 +1099,123 @@ export function DroneCanvasDock({
       setHideSideChatWindowsWithCanvas: s.setHideSideChatWindowsWithCanvas,
     })),
   );
+
+  // The organized board: chats in the sidebar's order, each tree of clones and created chats together, packed to fit
+  // the pane. It is laid out again when a chat comes, goes or is renamed, the pane resizes or previews show; nothing
+  // else moves it.
+  const sidebarChatOrder = useDroneHubUiStore(useShallow((s) => ({
+    order: boardDroneId ? s.sidebarChatOrderByDrone[boardDroneId] : undefined,
+    groupPaths: boardDroneId ? s.sidebarChatGroupPathsByDrone[boardDroneId] : undefined,
+    groupByChat: s.sidebarChatGroupByChat,
+    nodeOrderByParent: s.sidebarChatNodeOrderByParent,
+  })));
+  const [organizedViewportSize, setOrganizedViewportSize] = React.useState<{ width: number; height: number } | null>(null);
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!organized || !viewport) return;
+    const measure = () => {
+      const width = Math.round(viewport.clientWidth);
+      const height = Math.round(viewport.clientHeight);
+      setOrganizedViewportSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(viewport);
+    return () => observer?.disconnect();
+  }, [organized]);
+  const boardChatCreators = boardDrone?.chatCreators;
+  const boardChatCreatorsKey = JSON.stringify(boardChatCreators ?? {});
+  // Canvas node id of a chat -> the chat that created it, when it was not cloned from one: its line on the board.
+  const createdSourceNodeIdByNodeId = React.useMemo(() => {
+    const out: Record<string, string> = {};
+    if (!organized || !boardDroneId) return out;
+    const creators = JSON.parse(boardChatCreatorsKey) as Record<string, string>;
+    for (const member of cardMembers) {
+      const creator = creators[member.chatName];
+      if (creator && !member.sourceNodeId) out[member.nodeId] = createCanvasChatNodeId(boardDroneId, creator);
+    }
+    return out;
+  }, [boardChatCreatorsKey, boardDroneId, cardMembers, organized]);
+  // Everything the layout depends on, as one string: summaries and widths are rebuilt often without changing.
+  const organizedLayoutInput = React.useMemo(() => {
+    if (!organized || !boardDroneId || !organizedViewportSize) return '';
+    // The Hub lists a drone's chats sorted by name. A chat it has not confirmed yet goes where that will put it, so a
+    // new chat does not show at the end and then jump into its place.
+    const confirmed = new Set(boardChats ?? []);
+    const names: string[] = [];
+    for (const member of cardMembers) {
+      if (confirmed.has(member.chatName) || names.length === 0) {
+        names.push(member.chatName);
+        continue;
+      }
+      const at = names.findIndex((name) => confirmed.has(name) && name > member.chatName);
+      names.splice(at < 0 ? names.length : at, 0, member.chatName);
+    }
+    const tree = buildSidebarChatTree({
+      droneId: boardDroneId,
+      chatNames: orderSidebarEntries(names, sidebarChatOrder.order ?? [], (name) => name),
+      groupPaths: sidebarChatOrder.groupPaths ?? [],
+      groupByChat: sidebarChatOrder.groupByChat,
+      nodeOrderByParent: sidebarChatOrder.nodeOrderByParent,
+    });
+    const rank = new Map<string, number>();
+    for (const id of flattenSidebarChatTreeChatNodeIds(tree)) {
+      const node = tree.nodesById[id];
+      if (node?.kind === 'chat') rank.set(node.chatName, rank.size);
+    }
+    const memberByName = new Map(cardMembers.map((member) => [member.chatName, member]));
+    const ordered = [...names].sort((a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity));
+    return JSON.stringify({
+      cards: ordered.map((chatName) => {
+        const member = memberByName.get(chatName)!;
+        return {
+          nodeId: member.nodeId,
+          width: detailedCardWidthPx(nodeLabelWidthPx(chatName), { runtimeIcon: false, stateSlot: true })
+            + sideChatSquaresWidthPx(sideChatSquaresByNodeId[member.nodeId]?.length ?? 0),
+          parentNodeId: member.sourceNodeId ?? createdSourceNodeIdByNodeId[member.nodeId] ?? null,
+        };
+      }),
+      // A latest reply shows above its card: rows make room for it.
+      rowGap: showCanvasLastMessagePreviews ? 62 : 12,
+      ...organizedViewportSize,
+    });
+  }, [boardChats, boardDroneId, cardMembers, createdSourceNodeIdByNodeId, organized, organizedViewportSize, showCanvasLastMessagePreviews,
+    sideChatSquaresByNodeId, sidebarChatOrder]);
+  const organizedLayout = React.useMemo((): OrganizedLayout | null => {
+    if (!organizedLayoutInput) return null;
+    const input = JSON.parse(organizedLayoutInput);
+    return layoutOrganizedBoard(input.cards, {
+      cardHeight: DETAILED_CARD_HEIGHT_PX,
+      rowGap: input.rowGap,
+      viewportWidth: input.width,
+      viewportHeight: input.height,
+      // The canvas composer floats over the bottom of the board.
+      bottomInset: 60,
+    });
+  }, [organizedLayoutInput]);
+  const organizedLayoutRef = React.useRef(organizedLayout);
+  organizedLayoutRef.current = organizedLayout;
+  React.useLayoutEffect(() => {
+    if (!organizedLayout) return;
+    const view = getView();
+    const spread = cardSpreadRef.current;
+    const updates: Array<{ droneId: string; label: string; x: number; y: number }> = [];
+    for (const member of cardMembers) {
+      const position = organizedLayout.positions[member.nodeId];
+      if (!position) continue;
+      const x = Math.round((position.x / spread.x) * 10) / 10;
+      const y = Math.round((position.y / spread.y) * 10) / 10;
+      const node = view.nodesByDroneId[member.nodeId];
+      if (node && node.label === member.chatName && Math.abs(node.x - x) < 0.05 && Math.abs(node.y - y) < 0.05) continue;
+      updates.push({ droneId: member.nodeId, label: member.chatName, x, y });
+    }
+    if (updates.length > 0) upsertNodes(updates);
+    const stale = Object.keys(view.nodesByDroneId).filter((nodeId) => !organizedLayout.positions[nodeId]);
+    if (stale.length > 0) removeNodes(stale);
+    const { panX, panY, scale } = organizedLayout.view;
+    if (view.panX !== panX || view.panY !== panY || view.scale !== scale) setViewport(panX, panY, scale);
+    // Members follow the layout input; the layout is what changes.
+  }, [boardKey, organizedLayout]);
 
   React.useEffect(() => {
     const known = new Set(nodeOrder);
@@ -1441,7 +1621,8 @@ export function DroneCanvasDock({
   }, [boardMembers, effectiveDroneNameById, getView, nodeMetaById, topicDrones, topicScope, upsertNodes]);
 
   React.useEffect(() => {
-    if (!droneScope) return;
+    // The organized board places its cards itself; the drone's own board takes new chats once it is shown again.
+    if (!droneScope || organized) return;
     const anyPlaced = boardMembers.some((member) => nodeMetaById[member.nodeId]);
     let rootAnchor = pendingChatPlacementRef.current;
     const viewport = viewportRef.current;
@@ -1463,7 +1644,7 @@ export function DroneCanvasDock({
     if (planned.length === 0) return;
     if (planned.some((node) => !forkSourceNodeIdByNodeId[node.droneId])) pendingChatPlacementRef.current = null;
     upsertNodes(planned);
-  }, [boardMembers, droneScope, forkSourceNodeIdByNodeId, getView, nodeMetaById, upsertNodes]);
+  }, [boardMembers, droneScope, forkSourceNodeIdByNodeId, getView, nodeMetaById, organized, upsertNodes]);
 
   React.useEffect(() => {
     if (selectedDroneIds.length > 0) return;
@@ -1738,7 +1919,8 @@ export function DroneCanvasDock({
           resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY),
         );
         const ownerDroneId = assignmentTarget.ownerDroneId;
-        if (ownerDroneId) {
+        // The organized board keeps its places: a card dragged anywhere but onto a target goes back to its own.
+        if (organizedLayoutRef.current || ownerDroneId) {
           moveNodes(
             nodeDrag.droneIds
               .map((droneId) => {
@@ -1748,7 +1930,7 @@ export function DroneCanvasDock({
               })
               .filter(Boolean) as Array<{ droneId: string; x: number; y: number }>,
           );
-          if (onAssignDronesToOwner) {
+          if (ownerDroneId && onAssignDronesToOwner) {
             const targetDroneIds = assignmentTarget.targetDroneIds;
             if (targetDroneIds.length > 0) {
               setMessageError(null);
@@ -1796,6 +1978,13 @@ export function DroneCanvasDock({
       setCanvasGesture(viewportRef.current, false);
       const nodeDrag = nodeDragRef.current;
       if (nodeDrag?.moved) suppressNodeClickRef.current = true;
+      // As on a release: the organized board's cards go back to their places.
+      if (nodeDrag?.moved && organizedLayoutRef.current) {
+        moveNodes(nodeDrag.droneIds.flatMap((droneId) => {
+          const start = nodeDrag.startPositionsById[droneId];
+          return start ? [{ droneId, x: start.x, y: start.y }] : [];
+        }));
+      }
       setComposerDropHover(false);
       dispatchCanvasAssignmentPreview(null);
       setAssignmentHoverNodeId(null);
@@ -2232,10 +2421,11 @@ export function DroneCanvasDock({
     [activateCanvasNode, droneScope, openDroneBoard],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard: cardHover.hover, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard: cardHover.hover, openSideChat: activateCanvasNode, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
+  const lastMiddleClickAtRef = React.useRef(-Infinity);
   const onCanvasMouseDown = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const { panX, panY } = getView();
@@ -2243,11 +2433,23 @@ export function DroneCanvasDock({
       // Middle-click holds the cursor in the canvas for edge panning; while held, the lock itself releases it.
       if (event.button === 1) {
         event.preventDefault();
-        edgePan.lock(event.clientX, event.clientY);
+        if (!organized) {
+          edgePan.lock(event.clientX, event.clientY);
+          return;
+        }
+        // Nothing to pan to on the organized board: no cursor hold, but a double middle-click still fills the workspace.
+        const now = performance.now();
+        if (now - lastMiddleClickAtRef.current <= DOUBLE_MIDDLE_CLICK_MS) {
+          lastMiddleClickAtRef.current = -Infinity;
+          toggleCanvasFullView();
+        } else {
+          lastMiddleClickAtRef.current = now;
+        }
         return;
       }
       if (event.button === 2) {
         event.preventDefault();
+        if (organized) return;
         canvasPerf.gestureStart('pan');
         cardHover.clear();
         setCanvasGesture(viewportRef.current, true);
@@ -2290,7 +2492,7 @@ export function DroneCanvasDock({
       };
       setSelectionBox(buildSelectionBox(event.clientX, event.clientY, event.clientX, event.clientY, rect));
     },
-    [edgePan.lock, getView, selectedDroneIds, setSelectedDroneIds],
+    [edgePan.lock, getView, organized, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onCanvasDoubleClick = React.useCallback(
@@ -2332,7 +2534,7 @@ export function DroneCanvasDock({
   );
 
   // Zooming moves cards under the pointer: the steps panel waits until the pointer rests again.
-  useCanvasWheelZoom(viewportRef, getView, setViewport, cardHover.clear);
+  useCanvasWheelZoom(viewportRef, getView, setViewport, cardHover.clear, isViewLocked);
   const { setNodeRef: setCanvasDropNodeRef } = useDroppable({
     id: 'canvas-drop',
     data: { type: 'canvas-drop' },
@@ -2792,6 +2994,26 @@ export function DroneCanvasDock({
     ],
   );
 
+  // Each card's squares, the same array while nothing on it changed, so its card does not render again.
+  const squaresCacheRef = React.useRef<Record<string, readonly CanvasSideChatSquare[]>>({});
+  const squaresByNodeId = React.useMemo(() => {
+    const previous = squaresCacheRef.current;
+    const out: Record<string, readonly CanvasSideChatSquare[]> = {};
+    for (const [nodeId, squares] of Object.entries(sideChatSquaresByNodeId)) {
+      const next = squares.flatMap((square) => {
+        const detail = detailByNodeId[square.nodeId];
+        return detail ? [{ nodeId: square.nodeId, chatName: square.chatName, detail, open: openChatShown && square.nodeId === sidebarSelectedChatNodeId }] : [];
+      });
+      const kept = previous[nodeId];
+      out[nodeId] = kept && kept.length === next.length && kept.every((square, index) =>
+        square.nodeId === next[index]!.nodeId && square.detail === next[index]!.detail && square.open === next[index]!.open)
+        ? kept
+        : next;
+    }
+    squaresCacheRef.current = out;
+    return out;
+  }, [detailByNodeId, openChatShown, sideChatSquaresByNodeId, sidebarSelectedChatNodeId]);
+
   const cardById: Record<string, React.ReactElement> = {};
   for (const node of nodes) {
     const draftNode = isCanvasDraftNodeId(node.droneId);
@@ -2858,6 +3080,7 @@ export function DroneCanvasDock({
       nodeElementByDroneIdRef={nodeElementByDroneIdRef}
       inlineRenameInputRef={inlineRenameInputRef}
       inlineRenameSettledRef={inlineRenameSettledRef}
+      sideChatSquares={squaresByNodeId[node.droneId]}
     />;
   }
 
@@ -2886,6 +3109,19 @@ export function DroneCanvasDock({
               >
                 This drone
               </UiToolbarButton>
+            ) : null}
+            {droneScope ? (
+              <UiToolbarIconButton size="xsmall"
+                onClick={() => setOrganizedDroneBoard(!organizedSetting)}
+                label="Organized layout"
+                icon={<OrganizedLayoutIcon />}
+                tone="accent"
+                active={organizedSetting}
+                aria-pressed={organizedSetting}
+                title={organizedSetting
+                  ? 'Organized: chats are laid out for you, copies and created chats beside the chat they came from, side chats as squares on it. Click to place cards yourself again.'
+                  : 'Lay the chats out for you: everything fits, copies and created chats beside the chat they came from, side chats as squares on it. Your own layout stays for when you turn it off.'}
+              />
             ) : null}
             <UiToolbarButton size="xsmall"
               pressed={!droneScope && !topicScope}
@@ -2933,17 +3169,20 @@ export function DroneCanvasDock({
               Side chat windows
             </UiToolbarButton>
           </div>
-          <div className="ml-auto flex flex-shrink-0 items-center gap-1">
-            <CanvasEdgePanControls lock={edgePan} />
-            <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true" />
-            <UiToolbarButton size="xsmall" onClick={fitViewportToNodes} disabled={nodes.length === 0} title="Zoom and pan so every node is in view">
-              Fit
-            </UiToolbarButton>
-            <UiToolbarButton size="xsmall" onClick={resetViewport} title="Reset canvas view">
-              Reset
-            </UiToolbarButton>
-            <CanvasZoomLabel boardKey={boardKey} />
-          </div>
+          {/* The organized board always shows all of itself: nothing here to pan or zoom. */}
+          {organized ? null : (
+            <div className="ml-auto flex flex-shrink-0 items-center gap-1">
+              <CanvasEdgePanControls lock={edgePan} />
+              <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true" />
+              <UiToolbarButton size="xsmall" onClick={fitViewportToNodes} disabled={nodes.length === 0} title="Zoom and pan so every node is in view">
+                Fit
+              </UiToolbarButton>
+              <UiToolbarButton size="xsmall" onClick={resetViewport} title="Reset canvas view">
+                Reset
+              </UiToolbarButton>
+              <CanvasZoomLabel boardKey={boardKey} />
+            </div>
+          )}
         </UiPanelToolbar>
         {canvasControlsExpanded && !droneScope ? (
           <UiPanelToolbar
@@ -3033,6 +3272,7 @@ export function DroneCanvasDock({
             fleetParentIdByDroneId={fleetParentIdByDroneId}
             fleetAssignedIdsByDroneId={fleetAssignedIdsByDroneId}
             forkSourceNodeIdByNodeId={edgeForkSourceNodeIdByNodeId}
+            createdSourceNodeIdByNodeId={createdSourceNodeIdByNodeId}
           />
           <CanvasCardsLayer
             boardKey={boardKey}
