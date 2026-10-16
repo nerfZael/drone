@@ -3060,8 +3060,11 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
     </>
   ) : null;
 
+  // Like the File Explorer's workspace switcher, the worktree picker heads the explorer whose files it decides.
+  const shownWorktreeSwitcher = repoAttached && !disabled && contextMode === 'branch' ? worktreeSwitcher : null;
   const explorerHeader = (
     <WorkspaceExplorerHeader
+      title={shownWorktreeSwitcher ?? undefined}
       zoom={explorerZoom}
       onDecreaseZoom={decreaseExplorerZoom}
       onIncreaseZoom={increaseExplorerZoom}
@@ -3071,6 +3074,18 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   const showChangesExplorer =
     primaryView === 'changes' && repoAttached && !disabled && !showingInitialLoad && !listError && entries.length > 0 &&
     (separateExplorer ? Boolean(explorerHost) : viewMode === 'split' && !showingPullRequestOverview);
+  // The detached explorer keeps its header in every state, so a worktree with nothing changed can still be switched
+  // away from; with no explorer on screen the picker falls back to the Changes toolbar.
+  const worktreeSwitcherInExplorer = separateExplorer ? Boolean(explorerHost) : showChangesExplorer;
+  const withSwitcherHeader = (state: React.ReactNode) =>
+    shownWorktreeSwitcher ? (
+      <>
+        {explorerHeader}
+        <div className="flex min-h-0 flex-1 flex-col">{state}</div>
+      </>
+    ) : (
+      state
+    );
   const explorerContents = showChangesExplorer ? (
     <>
       {explorerHeader}
@@ -3132,14 +3147,14 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
   const detachedExplorerContents = !explorerHost ? null : !repoAttached ? (
     <UiPaneState kind="unavailable" title="Repository unavailable" />
   ) : disabled || showingInitialLoad ? (
-    <UiCenteredLoadingState message={disabled ? 'Waiting for repository…' : initialLoadingLabel} />
+    withSwitcherHeader(<UiCenteredLoadingState message={disabled ? 'Waiting for repository…' : initialLoadingLabel} />)
   ) : primaryView === 'commits' ? (
     commitListError || activeCommitDetailsError ? (
-      <UiPaneState kind="error" title="Could not load commit files" description={commitListError || activeCommitDetailsError} />
+      withSwitcherHeader(<UiPaneState kind="error" title="Could not load commit files" description={commitListError || activeCommitDetailsError} />)
     ) : activeCommitDetailsLoading ? (
-      <UiCenteredLoadingState message="Loading commit files…" />
+      withSwitcherHeader(<UiCenteredLoadingState message="Loading commit files…" />)
     ) : !selectedCommit ? (
-      <UiPaneState kind="empty" title="Select a commit to browse its files." />
+      withSwitcherHeader(<UiPaneState kind="empty" title="Select a commit to browse its files." />)
     ) : (
       <>
         {explorerHeader}
@@ -3147,9 +3162,9 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       </>
     )
   ) : listError ? (
-    <UiPaneState kind="error" title="Could not load changes" description={listError} />
+    withSwitcherHeader(<UiPaneState kind="error" title="Could not load changes" description={listError} />)
   ) : entries.length === 0 ? (
-    <UiPaneState kind="empty" title={emptyChangesTitle} description={emptyChangesDescription} action={emptyChangesAction} />
+    withSwitcherHeader(<UiPaneState kind="empty" title={emptyChangesTitle} description={emptyChangesDescription} action={emptyChangesAction} />)
   ) : explorerContents;
   const detachedExplorer = explorerHost ? createPortal(
     <div className="dh-utility-panel-inset flex h-full min-h-0 flex-col overflow-hidden" data-changes-explorer="detached">
@@ -3204,7 +3219,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
           className="!min-h-8 !gap-1.5 !px-1.5 !py-0.5"
         >
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
-          {repoAttached && !disabled && contextMode === 'branch' ? worktreeSwitcher : null}
+          {worktreeSwitcherInExplorer ? null : shownWorktreeSwitcher}
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' && !worktree ? (
             <UiToolbarSegmentedControl
               label="Branch change source"
