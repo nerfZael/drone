@@ -26,7 +26,7 @@ async function withRunner(
     output: () => string;
     exited: Promise<number | null>;
   }) => Promise<void>,
-  options: { idleCloseGraceMs?: number } = {},
+  options: { idleCloseGraceMs?: number; scheduleLateMs?: number } = {},
 ) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-stream-test-'));
   const stdoutPath = path.join(directory, 'stdout');
@@ -41,6 +41,7 @@ async function withRunner(
         prompt: 'initial',
         ...claudeStreamPaths(stdoutPath),
         idleCloseGraceMs: options.idleCloseGraceMs,
+        scheduleLateMs: options.scheduleLateMs,
       }),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
@@ -272,4 +273,100 @@ test('a wake-up right after a turn whose task ended in it is still recorded', as
       ['initial-wake-1', true, ['npm test completed']],
     ]);
   });
+});
+
+// Mirrors headless Claude's ScheduleWakeup and CronCreate: the tool call and its
+// result are all the output shows; the wake-up later starts a turn with no report.
+const fakeSchedulingClaude = (mode: 'wake' | 'hold' | 'stale' | 'cron') => `
+  const lines = require('node:readline').createInterface({ input: process.stdin });
+  const emit = (event) => console.log(JSON.stringify(event));
+  let calls = 0;
+  const call = (name, input, result, isError) => {
+    const id = 'toolu_' + ++calls;
+    emit({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+    emit({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, ...(isError ? { is_error: true } : {}) }] } });
+  };
+  const wakeup = (seconds) => call('ScheduleWakeup', { delaySeconds: 600, reason: 'check the captures', prompt: 'build the page' },
+    [{ type: 'text', text: 'Next wakeup scheduled for 12:53:00 (in ' + seconds + 's). End the turn.' }]);
+  lines.on('line', (line) => {
+    const event = JSON.parse(line);
+    const content = event.message.content;
+    emit({ type: 'system', subtype: 'init' });
+    emit(event);
+    if (content === 'initial') {
+      if (${JSON.stringify(mode)} === 'wake') {
+        wakeup(1);
+        setTimeout(() => {
+          emit({ type: 'system', subtype: 'init' });
+          emit({ type: 'result', subtype: 'success', result: 'captures done' });
+        }, 300);
+      }
+      if (${JSON.stringify(mode)} === 'hold') wakeup(600);
+      if (${JSON.stringify(mode)} === 'stale') wakeup(0);
+      if (${JSON.stringify(mode)} === 'cron') {
+        call('CronCreate', { cron: '*/5 * * * *', prompt: 'poll the queue' }, 'Scheduled recurring task 3f2a91bc (*/5 * * * *).');
+        call('CronCreate', { cron: '1 2 3 4 *', prompt: 'refused' }, 'Invalid cron', true);
+      }
+    }
+    if (content === 'cancel') call('ScheduleWakeup', { stop: true }, 'Wakeup cancelled.');
+    if (content === 'uncron') call('CronDelete', { id: '3f2a91bc' }, 'Cancelled job 3f2a91bc.');
+    emit({ type: 'result', subtype: 'success', result: 'reply to ' + content });
+  });
+`;
+
+test('a scheduled wake-up keeps the run alive and labels the turn it starts', async () => {
+  await withRunner(fakeSchedulingClaude('wake'), async ({ stdoutPath, exited }) => {
+    await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+    const [wakeup] = (await readClaudeStreamState(stdoutPath))?.backgroundTasks ?? [];
+    expect([wakeup?.type, wakeup?.description]).toEqual(['wakeup', 'check the captures']);
+    expect(Date.parse(wakeup!.dueAt!) - Date.parse(wakeup!.startedAt)).toBe(1_000);
+
+    // Once the wake-up has fired, nothing is left to keep the run open.
+    expect(await exited).toBe(0);
+    const state = await readClaudeStreamState(stdoutPath);
+    expect(state?.backgroundTasks).toEqual([]);
+    expect(state?.turns?.map((turn) => [turn.id, turn.ok, turn.wake?.summaries])).toEqual([
+      ['initial', true, undefined],
+      ['initial-wake-1', true, ['Scheduled wake-up: check the captures']],
+    ]);
+  });
+});
+
+test('a cancelled wake-up releases the run', async () => {
+  await withRunner(fakeSchedulingClaude('hold'), async ({ stdoutPath, exited }) => {
+    await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+    expect(await steerClaudeStream(stdoutPath, 'second', 'cancel')).toBe(true);
+    expect(await exited).toBe(0);
+  });
+});
+
+test('a recurring cron job holds the run until deleted', async () => {
+  await withRunner(fakeSchedulingClaude('cron'), async ({ stdoutPath, exited }) => {
+    await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+    // The refused CronCreate schedules nothing.
+    expect(
+      (await readClaudeStreamState(stdoutPath))?.backgroundTasks?.map((task) => [
+        task.id,
+        task.type,
+        task.recurring,
+        task.description,
+      ]),
+    ).toEqual([['cron:3f2a91bc', 'cron', true, 'poll the queue']]);
+    expect(await steerClaudeStream(stdoutPath, 'second', 'uncron')).toBe(true);
+    expect(await exited).toBe(0);
+  });
+});
+
+test('a wake-up that never fires stops holding the run once it is overdue', async () => {
+  await withRunner(
+    fakeSchedulingClaude('stale'),
+    async ({ stdoutPath, exited }) => {
+      await waitUntil(async () => Boolean((await readClaudeStreamState(stdoutPath))?.resident));
+      expect(await exited).toBe(0);
+      const state = await readClaudeStreamState(stdoutPath);
+      expect(state?.backgroundTasks).toEqual([]);
+      expect(state?.turns?.map((turn) => turn.id)).toEqual(['initial']);
+    },
+    { idleCloseGraceMs: 100, scheduleLateMs: 300 },
+  );
 });
