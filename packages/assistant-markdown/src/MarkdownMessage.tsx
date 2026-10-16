@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { rehypeStatusIcons } from './status-icons.js';
 import {
   allocateFitTableColumnWidths,
   type FitTableColumnMetric,
@@ -1182,6 +1183,7 @@ const STABLE_MARKDOWN_COMPONENTS: NonNullable<
 };
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const MARKDOWN_REHYPE_PLUGINS = [rehypeStatusIcons];
 
 export function MarkdownMessage({
   text,
@@ -1296,6 +1298,7 @@ export function MarkdownMessage({
         <MarkdownCodeRenderContext.Provider value={codeRenderContext}>
           <ReactMarkdown
             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={STABLE_MARKDOWN_COMPONENTS}
             urlTransform={onOpenFileReference || onOpenLink ? markdownUrlTransform : defaultUrlTransform}
           >

@@ -3,6 +3,7 @@ import { useCompanionWindow } from './companion-window';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import type { CompanionScreen } from '@drone/assistant-chat';
+import { rehypeStatusIcons } from '@drone/assistant-markdown';
 
 export function CompanionScreenPanel({ screen }: { screen: CompanionScreen }) {
   const { ownerWindow, portalContainer, detached } = useCompanionWindow();
@@ -42,7 +43,7 @@ export function CompanionScreenPanel({ screen }: { screen: CompanionScreen }) {
     });
     return () => { cancelled = true; };
   }, [screen, state.candidate, bounds]);
-  const content = (markdown: string) => <ReactMarkdown skipHtml components={markdownComponents}>{markdown}</ReactMarkdown>;
+  const content = (markdown: string) => <ReactMarkdown skipHtml rehypePlugins={rehypePlugins} components={markdownComponents}>{markdown}</ReactMarkdown>;
   const display = <div data-companion-surface="true" style={detached ? { position: 'relative', width: '100%', zIndex: 1 } : { position: 'fixed', bottom: bounds.bottom, right: bounds.right, width: bounds.width + 26, zIndex: 101 }}>
     {state.markdown ? <section aria-label="Companion display" style={{ boxSizing: 'border-box', padding: 12, border: '1px solid var(--border-subtle)', borderRadius: 12, background: 'var(--panel-raised, var(--panel))', color: 'var(--text)', maxHeight: detached ? undefined : bounds.height + 48, overflow: 'auto' }}>
       <button type="button" aria-label="Dismiss Companion display" onClick={() => screen.clear()} style={{ display: 'block', marginLeft: 'auto', height: 22, lineHeight: '22px', fontSize: 12 }}>Dismiss</button>
@@ -54,6 +55,8 @@ export function CompanionScreenPanel({ screen }: { screen: CompanionScreen }) {
 }
 
 const textStyle: React.CSSProperties = { display: 'flow-root', fontSize: 14, lineHeight: '22px', overflowWrap: 'anywhere' };
+
+const rehypePlugins = [rehypeStatusIcons];
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 style={{ fontSize: 22, lineHeight: '28px', fontWeight: 700, margin: '8px 0' }}>{children}</h1>,

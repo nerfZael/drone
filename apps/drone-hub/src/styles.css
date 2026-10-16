@@ -1995,6 +1995,42 @@ code, pre {
   font-weight: var(--weight-strong);
 }
 
+/* Status emoji (✅ 🔄 ⏳ …) drawn as line icons in the theme's status colours.
+   Not scoped to .dh-markdown: the Companion display renders markdown too. */
+.dh-md-status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1em;
+  vertical-align: -.14em;
+  color: var(--muted-dim);
+}
+.dh-md-status--success { color: var(--green); }
+.dh-md-status--danger { color: var(--red); }
+.dh-md-status--warning { color: var(--yellow); }
+.dh-md-status--info { color: var(--info); }
+del .dh-md-status { opacity: .7; }
+.dh-md-status__icon {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dh-md-status__text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .dh-markdown a {
   color: var(--link);
   text-decoration: underline;
