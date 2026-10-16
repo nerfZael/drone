@@ -480,21 +480,19 @@ function ToolPartialFailureIcon({ className }: { className?: string }) {
 }
 
 function ToolSpinnerIcon({ className }: { className?: string }) {
+  // The wrapper spins so the animation stays on the compositor (SVG animations repaint every frame).
   return (
-    <svg
-      className={`animate-spin motion-reduce:animate-none ${className ?? ''}`}
-      viewBox="0 0 12 12"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-      <path
-        d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
+    <span className={`inline-block animate-spin motion-reduce:animate-none ${className ?? ''}`} aria-hidden="true">
+      <svg className="block h-full w-full" viewBox="0 0 12 12" fill="none">
+        <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+        <path
+          d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    </span>
   );
 }
 
