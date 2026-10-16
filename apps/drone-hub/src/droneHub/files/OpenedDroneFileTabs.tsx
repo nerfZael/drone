@@ -9,6 +9,8 @@ type OpenedDroneFileTabsProps = {
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onReorderTabs: (fromTabId: string, toTabId: string) => void;
+  /** The workspace a tab's file is in, when the strip holds tabs from more than the drone's own; null for its own. */
+  workspaceLabel?: (tab: DroneOpenedFileTabState) => string | null;
   trailingActions?: React.ReactNode;
   fullScreenAction?: {
     active: boolean;
@@ -63,6 +65,7 @@ export function OpenedDroneFileTabs({
   onActivateTab,
   onCloseTab,
   onReorderTabs,
+  workspaceLabel,
   trailingActions,
   fullScreenAction,
 }: OpenedDroneFileTabsProps) {
@@ -83,7 +86,8 @@ export function OpenedDroneFileTabs({
               .filter(Boolean)
               .pop() ||
             'File';
-          const title = `${displayName}${tab.dirty ? ' (unsaved)' : ''}`;
+          const workspace = workspaceLabel?.(tab) ?? null;
+          const title = `${displayName}${workspace ? ` · ${workspace}` : ''}${tab.dirty ? ' (unsaved)' : ''}`;
           return (
             <div
               key={tab.tabId}
@@ -123,7 +127,7 @@ export function OpenedDroneFileTabs({
                 if (!fromTabId || fromTabId === tab.tabId) return;
                 onReorderTabs(fromTabId, tab.tabId);
               }}
-              className={`group/tab relative flex h-9 min-w-[120px] max-w-[200px] items-center gap-0 overflow-hidden border-r border-[var(--border-subtle)] text-ui transition-colors ${
+              className={`group/tab relative flex h-9 min-w-[120px] ${workspace ? 'max-w-[260px]' : 'max-w-[200px]'} items-center gap-0 overflow-hidden border-r border-[var(--border-subtle)] text-ui transition-colors ${
                 active
                   ? 'bg-[var(--editor-surface)] text-[var(--fg)] shadow-[inset_0_2px_0_var(--accent)]'
                   : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -143,6 +147,10 @@ export function OpenedDroneFileTabs({
                   {displayName}
                   {tab.dirty ? <span aria-hidden="true">*</span> : null}
                 </span>
+                {workspace ? (
+                  // The file's name keeps its room; the workspace gives way first.
+                  <span className="min-w-[3ch] shrink-[4] truncate text-caption text-[var(--muted-dim)]" data-tab-workspace="">{workspace}</span>
+                ) : null}
                 {tab.dirty ? (
                   <span className="sr-only"> (unsaved)</span>
                 ) : null}

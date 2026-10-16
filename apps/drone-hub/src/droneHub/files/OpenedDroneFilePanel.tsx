@@ -290,6 +290,8 @@ type OpenedDroneFilePanelProps = {
   onCloseFile?: (tabId?: string | null) => void;
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
+  /** Labels tabs whose file is in another workspace than the drone's own. */
+  workspaceLabelForTab?: (tab: DroneOpenedFileTabState) => string | null;
   onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onAppendFileDictationLine?: (input: {
     droneId: string;
@@ -318,6 +320,7 @@ export function OpenedDroneFilePanel({
   onCloseFile,
   onActivateFileTab,
   onReorderFileTabs,
+  workspaceLabelForTab,
   onOpenResolvedFile,
   onAppendFileDictationLine,
   onOpenFileDictationTarget,
@@ -1018,6 +1021,7 @@ export function OpenedDroneFilePanel({
           onActivateTab={(tabId) => onActivateFileTab?.(tabId)}
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
+          workspaceLabel={workspaceLabelForTab}
           trailingActions={
             (onAppendFileDictationLine && onOpenFileDictationTarget) ||
             openedFileIsMarkdown ||

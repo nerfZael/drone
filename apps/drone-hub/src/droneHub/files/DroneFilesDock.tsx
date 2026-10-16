@@ -304,6 +304,16 @@ export function DroneFilesDock({
     [],
   );
 
+  // The active file went to another explorer (a root of another workspace) or was closed: the row that showed it
+  // here is no longer selected, so only one explorer marks the file being edited.
+  const previousActiveFilePathRef = React.useRef(activeOpenedFilePath);
+  React.useEffect(() => {
+    const previous = previousActiveFilePathRef.current;
+    previousActiveFilePathRef.current = activeOpenedFilePath;
+    if (!previous || activeOpenedFilePath) return;
+    setSelectedPaths((current) => (current.size === 1 && current.has(previous) ? new Set() : current));
+  }, [activeOpenedFilePath]);
+
   const explorerTree = React.useMemo(
     () =>
       buildFileExplorerTree({

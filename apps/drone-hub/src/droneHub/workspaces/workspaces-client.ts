@@ -90,6 +90,19 @@ export function subscribeWorkspacesChanged(callback: () => void): () => void {
   };
 }
 
+const CHAT_WORKSPACES_CHANGED_EVENT = 'drone-hub:chat-workspaces-changed';
+
+/** Tells File Explorers in this window that a chat's workspaces were changed here (they show them as roots). */
+export function notifyChatWorkspacesChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(CHAT_WORKSPACES_CHANGED_EVENT));
+}
+
+export function subscribeChatWorkspacesChanged(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener(CHAT_WORKSPACES_CHANGED_EVENT, callback);
+  return () => window.removeEventListener(CHAT_WORKSPACES_CHANGED_EVENT, callback);
+}
+
 /** The desktop app's folder dialog, when this window has one. */
 export function folderDialog(): ((options?: { title?: string; defaultPath?: string }) => Promise<string | null>) | null {
   const choose = typeof window !== 'undefined' ? window.droneHubDesktop?.chooseFolder : undefined;

@@ -554,7 +554,10 @@ function parseWorkspaceLinkReference(raw: string): MarkdownFileReference | null 
   return { raw: text, path: shown, line, column: line == null ? null : parsePositiveInt(match[3]), link: text };
 }
 
-/** Workspace links are the app's own; every other URL goes through react-markdown's safety check. */
+/**
+ * Workspace links are the app's own, kept where the app opens files or links (elsewhere they would be followed as a web link);
+ * every other URL goes through react-markdown's safety check.
+ */
 function markdownUrlTransform(url: string): string {
   return /^workspace:\/\//i.test(url) ? url : defaultUrlTransform(url);
 }
@@ -1294,7 +1297,7 @@ export function MarkdownMessage({
           <ReactMarkdown
             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
             components={STABLE_MARKDOWN_COMPONENTS}
-            urlTransform={markdownUrlTransform}
+            urlTransform={onOpenFileReference || onOpenLink ? markdownUrlTransform : defaultUrlTransform}
           >
             {normalizedText}
           </ReactMarkdown>

@@ -25,6 +25,13 @@ describe('workspace links in Markdown', () => {
   test('other schemes are still made safe', () => {
     expect(render('[x](javascript:alert(1))')).not.toContain('javascript:');
   });
+
+  test('where files do not open, a workspace link is not followed as a web link', () => {
+    expect(render('[the loop](workspace://Guides/gauntlet-loop.md)', false)).not.toContain('workspace://');
+    // The editor's preview opens links itself.
+    const preview = renderToStaticMarkup(React.createElement(MarkdownMessage, { text: '[the loop](workspace://Guides/a.md)', onOpenLink: () => true }));
+    expect(preview).toContain('href="workspace://Guides/a.md"');
+  });
 });
 
 describe('the workspace a link names and where it starts', () => {

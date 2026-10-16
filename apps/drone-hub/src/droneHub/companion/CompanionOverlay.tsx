@@ -36,6 +36,7 @@ import { companionAttachmentFromFile, isCompanionPreviewable } from './companion
 import { CompanionTranscriptDialog, useCompanionTranscriptDialog } from './CompanionTranscriptDialog';
 import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
+import { openWorkspaceLink } from '../workspaces/workspace-links';
 
 function companionStatusLabel(status: CompanionStatus, recordingPaused: boolean): string {
   if (recordingPaused) return 'Paused';
@@ -707,7 +708,11 @@ export function CompanionOverlay() {
               <div data-companion-selectable="true" className="cursor-auto select-text">
                 <ChatMessageBody role="assistant" text={companion.reply} autoExpand
                   // Paths in a reply refer to Companion home: open the file there, or select the folder.
-                  onOpenFileReference={reference => openCompanionHomeFiles({ path: reference.path, line: reference.line, column: reference.column })} />
+                  onOpenFileReference={reference => {
+                    // A link names its workspace; other references are files of the companion's home folder.
+                    if (reference.link && openWorkspaceLink(reference.link)) return;
+                    openCompanionHomeFiles({ path: reference.path, line: reference.line, column: reference.column });
+                  }} />
               </div>
             </div>
           ) : null}

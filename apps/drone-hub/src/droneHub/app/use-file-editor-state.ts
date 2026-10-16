@@ -91,6 +91,7 @@ function rememberedEditorFilesFromTabState(
     const activeTab = state.tabs.find((tab) => tab.tabId === state.activeTabId);
     const file = rememberedEditorFileFromTab(
       activeTab?.untitled ? state.tabs.filter((tab) => !tab.untitled).pop() : activeTab,
+      droneId,
     );
     if (file) remembered[droneId] = file;
   }
@@ -102,6 +103,7 @@ function rememberedEditorFilesEqual(
   right: RememberedEditorFile | null | undefined,
 ): boolean {
   return (
+    left?.droneId === right?.droneId &&
     left?.path === right?.path &&
     left?.name === right?.name &&
     left?.targetLine === right?.targetLine &&
@@ -385,13 +387,18 @@ export function useFileEditorState({
   }, []);
 
   const openEditorLocation = React.useCallback(
-    (next: { droneId: string; path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead }) => {
+    (next: {
+      droneId: string; path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead;
+      /** Whose editor shows the tab: the file's own drone by default, or one showing another workspace's file. */
+      stripDroneId?: string;
+    }) => {
       const droneId = String(next.droneId ?? '').trim();
       if (!droneId) return;
+      const stripDroneId = String(next.stripDroneId ?? '').trim() || droneId;
       const nextPath = String(next.path ?? '').trim();
       if (!nextPath) return;
       const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
-      const alreadyLoaded = tabStateByDroneIdRef.current[droneId]?.tabs.some((tab) => tab.path === nextPath && tab.loaded);
+      const alreadyLoaded = tabStateByDroneIdRef.current[stripDroneId]?.tabs.some((tab) => tab.droneId === droneId && tab.path === nextPath && tab.loaded);
       initialFileReadRef.current = next.initialRead && !alreadyLoaded
         ? { droneId, path: nextPath, read: next.initialRead } : null;
       const targetLine = normalizePositiveInt(next.line);
@@ -399,7 +406,7 @@ export function useFileEditorState({
       navigationSeqRef.current += 1;
       const navigationSeq = navigationSeqRef.current;
       setOpenFailure(null);
-      setTabStateForDrone(droneId, (prev) =>
+      setTabStateForDrone(stripDroneId, (prev) =>
         openFileTab(prev, {
           droneId,
           path: nextPath,
@@ -414,9 +421,14 @@ export function useFileEditorState({
   );
 
   const openEditorFile = React.useCallback(
-    (next: { path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead }) => {
-      const droneId = String(currentDrone?.id ?? '').trim();
-      if (!droneId) return;
+    (next: {
+      path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead;
+      /** The workspace the file is in (as the file routes name it), when it is not the drone's own. */
+      droneId?: string | null;
+    }) => {
+      const stripDroneId = String(currentDrone?.id ?? '').trim();
+      if (!stripDroneId) return;
+      const droneId = String(next.droneId ?? '').trim() || stripDroneId;
       const nextPath = String(next.path ?? '').trim();
       if (!nextPath) return;
       const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
@@ -429,16 +441,19 @@ export function useFileEditorState({
         line: targetLine,
         column: targetColumn,
       };
-      const currentHistory = locationHistoryByDroneIdRef.current[droneId] ?? emptyEditorLocationHistory;
-      setEditorLocationHistoryForDrone(droneId, pushEditorLocation(currentHistory, nextLocation));
-      setRecentFilesByDroneId((prev) => ({
-        ...prev,
-        [droneId]: trackRecentQuickOpenFile(prev[droneId] ?? [], {
-          path: nextPath,
-          name: nextName,
-        }),
-      }));
-      openEditorLocation({ ...nextLocation, initialRead: next.initialRead });
+      const currentHistory = locationHistoryByDroneIdRef.current[stripDroneId] ?? emptyEditorLocationHistory;
+      setEditorLocationHistoryForDrone(stripDroneId, pushEditorLocation(currentHistory, nextLocation));
+      // Quick Open lists the drone's own files; another workspace's file is not one of them.
+      if (droneId === stripDroneId) {
+        setRecentFilesByDroneId((prev) => ({
+          ...prev,
+          [droneId]: trackRecentQuickOpenFile(prev[droneId] ?? [], {
+            path: nextPath,
+            name: nextName,
+          }),
+        }));
+      }
+      openEditorLocation({ ...nextLocation, initialRead: next.initialRead, stripDroneId });
     },
     [currentDrone?.id, normalizePositiveInt, openEditorLocation, setEditorLocationHistoryForDrone],
   );
@@ -474,14 +489,17 @@ export function useFileEditorState({
     const location = next.location;
     if (!location) return null;
     setEditorLocationHistory(next.history);
-    openEditorLocation(location);
-    setRecentFilesByDroneId((prev) => ({
-      ...prev,
-      [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
-        path: location.path,
-        name: location.name,
-      }),
-    }));
+    // The history holds files of every workspace this editor showed; each opens in this editor again.
+    openEditorLocation({ ...location, stripDroneId: currentDroneId });
+    if (location.droneId === currentDroneId) {
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
+          path: location.path,
+          name: location.name,
+        }),
+      }));
+    }
     return location;
   }, [currentDroneId, openEditorLocation, setEditorLocationHistory]);
 
@@ -490,14 +508,17 @@ export function useFileEditorState({
     const location = next.location;
     if (!location) return null;
     setEditorLocationHistory(next.history);
-    openEditorLocation(location);
-    setRecentFilesByDroneId((prev) => ({
-      ...prev,
-      [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
-        path: location.path,
-        name: location.name,
-      }),
-    }));
+    // The history holds files of every workspace this editor showed; each opens in this editor again.
+    openEditorLocation({ ...location, stripDroneId: currentDroneId });
+    if (location.droneId === currentDroneId) {
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
+          path: location.path,
+          name: location.name,
+        }),
+      }));
+    }
     return location;
   }, [currentDroneId, openEditorLocation, setEditorLocationHistory]);
 
@@ -1248,8 +1269,11 @@ export function useFileEditorState({
       const line = String(input.line ?? '').trim();
       if (!droneId || !filePath || !line) return false;
 
-      const openTab = (tabStateByDroneIdRef.current[droneId]?.tabs ?? []).find(
-        (tab) => tab.path === filePath,
+      // The file's tab is in its drone's editor, or in this one when it shows another workspace's file.
+      const stripDroneId = (tabStateByDroneIdRef.current[droneId]?.tabs ?? []).some((tab) => tab.droneId === droneId && tab.path === filePath)
+        ? droneId : currentDroneId;
+      const openTab = (tabStateByDroneIdRef.current[stripDroneId]?.tabs ?? []).find(
+        (tab) => tab.droneId === droneId && tab.path === filePath,
       );
       if (
         openTab &&
@@ -1268,7 +1292,7 @@ export function useFileEditorState({
       if (openTab) {
         sourceContent = openTab.content;
         expectedRevision = openTab.revision ?? null;
-        setTabStateForDrone(droneId, (state) => ({
+        setTabStateForDrone(stripDroneId, (state) => ({
           ...state,
           tabs: state.tabs.map((tab) =>
             tab.tabId === openTab.tabId ? { ...tab, saving: true, error: null } : tab,
@@ -1304,13 +1328,13 @@ export function useFileEditorState({
         );
         if (openTab) {
           const latestOpenTab = (
-            tabStateByDroneIdRef.current[droneId]?.tabs ?? []
+            tabStateByDroneIdRef.current[stripDroneId]?.tabs ?? []
           ).find((tab) => tab.tabId === openTab.tabId);
           const editorContent =
             latestOpenTab && latestOpenTab.content !== sourceContent
               ? appendFileDictationLine(latestOpenTab.content, line)
               : nextContent;
-          setTabStateForDrone(droneId, (state) => ({
+          setTabStateForDrone(stripDroneId, (state) => ({
             ...state,
             tabs: state.tabs.map((tab) =>
               tab.tabId === openTab.tabId
@@ -1340,7 +1364,7 @@ export function useFileEditorState({
       } catch (error: any) {
         if (openTab) {
           const message = error?.message ?? String(error);
-          setTabStateForDrone(droneId, (state) => ({
+          setTabStateForDrone(stripDroneId, (state) => ({
             ...state,
             tabs: state.tabs.map((tab) =>
               tab.tabId === openTab.tabId
@@ -1436,15 +1460,16 @@ export function useFileEditorState({
     if (activeTab) reloadFileTabFromDisk(activeTab.tabId);
   }, [activeTab, reloadFileTabFromDisk]);
 
-  const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action'): Promise<boolean> => {
-    const dirtyTabs = dirtyFileTabsForPaths(tabs, paths);
+  // Paths are in one workspace: the drone's own unless another's (as the file routes name it) is given.
+  const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action', workspaceId?: string): Promise<boolean> => {
+    const dirtyTabs = dirtyFileTabsForPaths(tabs, paths, workspaceId || currentDroneId);
     return confirmDiscardDirtyTabs(dirtyTabs, actionLabel);
-  }, [tabs]);
+  }, [currentDroneId, tabs]);
 
-  const closeOpenedFileTabsForPaths = React.useCallback((paths: string[]) => {
+  const closeOpenedFileTabsForPaths = React.useCallback((paths: string[], workspaceId?: string) => {
     const droneId = String(currentDrone?.id ?? '').trim();
-    setTabState((prev) => closeFileTabsForPaths(prev, paths));
-    if (droneId) {
+    setTabState((prev) => closeFileTabsForPaths(prev, paths, workspaceId || droneId));
+    if (droneId && (!workspaceId || workspaceId === droneId)) {
       setRecentFilesByDroneId((prev) => ({
         ...prev,
         [droneId]: removeRecentQuickOpenFilesForPaths(prev[droneId] ?? [], paths),
@@ -1452,10 +1477,10 @@ export function useFileEditorState({
     }
   }, [currentDrone?.id, setTabState]);
 
-  const remapOpenedFileTabsForPathChange = React.useCallback((sourcePath: string, targetPath: string) => {
+  const remapOpenedFileTabsForPathChange = React.useCallback((sourcePath: string, targetPath: string, workspaceId?: string) => {
     const droneId = String(currentDrone?.id ?? '').trim();
-    setTabState((prev) => remapFileTabsForPathChange(prev, sourcePath, targetPath));
-    if (droneId) {
+    setTabState((prev) => remapFileTabsForPathChange(prev, sourcePath, targetPath, workspaceId || droneId));
+    if (droneId && (!workspaceId || workspaceId === droneId)) {
       setRecentFilesByDroneId((prev) => ({
         ...prev,
         [droneId]: remapRecentQuickOpenFilesForPathChange(prev[droneId] ?? [], sourcePath, targetPath),
@@ -1466,7 +1491,7 @@ export function useFileEditorState({
   const acceptCompanionFile = (droneId: string, data: Extract<DroneFsReadPayload, { ok: true }>) => {
     if (droneId !== currentDroneId) throw new Error('DRONE_NOT_OPEN');
     const path = data.path;
-    const existing = tabStateByDroneIdRef.current[droneId]?.tabs.find(tab => tab.path === path);
+    const existing = tabStateByDroneIdRef.current[droneId]?.tabs.find(tab => tab.droneId === droneId && tab.path === path);
     if (existing?.loaded) {
       setTabStateForDrone(droneId, state => activateFileTab(state, existing.tabId));
       return existing.tabId;

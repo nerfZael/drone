@@ -119,7 +119,8 @@ type DockableDroneWorkspaceProps = {
   sharedLayout?: boolean;
 };
 
-export type WorkspaceFileWindow = { tabId: string; path: string; name: string };
+/** `droneId` names the workspace the file is in (as the file routes take it); another than the drone's own for an explorer root's file. */
+export type WorkspaceFileWindow = { tabId: string; path: string; name: string; droneId?: string };
 export type WorkspaceFileWindows = {
   presetRootPath?: string;
   restorePresetFiles?: (files: WorkspaceFileWindow[]) => void;
@@ -1430,6 +1431,12 @@ export function DockableDroneWorkspace({
         for (const panel of Object.values(layout.panels)) {
           if (panel.contentComponent !== 'file' || !panel.params) continue;
           delete panel.params.presetRelativePath;
+          delete panel.params.presetWorkspaceId;
+          // A file of another workspace stays that workspace's file, whichever drone the preset is applied to.
+          if (panel.params.droneId && panel.params.droneId !== currentDrone.id) {
+            panel.params.presetWorkspaceId = panel.params.droneId;
+            continue;
+          }
           if (root && panel.params.path?.startsWith(`${root}/`)) {
             panel.params.presetRelativePath = panel.params.path.slice(root.length + 1);
           }

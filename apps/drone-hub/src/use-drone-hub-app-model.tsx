@@ -263,7 +263,16 @@ import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
 import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-tabs-state';
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
-import { setExplorerWorkspace, useExplorerWorkspaceDrone } from './droneHub/workspaces/explorer-workspace-store';
+import {
+  OWN_EXPLORER_ROOT,
+  addExplorerRoot,
+  isOwnExplorerWorkspace,
+  revealInExplorerRoot,
+  setExplorerRootOpen,
+  useExplorerRoots,
+} from './droneHub/workspaces/explorer-roots';
+import type { ExplorerRootsEditor } from './droneHub/files/ExplorerRootsColumn';
+import type { EditorWorkspaceInfo } from './droneHub/app/DroneEditorDock';
 import {
   OPEN_WORKSPACE_LINK_EVENT,
   browsableWorkspacesForLinks,
@@ -273,7 +282,6 @@ import {
   type OpenWorkspaceLinkDetail,
 } from './droneHub/workspaces/workspace-links';
 import { ExplorerWorkspaceSwitcher } from './droneHub/workspaces/ExplorerWorkspaceSwitcher';
-import { useStandaloneEditorPaneProps } from './droneHub/app/DesktopEditorPane';
 import type {
   GlobalDictationDroneDestination,
   GlobalDictationSendResult,
@@ -2039,19 +2047,32 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const currentDrone = selectedDrone ? (sidebarDisplayDroneById[selectedDrone] ?? null) : null;
   const currentDroneId = currentDrone?.id ?? '';
-  // The selected drone's File Explorer can show another workspace, with an explorer and editor of its own; the
-  // drone's own files and open tabs stay as they were for when it switches back.
-  const { workspace: explorerWorkspace, drone: explorerWorkspaceDrone } = useExplorerWorkspaceDrone(currentDroneId, droneById);
-  // Set once the editor pane can be brought forward (below): opening a file shows the editor, as for the drone's own.
-  const focusEditorPaneRef = React.useRef<() => void>(() => {});
-  const standaloneEditor = useStandaloneEditorPaneProps(explorerWorkspaceDrone, () => focusEditorPaneRef.current());
-  // Only while switched, so the tool panes do not re-render with every Hub render otherwise. The editor shortcuts
-  // (quick open, new file, back and forward) act on whichever editor is shown.
-  const switchedEditorProps = explorerWorkspaceDrone ? standaloneEditor.pane : null;
-  const switchedEditorControls = explorerWorkspaceDrone ? standaloneEditor.controls : null;
+  // The selected drone's File Explorer shows other workspaces as roots below its own files: those the open chat can
+  // use and those added to it. Their files open in the drone's editor, beside its own.
+  const { roots: explorerRoots, ownOpen: explorerOwnOpen, workspaces: explorerWorkspaces } = useExplorerRoots({
+    drone: currentDrone,
+    chatName: currentDrone ? selectedChat || 'default' : null,
+    droneById,
+  });
+  const explorerRootsRef = React.useRef(explorerRoots);
+  explorerRootsRef.current = explorerRoots;
   const showOwnDroneFiles = React.useCallback(() => {
-    if (currentDroneId) setExplorerWorkspace(currentDroneId, null);
+    if (currentDroneId) setExplorerRootOpen(currentDroneId, OWN_EXPLORER_ROOT, true);
   }, [currentDroneId]);
+  /** Shows a file of another workspace under its root, when the explorer has one for it (by file route id). */
+  const revealInRootOf = React.useCallback((routeId: string, path: string) => {
+    const root = explorerRootsRef.current.find((item) => item.drone.id === routeId);
+    if (root && currentDroneId) revealInExplorerRoot(currentDroneId, root.workspace.id, path);
+  }, [currentDroneId]);
+  const editorWorkspaceOf = React.useCallback((routeId: string): EditorWorkspaceInfo | null => {
+    const root = explorerRoots.find((item) => item.drone.id === routeId);
+    if (root) return { name: root.workspace.name, homePath: droneHomePath(root.drone) };
+    // A tab whose root was removed since it opened.
+    const workspace = explorerWorkspaces?.find((item) => (item.kind === 'folder' ? item.browseId : item.droneId) === routeId);
+    if (workspace?.kind === 'folder' && workspace.path) return { name: workspace.name, homePath: workspace.path };
+    const other = droneById[routeId];
+    return other ? { name: other.name, homePath: droneHomePath(other) } : null;
+  }, [droneById, explorerRoots, explorerWorkspaces]);
   const visibleToolTabs =
     visibleToolTabsByDrone[currentDroneId] ?? EMPTY_VISIBLE_TOOL_TABS;
   const handleVisibleToolTabsChange = React.useCallback(
@@ -3312,7 +3333,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           selectedDroneIds: [...selectedDroneIds],
           activePane: rightPanelTab,
           visiblePanes: visibleToolTabs,
-          openFile: openedEditorFile?.path ? { path: openedEditorFile.path } : null,
+          openFile: openedEditorFile?.path
+            ? {
+                path: openedEditorFile.path,
+                // A file of another workspace shown in this drone's editor.
+                ...(currentDrone && openedEditorFile.droneId !== currentDrone.id
+                  ? { workspace: editorWorkspaceOf(openedEditorFile.droneId)?.name ?? openedEditorFile.droneId }
+                  : {}),
+              }
+            : null,
         };
       },
       executeProposal: async (proposal, executionContext, onProgress) =>
@@ -3616,6 +3645,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     customAgents,
     companionWorkspace,
     deleteDrone,
+    editorWorkspaceOf,
     expandGroupsForDroneIds,
     openedEditorFile,
     rightPanelTab,
@@ -3829,7 +3859,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const focusEditorPane = React.useCallback(() => {
     requestRightPanelTab('editor');
   }, [requestRightPanelTab]);
-  focusEditorPaneRef.current = focusEditorPane;
   const pathNavigationVersion = React.useRef(0);
   const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number; kind?: 'file' | 'directory' } | null>(null);
   // Everything that reveals or opens one of the drone's files brings its explorer back to the drone's own files.
@@ -3845,11 +3874,41 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
       const tab = openedEditorFileTabs.find((entry) => entry.tabId === tabId);
-      if (tab && !tab.untitled) revealFileInExplorer(tab.path);
+      if (tab && !tab.untitled) {
+        if (tab.droneId && tab.droneId !== currentDroneId) revealInRootOf(tab.droneId, tab.path);
+        else revealFileInExplorer(tab.path);
+      }
       setActiveOpenedFileTab(tabId);
     },
-    [openedEditorFileTabs, revealFileInExplorer, setActiveOpenedFileTab],
+    [currentDroneId, openedEditorFileTabs, revealFileInExplorer, revealInRootOf, setActiveOpenedFileTab],
   );
+  /**
+   * Opens a file of another workspace (`droneId` as the file routes name it) in the drone's editor and shows it
+   * under its root; `rootId` names a root just added, which the roots do not list yet.
+   */
+  const openRootFileInEditor = React.useCallback(
+    (target: { droneId: string; path: string; name?: string; line?: number | null; column?: number | null }, rootId?: string) => {
+      if (!currentDroneId) return;
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
+      const name = String(target.name ?? '').trim() || target.path.split('/').filter(Boolean).pop() || target.path;
+      if (rootId) revealInExplorerRoot(currentDroneId, rootId, target.path);
+      else revealInRootOf(target.droneId, target.path);
+      openEditorFile({ path: target.path, name, line: target.line, column: target.column, droneId: target.droneId });
+      focusEditorPane();
+    },
+    [currentDroneId, focusEditorPane, openEditorFile, revealInRootOf],
+  );
+  const explorerRootsEditor = React.useMemo<ExplorerRootsEditor>(() => ({
+    activeFile: openedEditorFile && !openedEditorFile.untitled ? { droneId: openedEditorFile.droneId, path: openedEditorFile.path } : null,
+    onOpenFile: (root, entry) => openRootFileInEditor({ droneId: root.drone.id, path: entry.path, name: entry.name }),
+    onConfirmCloseOpenedFilesForPaths: (droneId, paths, actionLabel) => confirmCloseOpenedFileTabsForPaths(paths, actionLabel, droneId),
+    onCloseOpenedFilesForPaths: (droneId, paths) => closeOpenedFileTabsForPaths(paths, droneId),
+    onRemapOpenedFilesForPathChange: (droneId, sourcePath, targetPath) => remapOpenedFileTabsForPathChange(sourcePath, targetPath, droneId),
+  }), [
+    closeOpenedFileTabsForPaths, confirmCloseOpenedFileTabsForPaths, openRootFileInEditor, remapOpenedFileTabsForPathChange,
+    openedEditorFile?.droneId, openedEditorFile?.path, openedEditorFile?.untitled, // eslint-disable-line react-hooks/exhaustive-deps
+  ]);
   React.useEffect(() => {
     pathNavigationVersion.current += 1;
     setExplorerReveal(null);
@@ -3875,11 +3934,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId) return;
       showOwnDroneFiles();
       const diagnosticId = beginDesktopWorkspaceLoad('file-open', droneId, resolvedPath);
-      const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
+      const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === resolvedPath) ||
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
         focusEditorPane();
-        const cached = openedEditorFileTabs.some((tab) => tab.path === resolvedPath);
+        const cached = openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === resolvedPath);
         desktopWorkspaceLoads.mark(diagnosticId, 'openTabHit', cached ? 1 : 0);
         setPendingFileOpen(null);
         revealFileInExplorer(resolvedPath);
@@ -3952,14 +4011,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setPendingFileOpen(null);
       const name =
         String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
+      // A file of another workspace this drone's editor shows (a folder workspace is no drone to go to).
       const targetDrone = droneByIdRef.current[droneId];
-      if (targetDrone) setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
-      setExplorerWorkspace(droneId, null);
+      const inThisEditor = droneId !== currentDroneId && openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === path);
+      if (inThisEditor || !targetDrone) {
+        openRootFileInEditor({ droneId, path, name });
+        return;
+      }
+      setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
+      setExplorerRootOpen(droneId, OWN_EXPLORER_ROOT, true);
       showDroneWorkspace(droneId);
       openEditorLocation({ droneId, path, name });
       requestRightPanelTab('editor');
     },
-    [openEditorLocation, requestRightPanelTab, setFsPathForDrone, showDroneWorkspace],
+    [currentDroneId, openEditorLocation, openRootFileInEditor, openedEditorFileTabs, requestRightPanelTab, setFsPathForDrone, showDroneWorkspace],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: {
@@ -3988,17 +4053,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const createUntitledFileFromShortcut = React.useCallback(() => {
     if (!currentDrone?.id) return false;
     focusEditorPane();
-    if (switchedEditorControls) return switchedEditorControls.createUntitledFile();
     return createUntitledFile() != null;
-  }, [currentDrone?.id, createUntitledFile, focusEditorPane, switchedEditorControls]);
+  }, [currentDrone?.id, createUntitledFile, focusEditorPane]);
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
     if (!currentDrone?.id) return false;
     focusEditorPane();
-    if (switchedEditorControls) switchedEditorControls.openQuickOpen();
-    else openQuickOpen();
+    openQuickOpen();
     return true;
-  }, [currentDrone?.id, focusEditorPane, openQuickOpen, switchedEditorControls]);
+  }, [currentDrone?.id, focusEditorPane, openQuickOpen]);
 
   const revealEditorLocationFromRoot = React.useCallback(
     (pathRaw: string) => {
@@ -4011,23 +4074,33 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, focusEditorPane, revealFileInExplorer],
   );
+  /** Shows where Back or Forward went: under the drone's own files, or under the root of the workspace it is in. */
+  const revealEditorLocation = React.useCallback(
+    (location: { droneId: string; path: string }) => {
+      if (location.droneId && location.droneId !== currentDrone?.id) {
+        revealInRootOf(location.droneId, location.path);
+        focusEditorPane();
+      } else {
+        revealEditorLocationFromRoot(location.path);
+      }
+    },
+    [currentDrone?.id, focusEditorPane, revealEditorLocationFromRoot, revealInRootOf],
+  );
 
   const goBackEditorLocationFromShortcut = React.useCallback(() => {
-    if (switchedEditorControls) return switchedEditorControls.goBack();
     const location = goBackLocation();
     if (!location) return false;
-    revealEditorLocationFromRoot(location.path);
+    revealEditorLocation(location);
     return true;
-  }, [goBackLocation, revealEditorLocationFromRoot, switchedEditorControls]);
+  }, [goBackLocation, revealEditorLocation]);
 
   const goForwardEditorLocationFromShortcut = React.useCallback(() => {
-    if (switchedEditorControls) return switchedEditorControls.goForward();
     const location = goForwardLocation();
     if (!location) return false;
-    revealEditorLocationFromRoot(location.path);
+    revealEditorLocation(location);
     return true;
-  }, [goForwardLocation, revealEditorLocationFromRoot, switchedEditorControls]);
-  const anyQuickOpenOpen = quickOpenOpen || Boolean(switchedEditorControls?.quickOpenOpen);
+  }, [goForwardLocation, revealEditorLocation]);
+  const anyQuickOpenOpen = quickOpenOpen;
 
   React.useEffect(() => {
     const isBackShortcut = (event: KeyboardEvent): boolean =>
@@ -4093,23 +4166,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
   }, [currentDrone?.id, openMarkdownFileReference]);
   // Workspace links (`workspace://Guides/notes.md#L4`) from chats, previews and windows: a file of the drone's own
-  // workspace opens as any of its files; another workspace's opens in the File Explorer switched to it, once the
-  // switched explorer and editor are there.
-  const pendingWorkspaceLinkOpenRef = React.useRef<{
-    browseId: string; path: string; name: string; line: number | null; column: number | null;
-  } | null>(null);
-  const switchedEditorControlsRef = React.useRef(switchedEditorControls);
-  switchedEditorControlsRef.current = switchedEditorControls;
-  const openPendingWorkspaceLink = React.useCallback(() => {
-    const pending = pendingWorkspaceLinkOpenRef.current;
-    const controls = switchedEditorControlsRef.current;
-    if (!pending || !controls || explorerWorkspaceDrone?.id !== pending.browseId) return;
-    pendingWorkspaceLinkOpenRef.current = null;
-    controls.openFile(pending);
-  }, [explorerWorkspaceDrone?.id]);
-  React.useEffect(() => { openPendingWorkspaceLink(); }, [openPendingWorkspaceLink, switchedEditorControls]);
+  // workspace opens as any of its files; another workspace's opens in the drone's editor and under that workspace's
+  // root in the File Explorer, which is added when the explorer does not show it yet.
   React.useEffect(() => {
-    if (!currentDrone) return;
+    if (!currentDrone) {
+      // Files open in a drone's editor; with none shown there is nowhere to open one.
+      const onOpenWithoutDrone = () => showShortcutToast('Open a drone to follow workspace links.', 'Workspace link');
+      window.addEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpenWithoutDrone);
+      return () => window.removeEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpenWithoutDrone);
+    }
     const drone = currentDrone;
     const onOpen = (event: Event) => {
       const raw = (event as CustomEvent<OpenWorkspaceLinkDetail>).detail?.link ?? '';
@@ -4124,18 +4189,33 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           const name = path.split('/').filter(Boolean).pop() || path;
           const own = ownWorkspaceOf(drone, await browsableWorkspacesForLinks());
           recordUiAction({ action: 'workspace-link', droneId: drone.id, path: `${workspace.id}:${path}`, line: link.line });
-          if (own?.id === workspace.id) {
-            if (root) showOwnDroneFiles();
-            else openFileInFilesPane({ path, name, line: link.line, column: link.column });
+          if (own?.id === workspace.id || isOwnExplorerWorkspace(drone, workspace)) {
+            if (root) {
+              showOwnDroneFiles();
+              requestRightPanelTab('editor');
+            } else {
+              openFileInFilesPane({ path, name, line: link.line, column: link.column });
+            }
             return;
           }
-          setExplorerWorkspace(drone.id, workspace);
+          if (!explorerRootsRef.current.some((item) => item.workspace.id === workspace.id)) addExplorerRoot(drone.id, workspace);
           if (root) {
+            setExplorerRootOpen(drone.id, workspace.id, true);
             requestRightPanelTab('editor');
             return;
           }
-          pendingWorkspaceLinkOpenRef.current = { browseId: workspace.browseId, path, name, line: link.line, column: link.column };
-          openPendingWorkspaceLink();
+          const routeId = workspace.kind === 'folder' ? workspace.browseId : workspace.droneId;
+          if (!routeId) return;
+          // A folder is shown under the root; only a file opens in the editor.
+          const directory = await workspaceLinkIsDirectory(path, (parent) =>
+            requestJson(`/api/drones/${encodeURIComponent(routeId)}/fs/list?path=${encodeURIComponent(parent)}`),
+          ).catch(() => false);
+          if (directory) {
+            revealInExplorerRoot(drone.id, workspace.id, path, 'directory');
+            requestRightPanelTab('editor');
+            return;
+          }
+          openRootFileInEditor({ droneId: routeId, path, name, line: link.line, column: link.column }, workspace.id);
         } catch (error: any) {
           showShortcutToast(error?.message ?? String(error), 'Workspace link');
         }
@@ -4143,7 +4223,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     };
     window.addEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
-  }, [currentDrone, openFileInFilesPane, openPendingWorkspaceLink, requestRightPanelTab, showOwnDroneFiles, showShortcutToast]);
+  }, [currentDrone, openFileInFilesPane, openRootFileInEditor, requestRightPanelTab, showOwnDroneFiles, showShortcutToast]);
   const resolveDroneRepoFilePath = React.useCallback(
     (drone: DroneSummary | null, repoRelativePathRaw: string, repoRoot?: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')
@@ -5854,7 +5934,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onReloadFromDisk={() => reloadFileTabFromDisk(tab.tabId)}
           onOverwriteFile={() => overwriteFileTab(tab.tabId)}
           onCloseFile={() => closeEditorFile(tab.tabId)}
-          onOpenResolvedFile={openFileInFilesPane}
+          onOpenResolvedFile={(next) => {
+            if (tab.droneId !== currentDrone.id) openRootFileInEditor({ ...next, droneId: tab.droneId });
+            else openFileInFilesPane(next);
+          }}
           onAppendFileDictationLine={appendAndSaveFileDictationLine}
           onOpenFileDictationTarget={openFileDictationTarget}
         />
@@ -5866,6 +5949,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentDrone,
       openFileDictationTarget,
       openFileInFilesPane,
+      openRootFileInEditor,
       openedEditorFileTabs,
       overwriteFileTab,
       reloadFileTabFromDisk,
@@ -5875,7 +5959,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const fileWindows = React.useMemo<WorkspaceFileWindows>(() => ({
     presetRootPath: defaultFsPathForCurrentDrone,
-    restorePresetFiles: (files) => { for (const file of files) openEditorFile({ path: file.path, name: file.name }); },
+    restorePresetFiles: (files) => { for (const file of files) openEditorFile({ path: file.path, name: file.name, droneId: file.droneId }); },
     render: renderFileWindow,
     openTabIds: openedEditorFileTabs.map((tab) => tab.tabId),
     dirtyTabIds: openedEditorFileTabs.filter((tab) => tab.dirty).map((tab) => tab.tabId),
@@ -6019,7 +6103,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (entry.kind !== 'file') return false;
             return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
-          onOpenFileTargetInEditor={openFileInFilesPane}
+          onOpenFileTargetInEditor={(target) => {
+            if (target.droneId && target.droneId !== currentDrone?.id) openRootFileInEditor({ ...target, droneId: target.droneId });
+            else openFileInFilesPane(target);
+          }}
           pendingFileOpenPath={pendingFileOpen && pendingFileOpen.droneId === currentDrone?.id ? pendingFileOpen.path : null}
           openedFile={{
             path: openedEditorFile?.path ?? null,
@@ -6057,11 +6144,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             },
             onGoBack: () => {
               const location = goBackLocation();
-              if (location) revealEditorLocationFromRoot(location.path);
+              if (location) revealEditorLocation(location);
             },
             onGoForward: () => {
               const location = goForwardLocation();
-              if (location) revealEditorLocationFromRoot(location.path);
+              if (location) revealEditorLocation(location);
             },
           }}
           openedFileTabs={editorStripFileTabs}
@@ -6081,7 +6168,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!containerPath) return;
             const slash = containerPath.lastIndexOf('/');
             setFsPathForDrone(drone, slash > 0 ? containerPath.slice(0, slash) : '/');
-            setExplorerWorkspace(drone.id, null);
+            setExplorerRootOpen(drone.id, OWN_EXPLORER_ROOT, true);
             showDroneWorkspace(drone.id);
             requestRightPanelTab('editor');
           }}
@@ -6104,18 +6191,36 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               droneName={uiDroneName(drone.name)}
               ownPath={droneHomePath(drone)}
               chatName={selectedChat || 'default'}
-              current={explorerWorkspace}
+              current={null}
               ownIsLocal={drone.runtime === 'host'}
+              roots={{
+                shownIds: new Set(explorerRoots.map((root) => root.workspace.id)),
+                onPick: (workspace) => {
+                  if (!workspace) setExplorerRootOpen(drone.id, OWN_EXPLORER_ROOT, true);
+                  else if (explorerRoots.some((root) => root.workspace.id === workspace.id)) setExplorerRootOpen(drone.id, workspace.id, true);
+                  else addExplorerRoot(drone.id, workspace);
+                },
+              }}
             />
           ) : undefined}
-          editorOverride={isSelectedDrone && explorerWorkspaceDrone && switchedEditorProps ? { ...switchedEditorProps, drone: explorerWorkspaceDrone } : null}
+          explorerRoots={isSelectedDrone ? {
+            droneId: drone.id,
+            ownName: uiDroneName(drone.name),
+            ownOpen: explorerOwnOpen,
+            roots: explorerRoots,
+            editor: explorerRootsEditor,
+          } : null}
+          editorWorkspaceOf={editorWorkspaceOf}
         />
       );
     },
     [
-      explorerWorkspace,
-      explorerWorkspaceDrone,
-      switchedEditorProps,
+      explorerRoots,
+      explorerOwnOpen,
+      explorerRootsEditor,
+      editorWorkspaceOf,
+      openRootFileInEditor,
+      revealEditorLocation,
       resolveDroneRepoFilePath,
       setFsPathForDrone,
       showDroneWorkspace,

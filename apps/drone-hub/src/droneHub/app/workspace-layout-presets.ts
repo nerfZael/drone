@@ -27,15 +27,17 @@ export function remapPresetFiles(layout: SerializedDockview, droneId: string, ro
   for (const [oldId, panel] of Object.entries(result.panels)) {
     if (panel.contentComponent !== 'file') continue;
     const params = panel.params!;
-    const path = typeof params.presetRelativePath === 'string'
+    // A file of another workspace than the drone's own keeps its workspace and path.
+    const fileDroneId = typeof params.presetWorkspaceId === 'string' && params.presetWorkspaceId ? params.presetWorkspaceId : droneId;
+    const path = typeof params.presetRelativePath === 'string' && fileDroneId === droneId
       ? `${rootPath.replace(/\/+$/, '')}/${params.presetRelativePath}` : params.path;
     if (typeof params.presetRelativePath === 'string' && !rootPath) throw new Error('The destination workspace has no file root.');
     if (typeof path !== 'string' || !path) throw new Error('This preset contains an invalid file path.');
-    const tabId = openedFileTabId(droneId, path);
+    const tabId = openedFileTabId(fileDroneId, path);
     const id = filePanelId(tabId);
     ids.set(oldId, id);
     delete result.panels[oldId];
-    result.panels[id] = { ...panel, id, params: { ...params, droneId, tabId, path } };
+    result.panels[id] = { ...panel, id, params: { ...params, droneId: fileDroneId, tabId, path } };
   }
   for (const group of leaves(result.grid.root)) {
     group.views = group.views.map(id => ids.get(id) ?? id);

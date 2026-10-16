@@ -4,7 +4,7 @@ import { subscribeDesktopEvents } from '../app/desktop-events';
 import { subscribeDeviceMeshChanges } from '../app/device-mesh-events';
 import { IconSpinner } from '../icons';
 import { AddWorkspaceControls } from '../workspaces/AddWorkspaceControls';
-import { subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
+import { notifyChatWorkspacesChanged, subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
 import {
   WORKSPACE_CATEGORIES,
   addWorkspace,
@@ -248,6 +248,7 @@ export function WorkspaceAccessPicker({
       setPending(pendingRef.current.slice(sentChanges.length));
       setCatalog((existing) => existing ? { ...existing, access: result.access, revision: result.revision } : result);
       adopt(result);
+      notifyChatWorkspacesChanged();
     } catch (saveError: any) {
       if (!alive.current) return;
       const message = saveError?.message ?? String(saveError);

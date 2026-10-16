@@ -36,6 +36,14 @@ function ChevronIcon() {
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 shrink-0" aria-hidden="true">
+      <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function OpenFolderIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
@@ -74,7 +82,13 @@ export function ExplorerWorkspaceSwitcher({
   current,
   storeKey,
   ownIsLocal = false,
+  roots,
 }: {
+  /**
+   * The explorer shows several workspaces as roots: picking one adds it (or shows it, when it is there already)
+   * instead of switching to it; null is the drone's own files.
+   */
+  roots?: { shownIds: ReadonlySet<string>; onPick(workspace: BrowsableWorkspace | null): void };
   droneId: string;
   /** The drone's own files are a folder on this device (a host drone), so they can open in the file manager. */
   ownIsLocal?: boolean;
@@ -127,7 +141,8 @@ export function ExplorerWorkspaceSwitcher({
   const isOwn = (workspace: BrowsableWorkspace) =>
     (workspace.kind === 'drone' && workspace.droneId === droneId) || (Boolean(ownPath) && workspace.kind === 'folder' && workspace.path === ownPath);
   const choose = (workspace: BrowsableWorkspace | null) => {
-    setExplorerWorkspace(storeKey ?? droneId, workspace && !isOwn(workspace) ? workspace : null, droneId);
+    if (roots) roots.onPick(workspace && !isOwn(workspace) ? workspace : null);
+    else setExplorerWorkspace(storeKey ?? droneId, workspace && !isOwn(workspace) ? workspace : null, droneId);
     setOpen(false);
     setQuery('');
   };
@@ -159,10 +174,11 @@ export function ExplorerWorkspaceSwitcher({
     const items = capped ? all.filter((workspace, index) => index < DRONE_CAP || workspace.id === current?.id) : all;
     return { category, items, hidden: all.length - items.length };
   }).filter((group) => group.items.length > 0);
-  const label = current ? current.name : droneName;
+  // With other workspaces as roots, each root names itself; the title names them all.
+  const label = current ? current.name : roots && roots.shownIds.size > 0 ? 'Workspaces' : droneName;
 
   const row = (key: string, workspace: BrowsableWorkspace | null, title: string, detail?: string) => {
-    const selected = workspace ? current?.id === workspace.id : !current;
+    const selected = roots ? !workspace || roots.shownIds.has(workspace.id) : workspace ? current?.id === workspace.id : !current;
     return (
       <button
         key={key}
@@ -193,14 +209,16 @@ export function ExplorerWorkspaceSwitcher({
           <button
             ref={triggerRef}
             type="button"
-            title={current ? `Showing ${current.name}${current.path ? ` (${current.path})` : ''}. Click to switch workspace.` : 'Switch the workspace this File Explorer shows'}
-            aria-label={`Workspace: ${label}`}
+            title={roots
+              ? 'Add a workspace to this File Explorer'
+              : current ? `Showing ${current.name}${current.path ? ` (${current.path})` : ''}. Click to switch workspace.` : 'Switch the workspace this File Explorer shows'}
+            aria-label={roots ? `${label}: add a workspace` : `Workspace: ${label}`}
             className={`inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-medium)] px-1.5 text-ui transition-colors hover:bg-[var(--hover)] ${
               current ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'
             }`}
           >
             <span className="min-w-0 truncate font-[var(--weight-emphasis)]">{label}</span>
-            <ChevronIcon />
+            {roots ? <PlusIcon /> : <ChevronIcon />}
           </button>
         </Popover.Trigger>
         <Popover.Portal container={triggerRef.current?.ownerDocument.body}>
@@ -216,7 +234,7 @@ export function ExplorerWorkspaceSwitcher({
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search workspaces"
+                placeholder={roots ? 'Add a workspace' : 'Search workspaces'}
                 aria-label="Search workspaces"
                 className="h-7 min-w-0 flex-1 rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-xs text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
               />
