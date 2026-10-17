@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Simulate } from 'react-dom/test-utils';
 import { Window } from 'happy-dom';
 import { describe, expect, test } from 'bun:test';
 import {
@@ -9,7 +10,13 @@ import {
   remapFileTabsForPathChange,
   type OpenedFileTabsState,
 } from '../src/droneHub/app/opened-file-tabs';
-import { explorerRootsFor, type DroneRoots } from '../src/droneHub/workspaces/explorer-roots';
+import {
+  explorerRootsFor,
+  mergeExplorerRootOrder,
+  orderExplorerRoots,
+  type DroneRoots,
+} from '../src/droneHub/workspaces/explorer-roots';
+import { ExplorerRootsColumn } from '../src/droneHub/files/ExplorerRootsColumn';
 import { useFileEditorState } from '../src/droneHub/app/use-file-editor-state';
 import type { BrowsableWorkspace } from '../src/droneHub/workspaces/workspaces-client';
 import type { DroneSummary } from '../src/droneHub/types';
@@ -25,7 +32,7 @@ const workspaces: BrowsableWorkspace[] = [
 ];
 const terrain = { id: 'terrain', name: 'Terrain', runtime: 'container', repoAttached: false } as DroneSummary;
 const droneById = { mech, local, terrain };
-const none: DroneRoots = { pinned: [], hidden: [], open: {} };
+const none: DroneRoots = { pinned: [], hidden: [], open: {}, order: [] };
 const pin = (id: string) => {
   const { category: _category, ...workspace } = workspaces.find((item) => item.id === id)!;
   return workspace;
@@ -49,7 +56,7 @@ describe('explorer roots', () => {
   test('a host drone does not list its own folder; a removed chat workspace stays away; a choice to open sticks', () => {
     const roots = explorerRootsFor({
       drone: local, chatIds: ['host:local', 'host:guides', 'host:graphics'], workspaces, droneById,
-      state: { pinned: [pin('host:graphics')], hidden: ['host:guides'], open: { 'host:graphics': false } },
+      state: { pinned: [pin('host:graphics')], hidden: ['host:guides'], open: { 'host:graphics': false }, order: [] },
     });
     expect(roots.map((root) => [root.workspace.name, root.fromChat, root.pinned, root.open])).toEqual([
       ['Game Graphics', true, true, false],
@@ -62,6 +69,94 @@ describe('explorer roots', () => {
       .toEqual(['host:guides', 'host:removed']);
     expect(explorerRootsFor({ drone: mech, chatIds: [], workspaces, state, droneById }).map((root) => root.workspace.id))
       .toEqual(['host:guides']);
+  });
+});
+
+describe('reordering roots', () => {
+  test('the saved order comes first; roots it does not name keep their order after it', () => {
+    expect(orderExplorerRoots(['own', 'a', 'b', 'c'], (id) => id, ['c', 'own'])).toEqual(['c', 'own', 'a', 'b']);
+  });
+
+  test("a move keeps roots that are not shown (another chat's) after the root they followed", () => {
+    expect(mergeExplorerRootOrder(['own', 'x', 'a', 'b'], ['b', 'own', 'a'])).toEqual(['b', 'own', 'x', 'a']);
+    expect(mergeExplorerRootOrder(['x', 'own', 'a'], ['a', 'own'])).toEqual(['x', 'a', 'own']);
+    expect(mergeExplorerRootOrder([], ['a', 'own'])).toEqual(['a', 'own']);
+  });
+
+  test('dragging a header moves its root, the drone\'s own files too; a drop that changes nothing shows no line', async () => {
+    const dom = new Window({ url: 'http://localhost' });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: dom, document: dom.document, localStorage: dom.localStorage, Node: dom.Node, IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+    // Collapsed, so no root lists its files.
+    const roots = explorerRootsFor({
+      drone: mech, chatIds: ['host:guides'], workspaces, droneById,
+      state: { ...none, pinned: [pin('host:graphics')], open: { 'host:graphics': false } },
+    });
+    const editor = {
+      activeFile: null, onOpenFile() {}, onConfirmCloseOpenedFilesForPaths: () => true, onCloseOpenedFilesForPaths() {},
+      onRemapOpenedFilesForPathChange() {},
+    };
+    const element = dom.document.createElement('div');
+    dom.document.body.appendChild(element);
+    const root = createRoot(element as unknown as HTMLElement);
+    const order = () => Array.from(element.querySelectorAll('[data-explorer-root]')).map((section) => section.getAttribute('data-explorer-root'));
+    const section = (title: string) => element.querySelector(`[data-explorer-root="${title}"]`) as unknown as Element;
+    const header = (title: string) => section(title).querySelector('[draggable="true"]') as unknown as Element;
+    const line = (title: string) => section(title).querySelector('.bg-\\[var\\(--accent\\)\\]');
+    const transfer = () => {
+      const types: string[] = [];
+      return { types, effectAllowed: '', dropEffect: '', setData: (type: string) => { types.push(type); }, getData: () => '' };
+    };
+    const drag = async (from: string, to: string, clientY: number, dropIt = true) => {
+      const dataTransfer = transfer();
+      // Each header as if laid out at the top, 24px tall: above its middle is before it, below after.
+      Object.assign(section(to), { getBoundingClientRect: () => ({ top: 0, bottom: 24, height: 24, left: 0, right: 200, width: 200 }) });
+      await act(async () => { Simulate.dragStart(header(from), { dataTransfer } as never); });
+      await act(async () => { Simulate.dragOver(section(to), { dataTransfer, clientY } as never); });
+      const shown = Boolean(line(to));
+      if (dropIt) await act(async () => { Simulate.drop(section(to), { dataTransfer, clientY } as never); });
+      await act(async () => { Simulate.dragEnd(header(from), { dataTransfer } as never); });
+      return shown;
+    };
+    try {
+      await act(async () => {
+        root.render(<ExplorerRootsColumn droneId="mech-reorder" ownName="Mech" ownOpen={false} roots={roots} editor={editor} own={null} zoom={1} />);
+      });
+      expect(order()).toEqual(['Mech', 'Guides', 'Game Graphics']);
+      expect(await drag('Game Graphics', 'Mech', 4)).toBe(true);
+      expect(order()).toEqual(['Game Graphics', 'Mech', 'Guides']);
+      expect(await drag('Mech', 'Game Graphics', 20)).toBe(false);
+      expect(await drag('Game Graphics', 'Guides', 20)).toBe(true);
+      expect(order()).toEqual(['Mech', 'Guides', 'Game Graphics']);
+      // A drop goes where the pointer is, even with no drag-over drawn before it.
+      {
+        const dataTransfer = transfer();
+        Object.assign(section('Mech'), { getBoundingClientRect: () => ({ top: 0, bottom: 24, height: 24, left: 0, right: 200, width: 200 }) });
+        await act(async () => { Simulate.dragStart(header('Game Graphics'), { dataTransfer } as never); });
+        dataTransfer.types.splice(0);
+        dataTransfer.types.push('application/x-drone-explorer-root');
+        await act(async () => { Simulate.drop(section('Mech'), { dataTransfer, clientY: 4 } as never); });
+        await act(async () => { Simulate.dragEnd(header('Game Graphics'), { dataTransfer } as never); });
+      }
+      expect(order()).toEqual(['Game Graphics', 'Mech', 'Guides']);
+      await drag('Game Graphics', 'Guides', 20);
+      expect(order()).toEqual(['Mech', 'Guides', 'Game Graphics']);
+      // Alt+Up on a header moves it too.
+      await act(async () => { Simulate.keyDown(header('Guides').querySelector('button')!, { key: 'ArrowUp', altKey: true }); });
+      expect(order()).toEqual(['Guides', 'Mech', 'Game Graphics']);
+      await act(async () => root.unmount());
+    } finally {
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+      dom.happyDOM.abort();
+    }
   });
 });
 

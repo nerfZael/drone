@@ -26,12 +26,17 @@ export type DroneRoots = {
   hidden: string[];
   /** Roots the user opened or collapsed; the others start open when added, collapsed when the chat brings them. */
   open: Record<string, boolean>;
+  /**
+   * The order the user dragged the roots into, `OWN_EXPLORER_ROOT` among them. It keeps roots that are not shown at
+   * the moment (another chat's) in their place; a root it does not name goes after the ones it does.
+   */
+  order: string[];
 };
 
 const STORAGE_KEY = profileStorageKey('droneHub.explorerRootsByDrone');
 /** Where the Hub kept the one workspace an explorer was switched to, before it showed several. */
 const LEGACY_STORAGE_KEY = profileStorageKey('droneHub.explorerWorkspaceByDrone');
-const EMPTY: DroneRoots = { pinned: [], hidden: [], open: {} };
+const EMPTY: DroneRoots = { pinned: [], hidden: [], open: {}, order: [] };
 const listeners = new Set<() => void>();
 
 const validWorkspace = (value: any): value is ExplorerWorkspace =>
@@ -55,7 +60,7 @@ function readRoots(): Record<string, DroneRoots> {
       for (const [droneId, workspace] of Object.entries(legacy && typeof legacy === 'object' ? legacy : {})) {
         // Desktop Editor windows key their own choice by window and drone; they keep it.
         if (droneId.includes('\u0000') || !validWorkspace(workspace)) continue;
-        migrated[droneId] = { pinned: [compact(workspace)], hidden: [], open: { [workspace.id]: true } };
+        migrated[droneId] = { pinned: [compact(workspace)], hidden: [], open: { [workspace.id]: true }, order: [] };
       }
       return migrated;
     }
@@ -70,6 +75,7 @@ function readRoots(): Record<string, DroneRoots> {
         open: value.open && typeof value.open === 'object'
           ? Object.fromEntries(Object.entries(value.open).filter(([, open]) => typeof open === 'boolean')) as Record<string, boolean>
           : {},
+        order: Array.isArray(value.order) ? [...new Set(value.order.filter((id: unknown) => typeof id === 'string') as string[])] : [],
       };
     }
     return out;
@@ -107,6 +113,7 @@ export function addExplorerRoot(droneId: string, workspace: ExplorerWorkspace): 
       : [...current.pinned, compact(workspace)],
     hidden: current.hidden.filter((id) => id !== workspace.id),
     open: { ...current.open, [workspace.id]: true },
+    order: current.order,
   }));
 }
 
@@ -119,6 +126,7 @@ export function removeExplorerRoot(droneId: string, workspaceId: string, fromCha
       pinned: current.pinned.filter((item) => item.id !== workspaceId),
       hidden: fromChat && !current.hidden.includes(workspaceId) ? [...current.hidden, workspaceId] : current.hidden,
       open,
+      order: current.order.filter((id) => id !== workspaceId),
     };
   });
 }
@@ -128,6 +136,49 @@ export function setExplorerRootOpen(droneId: string, rootId: string, open: boole
   update(droneId, (current) => (current.open[rootId] === open ? current : { ...current, open: { ...current.open, [rootId]: open } }));
 }
 
+/**
+ * The roots shown in `shown` order after a drag, written into the saved order. Roots it does not show keep their
+ * place after the root they followed, so moving roots with one chat open leaves another chat's roots where they were.
+ */
+export function mergeExplorerRootOrder(saved: readonly string[], shown: readonly string[]): string[] {
+  const next = [...shown];
+  const shownSet = new Set(shown);
+  let after: string | null = null;
+  for (const id of saved) {
+    if (shownSet.has(id)) {
+      after = id;
+      continue;
+    }
+    if (next.includes(id)) continue;
+    next.splice(after === null ? 0 : next.indexOf(after) + 1, 0, id);
+    after = id;
+  }
+  return next;
+}
+
+/** Puts roots in the saved order; the ones it does not name keep their own order, after it. */
+export function orderExplorerRoots<T>(items: readonly T[], idOf: (item: T) => string, order: readonly string[]): T[] {
+  const index = new Map(order.map((id, at) => [id, at]));
+  return items
+    .map((item, at) => ({ item, at, rank: index.get(idOf(item)) ?? Number.POSITIVE_INFINITY }))
+    .sort((a, b) => a.rank - b.rank || a.at - b.at)
+    .map(({ item }) => item);
+}
+
+/** `shown` with `movedId` put before or after `targetId`; null when that leaves every root where it is. */
+export function movedExplorerRootOrder(shown: readonly string[], movedId: string, targetId: string, placement: 'before' | 'after'): string[] | null {
+  if (movedId === targetId || !shown.includes(movedId) || !shown.includes(targetId)) return null;
+  const next = shown.filter((id) => id !== movedId);
+  next.splice(next.indexOf(targetId) + (placement === 'after' ? 1 : 0), 0, movedId);
+  return next.every((id, at) => id === shown[at]) ? null : next;
+}
+
+/** Moves a drone's root `movedId` to before or after `targetId`; `shown` is every root in view, in its order now. */
+export function moveExplorerRoot(droneId: string, shown: readonly string[], movedId: string, targetId: string, placement: 'before' | 'after'): void {
+  const next = movedExplorerRootOrder(shown, movedId, targetId, placement);
+  if (next) update(droneId, (current) => ({ ...current, order: mergeExplorerRootOrder(current.order, next) }));
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -135,6 +186,11 @@ const subscribe = (listener: () => void) => {
 
 function useDroneRoots(droneId: string): DroneRoots {
   return React.useSyncExternalStore(subscribe, () => byDrone[droneId] ?? EMPTY, () => EMPTY);
+}
+
+/** The order the user dragged a drone's explorer roots into. */
+export function useExplorerRootOrder(droneId: string): string[] {
+  return useDroneRoots(droneId).order;
 }
 
 export type ExplorerRootReveal = { path: string; sequence: number; kind: 'file' | 'directory' };

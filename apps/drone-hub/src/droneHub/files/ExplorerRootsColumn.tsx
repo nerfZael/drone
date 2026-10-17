@@ -3,10 +3,15 @@ import { workspaceExplorerLocation } from '@drone/hub-model';
 import { requestJson } from '../http';
 import { IconChevron } from '../icons';
 import { useFilesPaneState } from '../app/use-files-and-ports-pane-state';
+import { SidebarReorderDropIndicator } from '../app/sidebar-reorder-ui';
 import {
+  movedExplorerRootOrder,
+  moveExplorerRoot,
+  orderExplorerRoots,
   OWN_EXPLORER_ROOT,
   removeExplorerRoot,
   setExplorerRootOpen,
+  useExplorerRootOrder,
   useExplorerRootReveal,
   type ExplorerRoot,
 } from '../workspaces/explorer-roots';
@@ -59,27 +64,58 @@ function OpenFolderIcon() {
 const actionClass =
   'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] opacity-0 transition-[opacity,background-color,color] hover:bg-[var(--hover)] hover:text-[var(--fg)] focus-visible:opacity-100 group-hover/root:opacity-100 group-focus-within/root:opacity-100';
 
-function RootSection({ title, detail, badge, open, onToggle, actions, children }: {
+/** What a root's header carries while it is dragged; nothing else in the Hub takes it. */
+const ROOT_DRAG_TYPE = 'application/x-drone-explorer-root';
+type Placement = 'before' | 'after';
+
+type RootDrag = {
+  /** Its header was picked up. */
+  dragging: boolean;
+  /** Where a drop would put the dragged root, against this one. */
+  dropAt: Placement | null;
+  onDragStart(event: React.DragEvent): void;
+  onDragEnd(): void;
+  onDragOver(event: React.DragEvent): void;
+  onDrop(event: React.DragEvent): void;
+  /** Alt+Up and Alt+Down on the header. */
+  onMove(step: -1 | 1): void;
+};
+
+function RootSection({ title, detail, badge, open, onToggle, actions, drag, children }: {
   title: string;
   detail?: string;
   badge?: string;
   open: boolean;
   onToggle(): void;
   actions?: React.ReactNode;
+  drag: RootDrag;
   children: React.ReactNode;
 }) {
   return (
     <section
-      className={`flex min-h-0 flex-col border-b border-[var(--border-subtle)] last:border-b-0 ${open ? 'flex-1' : 'shrink-0'}`}
+      className={`relative flex min-h-0 flex-col border-b border-[var(--border-subtle)] last:border-b-0 ${open ? 'flex-1' : 'shrink-0'}`}
       aria-label={title}
       data-explorer-root={title}
+      // Capture: a root's files take drags of their own, and must not see this one.
+      onDragOverCapture={drag.onDragOver}
+      onDropCapture={drag.onDrop}
     >
-      <div className="group/root flex h-6 shrink-0 items-center gap-0.5 bg-[var(--panel-alt)] pr-1">
+      <div
+        className={`group/root flex h-6 shrink-0 items-center gap-0.5 bg-[var(--panel-alt)] pr-1 ${drag.dragging ? 'opacity-50' : ''}`}
+        draggable
+        onDragStart={drag.onDragStart}
+        onDragEnd={drag.onDragEnd}
+      >
         <button
           type="button"
           onClick={onToggle}
+          onKeyDown={(event) => {
+            if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+            event.preventDefault();
+            drag.onMove(event.key === 'ArrowUp' ? -1 : 1);
+          }}
           aria-expanded={open}
-          title={detail ? `${title} · ${detail}` : title}
+          title={`${detail ? `${title} · ${detail}` : title}\nDrag to move, or Alt+Up / Alt+Down`}
           className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1 text-left text-[11px] font-[var(--weight-semibold)] uppercase tracking-[0.04em] text-[var(--fg-secondary)] hover:text-[var(--fg)]"
         >
           <IconChevron down={open} size={12} />
@@ -89,6 +125,7 @@ function RootSection({ title, detail, badge, open, onToggle, actions, children }
         {actions}
       </div>
       {open ? <div className="min-h-0 flex-1">{children}</div> : null}
+      {drag.dropAt ? <SidebarReorderDropIndicator placement={drag.dropAt} /> : null}
     </section>
   );
 }
@@ -135,9 +172,15 @@ function ExplorerRootFiles({ droneId, root, zoom, editor }: {
   );
 }
 
+/** Before or after a root, by the pointer against its header: an open root's files are not where a root goes. */
+function placementOf(event: React.DragEvent): Placement {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY < rect.top + Math.min(rect.height, 24) / 2 ? 'before' : 'after';
+}
+
 /**
- * The File Explorer of a drone with other workspaces as roots below its own files, each collapsible on its own.
- * Without other roots it is just the drone's own explorer.
+ * The File Explorer of a drone with other workspaces as roots beside its own files, each collapsible on its own and
+ * in the order the user dragged them into. Without other roots it is just the drone's own explorer.
  */
 export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, own, zoom }: ExplorerRootsProps & {
   /** The drone's own explorer. */
@@ -145,13 +188,75 @@ export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, 
   zoom: number;
 }) {
   const [openError, setOpenError] = React.useState<{ rootId: string; message: string } | null>(null);
+  const [dragged, setDragged] = React.useState<string | null>(null);
+  const [drop, setDrop] = React.useState<{ id: string; placement: Placement } | null>(null);
+  const order = useExplorerRootOrder(droneId);
+  const ids = React.useMemo(
+    () => orderExplorerRoots([OWN_EXPLORER_ROOT, ...roots.map((root) => root.workspace.id)], (id) => id, order),
+    [order, roots],
+  );
   if (roots.length === 0) return <>{own}</>;
+
+  const endDrag = () => {
+    setDragged(null);
+    setDrop(null);
+  };
+  const dragFor = (id: string): RootDrag => ({
+    dragging: dragged === id,
+    dropAt: drop?.id === id ? drop.placement : null,
+    onDragStart: (event) => {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData(ROOT_DRAG_TYPE, id);
+      setDragged(id);
+    },
+    onDragEnd: endDrag,
+    onDragOver: (event) => {
+      if (!dragged || !event.dataTransfer.types.includes(ROOT_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = placementOf(event);
+      // Only a drop that moves the root shows where it goes.
+      const moves = Boolean(movedExplorerRootOrder(ids, dragged, id, placement));
+      event.dataTransfer.dropEffect = moves ? 'move' : 'none';
+      const next = moves ? { id, placement } : null;
+      setDrop((current) => (current?.id === next?.id && current?.placement === next?.placement ? current : next));
+    },
+    onDrop: (event) => {
+      if (!event.dataTransfer.types.includes(ROOT_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Where the pointer is now, not the last line drawn: that may not have rendered yet.
+      const moved = event.dataTransfer.getData(ROOT_DRAG_TYPE) || dragged;
+      if (moved) moveExplorerRoot(droneId, ids, moved, id, placementOf(event));
+      endDrag();
+    },
+    onMove: (step) => {
+      const at = ids.indexOf(id);
+      const neighbour = ids[at + step];
+      if (neighbour) moveExplorerRoot(droneId, ids, id, neighbour, step < 0 ? 'before' : 'after');
+    },
+  });
+
+  const rootById = new Map(roots.map((root) => [root.workspace.id, root]));
   return (
-    <div className="flex h-full min-h-0 flex-col" data-explorer-roots>
-      <RootSection title={ownName} open={ownOpen} onToggle={() => setExplorerRootOpen(droneId, OWN_EXPLORER_ROOT, !ownOpen)}>
-        {own}
-      </RootSection>
-      {roots.map((root) => {
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-explorer-roots
+      onDragLeave={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDrop(null);
+      }}
+    >
+      {ids.map((id) => {
+        if (id === OWN_EXPLORER_ROOT) {
+          return (
+            <RootSection key={id} title={ownName} open={ownOpen} drag={dragFor(id)}
+              onToggle={() => setExplorerRootOpen(droneId, OWN_EXPLORER_ROOT, !ownOpen)}>
+              {own}
+            </RootSection>
+          );
+        }
+        const root = rootById.get(id);
+        if (!root) return null;
         const { workspace } = root;
         const removeLabel = root.fromChat
           ? `Remove ${workspace.name} from this File Explorer (the chat can still use it)`
@@ -164,6 +269,7 @@ export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, 
             detail={workspace.path}
             badge={root.fromChat && !root.pinned ? 'chat' : undefined}
             open={root.open}
+            drag={dragFor(id)}
             onToggle={() => setExplorerRootOpen(droneId, workspace.id, !root.open)}
             actions={
               <>
