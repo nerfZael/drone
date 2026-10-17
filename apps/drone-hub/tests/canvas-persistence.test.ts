@@ -38,6 +38,8 @@ test('canvas persistence waits for changes to pause, saves in idle time, and sav
     // The organized layout is worked out each time it shows: only whether it is on is kept.
     getCanvasBoardActions(organizedBoardKey('alpha')).upsertNodes([{ droneId: 'chat:a', label: 'chat', x: 900, y: 900 }]);
     useDroneCanvasStore.getState().setOrganizedDroneBoard(false);
+    // Which chats are folded into which card is the user's own arrangement: it is kept.
+    useDroneCanvasStore.getState().setChatFolds('alpha', { reviewer: { host: 'implementer' }, aside: { card: true } });
     useDroneCanvasStore.getState().setDraftPromptForNode('draft:a', 'Keep this prompt');
     useDroneCanvasStore.getState().setSelectedDroneIds(['draft:a']);
     for (let i = 0; i < 100; i++) useDroneCanvasStore.getState().setPan(i, i * 2);
@@ -69,17 +71,22 @@ test('canvas persistence waits for changes to pause, saves in idle time, and sav
     expect(saved.state.optimisticMembersByDroneId).toBeUndefined();
     expect(Object.keys(saved.state.droneBoards)).toEqual(['alpha']);
     expect(saved.state.organizedDroneBoard).toBe(false);
+    expect(saved.state.chatFoldsByDrone).toEqual({ alpha: { reviewer: { host: 'implementer' }, aside: { card: true } } });
 
     // Rehydrating with an unflushed edit reads the newest snapshot, not the older disk copy.
     useDroneCanvasStore.getState().setPan(500, 600);
     await useDroneCanvasStore.persist.rehydrate();
     expect(useDroneCanvasStore.getState().panX).toBe(500);
     expect(useDroneCanvasStore.getState().selectedDroneIds).toEqual([]);
+    expect(useDroneCanvasStore.getState().chatFoldsByDrone.alpha).toEqual({ reviewer: { host: 'implementer' }, aside: { card: true } });
+    // A deleted drone takes its folds with it.
+    useDroneCanvasStore.getState().removeDroneBoards(['alpha']);
+    expect(useDroneCanvasStore.getState().chatFoldsByDrone).toEqual({});
     useDroneCanvasStore.persist.clearStorage();
     expect(timers.size).toBe(0);
     expect(dom.localStorage.getItem(key)).toBeNull();
   } finally {
-    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone', organizedDroneBoard: true });
+    useDroneCanvasStore.setState({ ...EMPTY_CANVAS_BOARD, droneBoards: {}, optimisticMembersByDroneId: {}, scope: 'drone', organizedDroneBoard: true, chatFoldsByDrone: {} });
     useDroneCanvasStore.persist.clearStorage();
     Date.now = originalNow;
     for (const [key, descriptor] of descriptors) {

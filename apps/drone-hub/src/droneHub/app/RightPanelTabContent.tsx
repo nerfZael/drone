@@ -29,6 +29,7 @@ import {
 import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
 import { isDroneStartingOrSeeding } from './helpers';
 import type { ExplorerRootsProps } from '../files/ExplorerRootsColumn';
+import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import type { EditorWorkspaceInfo } from './DroneEditorDock';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
@@ -139,6 +140,8 @@ type RightPanelTabContentProps = {
     }
   >;
   onActivateChatFromCanvas: (droneId: string, chatName: string) => void;
+  /** The sidebar's own move, for chats moved on the organized canvas board. */
+  onMoveSidebar?: (intent: SidebarMoveIntent) => Promise<unknown>;
   onAssignCanvasDronesToOwner: (
     ownerDroneId: string,
     targetDroneIds: string[],
@@ -289,6 +292,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   chatNodeStateById,
   onActivateChatFromCanvas,
   onAssignCanvasDronesToOwner,
+  onMoveSidebar,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameCanvasChat,
@@ -418,6 +422,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               chatNodeStateById={chatNodeStateById}
               onActivateChat={onActivateChatFromCanvas}
               onAssignDronesToOwner={onAssignCanvasDronesToOwner}
+              onMoveSidebar={onMoveSidebar}
               onSendCanvasPrompt={onSendCanvasPrompt}
               onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
               onRenameChat={onRenameCanvasChat}

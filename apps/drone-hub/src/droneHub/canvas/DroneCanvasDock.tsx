@@ -94,11 +94,17 @@ import {
 } from './use-drone-canvas-store';
 import {
   layoutOrganizedBoard,
-  sideChatSquaresByChat,
+  organizedCardsWith,
+  organizedDropAt,
+  organizedDropLine,
+  type OrganizedDrop,
   sideChatSquaresWidthPx,
   type OrganizedLayout,
 } from './organized-board-layout';
-import { buildSidebarChatTree, flattenSidebarChatTreeChatNodeIds, orderSidebarEntries } from '@drone/hub-model/sidebar';
+import { buildSidebarChatTree, flattenSidebarChatTreeChatNodeIds, orderSidebarEntries, type SidebarMoveIntent } from '@drone/hub-model/sidebar';
+import { organizedChatMoveIntent } from './organized-board-reorder';
+import { foldChats, moveFoldedChat, resolveFolds, squaresLeading, unfoldChat, type FoldSquare } from './organized-board-folds';
+import { normalizedDroneChats } from '../app/chat-node-helpers';
 import {
   OPTIMISTIC_MEMBER_TTL_MS,
   buildDroneBoardMembers,
@@ -292,6 +298,7 @@ export function DroneCanvasDock({
   chatNodeStateById: chatNodeStateByIdProp,
   onActivateChat,
   onAssignDronesToOwner,
+  onMoveSidebar,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameChat,
@@ -329,6 +336,8 @@ export function DroneCanvasDock({
     ownerDroneId: string,
     targetDroneIds: string[],
   ) => Promise<{ ok: boolean; error?: string | null }>;
+  /** The sidebar's own move: a chat moved on the organized board moves there too. */
+  onMoveSidebar?: (intent: SidebarMoveIntent) => Promise<unknown>;
   onSendCanvasPrompt?: CanvasSendPrompt;
   onCreateCanvasDroneFromDraft?: (payload: CanvasDraftCreation) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameChat?: (
@@ -529,14 +538,53 @@ export function DroneCanvasDock({
     // Keyed like boardMembers: the summary object is rebuilt on every refresh.
   }, [boardDroneId, boardMemberKey]);
 
-  // On the organized board side chats are squares on the card they came from, not cards of their own.
+  const sidebarChatOrder = useDroneHubUiStore(useShallow((s) => ({
+    order: boardDroneId ? s.sidebarChatOrderByDrone[boardDroneId] : undefined,
+    groupPaths: boardDroneId ? s.sidebarChatGroupPathsByDrone[boardDroneId] : undefined,
+    groupByChat: s.sidebarChatGroupByChat,
+    nodeOrderByParent: s.sidebarChatNodeOrderByParent,
+  })));
+  // The drone's chats in the sidebar's order, as the organized board lays them out.
+  const sidebarChatNames = React.useMemo(() => {
+    if (!organized || !boardDroneId) return [] as string[];
+    const tree = buildSidebarChatTree({
+      droneId: boardDroneId,
+      chatNames: orderSidebarEntries([...new Set(boardChats ?? [])], sidebarChatOrder.order ?? [], (name) => name),
+      groupPaths: sidebarChatOrder.groupPaths ?? [],
+      groupByChat: sidebarChatOrder.groupByChat,
+      nodeOrderByParent: sidebarChatOrder.nodeOrderByParent,
+    });
+    return flattenSidebarChatTreeChatNodeIds(tree).flatMap((id) => {
+      const node = tree.nodesById[id];
+      return node?.kind === 'chat' ? [node.chatName] : [];
+    });
+  }, [boardChats, boardDroneId, organized, sidebarChatOrder]);
+  // On the organized board side chats are squares on the card they came from, and chats folded into another card are
+  // squares on it, until they are dragged out.
+  const chatFolds = useDroneCanvasStore((s) => (boardDroneId ? s.chatFoldsByDrone[boardDroneId] : undefined));
+  const setChatFolds = useDroneCanvasStore((s) => s.setChatFolds);
+  const boardSideChatKey = JSON.stringify((boardSideChats ?? []).map((chat) => [chat.name, chat.sourceChatName, chat.createdAt, chat.presentation]));
+  const resolvedFolds = React.useMemo(() => {
+    if (!organized || !boardDroneId) return null;
+    return resolveFolds({
+      chatNames: sidebarChatNames,
+      sideChats: (boardSideChats ?? []).map((chat) => ({
+        name: chat.name, sourceChatName: chat.sourceChatName, createdAt: chat.createdAt, composer: chat.presentation === 'composer',
+      })),
+      folds: chatFolds,
+    });
+    // The summary is rebuilt on every refresh; its side chats are in the key.
+  }, [boardDroneId, boardSideChatKey, chatFolds, organized, sidebarChatNames]); // eslint-disable-line react-hooks/exhaustive-deps
   const boardSideChatNameKey = (boardSideChats ?? []).map((chat) => chat.name).join('\u0000');
   const cardMembers = React.useMemo(() => {
-    if (!organized) return boardMembers;
+    if (!organized || !resolvedFolds) return boardMembers;
     const sideChatNames = new Set(boardSideChatNameKey ? boardSideChatNameKey.split('\u0000') : []);
     for (const member of optimisticMembers ?? []) if (member.sideChat) sideChatNames.add(member.chatName);
-    return boardMembers.filter((member) => !sideChatNames.has(member.chatName));
-  }, [boardMembers, boardSideChatNameKey, optimisticMembers, organized]);
+    // A chat the Hub has not listed yet is a card.
+    return boardMembers.filter((member) => (sideChatNames.has(member.chatName)
+      ? resolvedFolds.cards.has(member.chatName)
+      : !resolvedFolds.squared.has(member.chatName)));
+  }, [boardMembers, boardSideChatNameKey, optimisticMembers, organized, resolvedFolds]);
   // Stored positions outlive a chat briefly (renames land in two steps), so a
   // drone board renders members only instead of pruning the store.
   const boardMemberIds = React.useMemo(() => {
@@ -547,14 +595,12 @@ export function DroneCanvasDock({
   }, [autoMembers, cardMembers, topicDrones]);
   // Side chats of each card's chat, by its node id; side chats of side chats go on the same card.
   const sideChatSquaresByNodeId = React.useMemo(() => {
-    if (!organized || !boardDroneId) return {} as Record<string, Array<{ nodeId: string; chatName: string; sourceChatName: string }>>;
-    const byChat = sideChatSquaresByChat(boardSideChats, new Set(cardMembers.map((member) => member.chatName)));
-    return Object.fromEntries(Object.entries(byChat).map(([chatName, squares]) => [
+    if (!resolvedFolds || !boardDroneId) return {} as Record<string, Array<FoldSquare & { nodeId: string }>>;
+    return Object.fromEntries(Object.entries(resolvedFolds.squaresByHost).map(([chatName, squares]) => [
       createCanvasChatNodeId(boardDroneId, chatName),
       squares.map((square) => ({ ...square, nodeId: createCanvasChatNodeId(boardDroneId, square.chatName) })),
     ]));
-    // The summary is rebuilt on every refresh; its side chats are in the member key.
-  }, [boardDroneId, boardMemberKey, cardMembers, organized]);
+  }, [boardDroneId, resolvedFolds]);
   // A topic also holds drafts: double-click makes a new drone there, as on the global board.
   const isShownNode = React.useCallback(
     (nodeId: string) => !boardMemberIds || boardMemberIds.has(nodeId) || (topicScope && isCanvasDraftNodeId(nodeId)),
@@ -1103,12 +1149,6 @@ export function DroneCanvasDock({
   // The organized board: chats in the sidebar's order, each tree of clones and created chats together, packed to fit
   // the pane. It is laid out again when a chat comes, goes or is renamed, the pane resizes or previews show; nothing
   // else moves it.
-  const sidebarChatOrder = useDroneHubUiStore(useShallow((s) => ({
-    order: boardDroneId ? s.sidebarChatOrderByDrone[boardDroneId] : undefined,
-    groupPaths: boardDroneId ? s.sidebarChatGroupPathsByDrone[boardDroneId] : undefined,
-    groupByChat: s.sidebarChatGroupByChat,
-    nodeOrderByParent: s.sidebarChatNodeOrderByParent,
-  })));
   const [organizedViewportSize, setOrganizedViewportSize] = React.useState<{ width: number; height: number } | null>(null);
   React.useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -1195,6 +1235,134 @@ export function DroneCanvasDock({
   }, [organizedLayoutInput]);
   const organizedLayoutRef = React.useRef(organizedLayout);
   organizedLayoutRef.current = organizedLayout;
+  // Cards dragged on the organized board fold into the card they are dropped on, or one card goes before or after
+  // another with the same parent: the card lights up, or a line shows where.
+  const [organizedDrop, setOrganizedDrop] = React.useState<OrganizedDrop | null>(null);
+  const sidebarChatSet = React.useMemo(() => new Set(boardChats ?? []), [boardChats]);
+  const sidebarChatSetRef = React.useRef(sidebarChatSet);
+  sidebarChatSetRef.current = sidebarChatSet;
+  // Read when a drag ends, so the window listeners need not follow every summary refresh.
+  const organizedMoveRef = React.useRef({ boardDrone, boardDroneId, onMoveSidebar, squares: sideChatSquaresByNodeId });
+  organizedMoveRef.current = { boardDrone, boardDroneId, onMoveSidebar, squares: sideChatSquaresByNodeId };
+  const organizedDropAtPoint = React.useCallback((nodeIds: readonly string[], clientX: number, clientY: number): OrganizedDrop | null => {
+    const layout = organizedLayoutRef.current;
+    const viewport = viewportRef.current;
+    if (!layout || !viewport || nodeIds.length === 0) return null;
+    const rect = viewport.getBoundingClientRect();
+    const { panX, panY, scale } = getView();
+    const drop = organizedDropAt(layout, nodeIds, { x: (clientX - rect.left - panX) / scale, y: (clientY - rect.top - panY) / scale });
+    if (drop?.kind !== 'slot') return drop;
+    // Only chats the sidebar lists can move there: one still being made has no place there yet.
+    const listed = (nodeId: string) => sidebarChatSetRef.current.has(parseCanvasChatNodeId(nodeId)?.chatName ?? '');
+    return organizedMoveRef.current.onMoveSidebar && listed(nodeIds[0]!) && listed(drop.slot.targetId) ? drop : null;
+  }, [getView]);
+  const moveOrganizedChat = React.useCallback((movedId: string, slot: Extract<OrganizedDrop, { kind: 'slot' }>['slot']) => {
+    const { boardDrone, boardDroneId, onMoveSidebar } = organizedMoveRef.current;
+    const moved = parseCanvasChatNodeId(movedId);
+    const over = parseCanvasChatNodeId(slot.targetId);
+    if (!moved || !over || !boardDroneId || !onMoveSidebar) return;
+    const ui = useDroneHubUiStore.getState();
+    const intent = organizedChatMoveIntent({
+      droneId: boardDroneId,
+      chatNames: orderSidebarEntries(normalizedDroneChats(boardDrone), ui.sidebarChatOrderByDrone[boardDroneId] ?? [], (name) => name),
+      groupPaths: ui.sidebarChatGroupPathsByDrone[boardDroneId] ?? [],
+      groupByChat: ui.sidebarChatGroupByChat,
+      nodeOrderByParent: ui.sidebarChatNodeOrderByParent,
+      activeChatName: moved.chatName,
+      overChatName: over.chatName,
+      placement: slot.placement,
+    });
+    if (intent) void onMoveSidebar(intent);
+  }, []);
+  /** Folds cards into another: each, and the cards that came from it, which come back out with it. */
+  const foldOrganizedCards = React.useCallback((nodeIds: readonly string[], targetId: string) => {
+    const layout = organizedLayoutRef.current;
+    const { boardDroneId } = organizedMoveRef.current;
+    const host = parseCanvasChatNodeId(targetId)?.chatName;
+    if (!layout || !boardDroneId || !host) return;
+    const moving = new Set(nodeIds);
+    // A card whose parent goes too goes with its parent.
+    const leads = nodeIds.filter((id) => {
+      for (let at = layout.parentOf[id]; at; at = layout.parentOf[at]) if (moving.has(at)) return false;
+      return true;
+    });
+    const chatOf = (nodeId: string) => parseCanvasChatNodeId(nodeId)?.chatName ?? '';
+    const followers = new Map(leads.map((lead) => [
+      chatOf(lead), [...organizedCardsWith(layout, [lead])].filter((id) => id !== lead).map(chatOf).filter(Boolean),
+    ]));
+    const folds = useDroneCanvasStore.getState().chatFoldsByDrone[boardDroneId];
+    setChatFolds(boardDroneId, foldChats(folds, leads.map(chatOf), (lead) => followers.get(lead) ?? [], host));
+  }, [setChatFolds]);
+  // A square dragged off its card comes out as a card, with what was folded with it; onto another card, it moves
+  // there. Shift takes every square on the card. A small stack follows the pointer meanwhile.
+  const [squareGhost, setSquareGhost] = React.useState<{ x: number; y: number; count: number } | null>(null);
+  /** Set once a square drag moves, so the click that ends it on the square does not open its chat. */
+  const squareDragMovedRef = React.useRef(false);
+  /** Each side chat's source, read when a square drag ends. */
+  const boardSideChatSourcesRef = React.useRef(new Map<string, string>());
+  boardSideChatSourcesRef.current = new Map((boardSideChats ?? []).map((chat) => [chat.name, String(chat.sourceChatName ?? '').trim()]));
+  const startSquareDrag = React.useCallback((hostId: string, square: CanvasSideChatSquare, event: React.MouseEvent) => {
+    squareDragMovedRef.current = false;
+    const viewport = viewportRef.current;
+    const { boardDroneId, squares } = organizedMoveRef.current;
+    if (event.button !== 0 || !organizedLayoutRef.current || !viewport || !boardDroneId) return;
+    event.preventDefault();
+    const moving = event.shiftKey ? (squares[hostId] ?? []) : [square];
+    const startX = event.clientX;
+    const startY = event.clientY;
+    /** The card under the pointer; undefined outside the board, where a drop does nothing. */
+    const cardAt = (clientX: number, clientY: number): string | null | undefined => {
+      const layout = organizedLayoutRef.current;
+      const rect = viewport.getBoundingClientRect();
+      if (!layout || clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return undefined;
+      const { panX, panY, scale } = getView();
+      const x = (clientX - rect.left - panX) / scale;
+      const y = (clientY - rect.top - panY) / scale;
+      for (const [id, card] of Object.entries(layout.cardRects)) {
+        if (x >= card.x && x <= card.x + card.width && y >= card.y && y <= card.y + card.height) return id;
+      }
+      return null;
+    };
+    const onMove = (moveEvent: MouseEvent) => {
+      if (!squareDragMovedRef.current && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < DRAG_MOVE_THRESHOLD_PX) return;
+      squareDragMovedRef.current = true;
+      const rect = viewport.getBoundingClientRect();
+      setSquareGhost({ x: moveEvent.clientX - rect.left, y: moveEvent.clientY - rect.top, count: moving.length });
+      const target = cardAt(moveEvent.clientX, moveEvent.clientY);
+      const next: OrganizedDrop | null = target && target !== hostId ? { kind: 'fold', targetId: target } : null;
+      setOrganizedDrop((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+    };
+    const stop = () => {
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('mouseup', onUp, true);
+      window.removeEventListener('blur', stop);
+      setSquareGhost(null);
+      setOrganizedDrop(null);
+      // The click that ends the drag on the square comes right after this; a later one opens it again.
+      if (squareDragMovedRef.current) setTimeout(() => { squareDragMovedRef.current = false; }, 0);
+    };
+    const onUp = (upEvent: MouseEvent) => {
+      stop();
+      if (!squareDragMovedRef.current) return;
+      const target = cardAt(upEvent.clientX, upEvent.clientY);
+      // Back on its own card, or off the board: nothing changes.
+      if (target === hostId || target === undefined) return;
+      const host = target ? parseCanvasChatNodeId(target)?.chatName ?? null : null;
+      const sources = boardSideChatSourcesRef.current;
+      const isSideChat = (name: string) => sources.has(name);
+      let folds = useDroneCanvasStore.getState().chatFoldsByDrone[boardDroneId];
+      const composer = new Set(moving.filter((item) => item.composer).map((item) => item.chatName));
+      const leading = squaresLeading(folds, moving.map((item) => item.chatName), (name) => sources.get(name) || null);
+      for (const chatName of leading) {
+        if (host) folds = moveFoldedChat(folds, chatName, host);
+        else if (!composer.has(chatName)) folds = unfoldChat(folds, chatName, isSideChat);
+      }
+      setChatFolds(boardDroneId, folds ?? {});
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    window.addEventListener('blur', stop);
+  }, [getView, setChatFolds]);
   React.useLayoutEffect(() => {
     if (!organizedLayout) return;
     const view = getView();
@@ -1812,6 +1980,7 @@ export function DroneCanvasDock({
         const dy = (event.clientY - nodeDrag.startClientY - (panY - nodeDrag.startPanY)) / nodeDrag.scale / cardSpreadRef.current.y;
         const overComposer = nodeDrag.moved && isOverMessageComposer(event.clientX, event.clientY);
         setComposerDropHover(overComposer);
+        let overOtherDrone = false;
         if (nodeDrag.moved && !overComposer) {
           const draggedDroneIds = Array.from(
             new Set(
@@ -1823,6 +1992,7 @@ export function DroneCanvasDock({
           if (draggedDroneIds.length > 0) {
             const pointTarget = resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY);
             const assignmentTarget = resolveCanvasAssignmentDropTarget(nodeDrag.droneIds, pointTarget);
+            overOtherDrone = Boolean(assignmentTarget.ownerDroneId);
             setAssignmentHoverNodeId(assignmentTarget.canvasNodeId);
             setAssignmentHoverTargetCount(assignmentTarget.targetDroneIds.length);
             // Repositioning cards and hovering other canvas nodes are local to
@@ -1837,6 +2007,10 @@ export function DroneCanvasDock({
           setAssignmentHoverTargetCount(0);
           dispatchCanvasAssignmentPreview(null);
         }
+        const drop = nodeDrag.moved && !overComposer && !overOtherDrone
+          ? organizedDropAtPoint(nodeDrag.droneIds, event.clientX, event.clientY)
+          : null;
+        setOrganizedDrop((current) => (JSON.stringify(current) === JSON.stringify(drop) ? current : drop));
         moveNodes(
           nodeDrag.droneIds.map((droneId) => {
             const start = nodeDrag.startPositionsById[droneId];
@@ -1919,7 +2093,12 @@ export function DroneCanvasDock({
           resolveFleetAssignmentTargetFromPoint(event.clientX, event.clientY),
         );
         const ownerDroneId = assignmentTarget.ownerDroneId;
-        // The organized board keeps its places: a card dragged anywhere but onto a target goes back to its own.
+        // Where the pointer is now, not the last highlight drawn: that may not have rendered yet.
+        const drop = ownerDroneId ? null : organizedDropAtPoint(nodeDrag.droneIds, event.clientX, event.clientY);
+        // The organized board keeps its places: a card goes back to its own, and to a new one once the order or the
+        // folds change.
+        if (drop?.kind === 'slot') moveOrganizedChat(nodeDrag.droneIds[0]!, drop.slot);
+        else if (drop?.kind === 'fold') foldOrganizedCards(nodeDrag.droneIds, drop.targetId);
         if (organizedLayoutRef.current || ownerDroneId) {
           moveNodes(
             nodeDrag.droneIds
@@ -1948,6 +2127,7 @@ export function DroneCanvasDock({
       dispatchCanvasAssignmentPreview(null);
       setAssignmentHoverNodeId(null);
       setAssignmentHoverTargetCount(0);
+      setOrganizedDrop(null);
       nodeDragRef.current = null;
       setDraggingNodeId(null);
       setMovingNodeIds(EMPTY_ID_SET);
@@ -1989,6 +2169,7 @@ export function DroneCanvasDock({
       dispatchCanvasAssignmentPreview(null);
       setAssignmentHoverNodeId(null);
       setAssignmentHoverTargetCount(0);
+      setOrganizedDrop(null);
       nodeDragRef.current = null;
       setDraggingNodeId(null);
       setMovingNodeIds(EMPTY_ID_SET);
@@ -2011,7 +2192,7 @@ export function DroneCanvasDock({
       window.removeEventListener('mouseup', onWindowMouseUp, true);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, moveNodes, onAssignDronesToOwner, setPan, setSelectedDroneIds]);
+  }, [activateCanvasNode, clearSelection, getView, isOverMessageComposer, foldOrganizedCards, moveNodes, moveOrganizedChat, onAssignDronesToOwner, organizedDropAtPoint, setPan, setSelectedDroneIds]);
 
   const fitViewportToNodes = React.useCallback(() => {
     const viewport = viewportRef.current;
@@ -2421,7 +2602,14 @@ export function DroneCanvasDock({
     [activateCanvasNode, droneScope, openDroneBoard],
   );
 
-  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard: cardHover.hover, openSideChat: activateCanvasNode, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
+  const openSquare = React.useCallback((nodeId: string) => {
+    if (squareDragMovedRef.current) {
+      squareDragMovedRef.current = false;
+      return;
+    }
+    activateCanvasNode(nodeId);
+  }, [activateCanvasNode]);
+  const nodeActions = { onNodeMouseDown, onNodeClick, onNodeDoubleClick, hoverCard: cardHover.hover, openSideChat: openSquare, startSquareDrag, setInlineRenameDraft, submitInlineRename, cancelInlineRename, focusViewportElement };
   const nodeActionsRef = React.useRef(nodeActions);
   React.useLayoutEffect(() => { nodeActionsRef.current = nodeActions; });
 
@@ -3002,11 +3190,15 @@ export function DroneCanvasDock({
     for (const [nodeId, squares] of Object.entries(sideChatSquaresByNodeId)) {
       const next = squares.flatMap((square) => {
         const detail = detailByNodeId[square.nodeId];
-        return detail ? [{ nodeId: square.nodeId, chatName: square.chatName, detail, open: openChatShown && square.nodeId === sidebarSelectedChatNodeId }] : [];
+        return detail ? [{
+          nodeId: square.nodeId, chatName: square.chatName, kind: square.kind, composer: square.composer, detail,
+          open: openChatShown && square.nodeId === sidebarSelectedChatNodeId,
+        }] : [];
       });
       const kept = previous[nodeId];
       out[nodeId] = kept && kept.length === next.length && kept.every((square, index) =>
-        square.nodeId === next[index]!.nodeId && square.detail === next[index]!.detail && square.open === next[index]!.open)
+        square.nodeId === next[index]!.nodeId && square.kind === next[index]!.kind && square.composer === next[index]!.composer
+        && square.detail === next[index]!.detail && square.open === next[index]!.open)
         ? kept
         : next;
     }
@@ -3064,6 +3256,7 @@ export function DroneCanvasDock({
       inlineEditing={inlineEditing}
       assignmentHoverTarget={assignmentHoverTarget}
       assignmentHoverTargetCount={assignmentHoverTarget ? assignmentHoverTargetCount : 0}
+      foldTarget={organizedDrop?.kind === 'fold' && organizedDrop.targetId === node.droneId}
       isActiveSidebarChat={isActiveSidebarChat}
       indicatorState={indicatorState}
       deleting={deleting}
@@ -3297,6 +3490,31 @@ export function DroneCanvasDock({
             : parseCanvasChatNodeId(focusId)?.chatName ?? nodeMetaById[focusId]?.label ?? '';
           return <CanvasStepsPanel title={title} card={focus} bottomPx={stepsPanelBottomPx} />;
         }}</HoveredCard>
+
+        {(() => {
+          const slot = organizedDrop?.kind === 'slot' ? organizedDrop.slot : null;
+          const line = slot && organizedLayout ? organizedDropLine(organizedLayout, slot) : null;
+          if (!line) return null;
+          const { panX, panY, scale } = getView();
+          return (
+            <div
+              className="absolute pointer-events-none h-[2px] bg-[var(--accent)]"
+              data-organized-drop-line={slot!.placement}
+              style={{ left: panX + line.x * scale, top: panY + line.y * scale - 1, width: line.width * scale }}
+            />
+          );
+        })()}
+
+        {squareGhost ? (
+          <div
+            className="pointer-events-none absolute flex items-center gap-1"
+            data-canvas-square-ghost={squareGhost.count}
+            style={{ left: squareGhost.x + 8, top: squareGhost.y + 8 }}
+          >
+            <span className="h-2.5 w-2.5 rounded-[2px] bg-[var(--accent)]" />
+            {squareGhost.count > 1 ? <span className="font-mono text-10 text-[var(--fg-secondary)]">×{squareGhost.count}</span> : null}
+          </div>
+        ) : null}
 
         {selectionBox ? (
           <div

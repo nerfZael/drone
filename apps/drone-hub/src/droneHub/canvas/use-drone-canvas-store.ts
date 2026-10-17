@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import { profileStorageKey } from '../../profile-storage';
 import { normalizeCanvasNewCardSettings, type CanvasNewCardSettings } from './canvas-new-card-settings';
+import type { DroneChatFolds } from './organized-board-folds';
 
 const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
@@ -132,6 +133,9 @@ type DroneCanvasState = DroneCanvasBoard &
     /** Drone boards lay their chats out themselves instead of keeping them where they were put. One setting for all. */
     organizedDroneBoard: boolean;
     setOrganizedDroneBoard: (organized: boolean) => void;
+    /** Chats each drone's organized board shows as squares on another card, and side chats it shows as cards. */
+    chatFoldsByDrone: Record<string, DroneChatFolds>;
+    setChatFolds: (droneId: string, folds: DroneChatFolds) => void;
   };
 
 type DroneCanvasPersistedBoard = Omit<DroneCanvasBoard, 'selectedDroneIds'>;
@@ -142,6 +146,7 @@ type DroneCanvasPersistedState = DroneCanvasPersistedBoard & {
   activeTopicId: string | null;
   newCardSettings: CanvasNewCardSettings | null;
   organizedDroneBoard: boolean;
+  chatFoldsByDrone: Record<string, DroneChatFolds>;
 };
 
 const BOARD_KEYS = [
@@ -305,7 +310,26 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
     activeTopicId,
     newCardSettings: normalizeCanvasNewCardSettings(raw.newCardSettings),
     organizedDroneBoard: raw.organizedDroneBoard !== false,
+    chatFoldsByDrone: normalizeChatFoldsByDrone(raw.chatFoldsByDrone),
   };
+}
+
+function normalizeChatFoldsByDrone(value: unknown): Record<string, DroneChatFolds> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, DroneChatFolds> = {};
+  for (const [droneId, rawFolds] of Object.entries(value as Record<string, unknown>)) {
+    if (!droneId.trim() || !rawFolds || typeof rawFolds !== 'object') continue;
+    const folds: DroneChatFolds = {};
+    for (const [chatName, fold] of Object.entries(rawFolds as Record<string, any>)) {
+      if (!chatName || !fold || typeof fold !== 'object') continue;
+      if (fold.card === true) folds[chatName] = { card: true };
+      else if (typeof fold.host === 'string' && fold.host) {
+        folds[chatName] = typeof fold.via === 'string' && fold.via ? { host: fold.host, via: fold.via } : { host: fold.host };
+      }
+    }
+    if (Object.keys(folds).length > 0) out[droneId] = folds;
+  }
+  return out;
 }
 
 function uniqueIds(ids: readonly unknown[]): string[] {
@@ -459,6 +483,7 @@ function toPersistedState(state: DroneCanvasState): DroneCanvasPersistedState {
     activeTopicId: state.activeTopicId,
     newCardSettings: state.newCardSettings,
     organizedDroneBoard: state.organizedDroneBoard,
+    chatFoldsByDrone: state.chatFoldsByDrone,
     droneBoards: Object.fromEntries(
       Object.entries(state.droneBoards)
         .filter(([droneId]) => !isOrganizedBoardKey(droneId))
@@ -751,6 +776,13 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
         setNewCardSettings: (settings) => set((state) => ({ ...state, newCardSettings: settings })),
         organizedDroneBoard: true,
         setOrganizedDroneBoard: (organized) => set((state) => ({ ...state, organizedDroneBoard: organized })),
+        chatFoldsByDrone: {},
+        setChatFolds: (droneId, folds) => set((state) => {
+          const chatFoldsByDrone = { ...state.chatFoldsByDrone };
+          if (Object.keys(folds).length > 0) chatFoldsByDrone[droneId] = folds;
+          else delete chatFoldsByDrone[droneId];
+          return { ...state, chatFoldsByDrone };
+        }),
         createTopic: (input) => {
           const id = createTopicId();
           set((state) => ({
@@ -851,7 +883,12 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
             const ids = requested.flatMap((id) => [id, organizedBoardKey(id)]).filter(
               (id) => state.droneBoards[id] || state.optimisticMembersByDroneId[id],
             );
-            if (ids.length === 0) return inTopics ? { ...state, topics } : state;
+            // Its folds go too.
+            const folded = requested.filter((id) => state.chatFoldsByDrone[id]);
+            const chatFoldsByDrone = folded.length > 0
+              ? Object.fromEntries(Object.entries(state.chatFoldsByDrone).filter(([id]) => !folded.includes(id)))
+              : state.chatFoldsByDrone;
+            if (ids.length === 0) return inTopics || folded.length > 0 ? { ...state, topics, chatFoldsByDrone } : state;
             const droneBoards = { ...state.droneBoards };
             const optimisticMembersByDroneId = { ...state.optimisticMembersByDroneId };
             for (const id of ids) {
@@ -859,7 +896,7 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
               delete optimisticMembersByDroneId[id];
               boardActionsByDroneId.delete(id);
             }
-            return { ...state, droneBoards, optimisticMembersByDroneId, topics };
+            return { ...state, droneBoards, optimisticMembersByDroneId, topics, chatFoldsByDrone };
           }),
       };
     },

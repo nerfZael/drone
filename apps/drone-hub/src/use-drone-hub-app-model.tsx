@@ -60,7 +60,8 @@ import {
   topicBoardKey,
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
-import { forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
+import { renameChatInFolds } from './droneHub/canvas/organized-board-folds';
+import { forgetChatFolds, forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
 import {
   beginChatDeletion,
   markChatsDeleted,
@@ -513,6 +514,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           }
         }
       }
+      // A folded chat stays folded, and a card keeps what was folded into it.
+      const canvas = useDroneCanvasStore.getState();
+      const folds = canvas.chatFoldsByDrone[droneId];
+      const renamedFolds = renameChatInFolds(folds, oldName, newName);
+      if (renamedFolds && renamedFolds !== folds) canvas.setChatFolds(droneId, renamedFolds);
       setOptimisticChatRenames((current) => {
         // A chat renamed again before the summary caught up goes straight to its latest name.
         const renames = Object.fromEntries(
@@ -4877,6 +4883,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         claimed.set(candidate, Date.now());
         // A clone placed by the caller (onNameChosen) replaces the stored card itself.
         if (!opts?.onNameChosen) forgetStaleChatCard(latestDrone.id, candidate);
+        else forgetChatFolds(latestDrone.id, candidate);
         opts?.onNameChosen?.(candidate);
         const created = await createDroneChat(latestDrone, candidate, opts);
         // A created chat stays claimed until the drone summary lists it.
@@ -6009,6 +6016,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           draftRepoLabel={canvasDraftRepoLabel}
           chatNodeStateById={chatNodeStateById}
           onActivateChatFromCanvas={onActivateChatFromCanvas}
+          onMoveSidebar={moveSidebar}
           onAssignCanvasDronesToOwner={async (ownerDroneId, targetDroneIds) =>
             openDroneDropActionModal(ownerDroneId, targetDroneIds)
           }
