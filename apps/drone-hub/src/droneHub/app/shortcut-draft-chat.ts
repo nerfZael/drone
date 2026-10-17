@@ -22,6 +22,11 @@ export function shortcutDraftChatDisposition(input: {
   return input.hasDraftContent ? 'retain' : 'delete';
 }
 
+/** The Hub answers 409 when the chat is no longer a draft, as when a summary that still listed it as one lagged. */
+export function isDraftChatAlreadyPublishedError(error: unknown): boolean {
+  return (error as { status?: unknown } | null)?.status === 409;
+}
+
 export async function publishThenSendShortcutDraftChat(input: {
   publish: () => Promise<void>;
   send: () => Promise<boolean>;
@@ -30,8 +35,10 @@ export async function publishThenSendShortcutDraftChat(input: {
   try {
     await input.publish();
   } catch (error: unknown) {
-    input.onPublishError(error);
-    return false;
+    if (!isDraftChatAlreadyPublishedError(error)) {
+      input.onPublishError(error);
+      return false;
+    }
   }
   return await input.send();
 }

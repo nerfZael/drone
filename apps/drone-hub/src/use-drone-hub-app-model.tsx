@@ -256,6 +256,7 @@ import {
 } from './droneHub/app/helpers';
 
 import {
+  isDraftChatAlreadyPublishedError,
   publishThenSendShortcutDraftChat,
   shouldRetainOptimisticallyHiddenDraftChat,
   shortcutDraftChatDisposition,
@@ -2621,12 +2622,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const chatName = String(selectedChat ?? '').trim() || 'default';
       const key = droneChatQueueKey(droneId, chatName);
       const tracked = newDraftChatsRef.current.get(key);
-      if (!tracked) return await sendPromptTextBase(payload, context);
-      tracked.submissionInFlight = true;
-
-      if (tracked.creationPromise && !(await tracked.creationPromise)) {
-        tracked.submissionInFlight = false;
-        return false;
+      // A draft the app no longer tracks (left with typed text, or kept across a reload) is still published by its
+      // first message: the Hub holds prompts sent to a draft until it is published.
+      const untrackedDraft = !tracked && droneByIdRef.current[droneId]?.draftChats?.[chatName] === true;
+      if (!tracked && !untrackedDraft) return await sendPromptTextBase(payload, context);
+      if (tracked) {
+        tracked.submissionInFlight = true;
+        if (tracked.creationPromise && !(await tracked.creationPromise)) {
+          tracked.submissionInFlight = false;
+          return false;
+        }
       }
 
       const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`;
@@ -2643,8 +2648,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           return await sendPromptTextBase(payload, context);
         },
         onPublishError: (error) => {
-          tracked.submissionInFlight = false;
-          tracked.publishFailed = true;
+          if (tracked) {
+            tracked.submissionInFlight = false;
+            tracked.publishFailed = true;
+          }
           const message = String(error instanceof Error ? error.message : error ?? '').trim();
           showShortcutToast(
             message || 'The draft chat could not be published, so the message was not sent.',
@@ -5329,11 +5336,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!drone) return { ok: false, error: 'The destination drone is no longer available.' };
       const key = droneChatQueueKey(droneId, chatName);
       const tracked = newDraftChatsRef.current.get(key);
-      if (tracked) {
-        tracked.submissionInFlight = true;
-        if (tracked.creationPromise && !(await tracked.creationPromise)) {
-          tracked.submissionInFlight = false;
-          return { ok: false, error: 'The destination draft chat could not be created.' };
+      if (tracked || drone.draftChats?.[chatName] === true) {
+        if (tracked) {
+          tracked.submissionInFlight = true;
+          if (tracked.creationPromise && !(await tracked.creationPromise)) {
+            tracked.submissionInFlight = false;
+            return { ok: false, error: 'The destination draft chat could not be created.' };
+          }
         }
         try {
           await requestJson<{ ok: true }>(
@@ -5346,15 +5355,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           );
           newDraftChatsRef.current.delete(key);
         } catch (publishError: unknown) {
-          tracked.submissionInFlight = false;
-          tracked.publishFailed = true;
-          return {
-            ok: false,
-            error:
-              publishError instanceof Error
-                ? publishError.message
-                : 'The destination draft chat could not be published.',
-          };
+          if (!isDraftChatAlreadyPublishedError(publishError)) {
+            if (tracked) {
+              tracked.submissionInFlight = false;
+              tracked.publishFailed = true;
+            }
+            return {
+              ok: false,
+              error:
+                publishError instanceof Error
+                  ? publishError.message
+                  : 'The destination draft chat could not be published.',
+            };
+          }
+          newDraftChatsRef.current.delete(key);
         }
       }
 
