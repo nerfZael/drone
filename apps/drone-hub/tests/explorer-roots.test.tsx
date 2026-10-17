@@ -149,6 +149,29 @@ describe('reordering roots', () => {
       // Alt+Up on a header moves it too.
       await act(async () => { Simulate.keyDown(header('Guides').querySelector('button')!, { key: 'ArrowUp', altKey: true }); });
       expect(order()).toEqual(['Guides', 'Mech', 'Game Graphics']);
+      // The header keeps the focus as it moves, so Alt+Down can move it on: Chrome drops the focus of a node moved in the
+      // page, and React gives it back after the commit. happy-dom keeps it, so it is made to drop it here.
+      const nodeProto = dom.Node.prototype as any;
+      const insertBefore = nodeProto.insertBefore;
+      const appendChild = nodeProto.appendChild;
+      const blurMoved = (node: any) => {
+        const focused = dom.document.activeElement as any;
+        if (node?.isConnected && focused && node.contains(focused)) focused.blur();
+      };
+      nodeProto.insertBefore = function (node: any, ref: any) { blurMoved(node); return insertBefore.call(this, node, ref); };
+      nodeProto.appendChild = function (node: any) { blurMoved(node); return appendChild.call(this, node); };
+      const guidesButton = header('Guides').querySelector('button') as unknown as HTMLElement;
+      guidesButton.focus();
+      for (const expected of [['Mech', 'Guides', 'Game Graphics'], ['Mech', 'Game Graphics', 'Guides']]) {
+        await act(async () => {
+          const focused = dom.document.activeElement as unknown as Element;
+          if (focused) Simulate.keyDown(focused, { key: 'ArrowDown', altKey: true });
+        });
+        expect(order()).toEqual(expected);
+        expect(dom.document.activeElement as unknown).toBe(guidesButton);
+      }
+      nodeProto.insertBefore = insertBefore;
+      nodeProto.appendChild = appendChild;
       await act(async () => root.unmount());
     } finally {
       for (const [key, descriptor] of originals) {
