@@ -61,6 +61,7 @@ import {
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
 import { renameChatInFolds } from './droneHub/canvas/organized-board-folds';
+import { renameChatInSidebarPlaces } from './droneHub/app/sidebar-chat-rename';
 import { forgetChatFolds, forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
 import {
   beginChatDeletion,
@@ -520,6 +521,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const folds = canvas.chatFoldsByDrone[droneId];
       const renamedFolds = renameChatInFolds(folds, oldName, newName);
       if (renamedFolds && renamedFolds !== folds) canvas.setChatFolds(droneId, renamedFolds);
+      // Its place in the sidebar, and so on the organized board, stays: the sidebar keeps it under the chat's name.
+      const ui = useDroneHubUiStore.getState();
+      const places = renameChatInSidebarPlaces(ui, droneId, oldName, newName);
+      if (places.sidebarChatOrderByDrone !== ui.sidebarChatOrderByDrone) ui.setSidebarChatOrderByDrone(places.sidebarChatOrderByDrone);
+      if (places.sidebarChatGroupByChat !== ui.sidebarChatGroupByChat) ui.setSidebarChatGroupByChat(places.sidebarChatGroupByChat);
+      if (places.sidebarChatNodeOrderByParent !== ui.sidebarChatNodeOrderByParent) ui.setSidebarChatNodeOrderByParent(places.sidebarChatNodeOrderByParent);
+      if (places.mutedChatIds !== ui.mutedChatIds) ui.setMutedChatIds(places.mutedChatIds);
       setOptimisticChatRenames((current) => {
         // A chat renamed again before the summary caught up goes straight to its latest name.
         const renames = Object.fromEntries(
@@ -4597,14 +4605,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
         );
         followChatRename(droneId, chatName, newName);
-        setSidebarChatOrderByDrone((prev) => {
-          const currentOrder = prev[droneId];
-          if (!currentOrder || !currentOrder.includes(chatName)) return prev;
-          return {
-            ...prev,
-            [droneId]: currentOrder.map((entry) => (entry === chatName ? newName : entry)),
-          };
-        });
         if (selectedDrone === droneId && selectedChat === chatName) {
           setSelectedChat(newName);
         }
@@ -4619,7 +4619,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedChat,
       selectedDrone,
       setSelectedChat,
-      setSidebarChatOrderByDrone,
       sidebarSelectableDroneIdSet,
     ],
   );
