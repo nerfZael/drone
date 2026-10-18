@@ -1498,6 +1498,61 @@ async function authorizeChatSubscriptionResource(
   }
 }
 
+const CREATED_CHAT_SUBSCRIPTION_INTENT =
+  'You created this chat. When it goes idle, read its reply and continue the work you gave it; when it fails, decide whether to retry it.';
+
+const createdChatSubscriptionInputs = {
+  subscribe: z
+    .boolean()
+    .describe(
+      "Subscribe this chat to the new chat's chat.idle and chat.failed events. Defaults to true when called from a chat; set false for a chat you will not follow up on.",
+    )
+    .optional(),
+  subscriptionIntent: z
+    .string()
+    .describe('Intent delivered with those events. Defaults to following up on the work you gave the new chat.')
+    .optional(),
+};
+
+/**
+ * Subscribes the calling chat to a chat it just created, so the creator hears
+ * when the work it handed over finishes even if it never subscribes itself.
+ * Never fails the creation: problems come back as a warning instead.
+ */
+async function subscribeCreatorToCreatedChat(
+  context: McpToolRegistrationContext,
+  chatId: unknown,
+  options: { subscribe?: boolean; subscriptionIntent?: string },
+): Promise<Record<string, unknown>> {
+  const resourceId = cleanString(chatId);
+  if (options.subscribe === false || !chatPrincipal(context) || !resourceId) return {};
+  let events = ['chat.idle', 'chat.failed'];
+  try {
+    await authorizeChatSubscriptionResource(context, resourceId);
+  } catch {
+    // Failure events need read access to the new chat's drone; idle events do not.
+    events = ['chat.idle'];
+  }
+  try {
+    const response = await requestJson('/api/resource-subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: 'drone-hub',
+        resourceType: 'chat',
+        resourceId,
+        events,
+        intent: cleanString(options.subscriptionIntent) || CREATED_CHAT_SUBSCRIPTION_INTENT,
+        subscriber: subscriptionSubscriber(context),
+      }),
+    });
+    return { subscription: mcpSubscription(response?.subscription) };
+  } catch (error: any) {
+    return {
+      subscriptionWarning: `The chat was created, but this chat is not subscribed to it: ${error?.message ?? String(error)}. Call subscribe_to_resource_events with resourceId ${resourceId} to hear when it finishes.`,
+    };
+  }
+}
+
 async function authorizeChangeRequestSubscriptionResource(
   context: McpToolRegistrationContext,
   resourceId: string,
@@ -2675,13 +2730,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Clone drone chat',
       description:
-        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to put the clone in a temporary side chat instead of the sidebar; the operation is otherwise the same. The clone ends at the last completed answer of the source. Side chats and running sources require that checkpoint (a supported agent with a completed answer); an idle source without one is cloned whole instead. Side chats cannot be drafts.',
+        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to put the clone in a temporary side chat instead of the sidebar; the operation is otherwise the same. The clone ends at the last completed answer of the source. Side chats and running sources require that checkpoint (a supported agent with a completed answer); an idle source without one is cloned whole instead. Side chats cannot be drafts. When called from a chat, that chat is subscribed to the clone\'s idle and failure events (see subscribe).',
       inputSchema: {
         drone: z.string().trim().min(1),
         sourceChat: z.string().trim().min(1).describe('Source chat name.'),
         chat: z.string().trim().min(1).describe('New chat name. Must not already exist.'),
         draft: z.boolean().optional(),
         sideChat: z.boolean().optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
@@ -2705,7 +2761,10 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           }),
         },
       );
-      return toolResult(result);
+      return toolResult({
+        ...result,
+        ...(await subscribeCreatorToCreatedChat(context, result?.chatId, args)),
+      });
     },
   );
 
@@ -2714,7 +2773,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Create drone chat',
       description:
-        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", "openrouter", or "cerebras".',
+        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", "openrouter", or "cerebras". When called from a chat, that chat is subscribed to the new chat\'s idle and failure events, so you hear when the work you send it finishes (see subscribe); the result\'s subscription field shows it.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -2740,6 +2799,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         afterChat: z.string().optional(),
         beforeGroup: z.string().optional(),
         afterGroup: z.string().optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
@@ -2946,6 +3006,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           layoutWarning = `The chat was created and configured, but its sidebar placement could not be saved: ${error?.message ?? String(error)}`;
         }
       }
+      const subscription = created
+        ? await subscribeCreatorToCreatedChat(context, result?.chatId, args)
+        : {};
       return toolResult({
         ok: true,
         drone: { id: resolved.id, name: resolved.name },
@@ -2960,6 +3023,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           : layoutWarning
             ? { warning: layoutWarning }
             : {}),
+        ...subscription,
       });
     },
   );
@@ -3372,21 +3436,28 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           .optional(),
         createChat: z
           .boolean()
-          .describe('Create the named chat before sending. Defaults to false.')
+          .describe(
+            'Create the named chat before sending. Defaults to false. When called from a chat and the chat is new, the calling chat is subscribed to its idle and failure events (see subscribe).',
+          )
           .optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
       const chat = await resolveTargetChat(args.drone, args.chat);
       const sender = chatActor(context);
+      let subscription: Record<string, unknown> = {};
       if (args.createChat) {
         await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
-        await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+        const created = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
           method: 'POST',
           body: JSON.stringify({ name: chat, ...(sender ? { createdBy: sender } : {}) }),
         }).catch((error: any) => {
           if (error?.status !== 409) throw error;
+          return null;
         });
+        // Subscribe before the prompt starts so the first run's idle event is not missed.
+        if (created) subscription = await subscribeCreatorToCreatedChat(context, created.chatId, args);
       }
       // The prompt endpoint validates canonical existence with requireExistingChat.
       // Sidebar listings deliberately omit side/workflow chats and cannot validate recipients.
@@ -3427,6 +3498,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
                 'This message is not linked to your chat, either because the target drone is still starting or because idempotencyKey matched a message another chat sent. cancel_messages and edit_message will report it as not_yours.',
             }
           : {}),
+        ...subscription,
         raw: response,
       });
     },
