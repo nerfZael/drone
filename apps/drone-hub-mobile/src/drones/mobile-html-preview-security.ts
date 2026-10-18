@@ -91,10 +91,10 @@ export const MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST = ['*'] as const;
 
 export const MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  // Inline scripts run as on desktop. Network, frames, forms and navigation stay blocked.
+  // Inline, data: and blob: scripts run as on desktop. Network, frames, forms and navigation stay blocked.
   // A page with a media session may load images and video from that session only; a
   // page without one gets one message to the app instead: a request for a local image.
-  "script-src 'unsafe-inline'",
+  "script-src 'unsafe-inline' data: blob:",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
   'font-src data:',

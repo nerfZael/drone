@@ -23,7 +23,9 @@ export const HTML_PREVIEW_PERMISSIONS_POLICY = [
  */
 export const HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  // data: and blob: scripts come from the document itself, like inline ones. Single-file
+  // pages map their bundled modules to data: URLs in an import map.
+  "script-src 'unsafe-inline' data: blob:",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
   'font-src data:',
@@ -41,7 +43,7 @@ export const HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
 
 // Opt-in resource access retains the opaque origin and all non-network restrictions.
 export const HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY = HTML_PREVIEW_CONTENT_SECURITY_POLICY
-  .replace("script-src 'unsafe-inline'", "script-src 'unsafe-inline' 'unsafe-eval' http: https:")
+  .replace("script-src 'unsafe-inline' data: blob:", "script-src 'unsafe-inline' data: blob: 'unsafe-eval' http: https:")
   .replace("style-src 'unsafe-inline'", "style-src 'unsafe-inline' http: https:")
   .replace('img-src data: blob:', 'img-src data: blob: http: https:')
   .replace('font-src data:', 'font-src data: http: https:')

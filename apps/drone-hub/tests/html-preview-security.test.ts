@@ -14,7 +14,7 @@ describe('isolated HTML preview', () => {
     const enabled = buildIsolatedHtmlPreviewDocument(source, true);
     expect(enabled).toContain(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY);
     expect(enabled.indexOf(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY)).toBeLessThan(enabled.indexOf(source));
-    expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' 'unsafe-eval' http: https:");
+    expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' data: blob: 'unsafe-eval' http: https:");
     expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain('connect-src http: https: ws: wss:');
     for (const directive of ['frame-src', 'object-src', 'worker-src', 'base-uri', 'form-action', 'navigate-to']) {
       expect(HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY).toContain(`${directive} 'none'`);
@@ -43,7 +43,7 @@ describe('isolated HTML preview', () => {
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("frame-src 'none'");
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("form-action 'none'");
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("navigate-to 'none'");
-    expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline'");
+    expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' data: blob:;");
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain('unsafe-eval');
   });
 

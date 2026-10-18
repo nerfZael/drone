@@ -42,7 +42,7 @@ describe('mobile rendered HTML preview security', () => {
 
   test('allows inline scripts while blocking network, form, object, and navigation capabilities', () => {
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("default-src 'none'");
-    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline'");
+    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' data: blob:;");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain('unsafe-eval');
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain('img-src data: blob:;');
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("connect-src 'none'");
