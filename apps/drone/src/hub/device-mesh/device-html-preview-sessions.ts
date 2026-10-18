@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import type http from 'node:http';
+import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isGranted } from '@drone/device-protocol';
 import { DeviceMeshStore } from './device-mesh-store';
 import type { LocalHubAccess } from './local-hub-request';
 import type { DeviceMeshHttpExtension } from './device-mesh-http';
+import { htmlPreviewFramedPath, htmlPreviewResponsePolicy } from '../html-preview-sessions';
 
 type Session = {
   sourceDeviceId: string;
   encodedDrone: string;
+  /** The previewed page; HTML files in its folder load in frames inside it. */
+  htmlPath: string | null;
   lastUsedAt: number;
 };
 
@@ -25,8 +29,9 @@ export const HTML_PREVIEW_MEDIA_MAX_BYTES = 32 * 1024 * 1024;
  * Lets a phone's rendered HTML preview load the page's local images and video
  * the way a browser does: by URL, decoded and cached by the WebView itself. An
  * <img> cannot send headers, so the token is in the path. A session serves one
- * drone's media files only, through the Hub's image/video route, and only while
- * the device keeps its file preview grant.
+ * drone's media files, through the Hub's image/video route, and HTML files in the
+ * previewed page's folder to frames inside it, sandboxed. It lasts only while the
+ * device keeps its file preview grant.
  */
 export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
   private readonly sessions = new Map<string, Session>();
@@ -56,7 +61,7 @@ export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
   }
 
   /** Returns the URL prefix the page's relative media URLs resolve under. */
-  create(sourceDeviceId: string, droneId: string): { mediaBase: string } {
+  create(sourceDeviceId: string, droneId: string, htmlPath?: string): { mediaBase: string } {
     const endpoint = this.endpoint();
     if (!endpoint) throw new Error('Configure Tailscale access to preview HTML media');
     this.prune();
@@ -68,6 +73,7 @@ export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
     this.sessions.set(hash(token), {
       sourceDeviceId,
       encodedDrone: encodeURIComponent(droneId),
+      htmlPath: htmlPath?.startsWith('/') ? path.posix.normalize(htmlPath) : null,
       lastUsedAt: Date.now(),
     });
     return { mediaBase: `${endpoint}${ROUTE}${token}/` };
@@ -143,18 +149,44 @@ export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
     this.active.set(controller, session.sourceDeviceId);
     const abort = () => controller.abort();
     response.once('close', abort);
+    const framedPath = session.htmlPath ? htmlPreviewFramedPath(session.htmlPath, filePath) : null;
+    let framedSession: string | null = null;
+    const base =
+      typeof this.access.baseUrl === 'function' ? this.access.baseUrl() : this.access.baseUrl;
+    const headers: Record<string, string> = { authorization: `Bearer ${this.access.apiToken}` };
     try {
-      const base =
-        typeof this.access.baseUrl === 'function' ? this.access.baseUrl() : this.access.baseUrl;
-      const headers: Record<string, string> = { authorization: `Bearer ${this.access.apiToken}` };
-      if (request.headers.range) headers.range = request.headers.range;
-      if (request.headers['if-range']) headers['if-range'] = String(request.headers['if-range']);
-      const upstream = await fetch(
-        `${base}/api/drones/${session.encodedDrone}/fs/media?path=${encodeURIComponent(filePath)}&maxBytes=${HTML_PREVIEW_MEDIA_MAX_BYTES}`,
-        { method: request.method, headers, signal: controller.signal, redirect: 'error' },
-      );
+      let upstream: Response;
+      if (framedPath && session.htmlPath) {
+        // The Hub's preview route for the previewed page serves the framed one, keeping
+        // it inside the page's folder after links resolve. This session sets its policy.
+        const policy = framedPagePolicy(`${this.endpoint() ?? url.origin}${ROUTE}${token}/`);
+        response.setHeader('content-security-policy', htmlPreviewResponsePolicy(policy));
+        const created = await fetch(`${base}/api/drones/${session.encodedDrone}/fs/html-preview`, {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ path: session.htmlPath, contentSecurityPolicy: policy, documentPrefix: '' }),
+          signal: controller.signal,
+          redirect: 'error',
+        });
+        const page = (await created.json().catch(() => null)) as { ok?: boolean; url?: unknown } | null;
+        if (!created.ok || !page?.ok || typeof page.url !== 'string' || !page.url.startsWith('/api/drones/')) {
+          response.writeHead(created.ok ? 502 : created.status).end();
+          return true;
+        }
+        framedSession = page.url.split('/').slice(0, 7).join('/');
+        const encodedPath = framedPath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+        upstream = await fetch(`${base}${framedSession}${encodedPath}`, { method: request.method, headers, signal: controller.signal, redirect: 'error' });
+      } else {
+        if (request.headers.range) headers.range = request.headers.range;
+        if (request.headers['if-range']) headers['if-range'] = String(request.headers['if-range']);
+        upstream = await fetch(
+          `${base}/api/drones/${session.encodedDrone}/fs/media?path=${encodeURIComponent(filePath)}&maxBytes=${HTML_PREVIEW_MEDIA_MAX_BYTES}`,
+          { method: request.method, headers, signal: controller.signal, redirect: 'error' },
+        );
+      }
       const type = String(upstream.headers.get('content-type') ?? '').toLowerCase();
-      if (!upstream.ok || (!type.startsWith('image/') && !type.startsWith('video/'))) {
+      const served = framedPath ? type.startsWith('text/html') : type.startsWith('image/') || type.startsWith('video/');
+      if (!upstream.ok || !served) {
         await upstream.body?.cancel();
         // A video player recovers from an unsatisfiable range using the size it reports.
         const contentRange = upstream.headers.get('content-range');
@@ -189,6 +221,7 @@ export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
       if (!response.headersSent) response.writeHead(502).end();
       else response.destroy();
     } finally {
+      if (framedSession) void fetch(`${base}${framedSession}`, { method: 'DELETE', headers }).catch(() => {});
       response.removeListener('close', abort);
       this.active.delete(controller);
       const next = this.waiting.shift();
@@ -213,6 +246,21 @@ export class DeviceHtmlPreviewSessions implements DeviceMeshHttpExtension {
     for (const [id, session] of this.sessions)
       if (session.lastUsedAt <= cutoff) this.sessions.delete(id);
   }
+}
+
+/** A framed page runs scripts and loads this session's files, and nothing else. */
+function framedPagePolicy(sessionBase: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline' data: blob:",
+    "style-src 'unsafe-inline'",
+    `img-src data: blob: ${sessionBase}`,
+    'font-src data:',
+    `media-src data: blob: ${sessionBase}`,
+    `frame-src ${sessionBase}`,
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ');
 }
 
 function hash(token: string): string {

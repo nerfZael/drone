@@ -1198,7 +1198,7 @@ export function createDroneControlCapability(
         if (payload.htmlPreviewSession === true) {
           // Older phones never ask; older Hubs ignore the flag and the phone falls back.
           if (!options?.htmlPreviews) throw new Error('HTML preview media is unavailable on this Hub');
-          return { htmlPreview: options.htmlPreviews.create(sourceDeviceId, droneId) };
+          return { htmlPreview: options.htmlPreviews.create(sourceDeviceId, droneId, filePath) };
         }
         const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
         if (payload.metadataOnly === true) {

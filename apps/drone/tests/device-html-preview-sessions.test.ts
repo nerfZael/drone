@@ -79,6 +79,65 @@ test('HTML preview sessions serve one drone media by URL while the grant lasts',
   }
 });
 
+test('HTML preview sessions serve pages in the previewed page\'s folder to its frames', async () => {
+  const hubRequests: Array<{ method: string; url: string; body?: any }> = [];
+  const hub = await listen((request, response) => {
+    let text = '';
+    request.on('data', (chunk) => { text += chunk; });
+    request.on('end', () => {
+      const body = text ? JSON.parse(text) : undefined;
+      hubRequests.push({ method: request.method!, url: request.url!, body });
+      if (request.method === 'POST') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ ok: true, url: `/api/drones/d/fs/html-preview/hub-token${body.path}` }));
+      } else if (request.method === 'GET' && request.url!.startsWith('/api/drones/d/fs/html-preview/')) {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<canvas></canvas>');
+      } else {
+        response.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+      }
+    });
+  });
+  const store = {
+    read: async () => ({ devices: { phone: { id: 'phone', grants: [GRANT] } } }),
+    subscribe: () => () => {},
+  };
+  let endpoint = '';
+  const sessions = new DeviceHtmlPreviewSessions({ baseUrl: hub.base, apiToken: 't' }, store as any, () => endpoint);
+  const publicServer = await listen((request, response) => {
+    void sessions.handlePublic(request, response, new URL(request.url!, endpoint));
+  });
+  endpoint = publicServer.base;
+  try {
+    const { mediaBase } = sessions.create('phone', 'd', '/work/site/index.html');
+    const page = await fetch(`${mediaBase}work/site/viewer/3d.html`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    const policy = page.headers.get('content-security-policy')!;
+    expect(policy).toStartWith("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' data: blob:;");
+    expect(policy).toContain(`frame-src ${mediaBase};`);
+    expect(policy).toContain(`img-src data: blob: ${mediaBase};`);
+    expect(await page.text()).toBe('<canvas></canvas>');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(hubRequests.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      'POST /api/drones/d/fs/html-preview',
+      'GET /api/drones/d/fs/html-preview/hub-token/work/site/viewer/3d.html',
+      'DELETE /api/drones/d/fs/html-preview/hub-token',
+    ]);
+    expect(hubRequests[0].body).toEqual({ path: '/work/site/index.html', contentSecurityPolicy: policy.slice('sandbox allow-scripts; '.length), documentPrefix: '' });
+
+    // Pages outside the folder, or in a session that names no page, go to the media route.
+    hubRequests.length = 0;
+    expect((await fetch(`${mediaBase}work/other.html`)).status).toBe(415);
+    const noPage = sessions.create('phone', 'd').mediaBase;
+    expect((await fetch(`${noPage}work/site/viewer/3d.html`)).status).toBe(415);
+    expect(hubRequests.map(({ url }) => url.split('?')[0])).toEqual(['/api/drones/d/fs/media', '/api/drones/d/fs/media']);
+  } finally {
+    sessions.close();
+    publicServer.server.close();
+    hub.server.close();
+  }
+});
+
 test('each device keeps a bounded number of preview sessions', () => {
   const store = { read: async () => ({ devices: {} }), subscribe: () => () => {} };
   const sessions = new DeviceHtmlPreviewSessions({ baseUrl: 'http://hub', apiToken: 't' }, store as any, () => 'https://hub.test');

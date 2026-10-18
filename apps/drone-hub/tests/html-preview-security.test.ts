@@ -5,6 +5,8 @@ import {
   HTML_PREVIEW_EXTERNAL_CONTENT_SECURITY_POLICY,
   HTML_PREVIEW_IFRAME_SANDBOX,
   HTML_PREVIEW_PERMISSIONS_POLICY,
+  htmlPreviewContentSecurityPolicy,
+  htmlPreviewUrlFilePath,
 } from '../src/droneHub/files/html-preview-security';
 
 describe('isolated HTML preview', () => {
@@ -45,6 +47,25 @@ describe('isolated HTML preview', () => {
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("navigate-to 'none'");
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' data: blob:;");
     expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain('unsafe-eval');
+  });
+
+  test('frames load only from the drone\'s preview route', () => {
+    const local = 'http://hub.test/api/drones/d/fs/html-preview/';
+    expect(HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("frame-src 'none'");
+    for (const external of [false, true]) {
+      const policy = htmlPreviewContentSecurityPolicy(external, local);
+      expect(policy).toContain(`frame-src ${local};`);
+      expect(policy).toContain(`img-src data: blob: ${external ? 'http: https: ' : ''}${local};`);
+      expect(policy).not.toContain("frame-src 'none'");
+    }
+  });
+
+  test('finds the file a preview URL serves, for links clicked in framed pages', () => {
+    const local = 'http://hub.test/api/drones/d/fs/html-preview/';
+    expect(htmlPreviewUrlFilePath(`${local}tok/work/site/viewer%203d.html#top`, local)).toBe('/work/site/viewer 3d.html');
+    expect(htmlPreviewUrlFilePath(`${local}tok`, local)).toBeNull();
+    expect(htmlPreviewUrlFilePath('about:srcdoc', local)).toBeNull();
+    expect(htmlPreviewUrlFilePath('http://hub.test/api/drones/other/fs/html-preview/tok/a.html', local)).toBeNull();
   });
 
   test('places the security policy before user-authored scripts', () => {

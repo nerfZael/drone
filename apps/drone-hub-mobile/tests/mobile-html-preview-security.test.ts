@@ -8,6 +8,7 @@ import {
   MOBILE_HTML_PREVIEW_IMAGE_REQUEST,
   MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY,
   MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST,
+  shouldAllowMobileHtmlPreviewFrameLoad,
   shouldAllowMobileHtmlPreviewNavigation,
 } from '../src/drones/mobile-html-preview-security';
 
@@ -45,6 +46,7 @@ describe('mobile rendered HTML preview security', () => {
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("script-src 'unsafe-inline' data: blob:;");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).not.toContain('unsafe-eval');
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain('img-src data: blob:;');
+    expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("frame-src 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("connect-src 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("object-src 'none'");
     expect(MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY).toContain("form-action 'none'");
@@ -120,10 +122,21 @@ describe('mobile rendered HTML preview security', () => {
     expect(document).toStartWith(`<!doctype html><base href="${mediaBase}work/my%20site/index.html"><meta http-equiv="Content-Security-Policy"`);
     expect(document).toContain(`img-src data: blob: ${mediaBase};`);
     expect(document).toContain(`media-src data: blob: ${mediaBase};`);
+    expect(document).toContain(`frame-src ${mediaBase};`);
     expect(document).toContain("connect-src 'none'");
     expect(document).toContain("base-uri 'none'");
     expect(document).not.toContain('securitypolicyviolation');
     expect(document).toEndWith(source);
+  });
+
+  test('frames load only from the page\'s media session', () => {
+    const mediaBase = 'https://hub.tail.ts.net/api/device-mesh/v2/html-preview/tok_en-1/';
+    expect(shouldAllowMobileHtmlPreviewFrameLoad(`${mediaBase}work/site/viewer-3d.html`, mediaBase)).toBe(true);
+    expect(shouldAllowMobileHtmlPreviewFrameLoad('about:blank', null)).toBe(true);
+    expect(shouldAllowMobileHtmlPreviewFrameLoad(`${mediaBase}work/site/viewer-3d.html`, null)).toBe(false);
+    expect(shouldAllowMobileHtmlPreviewFrameLoad('https://hub.tail.ts.net/api/device-mesh/v2/html-preview/other/a.html', mediaBase)).toBe(false);
+    expect(shouldAllowMobileHtmlPreviewFrameLoad('https://example.com/', mediaBase)).toBe(false);
+    expect(shouldAllowMobileHtmlPreviewFrameLoad('https://drone-hub-preview.invalid/work/site/viewer-3d.html', mediaBase)).toBe(false);
   });
 
   test('accepts only plain HTTPS session URLs that cannot alter the policy', () => {

@@ -10,6 +10,7 @@ import {
   MOBILE_HTML_PREVIEW_IMAGE_DELIVERY,
   MOBILE_HTML_PREVIEW_IMAGE_REQUEST,
   MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST,
+  shouldAllowMobileHtmlPreviewFrameLoad,
   shouldAllowMobileHtmlPreviewNavigation,
 } from './mobile-html-preview-security';
 import {
@@ -163,7 +164,9 @@ export function RenderedHtmlPreview({
         originWhitelist={[...MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST]}
         source={{ html: document, baseUrl: documentUrl }}
         onShouldStartLoadWithRequest={(request) =>
-          shouldAllowMobileHtmlPreviewNavigation(request.url, documentUrl)
+          request.isTopFrame === false
+            ? shouldAllowMobileHtmlPreviewFrameLoad(request.url, mediaBase)
+            : shouldAllowMobileHtmlPreviewNavigation(request.url, documentUrl)
         }
         // Only pages without a media session get a message channel, for image requests.
         onMessage={mediaBase ? undefined : (event) => runtimeImagesRef.current?.request(event.nativeEvent.data)}

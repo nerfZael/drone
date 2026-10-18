@@ -91,9 +91,10 @@ export const MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST = ['*'] as const;
 
 export const MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  // Inline, data: and blob: scripts run as on desktop. Network, frames, forms and navigation stay blocked.
-  // A page with a media session may load images and video from that session only; a
-  // page without one gets one message to the app instead: a request for a local image.
+  // Inline, data: and blob: scripts run as on desktop. Network, forms and navigation stay blocked.
+  // A page with a media session may load images, video and framed pages in its folder
+  // from that session only, and no frames otherwise; a page without one gets one
+  // message to the app instead: a request for a local image.
   "script-src 'unsafe-inline' data: blob:",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
@@ -168,12 +169,13 @@ export function mobileHtmlPreviewMediaBase(value: unknown): string | null {
   }
 }
 
-/** The policy, admitting images and video from the page's media session when it has one. */
+/** The policy, admitting images, video and frames from the page's media session when it has one. */
 export function mobileHtmlPreviewContentSecurityPolicy(mediaBase?: string | null): string {
   if (!mediaBase) return MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY;
   return MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY
     .replace('img-src data: blob:', `img-src data: blob: ${mediaBase}`)
-    .replace('media-src data: blob:', `media-src data: blob: ${mediaBase}`);
+    .replace('media-src data: blob:', `media-src data: blob: ${mediaBase}`)
+    .replace("frame-src 'none'", `frame-src ${mediaBase}`);
 }
 
 /**
@@ -202,6 +204,22 @@ export function buildMobileHtmlPreviewDocument(
     mediaBase ? '' : MOBILE_HTML_PREVIEW_IMAGE_SCRIPT,
     String(source ?? '').replace(/\u0000/g, '\uFFFD'),
   ].join('');
+}
+
+/**
+ * iOS asks before loading a frame too. A frame may hold a page from the media
+ * session, which serves the Hub's sandboxed copy, and nothing from elsewhere.
+ */
+export function shouldAllowMobileHtmlPreviewFrameLoad(url: string, mediaBase?: string | null): boolean {
+  if (url === 'about:blank') return true;
+  const base = mobileHtmlPreviewMediaBase(mediaBase);
+  if (!base) return false;
+  try {
+    const target = new URL(url);
+    return target.href.startsWith(base) && target.username === '' && target.password === '';
+  } catch {
+    return false;
+  }
 }
 
 export function shouldAllowMobileHtmlPreviewNavigation(

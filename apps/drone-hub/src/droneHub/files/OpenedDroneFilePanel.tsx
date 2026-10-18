@@ -840,11 +840,12 @@ export function OpenedDroneFilePanel({
   }, [activeFilePath, fileLoading, fileTargetLine, openedFileEditorVisible]);
 
   const openPreviewLink = React.useCallback(
-    (href: string): boolean => {
+    (href: string, fromPath?: string): boolean => {
       // A file in a workspace, this one or another: the Hub's window opens it.
       if (openWorkspaceLink(href)) return true;
       if (!onOpenResolvedFile) return false;
-      const resolved = resolveMarkdownPreviewLinkTarget(activeFilePath, href);
+      // A link in a page framed inside an HTML preview is relative to that page.
+      const resolved = resolveMarkdownPreviewLinkTarget(fromPath ?? activeFilePath, href);
       if (!resolved) return false;
       const name = resolved.path.split('/').filter(Boolean).pop() || resolved.path;
       onOpenResolvedFile({

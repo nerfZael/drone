@@ -6,6 +6,7 @@ import {
   HTML_PREVIEW_IFRAME_SANDBOX,
   HTML_PREVIEW_LINK_MESSAGE,
   HTML_PREVIEW_PERMISSIONS_POLICY,
+  htmlPreviewUrlFilePath,
 } from './html-preview-security';
 import { htmlPreviewMediaBase, useHtmlPreviewSession } from './use-html-preview-session';
 
@@ -29,8 +30,11 @@ export function IsolatedHtmlPreview({
   fileName?: string | null;
   droneId?: string;
   filePath?: string;
-  /** Receives the authored href of a link the user clicked in the preview. */
-  onOpenLink?: (href: string) => void;
+  /**
+   * Receives the authored href of a link the user clicked in the preview, and the
+   * file it was clicked in when that is a page framed inside the preview.
+   */
+  onOpenLink?: (href: string, fromPath?: string) => void;
 }) {
   // A key is an identity, never a serialization of the document. Keep the source
   // reference only, and reset consent whenever the accepted document changes.
@@ -43,7 +47,7 @@ export function IsolatedHtmlPreview({
   return <HtmlPreviewSession key={current.id} source={source} fileName={fileName} droneId={droneId} filePath={filePath} onOpenLink={onOpenLink} />;
 }
 
-function HtmlPreviewSession({ source, fileName, droneId, filePath, onOpenLink }: { source: string | null; fileName?: string | null; droneId?: string; filePath?: string; onOpenLink?: (href: string) => void }) {
+function HtmlPreviewSession({ source, fileName, droneId, filePath, onOpenLink }: { source: string | null; fileName?: string | null; droneId?: string; filePath?: string; onOpenLink?: (href: string, fromPath?: string) => void }) {
   const confirm = useAppConfirmDialog();
   const frameRef = React.useRef<HTMLIFrameElement>(null);
   const onOpenLinkRef = React.useRef(onOpenLink);
@@ -52,13 +56,16 @@ function HtmlPreviewSession({ source, fileName, droneId, filePath, onOpenLink }:
     // Only this preview's own frame may ask; the href is resolved like any authored link.
     function handleMessage(event: MessageEvent) {
       if (!event.source || !frameRef.current || event.source !== frameRef.current.contentWindow) return;
-      const data = event.data as { type?: unknown; href?: unknown } | null;
+      const data = event.data as { type?: unknown; href?: unknown; from?: unknown } | null;
       if (data?.type !== HTML_PREVIEW_LINK_MESSAGE || typeof data.href !== 'string') return;
-      onOpenLinkRef.current?.(data.href);
+      // Any page in the preview can claim any page URL here. That only picks the
+      // folder a relative link resolves in; it could post an absolute path anyway.
+      const fromPath = droneId && typeof data.from === 'string' ? htmlPreviewUrlFilePath(data.from, htmlPreviewMediaBase(droneId)) : null;
+      onOpenLinkRef.current?.(data.href, fromPath && fromPath !== filePath ? fromPath : undefined);
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [droneId, filePath]);
   const [allowExternalResources, setAllowExternalResources] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const local = Boolean(droneId && filePath);

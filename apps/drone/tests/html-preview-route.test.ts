@@ -16,6 +16,11 @@ beforeAll(async () => {
   await fs.writeFile(path.join(dir, 'index.html'), '<h1>Žiga</h1><img src="shot.png">');
   await fs.writeFile(path.join(dir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   await fs.writeFile(path.join(dir, 'notes.txt'), 'secret');
+  await fs.mkdir(path.join(dir, 'site', 'viewer'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'site', 'index.html'), '<iframe src="viewer/3d.html"></iframe>');
+  await fs.writeFile(path.join(dir, 'site', 'viewer', '3d.html'), '<canvas></canvas>');
+  await fs.writeFile(path.join(dir, 'outside.html'), 'secret page');
+  await fs.symlink(path.join(dir, 'outside.html'), path.join(dir, 'site', 'link.html'));
   const handler = createFilesystemRouteHandler({
     FS_MEDIA_MAX_BYTES: 1024 * 1024,
     droneRuntime: () => 'host',
@@ -77,6 +82,25 @@ describe('HTML preview route', () => {
     expect(await text.text()).not.toContain('secret');
   });
 
+  test('serves HTML files in the previewed file\'s folder to frames, with the same prefix and policy', async () => {
+    const { body } = await createSession('drone-a', { path: path.join(dir, 'site', 'index.html') });
+    const framed = await fetch(new URL('viewer/3d.html', `${base}${body.url}`));
+    expect(framed.status).toBe(200);
+    expect(framed.headers.get('content-security-policy')).toBe(`sandbox allow-scripts; ${POLICY}`);
+    expect(framed.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(await framed.text()).toBe('<!doctype html><script>guard()</script><canvas></canvas>');
+
+    // A page above the folder stays out of reach, however the path is spelled or linked.
+    const linked = await fetch(new URL('link.html', `${base}${body.url}`));
+    expect(linked.status).toBe(404);
+    expect(await linked.text()).not.toContain('secret page');
+    for (const escape of ['../outside.html', 'viewer/..%2F..%2Foutside.html']) {
+      const response = await fetch(`${base}${body.url.replace(/index\.html$/, escape)}`);
+      expect(response.status).toBe(415);
+      expect(await response.text()).not.toContain('secret page');
+    }
+  });
+
   test('a session is bound to its drone and ends when deleted', async () => {
     const { body } = await createSession();
     const token = body.url.split('/')[6];
@@ -88,5 +112,67 @@ describe('HTML preview route', () => {
   test('rejects a policy that could inject response headers', async () => {
     expect((await createSession('drone-a', { contentSecurityPolicy: "default-src 'none'\r\nx-evil: 1" })).status).toBe(400);
     expect((await createSession('drone-a', { contentSecurityPolicy: '' })).status).toBe(400);
+  });
+});
+
+describe('HTML preview route for a container drone', () => {
+  // Stands in for a container: realpath resolves links inside it, and docker cp
+  // copies a link as a link, here one pointing at a file on the Hub's side.
+  let hubSecret = '';
+  let containerServer: http.Server;
+  let containerBase = '';
+  const links: Record<string, string> = { '/work/site/link.html': '/work/secret.html' };
+  const copied: string[] = [];
+  beforeAll(async () => {
+    hubSecret = path.join(dir, 'hub-secret.txt');
+    await fs.writeFile(hubSecret, 'hub secret');
+    const handler = createFilesystemRouteHandler({
+      FS_MEDIA_MAX_BYTES: 1024 * 1024,
+      droneRuntime: () => 'container',
+      normalizeFsPathForRuntime: (_drone: unknown, rawPath: string) => rawPath,
+      resolveDroneOrRespond: async (_res: unknown, ref: string) => ({ id: ref, drone: { name: ref } }),
+      withReadonlyDroneContainer: async (_options: unknown, run: (context: { containerName: string }) => Promise<unknown>) => run({ containerName: 'c' }),
+      dvmExec: async (_container: string, command: string, args: string[]) => {
+        expect(command).toBe('realpath');
+        return { code: 0, stdout: args.slice(2).map((p) => links[p] ?? p).join('\n') + '\n', stderr: '' };
+      },
+      dvmCopyFromContainer: async (_container: string, source: string, dest: string) => {
+        copied.push(source);
+        const target = path.join(dest, path.posix.basename(source));
+        if (source === '/work/site/swapped.html') await fs.symlink(hubSecret, target);
+        else await fs.writeFile(target, `<p>${source}</p>`);
+      },
+      hostFsErrorStatus: () => 404,
+      looksLikeMissingContainerError: () => false,
+    } as any);
+    containerServer = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://hub.test');
+      void handler({ req, res, url, method: req.method ?? 'GET', parts: url.pathname.split('/').filter(Boolean) }).then((handled) => {
+        if (!handled) { res.statusCode = 404; res.end(); }
+      });
+    });
+    await new Promise<void>((resolve) => containerServer.listen(0, '127.0.0.1', resolve));
+    containerBase = `http://127.0.0.1:${(containerServer.address() as any).port}`;
+  });
+  afterAll(() => containerServer.close());
+
+  test('reads the file a link resolves to inside the container, never a link on the Hub', async () => {
+    const created = await fetch(`${containerBase}/api/drones/c/fs/html-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ path: '/work/site/index.html', contentSecurityPolicy: POLICY, documentPrefix: '' }),
+    });
+    const { url } = await created.json() as any;
+    const page = await fetch(`${containerBase}${url}`);
+    expect(await page.text()).toBe('<p>/work/site/index.html</p>');
+
+    // A framed page linked out of the folder is refused before anything is copied.
+    copied.length = 0;
+    expect((await fetch(`${containerBase}${url.replace(/index\.html$/, 'link.html')}`)).status).toBe(404);
+    expect(copied).toEqual([]);
+
+    // A file swapped for a link after it resolved arrives as a link and is refused.
+    const swapped = await fetch(`${containerBase}${url.replace(/index\.html$/, 'swapped.html')}`);
+    expect(swapped.status).toBe(404);
+    expect(await swapped.text()).not.toContain('hub secret');
   });
 });
