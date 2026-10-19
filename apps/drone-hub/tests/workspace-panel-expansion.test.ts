@@ -59,8 +59,9 @@ describe('content-fit width', () => {
   });
 });
 
-test('file and side chat windows share one setting per kind', () => {
+test('file and chat windows share one setting per kind', () => {
   expect(expansionKeyForPanel('file-tab:abc')).toBe('file');
-  expect(expansionKeyForPanel('side-chat:plan')).toBe('side-chat');
+  expect(expansionKeyForPanel('side-chat:plan')).toBe('chat');
+  expect(expansionKeyForPanel('agent-chat')).toBe('chat');
   expect(expansionKeyForPanel('tool:terminal')).toBe('tool:terminal');
 });

@@ -23,7 +23,10 @@ test('the Chats tab switches between list and grid without leaving the tab', asy
   let closed = 0;
   const api = {
     title: 'Chats',
+    location: { type: 'grid' },
     onDidTitleChange: () => ({ dispose: () => {} }),
+    onDidLocationChange: () => ({ dispose: () => {} }),
+    onDidGroupChange: () => ({ dispose: () => {} }),
     close: () => { closed += 1; },
   };
   try {

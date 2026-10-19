@@ -42,7 +42,7 @@ export function DockTabShell({ api, children, expandable = true }: {
     >
       <span className="dv-default-tab-content">{title}</span>
       {/* Controls that render nothing (outside the desktop app) leave the slot empty, and CSS drops the divider with it. */}
-      <span className="dh-dock-tab-controls">{expandable ? <ExpandOnFocusButton panelId={api.id} /> : null}{children}</span>
+      <span className="dh-dock-tab-controls">{expandable ? <ExpandOnFocusButton api={api} /> : null}{children}</span>
       <span className="dh-dock-tab-divider" aria-hidden="true" />
       <div
         className="dv-default-tab-action"
@@ -63,12 +63,27 @@ export function DockTabShell({ api, children, expandable = true }: {
 /** Stops a tab control's press from dragging or activating the tab. */
 export const stopTabEvent = (event: React.SyntheticEvent) => event.stopPropagation();
 
-/** Turns expand on focus on or off for this kind of window, in every layout. */
-function ExpandOnFocusButton({ panelId }: { panelId: string | undefined }) {
-  const key = panelId ? expansionKeyForPanel(panelId) : '';
+function useDockedInGrid(api: IDockviewPanelHeaderProps['api']): boolean {
+  const [docked, setDocked] = React.useState(() => api.location.type === 'grid');
+  React.useEffect(() => {
+    const update = () => setDocked(api.location.type === 'grid');
+    update();
+    const disposables = [api.onDidLocationChange(update), api.onDidGroupChange(update)];
+    return () => disposables.forEach((disposable) => disposable.dispose());
+  }, [api]);
+  return docked;
+}
+
+/**
+ * Turns expand on focus on or off for this kind of window, in every layout.
+ * Floating windows never expand, so theirs is left out.
+ */
+export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['api'] }) {
+  const key = api.id ? expansionKeyForPanel(api.id) : '';
   const on = usePanelExpansionPreferences((state) => Boolean(key && state.enabled[key]));
   const toggle = usePanelExpansionPreferences((state) => state.toggle);
-  if (!key) return null;
+  const docked = useDockedInGrid(api);
+  if (!key || !docked) return null;
   return (
     <button
       type="button"

@@ -10,7 +10,7 @@ import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
-import { DockTabShell, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
+import { DockTabShell, ExpandOnFocusButton, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
 import { OCCUPIED_GROUP_CONSTRAINTS, useWorkspacePanelExpansion } from './workspace-panel-expansion';
 import { ChatsDockTab } from './ChatsDockTab';
 import { TerminalHeaderControlsContext } from '../terminal/terminal-header-controls-context';
@@ -661,6 +661,7 @@ function MainChatTab({ api }: IDockviewPanelHeaderProps) {
     <div className="dv-default-tab" data-testid="dockview-dv-default-tab" title={title}
       data-chat-drone-id={ctx.droneId} data-chat-name={chatName}>
       <span className="dv-default-tab-content">{title} <ChatUsageBadge droneId={ctx.droneId} chatName={chatName} /></span>
+      <span className="dh-dock-tab-controls"><ExpandOnFocusButton api={api} /></span>
     </div>
   );
 }
@@ -872,7 +873,8 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   if (sideChat) {
     const displayedName = displaced || chatName;
     return <ChatWindowTab key={displayedName} {...props} data-side-chat-name={displayedName} data-chat-drone-id={ctx.droneId} data-chat-name={displayedName} chatName={displayedName} droneId={ctx.droneId}
-      onRename={!displaced && onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
+      onRename={!displaced && onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown}
+      controls={<ExpandOnFocusButton api={props.api} />} />;
   }
   if (!closeable) return <MainChatTab {...props} />;
   if (tabFromPanelId(props.api.id) === 'terminal') return <TerminalDockTab {...props} />;

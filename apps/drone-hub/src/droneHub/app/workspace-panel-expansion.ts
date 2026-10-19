@@ -32,9 +32,12 @@ export const OCCUPIED_GROUP_CONSTRAINTS = { minimumWidth: 100, minimumHeight: 10
 /** Focus that follows a key press this recently is the user's; other focus changes are programmatic. */
 const KEYBOARD_FOCUS_WINDOW_MS = 800;
 
+/** The main chat and its side chats share one setting. */
+export const CHAT_EXPANSION_KEY = 'chat';
+
 export function expansionKeyForPanel(panelId: string): string {
   if (panelId.startsWith(FILE_PANEL_PREFIX)) return 'file';
-  if (panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) return 'side-chat';
+  if (panelId === 'agent-chat' || panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) return CHAT_EXPANSION_KEY;
   return panelId;
 }
 
@@ -141,6 +144,28 @@ export function measureDiffOverflowPx(root: HTMLElement): number | null {
   const needed = columns * characterWidth(sample) + parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0') + 4;
   const codeColumns = sample.closest('table')?.classList.contains('diff-split') ? 2 : 1;
   return Math.max(0, Math.ceil((needed - sample.clientWidth) * codeColumns));
+}
+
+/**
+ * Extra width a chat needs before its replies stop re-wrapping. Reply prose is
+ * capped at --chat-prose-max, so past that a wider window changes nothing.
+ * Tables and other wide blocks may keep wrapping; they don't count.
+ */
+export function measureChatProseOverflowPx(root: HTMLElement): number {
+  let widest: HTMLElement | null = null;
+  for (const reply of root.querySelectorAll<HTMLElement>('.dh-markdown--transcript')) {
+    if (!widest || reply.clientWidth > widest.clientWidth) widest = reply;
+  }
+  if (!widest || widest.clientWidth === 0) return 0;
+  // Resolved inside a reply so the cap's ch units use the reply's font.
+  const probe = root.ownerDocument.createElement('div');
+  probe.style.cssText = 'position:absolute;visibility:hidden;height:0;width:var(--chat-prose-max);max-width:none';
+  widest.appendChild(probe);
+  const proseWidth = probe.getBoundingClientRect().width;
+  probe.remove();
+  const style = getComputedStyle(widest);
+  const width = widest.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0');
+  return Math.max(0, Math.ceil(proseWidth - width));
 }
 
 export type ExpansionRect = { left: number; top: number; width: number; height: number };
@@ -299,7 +324,9 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
 
     const expand = (group: DockviewGroupPanel, pinned: boolean) => {
       // Measured once from the docked size; once wider, the content no longer asks for more.
-      const extraWidth = measureContentOverflow(group.element);
+      const extraWidth = keyOf(group) === CHAT_EXPANSION_KEY
+        ? measureChatProseOverflowPx(group.element)
+        : measureContentOverflow(group.element);
       if (!plan(group, extraWidth)) return;
       expanded = { group, pinned, extraWidth };
       apply();
