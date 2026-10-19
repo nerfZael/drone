@@ -3,7 +3,7 @@ import type { IDockviewPanelHeaderProps } from 'dockview';
 import { usePanelTitle } from './ChatWindowTab';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 import { desktopToolTabSupported, desktopToolWindowsAvailable, useDesktopToolWindows } from './desktop-tool-windows';
-import { expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPreferences } from './workspace-panel-expansion';
+import { CHAT_EXPANSION_KEY, expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPreferences } from './workspace-panel-expansion';
 
 /**
  * A dock tab that carries its own controls before the close button: the
@@ -76,7 +76,8 @@ function useDockedInGrid(api: IDockviewPanelHeaderProps['api']): boolean {
 
 /**
  * Turns expand on focus on or off for this kind of window, in every layout.
- * Floating windows never expand, so theirs is left out.
+ * For chats it keeps them at their reading width instead. Floating windows
+ * do neither, so theirs is left out.
  */
 export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['api'] }) {
   const key = api.id ? expansionKeyForPanel(api.id) : '';
@@ -84,6 +85,7 @@ export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['a
   const toggle = usePanelExpansionPreferences((state) => state.toggle);
   const docked = useDockedInGrid(api);
   if (!key || !docked) return null;
+  const chat = key === CHAT_EXPANSION_KEY;
   return (
     <button
       type="button"
@@ -91,10 +93,14 @@ export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['a
       aria-checked={on}
       className="dh-dock-tab-button"
       data-expand-on-focus-toggle=""
-      title={on
-        ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
-        : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
-      aria-label="Expand on focus"
+      title={chat
+        ? on
+          ? 'Reading width is on: chats stay wide enough that their replies stop wrapping, pushing neighbouring windows aside. Click to turn off.'
+          : 'Reading width: keep chats wide enough that their replies stop wrapping, pushing neighbouring windows aside.'
+        : on
+          ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
+          : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
+      aria-label={chat ? 'Reading width' : 'Expand on focus'}
       onPointerDown={stopTabEvent}
       onDoubleClick={stopTabEvent}
       onClick={(event) => {
@@ -103,7 +109,7 @@ export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['a
       }}
     >
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M10 2h4v4M6 14H2v-4M14 2 9.5 6.5M2 14l4.5-4.5" />
+        <path d={chat ? 'M2 3v10M14 3v10M5 8h6M7 6 5 8l2 2M9 6l2 2-2 2' : 'M10 2h4v4M6 14H2v-4M14 2 9.5 6.5M2 14l4.5-4.5'} />
       </svg>
     </button>
   );

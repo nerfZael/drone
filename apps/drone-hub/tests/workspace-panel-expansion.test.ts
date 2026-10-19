@@ -4,7 +4,7 @@ import {
   EXPANSION_MAX_CODE_COLUMNS,
   EXPANSION_NEIGHBOUR_STRIP_PX,
   expansionKeyForPanel,
-  measureChatProseOverflowPx,
+  chatReadingWidthPx,
   planPanelExpansion,
   targetCodeColumns,
   visualLineLength,
@@ -69,15 +69,24 @@ test('file and chat windows share one setting per kind', () => {
 });
 
 describe('chat reading width', () => {
-  // happy-dom has no layout: replies get fixed widths, and the prose cap resolves to 600px.
-  function chatWith(replyWidths: number[]): HTMLElement {
+  // happy-dom has no layout: elements get fixed widths, and the prose cap resolves to 600px.
+  function chatWindow({ group = 500, scroller = 488, transcript = 488, replies = [] as number[], mounted = true } = {}) {
     const document = new Window().document;
-    const root = document.createElement('div');
-    for (const width of replyWidths) {
-      const reply = document.createElement('div');
-      reply.className = 'dh-markdown dh-markdown--transcript dh-markdown--agent';
-      Object.defineProperty(reply, 'clientWidth', { value: width });
-      root.appendChild(reply);
+    const sized = (width: number, className = '') => {
+      const element = document.createElement('div');
+      element.className = className;
+      Object.defineProperty(element, 'clientWidth', { value: width });
+      Object.defineProperty(element, 'getBoundingClientRect', { value: () => ({ width }) });
+      return element;
+    };
+    const root = sized(group);
+    if (mounted) {
+      const scroll = sized(scroller);
+      scroll.setAttribute('data-chat-transcript-scroll', 'true');
+      const content = sized(transcript, 'dh-chat-transcript');
+      for (const width of replies) content.appendChild(sized(width, 'dh-markdown dh-markdown--transcript dh-markdown--agent'));
+      scroll.appendChild(content);
+      root.appendChild(scroll);
     }
     const createElement = document.createElement.bind(document);
     Object.defineProperty(document, 'createElement', {
@@ -92,14 +101,19 @@ describe('chat reading width', () => {
     return root as unknown as HTMLElement;
   }
 
-  test('widens until the widest reply reaches the prose cap, leaving no probe behind', () => {
-    const root = chatWith([300, 420, 0]);
-    expect(measureChatProseOverflowPx(root)).toBe(180);
-    expect(root.querySelectorAll('.dh-markdown--transcript > *')).toHaveLength(0);
+  test('is the prose cap plus what sits beside the widest reply and around the transcript', () => {
+    // 12px of scrollbar outside, 48px of padding beside the 440px reply.
+    const root = chatWindow({ replies: [300, 440] });
+    expect(chatReadingWidthPx(root)).toBe(12 + 48 + 600);
+    expect(root.querySelectorAll('[style*="chat-prose-max"]')).toHaveLength(0);
   });
 
-  test('asks for nothing once replies are at the cap, or when there are none yet', () => {
-    expect(measureChatProseOverflowPx(chatWith([700]))).toBe(0);
-    expect(measureChatProseOverflowPx(chatWith([]))).toBe(0);
+  test('a chat without replies yet uses the transcript padding', () => {
+    expect(chatReadingWidthPx(chatWindow())).toBe(12 + 48 + 600);
+  });
+
+  test('a chat that is not on screen asks for nothing', () => {
+    expect(chatReadingWidthPx(chatWindow({ mounted: false }))).toBeNull();
+    expect(chatReadingWidthPx(chatWindow({ scroller: 0 }))).toBeNull();
   });
 });
