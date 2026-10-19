@@ -163,7 +163,7 @@ export function measureChatProseOverflowPx(root: HTMLElement): number {
   widest.appendChild(probe);
   const proseWidth = probe.getBoundingClientRect().width;
   probe.remove();
-  const style = getComputedStyle(widest);
+  const style = (root.ownerDocument.defaultView ?? window).getComputedStyle(widest);
   const width = widest.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0');
   return Math.max(0, Math.ceil(proseWidth - width));
 }
@@ -222,6 +222,11 @@ function isTransientLayer(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(
     '[role="menu"], [role="dialog"], [role="listbox"], [data-radix-popper-content-wrapper], .context-view, .monaco-menu-container',
   ));
+}
+
+/** The element a chat window focuses when it is selected, not a control inside it. */
+export function isChatFocusScope(target: EventTarget | null): boolean {
+  return target instanceof Element && target.matches('[data-main-workspace-chat], [data-side-chat-name]');
 }
 
 function setOverlay(element: HTMLElement, plan: ExpansionPlan | null) {
@@ -364,6 +369,9 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
       if (pointerDown || performance.now() - lastKeyAt > KEYBOARD_FOCUS_WINDOW_MS) return;
       const group = groupOf(event.target);
       collapseFor(event.target, group);
+      // Selecting a drone or chat (a shortcut, quick open) focuses the chat as a whole; that follows the
+      // selection, so it expands nothing. Moving into the composer or anything else inside still does.
+      if (isChatFocusScope(event.target)) return;
       if (group && group !== expanded?.group && enabledFor(group)) expand(group, false);
     };
     const onToggle = (event: Event) => {

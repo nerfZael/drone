@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import {
   EXPANSION_MAX_CODE_COLUMNS,
   EXPANSION_NEIGHBOUR_STRIP_PX,
   expansionKeyForPanel,
+  measureChatProseOverflowPx,
   planPanelExpansion,
   targetCodeColumns,
   visualLineLength,
@@ -64,4 +66,40 @@ test('file and chat windows share one setting per kind', () => {
   expect(expansionKeyForPanel('side-chat:plan')).toBe('chat');
   expect(expansionKeyForPanel('agent-chat')).toBe('chat');
   expect(expansionKeyForPanel('tool:terminal')).toBe('tool:terminal');
+});
+
+describe('chat reading width', () => {
+  // happy-dom has no layout: replies get fixed widths, and the prose cap resolves to 600px.
+  function chatWith(replyWidths: number[]): HTMLElement {
+    const document = new Window().document;
+    const root = document.createElement('div');
+    for (const width of replyWidths) {
+      const reply = document.createElement('div');
+      reply.className = 'dh-markdown dh-markdown--transcript dh-markdown--agent';
+      Object.defineProperty(reply, 'clientWidth', { value: width });
+      root.appendChild(reply);
+    }
+    const createElement = document.createElement.bind(document);
+    Object.defineProperty(document, 'createElement', {
+      value: (tagName: string) => {
+        const element = createElement(tagName);
+        Object.defineProperty(element, 'getBoundingClientRect', {
+          value: () => ({ width: element.style.width === 'var(--chat-prose-max)' ? 600 : 0 }),
+        });
+        return element;
+      },
+    });
+    return root as unknown as HTMLElement;
+  }
+
+  test('widens until the widest reply reaches the prose cap, leaving no probe behind', () => {
+    const root = chatWith([300, 420, 0]);
+    expect(measureChatProseOverflowPx(root)).toBe(180);
+    expect(root.querySelectorAll('.dh-markdown--transcript > *')).toHaveLength(0);
+  });
+
+  test('asks for nothing once replies are at the cap, or when there are none yet', () => {
+    expect(measureChatProseOverflowPx(chatWith([700]))).toBe(0);
+    expect(measureChatProseOverflowPx(chatWith([]))).toBe(0);
+  });
 });
