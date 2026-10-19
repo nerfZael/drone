@@ -29,6 +29,8 @@ const MIN_USEFUL_GROWTH_PX = 8;
 /** A window with expand on focus can be dragged down to its tab bar and a sliver of content. */
 const COMPACT_GROUP_CONSTRAINTS = { minimumWidth: 40, minimumHeight: 40 };
 export const OCCUPIED_GROUP_CONSTRAINTS = { minimumWidth: 100, minimumHeight: 100 };
+/** Occupied, with any maximum lifted (Dockview's own "no maximum"). */
+const FREE_GROUP_CONSTRAINTS = { ...OCCUPIED_GROUP_CONSTRAINTS, maximumWidth: Number.MAX_SAFE_INTEGER };
 /** Focus that follows a key press this recently is the user's; other focus changes are programmatic. */
 const KEYBOARD_FOCUS_WINDOW_MS = 800;
 
@@ -307,23 +309,40 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
       extraWidth,
     });
 
+    /** Whether another window (or empty slot) sits beside the group, to take the width a fixed chat leaves. */
+    const hasRowNeighbour = (group: DockviewGroupPanel) => {
+      const rect = group.element.getBoundingClientRect();
+      return api.groups.some((other) => {
+        if (other === group || other.api.location.type !== 'grid') return false;
+        const near = other.element.getBoundingClientRect();
+        return near.width > 0 && Math.min(rect.bottom, near.bottom) - Math.max(rect.top, near.top) > 1;
+      });
+    };
     /**
-     * Keeps a chat at least as wide as its reading width: it pushes its
-     * neighbours aside and can't be dragged narrower. A wider chat stays as it is.
+     * Holds a chat at exactly its reading width: it pushes its neighbours
+     * aside, and its divider doesn't move. Alone in its row it fills the row,
+     * since nothing beside it could take the rest.
      */
     const fitChat = (group: DockviewGroupPanel) => {
       const target = chatReadingWidthPx(group.element);
       if (target == null) return;
       // In a small window the neighbours keep their minimum.
       const width = Math.min(target, root.clientWidth - OCCUPIED_GROUP_CONSTRAINTS.minimumWidth);
-      if (width < OCCUPIED_GROUP_CONSTRAINTS.minimumWidth || fitted.get(group) === width) return;
+      if (width < OCCUPIED_GROUP_CONSTRAINTS.minimumWidth || !hasRowNeighbour(group)) {
+        releaseChat(group);
+        return;
+      }
+      if (fitted.get(group) === width) return;
       fitted.set(group, width);
-      group.api.setConstraints({ minimumWidth: width, minimumHeight: OCCUPIED_GROUP_CONSTRAINTS.minimumHeight });
-      if (group.api.width < width) group.api.setSize({ width });
+      group.api.setConstraints({ minimumWidth: width, maximumWidth: width, minimumHeight: OCCUPIED_GROUP_CONSTRAINTS.minimumHeight });
+      if (Math.round(group.api.width) !== width) group.api.setSize({ width });
     };
     const releaseChat = (group: DockviewGroupPanel) => {
-      if (!fitted.delete(group)) return;
-      if (api.groups.includes(group)) group.api.setConstraints(OCCUPIED_GROUP_CONSTRAINTS);
+      if (!fitted.delete(group) || !api.groups.includes(group)) return;
+      group.api.setConstraints(FREE_GROUP_CONSTRAINTS);
+      // Lifting a maximum doesn't relayout by itself: a chat left alone in its row would keep
+      // its width beside a gap. Dockview's layout takes a force flag its types leave out.
+      (api.layout as (width: number, height: number, force: boolean) => void).call(api, api.width, api.height, true);
     };
 
     const apply = () => {

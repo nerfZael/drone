@@ -95,8 +95,8 @@ export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['a
       data-expand-on-focus-toggle=""
       title={chat
         ? on
-          ? 'Reading width is on: chats stay wide enough that their replies stop wrapping, pushing neighbouring windows aside. Click to turn off.'
-          : 'Reading width: keep chats wide enough that their replies stop wrapping, pushing neighbouring windows aside.'
+          ? 'Reading width is on: chats are held at the width where their replies stop wrapping, and neighbouring windows take the rest. Click to turn off.'
+          : 'Reading width: hold chats at the width where their replies stop wrapping, and let neighbouring windows take the rest.'
         : on
           ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
           : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
