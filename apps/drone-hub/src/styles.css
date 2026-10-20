@@ -3475,6 +3475,12 @@ select:disabled optgroup {
   display: contents;
 }
 
+/* In a narrow Changes Explorer its name gives way to the line counts beside it. */
+.dh-dockable-workspace .dv-tabs-and-actions-container.dv-single-tab:has([data-changes-explorer-tab-counts]) .dv-tab {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
 .dh-dock-tab-controls:empty + .dh-dock-tab-divider,
 .dh-dock-tab-controls:not(:has(button)) + .dh-dock-tab-divider {
   display: none;

@@ -11,11 +11,15 @@ import { CHAT_EXPANSION_KEY, expansionKeyForPanel, requestPanelExpansionToggle, 
  * Middle-click closes, like dockview's stock tab; double-click expands the
  * window over its neighbours until the next double-click.
  */
-export function DockTabShell({ api, children, expandable = true }: {
+export function DockTabShell({ api, children, expandable = true, onClick, collapsed }: {
   api: IDockviewPanelHeaderProps['api'];
   children?: React.ReactNode;
   /** False for a window that never expands over its neighbours: no expand switch, and double-click does nothing. */
   expandable?: boolean;
+  /** A click on the tab itself, not on one of its buttons. */
+  onClick?: () => void;
+  /** For a window that collapses to its tab bar: whether it is collapsed now. */
+  collapsed?: boolean;
 }) {
   const title = usePanelTitle(api);
   const middleButtonDown = React.useRef(false);
@@ -24,6 +28,10 @@ export function DockTabShell({ api, children, expandable = true }: {
       className="dv-default-tab"
       data-testid="dockview-dv-default-tab"
       title={title}
+      aria-expanded={collapsed === undefined ? undefined : !collapsed}
+      onClick={(event) => {
+        if (onClick && !(event.target as Element).closest('button, .dv-default-tab-action')) onClick();
+      }}
       onPointerDown={(event) => {
         middleButtonDown.current = event.button === 1;
         if (event.button === 1) event.preventDefault();

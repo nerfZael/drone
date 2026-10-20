@@ -1,7 +1,7 @@
 import React from 'react';
 import { measureDiffOverflowPx, usePanelExpansionMeasure } from '../app/workspace-panel-expansion';
 import { createPortal } from 'react-dom';
-import { ChangesExplorerContext } from './changes-explorer-context';
+import { ChangesExplorerContext, ChangesExplorerTabContext } from './changes-explorer-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import {
@@ -68,7 +68,7 @@ import { DiffBlock } from './DiffBlock';
 import { diffZoomStyle } from './diff-zoom-style';
 import { useEditorZoomLevel } from '../files/editor-zoom';
 import { CommitInspectionView } from './CommitInspectionView';
-import { ChangesFileCountPill, ChangesLineSummary } from './ChangesLineSummary';
+import { ChangesFileCountPill, ChangesLineSummary, ChangesTabLineCounts } from './ChangesLineSummary';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 import {
   CHANGES_BRANCH_MODE_STORAGE_KEY,
@@ -620,6 +620,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
     [onOpenRepoFileInEditor, worktree],
   );
   const explorerHost = React.useContext(ChangesExplorerContext);
+  const explorerTabSlot = React.useContext(ChangesExplorerTabContext);
   const separateExplorer = explorerHost !== undefined;
   const confirm = useAppConfirmDialog();
   const workspaceSnapshotRef = React.useRef<ChangesWorkspaceUiSnapshot | null>(
@@ -3172,6 +3173,9 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
     </div>,
     explorerHost,
   ) : null;
+  const explorerTabCounts = explorerTabSlot && activeLineChangeCounts && activeLineChangeCounts.changed > 0
+    ? createPortal(<ChangesTabLineCounts counts={activeLineChangeCounts} />, explorerTabSlot)
+    : null;
 
   if (showingInitialLoad) {
     return (
@@ -3199,6 +3203,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
         ) : null}
         <UiCenteredLoadingState message={initialLoadingLabel} />
         {detachedExplorer}
+        {explorerTabCounts}
       </UiPanel>
     );
   }
@@ -3213,6 +3218,7 @@ const LiveDroneChangesDock = React.memo(function LiveDroneChangesDock({
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(editorZoomLevel) }}
     >
       {detachedExplorer}
+      {explorerTabCounts}
       {!reviewOverride && !showingPullRequestOverview ? (
         <UiPanelToolbar
           aria-label="Changes controls"
