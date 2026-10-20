@@ -112,8 +112,12 @@ export async function resolveWorkspaceLink(
 ): Promise<{ ok: true; target: ResolvedWorkspaceLink } | { ok: false; error: string }> {
   const link = parseWorkspaceLink(raw);
   if (!link) return { ok: false, error: `Not a workspace link: ${raw}` };
-  const workspaces = await browsableWorkspacesForLinks();
-  const workspace = resolveWorkspaceRef(link.workspace, workspaces);
+  let workspace = resolveWorkspaceRef(link.workspace, await browsableWorkspacesForLinks());
+  if (!workspace) {
+    // The list may predate the workspace, as a chat's home made while this window was reconnecting to the Hub would.
+    cached = null;
+    workspace = resolveWorkspaceRef(link.workspace, await browsableWorkspacesForLinks());
+  }
   if (!workspace) return { ok: false, error: `No workspace named “${link.workspace}” on this device.` };
   const root = workspaceRoot(workspace, droneById);
   if (!root) return { ok: false, error: `“${workspace.name}” is not available right now.` };

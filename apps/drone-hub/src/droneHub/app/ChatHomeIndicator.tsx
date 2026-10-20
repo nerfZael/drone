@@ -81,7 +81,7 @@ function accessLabel(access: ChatHome['access']): string {
 export function ChatHomeIndicator({ droneId, chatName }: { droneId?: string | null; chatName?: string | null }) {
   const home = useChatHome(droneId, chatName);
   if (!home) return null;
-  const title = `This chat's home: ${home.path}\n${accessLabel(home.access)}\nIts own folder, deleted with the chat. Click to show it in the File Explorer.`;
+  const title = `This chat's home: ${home.path}\n${accessLabel(home.access)}`;
   return (
     <button
       type="button"

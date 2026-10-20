@@ -250,7 +250,6 @@ export function DroneChatComposerMetadata({
             <DroneRuntimeIndicator runtime={runtime} />
           </div>
         ) : null}
-        {showWorkspaceInfo ? <ChatHomeIndicator droneId={droneId} chatName={chatName} /> : null}
         <ChatBackgroundTaskIndicator
           droneId={String(droneId ?? '').trim()}
           chatName={String(chatName ?? '').trim()}
@@ -262,6 +261,8 @@ export function DroneChatComposerMetadata({
       <div className="flex min-w-0 shrink items-center gap-2">
         {sideChatChips}
         {showWorkspaceInfo ? <DroneBranchIndicator branch={branch} /> : null}
+        {/* Last, so it keeps its place whether or not there is a branch. */}
+        {showWorkspaceInfo ? <ChatHomeIndicator droneId={droneId} chatName={chatName} /> : null}
       </div>
     </div>
   );

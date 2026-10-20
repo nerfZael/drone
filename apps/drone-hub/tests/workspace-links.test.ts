@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownMessage } from '../src/droneHub/chat/MarkdownMessage';
-import { ownWorkspaceOf, workspaceRoot, workspaceShownBy } from '../src/droneHub/workspaces/workspace-links';
+import { ownWorkspaceOf, resolveWorkspaceLink, workspaceRoot, workspaceShownBy } from '../src/droneHub/workspaces/workspace-links';
 import type { BrowsableWorkspace } from '../src/droneHub/workspaces/workspaces-client';
 import type { DroneSummary } from '../src/droneHub/types';
 
@@ -59,5 +59,32 @@ describe('the workspace a link names and where it starts', () => {
     expect(workspaceRoot(workspaces[0], {})).toBe('/home/me/hub/workspaces/Guides');
     expect(workspaceRoot(workspaces[2], { mech })).toBe('/work/repo');
     expect(workspaceRoot(workspaces[2], {})).toBeNull();
+  });
+});
+
+describe('resolving workspace links', () => {
+  test('looks again when the link names a workspace made after the list was loaded', async () => {
+    const home: BrowsableWorkspace = { id: 'host:chat-home-c1', browseId: 'host:chat-home-c1', name: 'default home (alpha)', kind: 'folder', category: 'Chat homes', path: '/data/chat-homes/c1' };
+    const lists: BrowsableWorkspace[][] = [[], [], [home]];
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true, workspaces: lists[Math.min(fetches++, lists.length - 1)] }), {
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    try {
+      // Loaded before the home was made, and still missing it on the first retry.
+      const missing = await resolveWorkspaceLink('workspace://host:chat-home-c1/', {});
+      expect(missing.ok).toBe(false);
+      expect(fetches).toBe(2);
+      const found = await resolveWorkspaceLink('workspace://host:chat-home-c1/notes.md', {});
+      expect(found.ok && found.target.path).toBe('/data/chat-homes/c1/notes.md');
+      expect(fetches).toBe(3);
+      // Found in the list as now cached: no more fetches.
+      expect((await resolveWorkspaceLink('workspace://host:chat-home-c1/', {})).ok).toBe(true);
+      expect(fetches).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
