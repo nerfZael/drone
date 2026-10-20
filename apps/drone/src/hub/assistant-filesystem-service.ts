@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -42,6 +43,7 @@ import {
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import { readTransferBytes, writeTransferBytes } from './assistant/transfer-file-io';
+import type { AssistantDroneFileVersion } from './assistant/assistant-workspace-contracts';
 import {
   createDroneDaemonGitRunner,
   createDroneDaemonWorktreeHasher,
@@ -349,6 +351,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         content: ranged.content,
         size: read.size,
         mtimeMs: read.mtimeMs,
+        sha256: sha256Of(read.buf),
+        fileId: fileIdOf(target),
         ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
       };
     }
@@ -368,8 +372,64 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
       content: ranged.content,
       size: read.size,
       mtimeMs: read.mtimeMs,
+      sha256: sha256Of(read.data),
+      fileId: fileIdOf(target),
       ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
     };
+  }
+
+  /**
+   * The file at `path` as the read-before-write check compares it: the sha256 of the bytes read_file reads, nothing
+   * when no file is there, or `unreadable` for one read_file refuses (binary, too large, not a regular file).
+   */
+  async function assistantDroneFileVersion(opts: { droneId: string; path: string }): Promise<AssistantDroneFileVersion> {
+    const target = await resolveAssistantDroneFsTarget({
+      droneId: opts.droneId,
+      path: opts.path,
+      fallbackToHome: false,
+    });
+    if (!target.targetPath || target.targetPath === '/') throw new Error('missing file path');
+    const fileId = fileIdOf(target);
+    if (target.runtime === 'host') {
+      const resolvedPath = path.resolve(target.targetPath);
+      let read: Awaited<ReturnType<typeof readHostFileBytes>>;
+      try {
+        read = await readHostFileBytes({ targetPath: resolvedPath, maxBytes: FS_EDITOR_MAX_BYTES });
+      } catch (error: any) {
+        const code = String(error?.code ?? '');
+        if (code === 'ENOENT' || code === 'ENOTDIR') return { path: resolvedPath, fileId, state: 'missing' };
+        if (error?.statusCode === 413) return { path: resolvedPath, fileId, state: 'unreadable' };
+        throw error;
+      }
+      if (!isAssistantTextFile(target.targetPath, read.buf, read.mime)) return { path: resolvedPath, fileId, state: 'unreadable' };
+      return { path: resolvedPath, fileId, state: 'file', sha256: sha256Of(read.buf) };
+    }
+    let data: Buffer;
+    try {
+      data = (
+        await withReadonlyDroneContainer(
+          { requestedDroneName: target.name, droneEntry: target.drone },
+          async ({ droneEntry }) => await workspaceReadFile(daemonClientForDrone(droneEntry), target.targetPath),
+        )
+      ).data;
+    } catch (error: any) {
+      if (error?.statusCode === 404) return { path: target.targetPath, fileId, state: 'missing' };
+      if (error?.statusCode === 413) return { path: target.targetPath, fileId, state: 'unreadable' };
+      throw error;
+    }
+    if (!isAssistantTextFile(target.targetPath, data, null)) return { path: target.targetPath, fileId, state: 'unreadable' };
+    return { path: target.targetPath, fileId, state: 'file', sha256: sha256Of(data) };
+  }
+
+  /** Where `path` is (its `fileId`), without reading it. */
+  async function assistantLocateDroneFile(opts: { droneId: string; path: string }): Promise<{ fileId: string }> {
+    const target = await resolveAssistantDroneFsTarget({
+      droneId: opts.droneId,
+      path: opts.path,
+      fallbackToHome: false,
+    });
+    if (!target.targetPath || target.targetPath === '/') throw new Error('missing file path');
+    return { fileId: fileIdOf(target) };
   }
 
   // Bounded local workspace-engine I/O. Remote adapters stream binary HTTP bodies;
@@ -1424,6 +1484,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     assistantMoveDroneFile,
     assistantMoveDronePath,
     assistantPrepareDroneTransferFile,
+    assistantDroneFileVersion,
+    assistantLocateDroneFile,
     assistantReadDroneFile,
     assistantReadDroneFileChunk,
     assistantRunDroneBash,
@@ -1433,4 +1495,26 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     assistantWriteDroneTransferChunk,
     readHostFileBytes,
   };
+}
+
+function sha256Of(data: Buffer): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+/** Whether read_file would show the file, without throwing: ensureAssistantTextFile's check. */
+function isAssistantTextFile(filePath: string, data: Buffer, mime: string | null): boolean {
+  try {
+    ensureAssistantTextFile(filePath, data, mime);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A file wherever it is reached from: a host file by its absolute path, whichever workspace (a repository, a folder
+ * added inside it, a host drone) leads to it; a container's file by its drone and path.
+ */
+function fileIdOf(target: { runtime: DroneRuntime; id: string; targetPath: string }): string {
+  return target.runtime === 'host' ? `host:${path.resolve(target.targetPath)}` : `drone:${target.id}:${target.targetPath}`;
 }

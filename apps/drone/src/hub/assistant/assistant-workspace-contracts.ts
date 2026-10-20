@@ -14,6 +14,10 @@ export type AssistantToolCallbacks = {
     startLine?: number;
     endLine?: number;
   }) => Promise<AssistantDroneFileReadResult>;
+  /** The file at `path` as the read-before-write check compares it (see file-read-guard.ts). */
+  droneFileVersion?: (opts: { droneId: string; path: string }) => Promise<AssistantDroneFileVersion>;
+  /** Where `path` is, without reading it: the `fileId` its version and reads carry. */
+  locateDroneFile?: (opts: { droneId: string; path: string }) => Promise<{ fileId: string }>;
   writeDroneFile?: (opts: {
     droneId: string;
     path: string;
@@ -132,6 +136,10 @@ export type AssistantDroneFileReadResult = {
   content: string;
   size?: number | null;
   mtimeMs?: number | null;
+  /** Of the whole file, also when only some lines were returned. */
+  sha256?: string;
+  /** The file wherever it is reached from (see `AssistantDroneFileVersion`). */
+  fileId?: string;
   lineRange?: {
     startLine: number;
     endLine: number;
@@ -139,6 +147,17 @@ export type AssistantDroneFileReadResult = {
     returnedLines: number;
   };
 };
+
+/**
+ * A file by its resolved path: its content's sha256, `missing` when nothing is there, or `unreadable` when read_file
+ * cannot show it (binary, too large, a directory), which the read-before-write check leaves alone. `fileId` names the
+ * file wherever it is reached from: a host file found through two workspaces (a repository and a folder added inside
+ * it) is one file.
+ */
+export type AssistantDroneFileVersion = { path: string; fileId: string } & (
+  | { state: 'file'; sha256: string }
+  | { state: 'missing' | 'unreadable' }
+);
 
 export function formatAssistantReadFileToolText(result: AssistantDroneFileReadResult): string {
   const lineRange = result.lineRange;

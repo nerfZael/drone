@@ -213,7 +213,14 @@ export class CompanionWorkspaceService {
    * Workspace tools over the selected targets. `homeRoot` adds an always-available home target: the Companion's by
    * default, or another consumer's own (`home`: its id and label), which gets no Companion-specific protection.
    */
-  async tools(runId: string, assertActive: () => void, homeRoot?: string, home?: { id: string; label: string }): Promise<AgentTool<any>[]> {
+  async tools(
+    runId: string,
+    assertActive: () => void,
+    homeRoot?: string,
+    home?: { id: string; label: string },
+    /** Who the calls are made for, for as long as it lasts (a chat; the run, for the Companion's session): it reads before it writes. */
+    reader: string = runId,
+  ): Promise<AgentTool<any>[]> {
     const [blip, catalog] = await Promise.all([loadBlipTools(), this.catalog()]);
     const access = catalog.access;
     const targets: WorkspaceTarget[] = [];
@@ -251,7 +258,7 @@ export class CompanionWorkspaceService {
                 : 'read';
           return this.assistant.executeAuthorizedWorkspaceTool(
             selected.kind === 'host' ? selected.id : selected.droneId!,
-            call,
+            { ...call, reader },
             guard(selected.id, permission),
             { parse: blip.parsePatch, applyHunks: blip.applyPatchHunks },
           );

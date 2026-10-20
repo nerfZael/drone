@@ -99,6 +99,8 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     assistantMoveDroneFile,
     assistantMoveDronePath,
     assistantPrepareDroneTransferFile,
+    assistantDroneFileVersion,
+    assistantLocateDroneFile,
     assistantReadDroneFile,
     assistantReadDroneFileChunk,
     assistantRunDroneBash,
@@ -235,6 +237,8 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     listDroneFiles: async ({ droneId, path }) => await assistantListDroneFiles({ droneId, path }),
     readDroneFile: async ({ droneId, path, startLine, endLine }) =>
       await assistantReadDroneFile({ droneId, path, startLine, endLine }),
+    droneFileVersion: async ({ droneId, path }) => await assistantDroneFileVersion({ droneId, path }),
+    locateDroneFile: async ({ droneId, path }) => await assistantLocateDroneFile({ droneId, path }),
     writeDroneFile: async ({ droneId, path, content }) =>
       await assistantWriteDroneFile({ droneId, path, content }),
     batchDroneFiles: async ({ droneId, operations }) =>

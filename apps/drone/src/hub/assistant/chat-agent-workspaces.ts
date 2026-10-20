@@ -314,9 +314,14 @@ export class AgentChatWorkspaces {
     const key = JSON.stringify(await this.read(chat));
     const cached = this.tools.get(id);
     if (cached && cached.key === key && Date.now() - cached.at < TOOLS_TTL_MS) return cached.byName;
+    // What the chat read stays its own across renames: it is known by its id.
+    const chatId = await this.store.id(chat);
     const tools = await this.service(chat).tools(
       `chat:${chat.droneId}:${chat.chatName}`,
       () => {},
+      undefined,
+      undefined,
+      chatId ? `chat:${chatId}` : `chat:${chat.droneId}:${chat.chatName}`,
     );
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
     const now = Date.now();

@@ -97,6 +97,7 @@ import {
   type AssistantToolCallbacks,
 } from './assistant/assistant-workspace-contracts';
 import { isAssistantTransferTemporaryName } from './assistant/is-assistant-transfer-temporary-name';
+import { FileReadGuard } from './assistant/file-read-guard';
 import { getChatQuestionRequestService } from './chat-question-requests';
 import type {
   AssistantChangeEvent,
@@ -919,6 +920,8 @@ function serializeState(input: {
 }
 
 export class HubAssistantService {
+  /** What each chat read, so it changes shared files only as it last saw them (see file-read-guard.ts). */
+  private readonly readGuard = new FileReadGuard();
   private threads: AssistantThread[] = [];
   private loaded = false;
   private runtimePromise: Promise<AssistantRuntime> | null = null;
@@ -2361,7 +2364,7 @@ export class HubAssistantService {
       !this.workspaceIsEnabled(threadId, droneId.startsWith('host:') ? droneId : `drone:${droneId}`)
     )
       throw new Error('This workspace is not selected for the chat.');
-    return this.executeAuthorizedWorkspaceTool(droneId, call, async () => {
+    return this.executeAuthorizedWorkspaceTool(droneId, { ...call, reader: `thread:${threadId}` }, async () => {
       await this.requireWorkspaceInScope(droneId, permission, threadId);
       if (this.getThread(threadId).workspaceAccess &&
           !this.workspaceIsEnabled(threadId, droneId.startsWith('host:') ? droneId : `drone:${droneId}`)) {
@@ -2370,10 +2373,13 @@ export class HubAssistantService {
     }, patchEngine);
   }
 
-  /** Shared executor; callers must supply a live authorization check for the resolved target. */
+  /**
+   * Shared executor; callers must supply a live authorization check for the resolved target. `reader` names the chat
+   * the call is made for: a chat changes an existing text file only as it last read it (see file-read-guard.ts).
+   */
   async executeAuthorizedWorkspaceTool(
     droneId: string,
-    call: { tool: string; args: Record<string, unknown>; signal?: AbortSignal },
+    call: { tool: string; args: Record<string, unknown>; signal?: AbortSignal; reader?: string },
     authorize: () => Promise<void>,
     patchEngine?: {
       parse: (patch: string) => any[];
@@ -2492,6 +2498,8 @@ export class HubAssistantService {
         startLine,
         endLine,
       });
+      // Any part of the file counts: the check compares the whole file.
+      if (call.reader && result.sha256 && result.fileId) this.readGuard.saw(call.reader, result.fileId, result.sha256);
       return {
         content: [{ type: 'text', text: formatAssistantReadFileToolText(result) }],
         details: result,
@@ -2517,30 +2525,30 @@ export class HubAssistantService {
       };
     }
     if (call.tool === 'write_file') {
-      const result = await this.requireFileCallback('writeDroneFile')({
-        droneId,
-        path: normalizeAssistantDroneFilePath(params.path),
-        content: String(params.content ?? ''),
-      });
+      const filePath = normalizeAssistantDroneFilePath(params.path);
+      const result = await this.checkedChange(droneId, call.reader, [filePath], [filePath], () =>
+        this.requireFileCallback('writeDroneFile')({ droneId, path: filePath, content: String(params.content ?? '') }),
+      );
       return {
         content: [{ type: 'text', text: `Wrote ${result.path} (${result.size ?? 0} bytes).` }],
         details: result,
       };
     }
     if (call.tool === 'delete_file') {
-      const result = await this.requireFileCallback('deleteDroneFile')({
-        droneId,
-        path: normalizeAssistantDroneFilePath(params.path),
-      });
+      const filePath = normalizeAssistantDroneFilePath(params.path);
+      const result = await this.checkedChange(droneId, call.reader, [filePath], [filePath], () =>
+        this.requireFileCallback('deleteDroneFile')({ droneId, path: filePath }),
+      );
       return { content: [{ type: 'text', text: `Deleted ${result.path}.` }], details: result };
     }
     if (call.tool === 'move_path') {
-      const result = await this.requireFileCallback('moveDronePath')({
-        droneId,
-        fromPath: normalizeAssistantDroneFilePath(params.from),
-        toPath: normalizeAssistantDroneFilePath(params.to),
-        overwrite: params.overwrite === true,
-      });
+      const fromPath = normalizeAssistantDroneFilePath(params.from);
+      const toPath = normalizeAssistantDroneFilePath(params.to);
+      const overwrite = params.overwrite === true;
+      // A move keeps the file's content; only a file it replaces must be as the chat read it.
+      const result = await this.checkedChange(droneId, call.reader, overwrite ? [toPath] : [], [fromPath, toPath], () =>
+        this.requireFileCallback('moveDronePath')({ droneId, fromPath, toPath, overwrite }),
+      );
       return {
         content: [{ type: 'text', text: `Moved ${result.path} to ${result.movedTo}.` }],
         details: result,
@@ -2592,11 +2600,18 @@ export class HubAssistantService {
     }
     if (call.tool === 'apply_patch') {
       if (!patchEngine) throw new Error('patch engine unavailable');
-      const result = await this.applyDronePatch(droneId, {
-        droneId,
-        operations: patchEngine.parse(String(params.patch ?? '')),
-        applyHunks: patchEngine.applyHunks,
-      }, authorize);
+      const operations: Array<{ type: string; path: string; moveTo?: string; hunks?: unknown[] }> = patchEngine.parse(
+        String(params.patch ?? ''),
+      );
+      // Files edited or deleted must be as the chat read them. Added files and move destinations must not exist yet, and
+      // a move alone keeps the content.
+      const checked = operations
+        .filter((operation) => operation.type === 'delete' || (operation.type === 'update' && (operation.hunks?.length ?? 0) > 0))
+        .map((operation) => operation.path);
+      const written = operations.flatMap((operation) => [operation.path, ...(operation.moveTo ? [operation.moveTo] : [])]);
+      const result = await this.checkedChange(droneId, call.reader, checked, written, () =>
+        this.applyDronePatch(droneId, { droneId, operations, applyHunks: patchEngine.applyHunks }, authorize),
+      );
       return {
         content: [
           {
@@ -2608,6 +2623,37 @@ export class HubAssistantService {
       };
     }
     throw new Error(`unsupported drone workspace tool: ${call.tool}`);
+  }
+
+  /**
+   * A change `reader` makes through the workspace tools, made only while each file in `checked` is as the reader last
+   * read it; afterwards the reader has seen what it left in `written`. The change holds every file it touches, so two
+   * chats cannot both pass the check for one file, whichever workspace they reach it through. A call without a reader
+   * (the Hub's own) is not checked.
+   */
+  private async checkedChange<T>(
+    droneId: string,
+    reader: string | undefined,
+    checked: string[],
+    written: string[],
+    change: () => Promise<T>,
+  ): Promise<T> {
+    const { droneFileVersion: version, locateDroneFile: locate } = this.tools;
+    if (!reader || !version || !locate) return await change();
+    const files = await Promise.all([...new Set([...checked, ...written])].map((filePath) => locate({ droneId, path: filePath })));
+    return await this.readGuard.serialize(files.map((file) => file.fileId), async () => {
+      for (const filePath of new Set(checked)) {
+        const current = await version({ droneId, path: filePath });
+        if (current.state === 'file') this.readGuard.assertCurrent(reader, current.fileId, current.sha256, filePath);
+      }
+      const result = await change();
+      for (const filePath of new Set(written)) {
+        const after = await version({ droneId, path: filePath }).catch(() => null);
+        if (after?.state === 'file') this.readGuard.saw(reader, after.fileId, after.sha256);
+        else if (after) this.readGuard.forget(reader, after.fileId);
+      }
+      return result;
+    });
   }
 
   resolvedSystemPrompt(

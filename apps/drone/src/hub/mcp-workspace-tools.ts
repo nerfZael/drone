@@ -21,6 +21,11 @@ const PARAMETER_DESCRIPTIONS: Record<string, string> = {
 };
 export const GRANT_WORKSPACE_ACCESS_TOOL_NAME = 'grant_workspace_access';
 
+/** The tools that change an existing file, which other chats may share (see file-read-guard.ts). */
+const READ_FIRST_TOOLS = new Set(['write_file', 'apply_patch', 'delete_file', 'move_path']);
+const READ_FIRST =
+  ' Other chats and the user may work on the same files: change an existing text file only after reading it with read_file (any part of it). If it changed since you read it, the change is refused; read it again and redo the change on what it holds now.';
+
 const READ_ONLY_TOOLS = new Set([
   'list_workspaces',
   'read_file',
@@ -214,7 +219,9 @@ export function registerAgentChatWorkspaceTools(
       definition.name,
       {
         title: definition.name.replace(/_/g, ' '),
-        description: `${definition.description} Acts on the workspaces this chat was given; see list_workspaces.`,
+        description: `${definition.description} Acts on the workspaces this chat was given; see list_workspaces.${
+          READ_FIRST_TOOLS.has(definition.name) ? READ_FIRST : ''
+        }`,
         inputSchema: inputSchema(definition) as any,
         annotations: annotations(definition.name),
       },
