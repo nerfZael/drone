@@ -451,6 +451,36 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     },
   });
 
+  /** Restarts a drone daemon that is confirmed gone, as after a host reboot; true when it did. */
+  async function reviveDroneDaemon(d: any, readyTimeoutMs: number): Promise<boolean> {
+    const runtime = droneRuntime(d);
+    const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const token = typeof d?.token === 'string' ? d.token : '';
+    const hostPort = typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? d.hostPort : 0;
+    if (!hostPort || !token) return false;
+    const recovery = await daemonRecovery.ensure({
+      droneId,
+      runtime,
+      client: makeClient(hostPort, token),
+      containerName,
+      containerPort: Number(d?.containerPort ?? hostPort),
+      hostPort,
+      hostPid: Number(d?.host?.pid),
+      token,
+      readyTimeoutMs,
+    });
+    if (recovery.recovered) {
+      hubLog('info', 'recovered drone daemon from status check', {
+        droneId,
+        runtime,
+        containerName,
+        hostPort,
+      });
+    }
+    return recovery.recovered;
+  }
+
   async function enqueueTranscriptPrompt(opts: {
     usage: ExternalUsageWatch;
     id?: string;
@@ -3738,6 +3768,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     promoteQueuedNewChatAction,
     pruneCompletedPendingPrompts,
     pushPendingPrompt,
+    reviveDroneDaemon,
     pushPendingStartupPrompt,
     readPendingPrompts,
     readPendingStartupPrompts,

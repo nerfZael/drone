@@ -357,4 +357,101 @@ describe('drone status runtime', () => {
 
     expect(probes).toBe(2);
   });
+
+  test('revives a daemon the status read cannot reach, a few drones at a time', async () => {
+    const drones = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        `drone-${index}`,
+        {
+          id: `drone-${index}`,
+          name: `Drone ${index}`,
+          runtime: 'container',
+          hostPort: 20_000 + index,
+          containerPort: 7_777,
+          token: `token-${index}`,
+        },
+      ]),
+    );
+    const daemonUp = new Set<number>();
+    let activeRevives = 0;
+    let maxActiveRevives = 0;
+    const revived: string[] = [];
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones }),
+      log: () => {},
+      makeClient: (hostPort) => ({ hostPort }),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      onChanged: () => {},
+      readStatus: async ({ hostPort }) => {
+        if (!daemonUp.has(hostPort)) throw new Error('fetch failed');
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+      reviveDaemon: async (drone) => {
+        activeRevives += 1;
+        maxActiveRevives = Math.max(maxActiveRevives, activeRevives);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        activeRevives -= 1;
+        revived.push(drone.id);
+        daemonUp.add(drone.hostPort);
+        return true;
+      },
+    });
+
+    await runtime.refreshNow('startup');
+
+    expect(revived).toHaveLength(10);
+    expect(maxActiveRevives).toBe(4);
+    expect(runtime.cachedForEntry(drones['drone-0'])).toMatchObject({
+      statusOk: true,
+      status: { state: 'ready' },
+      statusError: null,
+    });
+  });
+
+  test('waits before retrying a daemon that could not be revived', async () => {
+    let nowMs = 1_000_000;
+    let reviveAttempts = 0;
+    const drone = {
+      id: 'stopped',
+      name: 'Stopped',
+      runtime: 'container',
+      hostPort: 30_000,
+      containerPort: 7_777,
+      token: 'token',
+    };
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones: { stopped: drone } }),
+      log: () => {},
+      makeClient: (hostPort) => ({ hostPort }),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      now: () => nowMs,
+      onChanged: () => {},
+      readStatus: async () => {
+        throw new Error('fetch failed');
+      },
+      resolveHostPort: async () => null,
+      reviveDaemon: async () => {
+        reviveAttempts += 1;
+        throw new Error('container is not running');
+      },
+    });
+
+    await runtime.refreshNow('first');
+    expect(reviveAttempts).toBe(1);
+    expect(runtime.cachedForEntry(drone)).toMatchObject({
+      statusOk: false,
+      statusError: 'fetch failed',
+    });
+
+    nowMs += 60_000;
+    await runtime.refreshNow('second');
+    expect(reviveAttempts).toBe(1);
+
+    nowMs += 5 * 60_000;
+    await runtime.refreshNow('third');
+    expect(reviveAttempts).toBe(2);
+  });
 });

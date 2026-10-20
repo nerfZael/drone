@@ -2437,6 +2437,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 const DEFAULT_DAEMON_READY_TIMEOUT_MS = 20_000;
 const UPGRADE_DAEMON_READY_TIMEOUT_MS = 30_000;
+// A daemon restarted by the status check normally answers within a few seconds.
+const DAEMON_REVIVE_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_REPO_SEED_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SEED_BOOTSTRAP_TIMEOUT_MS = 45_000;
 const DEFAULT_PROMPT_ENQUEUE_TIMEOUT_MS = 180_000;
@@ -4742,6 +4744,8 @@ async function startDroneHubApiServerWithLifecycle(
     },
     readStatus: droneStatus,
     resolveHostPort,
+    reviveDaemon: async (drone) =>
+      await runtimeGraph.promptRuntime.reviveDroneDaemon(drone, DAEMON_REVIVE_READY_TIMEOUT_MS),
   });
   const cachedDroneStatusSummaryForEntry = droneStatusRuntime.cachedForEntry;
 

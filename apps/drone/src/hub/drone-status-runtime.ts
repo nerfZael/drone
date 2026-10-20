@@ -19,6 +19,8 @@ type DroneStatusRuntimeDependencies = {
   now?: () => number;
   readStatus: (client: any) => Promise<any>;
   resolveHostPort: (containerName: string, containerPort: number) => Promise<number | null>;
+  /** Restarts the drone's daemon when its runtime confirms it is gone; true when it did. */
+  reviveDaemon?: (drone: any) => Promise<boolean>;
 };
 
 export type DroneStatusRefreshTiming = {
@@ -57,6 +59,11 @@ const STATUS_PROBE_STAGGER_WINDOW_MS = 15_000;
 const STATUS_INTERVAL_BATCH_SIZE = 8;
 const STATUS_STABLE_MAX_INTERVAL_MS = 120_000;
 const STATUS_CACHE_MAX_ENTRIES = 500;
+// A host reboot brings containers back without their daemons. Restart a few at
+// a time so a whole fleet coming back does not start every daemon at once, and
+// leave a drone that could not be revived alone for a while before retrying.
+const DAEMON_REVIVE_CONCURRENCY = 4;
+const DAEMON_REVIVE_RETRY_INTERVAL_MS = 5 * 60_000;
 
 export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   const cache = new Map<string, CachedDroneStatusSummary>();
@@ -66,6 +73,9 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   let refreshSource = 'interval';
   let refreshRunning = false;
   let nextRefreshDelayMs = STATUS_PROBE_BASE_INTERVAL_MS;
+  const lastReviveAttemptAtMs = new Map<string, number>();
+  const reviveWaiters: Array<() => void> = [];
+  let activeRevives = 0;
 
   function cachedForEntry(drone: any): CachedDroneStatusSummary {
     pruneCache();
@@ -305,11 +315,21 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     const token = typeof drone.token === 'string' ? drone.token : '';
     if (hostPort && token) {
       const statusReadStartedAt = performance.now();
+      const client = deps.makeClient(hostPort, token);
       try {
-        status = await deps.readStatus(deps.makeClient(hostPort, token));
+        status = await deps.readStatus(client);
         statusOk = true;
       } catch (error: any) {
         statusError = error?.message ?? String(error);
+        if (await reviveDaemon(drone)) {
+          try {
+            status = await deps.readStatus(client);
+            statusOk = true;
+            statusError = null;
+          } catch (retryError: any) {
+            statusError = retryError?.message ?? String(retryError);
+          }
+        }
       } finally {
         timing.statusReadMs += performance.now() - statusReadStartedAt;
         timing.statusReadCount += 1;
@@ -324,6 +344,31 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     }
 
     return { hostPort: hostPort ?? null, statusOk, status, statusError };
+  }
+
+  async function reviveDaemon(drone: any): Promise<boolean> {
+    if (!deps.reviveDaemon) return false;
+    const droneId = deps.normalizeDroneId(drone?.id) || String(drone?.name ?? '');
+    const lastAttemptAtMs = lastReviveAttemptAtMs.get(droneId);
+    if (lastAttemptAtMs !== undefined && now() - lastAttemptAtMs < DAEMON_REVIVE_RETRY_INTERVAL_MS) {
+      return false;
+    }
+    lastReviveAttemptAtMs.set(droneId, now());
+    while (activeRevives >= DAEMON_REVIVE_CONCURRENCY) {
+      await new Promise<void>((resolve) => reviveWaiters.push(resolve));
+    }
+    activeRevives += 1;
+    try {
+      const revived = await deps.reviveDaemon(drone);
+      if (revived) lastReviveAttemptAtMs.delete(droneId);
+      return revived;
+    } catch {
+      // The status read already recorded why the daemon is unreachable.
+      return false;
+    } finally {
+      activeRevives -= 1;
+      reviveWaiters.shift()?.();
+    }
   }
 
   function cacheKey(drone: any): string {
