@@ -54,3 +54,10 @@ test('folder chooser returns the chosen path and explains an older desktop proce
   const old = desktopBridge(async () => { throw new Error("No handler registered for 'drone-hub:choose-folder'"); });
   await expect(old.chooseFolder()).rejects.toThrow('type the path instead');
 });
+
+test('unsaved changes reach the desktop close prompt', () => {
+  const sent: unknown[][] = [];
+  const bridge = desktopBridge(async () => undefined, (...args) => { sent.push(args); });
+  bridge.setUnsavedChanges(['notes.md']);
+  expect(sent).toEqual([['drone-hub:unsaved-changes', ['notes.md']]]);
+});

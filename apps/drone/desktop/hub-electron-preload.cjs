@@ -131,6 +131,9 @@ contextBridge.exposeInMainWorld('droneHubDesktop', {
       return () => ipcRenderer.removeListener('drone-hub:companion-window-placement', listener);
     },
   },
+  setUnsavedChanges(labels) {
+    ipcRenderer.send('drone-hub:unsaved-changes', labels);
+  },
   reportDiagnostic(record) {
     ipcRenderer.send('drone-hub:diagnostic', record);
   },

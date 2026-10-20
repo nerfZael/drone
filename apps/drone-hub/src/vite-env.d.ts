@@ -56,6 +56,8 @@ interface Window {
       onClose(callback: () => void): () => void;
       onPlacement?(callback: (placement: CompanionWindowPlacement) => void): () => void;
     };
+    /** Names what is unsaved for the desktop close prompt; see holdUnsavedChanges. */
+    setUnsavedChanges?(labels: string[]): void;
     reportDiagnostic?(record: Record<string, unknown>): void;
     /** Holds the real cursor inside a rectangle of the page (CSS pixels) until released or the window loses focus. */
     confineCursor?(rect: { x: number; y: number; width: number; height: number }): Promise<{ ok: boolean; unsupported?: boolean; error?: string }>;

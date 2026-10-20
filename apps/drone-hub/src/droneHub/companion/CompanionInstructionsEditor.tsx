@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CompanionInstructionsResponse } from '@drone/assistant-chat';
+import { holdUnsavedChanges } from '../app/desktop-unsaved-changes';
 import { requestJson } from '../http';
 import { CompanionTextEditor } from './CompanionTextEditor';
 
@@ -36,7 +37,11 @@ export function CompanionInstructionsEditor({ onClose }: { onClose(): void }) {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', beforeUnload);
-    return () => window.removeEventListener('beforeunload', beforeUnload);
+    const release = holdUnsavedChanges(['Companion instructions']);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      release();
+    };
   }, [dirty]);
   const save = async () => {
     if (!data || content === undefined || saving || loading || conflict) return false;

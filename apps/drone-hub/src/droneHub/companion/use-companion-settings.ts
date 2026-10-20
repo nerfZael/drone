@@ -1,4 +1,5 @@
 import React from 'react';
+import { holdUnsavedChanges } from '../app/desktop-unsaved-changes';
 
 export type CompanionProvider = 'openai' | 'codex' | 'gemini' | 'openrouter' | 'cerebras';
 
@@ -155,7 +156,11 @@ export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    const release = holdUnsavedChanges(['Companion settings']);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      release();
+    };
   }, [dirty]);
 
   const save = React.useCallback(async () => {

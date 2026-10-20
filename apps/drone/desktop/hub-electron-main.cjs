@@ -20,6 +20,7 @@ const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 const { connectDesktopGlobalShortcuts } = require('./hub-electron-global-shortcuts.cjs');
 const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
 const { installRendererRecovery } = require('./hub-electron-recovery.cjs');
+const { installUnloadPrompt } = require('./hub-electron-unload-prompt.cjs');
 
 const APP_NAME = 'Drone Hub';
 const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
@@ -416,6 +417,7 @@ function createWindow() {
   });
 
   observeWindowDiagnostics(mainWindow, diagnostics);
+  installUnloadPrompt({ window: mainWindow, dialog, ipcMain, isQuitting: () => isQuitting });
   rendererRecovery = installRendererRecovery({
     window: mainWindow, ipcMain, diagnostics, isQuitting: () => isQuitting,
     markerPath: path.join(app.getPath('userData'), 'renderer-recovery'),

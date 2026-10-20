@@ -1,5 +1,6 @@
 import React from 'react';
 import { desktopWorkspaceLoads, beginDesktopWorkspaceLoad } from '../files/workspace-load-telemetry';
+import { holdUnsavedChanges } from './desktop-unsaved-changes';
 import type { DroneFsReadPayload, DroneFsSearchPayload, DroneFsWritePayload, DroneSummary } from '../types';
 import type { requestJson as requestJsonFn } from '../http';
 import {
@@ -524,21 +525,24 @@ export function useFileEditorState({
     return location;
   }, [currentDroneId, openEditorLocation, setEditorLocationHistory]);
 
+  // Unsaved new files are kept in storage, so they do not hold up closing. Joined, so typing does not re-run the effect.
+  const dirtyTabNames = React.useMemo(() => Object.values(tabStateByDroneId)
+    .flatMap((state) => state.tabs.filter((tab) => !(rememberOpenedFiles && tab.untitled) && openedFileTabDirty(tab)))
+    .map((tab) => tab.name || tab.path || 'Untitled file')
+    .join('\n'), [rememberOpenedFiles, tabStateByDroneId]);
   React.useEffect(() => {
-    // Unsaved new files are kept in storage, so they do not hold up closing.
-    const dirtyTabs = Object.values(tabStateByDroneId).flatMap((state) =>
-      state.tabs.filter((tab) => !(rememberOpenedFiles && tab.untitled) && openedFileTabDirty(tab)),
-    );
-    if (dirtyTabs.length === 0 || typeof window === 'undefined') return;
+    if (!dirtyTabNames || typeof window === 'undefined') return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
+    const release = holdUnsavedChanges(dirtyTabNames.split('\n'));
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
+      release();
     };
-  }, [rememberOpenedFiles, tabStateByDroneId]);
+  }, [dirtyTabNames]);
 
   React.useEffect(() => {
     const disposeState = (event: Event) => {

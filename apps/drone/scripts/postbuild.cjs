@@ -156,6 +156,7 @@ const DRONE_HUB_ELECTRON_FILES = [
   'hub-x11-cursor-confine.py',
   'hub-electron-diagnostics.cjs',
   'hub-electron-recovery.cjs',
+  'hub-electron-unload-prompt.cjs',
   'hub-electron-launch.cjs',
   'hub-electron-static-server.cjs',
   'hub-electron-preload.cjs',
