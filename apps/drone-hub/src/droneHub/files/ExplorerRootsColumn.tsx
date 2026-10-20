@@ -81,10 +81,9 @@ type RootDrag = {
   onMove(step: -1 | 1): void;
 };
 
-function RootSection({ title, detail, badge, open, onToggle, actions, drag, children }: {
+function RootSection({ title, detail, open, onToggle, actions, drag, children }: {
   title: string;
   detail?: string;
-  badge?: string;
   open: boolean;
   onToggle(): void;
   actions?: React.ReactNode;
@@ -120,7 +119,6 @@ function RootSection({ title, detail, badge, open, onToggle, actions, drag, chil
         >
           <IconChevron down={open} size={12} />
           <span className="min-w-0 truncate">{title}</span>
-          {badge ? <span className="shrink-0 font-normal normal-case tracking-normal text-[var(--muted-dim)]">{badge}</span> : null}
         </button>
         {actions}
       </div>
@@ -258,16 +256,13 @@ export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, 
         const root = rootById.get(id);
         if (!root) return null;
         const { workspace } = root;
-        const removeLabel = root.fromChat
-          ? `Remove ${workspace.name} from this File Explorer (the chat can still use it)`
-          : `Remove ${workspace.name} from this File Explorer`;
+        const removeLabel = `Remove ${workspace.name} from this File Explorer`;
         const failed = openError?.rootId === workspace.id ? openError.message : '';
         return (
           <RootSection
             key={workspace.id}
             title={workspace.name}
             detail={workspace.path}
-            badge={root.fromChat && !root.pinned ? 'chat' : undefined}
             open={root.open}
             drag={dragFor(id)}
             onToggle={() => setExplorerRootOpen(droneId, workspace.id, !root.open)}
@@ -293,7 +288,7 @@ export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, 
                   className={actionClass}
                   title={removeLabel}
                   aria-label={removeLabel}
-                  onClick={() => removeExplorerRoot(droneId, workspace.id, root.fromChat)}
+                  onClick={() => removeExplorerRoot(droneId, workspace.id)}
                 >
                   <CloseIcon />
                 </button>

@@ -61,6 +61,7 @@ import {
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
 import { placeNewChatLastInSidebar } from './droneHub/app/sidebar-new-chat-place';
+import { closeGoneChatHomes } from './droneHub/workspaces/chat-home-cleanup';
 import { forgetChatFolds, forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
 import {
   beginChatDeletion,
@@ -621,6 +622,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     // Renamed anywhere (another device, an agent): what this client keeps under the old name follows.
     for (const batch of takeSeenChatRenames()) moveRenamedChatsClientState(batch);
   }, [drones]);
+  React.useEffect(() => {
+    // Deleted or archived anywhere: the chat's home leaves the File Explorers and its files close.
+    if (dronesLoading || drones.length === 0) return;
+    closeGoneChatHomes(new Set(drones.flatMap((drone) => Object.values(drone.chatIds ?? {}))));
+  }, [drones, dronesLoading]);
   React.useEffect(() => {
     setOptimisticChatRenames((current) => pruneOptimisticChatRenames(current, polledDrones));
   }, [polledDrones]);
@@ -2064,11 +2070,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const currentDrone = selectedDrone ? (sidebarDisplayDroneById[selectedDrone] ?? null) : null;
   const currentDroneId = currentDrone?.id ?? '';
-  // The selected drone's File Explorer shows other workspaces as roots below its own files: those the open chat can
-  // use and those added to it. Their files open in the drone's editor, beside its own.
+  // The selected drone's File Explorer shows the workspaces added to it as roots below its own files, whichever of its
+  // chats is open. Their files open in the drone's editor, beside its own.
   const { roots: explorerRoots, ownOpen: explorerOwnOpen, workspaces: explorerWorkspaces } = useExplorerRoots({
     drone: currentDrone,
-    chatName: currentDrone ? selectedChat || 'default' : null,
     droneById,
   });
   const explorerRootsRef = React.useRef(explorerRoots);

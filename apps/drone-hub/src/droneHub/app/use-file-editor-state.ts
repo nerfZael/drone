@@ -6,6 +6,7 @@ import {
   activateFileTab,
   closeFileTab,
   closeFileTabsForPaths,
+  closeFileTabsOfWorkspaces,
   createUntitledFileTab,
   dirtyFileTabsForPaths,
   openedFileTabDirty,
@@ -39,6 +40,7 @@ import {
   type QuickOpenRecentFile,
 } from '../files/quick-open-state';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
+import { CHAT_HOMES_GONE_EVENT, goneChatHomeTest } from '../workspaces/chat-home-cleanup';
 import {
   openedFileTabsStateForDrone,
   rememberedEditorFileFromTab,
@@ -565,6 +567,25 @@ export function useFileEditorState({
     };
     window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposeState);
     return () => window.removeEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposeState);
+  }, []);
+
+  React.useEffect(() => {
+    // A deleted or archived chat's home closes in every strip; a file with unsaved changes stays open.
+    const closeGoneHomes = (event: Event) => {
+      const gone = goneChatHomeTest(event);
+      if (!gone) return;
+      setTabStateByDroneId((prev) => {
+        let next = prev;
+        for (const [droneId, state] of Object.entries(prev)) {
+          const closed = closeFileTabsOfWorkspaces(state, gone);
+          if (closed !== state) next = { ...next, [droneId]: closed };
+        }
+        tabStateByDroneIdRef.current = next;
+        return next;
+      });
+    };
+    window.addEventListener(CHAT_HOMES_GONE_EVENT, closeGoneHomes);
+    return () => window.removeEventListener(CHAT_HOMES_GONE_EVENT, closeGoneHomes);
   }, []);
 
   React.useEffect(() => {

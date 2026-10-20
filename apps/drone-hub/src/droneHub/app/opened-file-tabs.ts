@@ -247,6 +247,18 @@ export function remapFileTabsForPathChange(
   return { tabs: nextTabs, activeTabId };
 }
 
+/** Closes the tabs of the workspaces `closed` picks (by file route id); a tab with unsaved changes stays open. */
+export function closeFileTabsOfWorkspaces(state: OpenedFileTabsState, closed: (routeId: string) => boolean): OpenedFileTabsState {
+  const tabs = state.tabs.filter((tab) => !closed(tab.droneId) || openedFileTabDirty(tab));
+  if (tabs.length === state.tabs.length) return state;
+  if (state.activeTabId && tabs.some((tab) => tab.tabId === state.activeTabId)) {
+    return { tabs, activeTabId: state.activeTabId };
+  }
+  const activeIndex = state.tabs.findIndex((tab) => tab.tabId === state.activeTabId);
+  const nextActive = tabs[activeIndex] ?? tabs[activeIndex - 1] ?? tabs[tabs.length - 1] ?? null;
+  return { tabs, activeTabId: nextActive?.tabId ?? null };
+}
+
 export function closeFileTabsForPaths(state: OpenedFileTabsState, paths: string[], droneId?: string | null): OpenedFileTabsState {
   const normalizedPaths = paths.map(normalizeOpenedFilePath).filter(Boolean);
   if (normalizedPaths.length === 0) return state;

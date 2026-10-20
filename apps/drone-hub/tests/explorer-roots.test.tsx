@@ -5,18 +5,22 @@ import { Window } from 'happy-dom';
 import { describe, expect, test } from 'bun:test';
 import {
   closeFileTabsForPaths,
+  closeFileTabsOfWorkspaces,
   dirtyFileTabsForPaths,
   openFileTab,
   remapFileTabsForPathChange,
   type OpenedFileTabsState,
 } from '../src/droneHub/app/opened-file-tabs';
 import {
+  addExplorerRoot,
   explorerRootsFor,
+  explorerRootsState,
   mergeExplorerRootOrder,
   orderExplorerRoots,
   type DroneRoots,
 } from '../src/droneHub/workspaces/explorer-roots';
 import { ExplorerRootsColumn } from '../src/droneHub/files/ExplorerRootsColumn';
+import { closeGoneChatHomes } from '../src/droneHub/workspaces/chat-home-cleanup';
 import { useFileEditorState } from '../src/droneHub/app/use-file-editor-state';
 import type { BrowsableWorkspace } from '../src/droneHub/workspaces/workspaces-client';
 import type { DroneSummary } from '../src/droneHub/types';
@@ -32,43 +36,55 @@ const workspaces: BrowsableWorkspace[] = [
 ];
 const terrain = { id: 'terrain', name: 'Terrain', runtime: 'container', repoAttached: false } as DroneSummary;
 const droneById = { mech, local, terrain };
-const none: DroneRoots = { pinned: [], hidden: [], open: {}, order: [] };
+const none: DroneRoots = { pinned: [], open: {}, order: [] };
 const pin = (id: string) => {
   const { category: _category, ...workspace } = workspaces.find((item) => item.id === id)!;
   return workspace;
 };
 
 describe('explorer roots', () => {
-  test("the chat's workspaces come first and start collapsed; added ones follow, open", () => {
+  test('the roots are the workspaces added to the drone, open, in the order they were added', () => {
     const roots = explorerRootsFor({
-      drone: mech, chatIds: ['host:guides', 'drone:mech'], workspaces, droneById,
-      state: { ...none, pinned: [pin('drone:terrain')] },
+      drone: mech, workspaces, droneById,
+      state: { ...none, pinned: [pin('host:guides'), pin('drone:mech'), pin('drone:terrain')] },
     });
     // The drone's own container is never a root of its own.
-    expect(roots.map((root) => [root.workspace.name, root.fromChat, root.pinned, root.open])).toEqual([
-      ['Guides', true, false, false],
-      ['Terrain', false, true, true],
+    expect(roots.map((root) => [root.workspace.name, root.open])).toEqual([
+      ['Guides', true],
+      ['Terrain', true],
     ]);
     expect(roots[0]!.drone).toMatchObject({ id: 'host:guides', runtime: 'host', cwd: '/home/me/hub/Guides' });
     expect(roots[1]!.drone).toBe(terrain);
   });
 
-  test('a host drone does not list its own folder; a removed chat workspace stays away; a choice to open sticks', () => {
+  test('a host drone does not list its own folder; a choice to collapse sticks', () => {
     const roots = explorerRootsFor({
-      drone: local, chatIds: ['host:local', 'host:guides', 'host:graphics'], workspaces, droneById,
-      state: { pinned: [pin('host:graphics')], hidden: ['host:guides'], open: { 'host:graphics': false }, order: [] },
+      drone: local, workspaces, droneById,
+      state: { pinned: [pin('host:local'), pin('host:graphics')], open: { 'host:graphics': false }, order: [] },
     });
-    expect(roots.map((root) => [root.workspace.name, root.fromChat, root.pinned, root.open])).toEqual([
-      ['Game Graphics', true, true, false],
+    expect(roots.map((root) => [root.workspace.name, root.open])).toEqual([
+      ['Game Graphics', false],
     ]);
   });
 
   test('added roots list before the workspaces load, and drop out once they are gone', () => {
     const state = { ...none, pinned: [pin('host:guides'), { ...pin('host:graphics'), id: 'host:removed' }] };
-    expect(explorerRootsFor({ drone: mech, chatIds: [], workspaces: null, state, droneById }).map((root) => root.workspace.id))
+    expect(explorerRootsFor({ drone: mech, workspaces: null, state, droneById }).map((root) => root.workspace.id))
       .toEqual(['host:guides', 'host:removed']);
-    expect(explorerRootsFor({ drone: mech, chatIds: [], workspaces, state, droneById }).map((root) => root.workspace.id))
+    expect(explorerRootsFor({ drone: mech, workspaces, state, droneById }).map((root) => root.workspace.id))
       .toEqual(['host:guides']);
+  });
+
+  test("a deleted or archived chat's home leaves every drone's explorer; other roots stay", () => {
+    const home = (chatId: string) => ({ id: `host:chat-home-${chatId}`, browseId: `host:chat-home-${chatId}`, name: `${chatId} home`, kind: 'folder' as const, path: `/homes/${chatId}` });
+    addExplorerRoot('homes-a', home('c1'));
+    addExplorerRoot('homes-a', pin('host:guides'));
+    addExplorerRoot('homes-a', home('c2'));
+    addExplorerRoot('homes-b', home('c1'));
+    closeGoneChatHomes(new Set(['c2', 'c3']));
+    expect(explorerRootsState('homes-a').pinned.map((item) => item.id)).toEqual(['host:guides', 'host:chat-home-c2']);
+    expect(explorerRootsState('homes-a').open).toEqual({ 'host:guides': true, 'host:chat-home-c2': true });
+    expect(explorerRootsState('homes-b').pinned).toEqual([]);
   });
 });
 
@@ -77,7 +93,7 @@ describe('reordering roots', () => {
     expect(orderExplorerRoots(['own', 'a', 'b', 'c'], (id) => id, ['c', 'own'])).toEqual(['c', 'own', 'a', 'b']);
   });
 
-  test("a move keeps roots that are not shown (another chat's) after the root they followed", () => {
+  test('a move keeps roots that are not shown after the root they followed', () => {
     expect(mergeExplorerRootOrder(['own', 'x', 'a', 'b'], ['b', 'own', 'a'])).toEqual(['b', 'own', 'x', 'a']);
     expect(mergeExplorerRootOrder(['x', 'own', 'a'], ['a', 'own'])).toEqual(['x', 'a', 'own']);
     expect(mergeExplorerRootOrder([], ['a', 'own'])).toEqual(['a', 'own']);
@@ -94,8 +110,8 @@ describe('reordering roots', () => {
     }
     // Collapsed, so no root lists its files.
     const roots = explorerRootsFor({
-      drone: mech, chatIds: ['host:guides'], workspaces, droneById,
-      state: { ...none, pinned: [pin('host:graphics')], open: { 'host:graphics': false } },
+      drone: mech, workspaces, droneById,
+      state: { ...none, pinned: [pin('host:guides'), pin('host:graphics')], open: { 'host:guides': false, 'host:graphics': false } },
     });
     const editor = {
       activeFile: null, onOpenFile() {}, onConfirmCloseOpenedFilesForPaths: () => true, onCloseOpenedFilesForPaths() {},
@@ -198,6 +214,18 @@ describe('tabs of several workspaces in one editor', () => {
     expect(renamed.tabs.map((entry) => `${entry.droneId}:${entry.path}`)).toEqual(['mech:/notes/a.md', 'host:guides:/docs/a.md']);
     const closed = closeFileTabsForPaths(state, ['/docs/a.md'], 'host:guides');
     expect(closed.tabs.map((entry) => entry.droneId)).toEqual(['mech']);
+  });
+
+  test("closing a workspace's tabs keeps those with unsaved changes and moves the active tab to a neighbour", () => {
+    let state: OpenedFileTabsState = { tabs: [], activeTabId: null };
+    state = tab(state, 'mech', '/a.md');
+    state = tab(state, 'host:chat-home-c1', '/edited.md');
+    state = tab(state, 'host:chat-home-c1', '/notes.md');
+    state.tabs[1] = { ...state.tabs[1]!, kind: 'text', content: 'changed', savedContent: '' };
+    const closed = closeFileTabsOfWorkspaces(state, (routeId) => routeId === 'host:chat-home-c1');
+    expect(closed.tabs.map((entry) => `${entry.droneId}:${entry.path}`)).toEqual(['mech:/a.md', 'host:chat-home-c1:/edited.md']);
+    expect(closed.activeTabId).toBe(closed.tabs[1]!.tabId);
+    expect(closeFileTabsOfWorkspaces(closed, (routeId) => routeId === 'host:other')).toBe(closed);
   });
 
   test("another workspace's file opens beside the drone's own, and Back returns to the drone's file", async () => {
