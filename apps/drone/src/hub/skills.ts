@@ -62,6 +62,8 @@ export type SkillRecord = {
   markdownBody: string;
   files: SkillFileEntry[];
   overlays?: SkillOverlaySet;
+  /** Switched off in the library: kept there, but not given to any drone. */
+  disabled?: true;
   createdAt: string;
   updatedAt: string;
 };
@@ -367,6 +369,7 @@ function normalizeStoredSkillRecord(raw: unknown, fallbackId?: string): SkillRec
     ...(normalizeSkillOverlays(record.overlays)
       ? { overlays: normalizeSkillOverlays(record.overlays) }
       : {}),
+    ...(record.disabled === true ? { disabled: true as const } : {}),
     createdAt: normalizeOptionalString(record.createdAt) || new Date().toISOString(),
     updatedAt:
       normalizeOptionalString(record.updatedAt) ||
@@ -469,6 +472,10 @@ function normalizeIncomingSkillInput(input: any, existing?: SkillRecord): SkillR
             ? input.body
             : ''
           : (existing?.markdownBody ?? '');
+  const disabled =
+    input && typeof input === 'object' && Object.prototype.hasOwnProperty.call(input, 'disabled')
+      ? input.disabled === true
+      : existing?.disabled === true;
   const record: SkillRecord = {
     id: existing?.id ?? crypto.randomUUID(),
     slug,
@@ -484,6 +491,7 @@ function normalizeIncomingSkillInput(input: any, existing?: SkillRecord): SkillR
     markdownBody,
     files,
     ...(overlays ? { overlays } : {}),
+    ...(disabled ? { disabled: true as const } : {}),
     createdAt,
     updatedAt: new Date().toISOString(),
   };
@@ -720,6 +728,7 @@ export async function replaceSkillFromEditablePackage(
   const current = await listSkills();
   const record = normalizeIncomingSkillInput({
     ...skillInputFromEditablePackage(parsed, existing),
+    disabled: existing.disabled === true,
     // A replacement gets the same default slug as a newly created skill. The old
     // record is excluded from uniqueness checks so case-only name changes work.
     slug: parsed.slug ?? parsed.name,
@@ -887,7 +896,8 @@ function renderSkillPackages(
   skills: SkillRecord[],
   agent: SkillProjectionAgent,
 ): RenderedSkillPackage[] {
-  return skills.map((skill) => ({
+  // A switched-off skill is left out, so syncs remove it from drones as if it were deleted.
+  return skills.filter((skill) => !skill.disabled).map((skill) => ({
     slug: skill.slug,
     files: buildSkillFileMap(skill, agent),
   }));

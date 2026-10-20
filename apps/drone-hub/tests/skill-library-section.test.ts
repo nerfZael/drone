@@ -41,6 +41,17 @@ describe('skill library settings navigation', () => {
     expect(hookSource).toContain('if (draftDirtyRef.current) return;');
   });
 
+  test('switching a skill on or off writes only the switch and keeps unsaved edits', () => {
+    const switchSource = hookSource.slice(
+      hookSource.indexOf('const setSkillEnabled'),
+      hookSource.indexOf('const clearSkillsNotice'),
+    );
+    expect(switchSource).toContain('JSON.stringify({ disabled: !enabled })');
+    expect(switchSource).not.toContain('applySelectedSkill');
+    expect(sectionSource).toContain('checked={!selectedSkill.disabled}');
+    expect(sectionSource).toContain("meta={skill.disabled ? 'Off' : undefined}");
+  });
+
   test('the Monaco save shortcut invokes the latest save callback', () => {
     const workspaceSource = readFileSync(
       new URL('../src/droneHub/app/SkillTextEditor.tsx', import.meta.url),

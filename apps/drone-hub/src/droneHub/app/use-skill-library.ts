@@ -90,6 +90,7 @@ export function useSkillLibrary(requestJson: RequestJsonFn, enabled = true) {
   const sourcesQueryKey = settingsQueryKey('skill-sources');
   const [skillsSaving, setSkillsSaving] = React.useState(false);
   const [skillsDeleting, setSkillsDeleting] = React.useState(false);
+  const [skillSwitching, setSkillSwitching] = React.useState<string | null>(null);
   const [skillsError, setSkillsError] = React.useState<string | null>(null);
   const [queryErrorDismissed, setQueryErrorDismissed] = React.useState(false);
   const [skillsNotice, setSkillsNotice] = React.useState<string | null>(null);
@@ -606,6 +607,36 @@ export function useSkillLibrary(requestJson: RequestJsonFn, enabled = true) {
     }
   }, [applySelectedSkill, queryClient, requestJson, selectedSkillId, skills, skillsQueryKey]);
 
+  /** Switches a skill on or off at once, apart from any unsaved edits to it. */
+  const setSkillEnabled = React.useCallback(
+    async (skillId: string, enabled: boolean) => {
+      setSkillSwitching(skillId);
+      setSkillsError(null);
+      setSkillsNotice(null);
+      try {
+        const data = await requestJson<SkillMutationResponse>(`/api/skills/${encodeURIComponent(skillId)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ disabled: !enabled }),
+        });
+        queryClient.setQueryData<SkillsListResponse>(skillsQueryKey, (current) => ({
+          ok: true,
+          skills: replaceSkill(current?.skills ?? [], data.skill),
+        }));
+        setSkillsNotice(
+          enabled
+            ? `Switched ${data.skill.name} on. Drones get it from their next turn.`
+            : `Switched ${data.skill.name} off. Drones lose it from their next turn.`,
+        );
+      } catch (e: any) {
+        setSkillsError(e?.message ?? String(e));
+      } finally {
+        setSkillSwitching(null);
+      }
+    },
+    [queryClient, requestJson, skillsQueryKey],
+  );
+
   const clearSkillsNotice = React.useCallback(() => setSkillsNotice(null), []);
   const clearSkillsError = React.useCallback(() => {
     setSkillsError(null);
@@ -637,6 +668,8 @@ export function useSkillLibrary(requestJson: RequestJsonFn, enabled = true) {
     sourceSkillPreviewLoading: sourcePreviewQuery.isFetching,
     skillsSaving,
     skillsDeleting,
+    skillSwitching,
+    setSkillEnabled,
     sourceSkillSearch,
     skillsError: settingsQueryError(
       skillsError,

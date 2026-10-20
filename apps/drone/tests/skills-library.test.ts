@@ -490,3 +490,56 @@ describe('skills library projection', () => {
     }
   });
 });
+
+describe('switching skills off', () => {
+  test('the switch survives edits and package saves, and only a write of it changes it', async () => {
+    await withTempHomes(async () => {
+      const created = await createSkill({ name: 'Repo Review', description: 'Review changes.', content: 'Body.' });
+      expect(created.disabled).toBeUndefined();
+
+      const off = await updateSkillRecord(created.id, { disabled: true });
+      expect(off.disabled).toBe(true);
+      expect(off.markdownBody).toBe('Body.');
+      expect((await listSkills())[0]?.disabled).toBe(true);
+
+      // Saving the skill's details or files leaves it off.
+      expect((await updateSkillRecord(created.id, { markdownBody: 'New body.' })).disabled).toBe(true);
+      const skillMd = '---\nname: Repo Review\ndescription: Review changes.\n---\nPackage body.\n';
+      expect((await updateSkillFromEditablePackage(created.id, { files: [{ path: 'SKILL.md', content: skillMd }] })).disabled).toBe(true);
+      expect((await replaceSkillFromEditablePackage(created.id, { files: [{ path: 'SKILL.md', content: skillMd }] })).disabled).toBe(true);
+
+      const on = await updateSkillRecord((await listSkills())[0]!.id, { disabled: false });
+      expect(on.disabled).toBeUndefined();
+      expect(on.markdownBody).toBe('Package body.');
+    });
+  });
+
+  test('a switched-off skill leaves drones on their next sync and comes back when switched on', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-skill-switch-'));
+    try {
+      const codexRoot = path.join(tempRoot, '.agents', 'skills');
+      const claudeRoot = path.join(tempRoot, '.claude', 'skills');
+      const targets = [
+        { agent: 'codex' as const, rootPath: codexRoot },
+        { agent: 'claude' as const, rootPath: claudeRoot },
+      ];
+      const other = sampleSkill({ id: 'skill-2', slug: 'communication', name: 'Communication' });
+
+      await syncSkillLibraryToHostTargets({ targets, skills: [sampleSkill(), other] });
+      expect(fs.existsSync(path.join(codexRoot, 'repo-review', 'SKILL.md'))).toBe(true);
+
+      await syncSkillLibraryToHostTargets({ targets, skills: [sampleSkill({ disabled: true }), other] });
+      expect(fs.existsSync(path.join(codexRoot, 'repo-review'))).toBe(false);
+      expect(fs.existsSync(path.join(claudeRoot, 'repo-review'))).toBe(false);
+      expect(fs.existsSync(path.join(codexRoot, 'communication', 'SKILL.md'))).toBe(true);
+      expect(renderSkillProjectionPackages([sampleSkill({ disabled: true }), other], 'codex').map((pkg) => pkg.slug)).toEqual([
+        'communication',
+      ]);
+
+      await syncSkillLibraryToHostTargets({ targets, skills: [sampleSkill(), other] });
+      expect(fs.existsSync(path.join(codexRoot, 'repo-review', 'SKILL.md'))).toBe(true);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

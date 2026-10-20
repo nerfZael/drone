@@ -58,6 +58,8 @@ export type SkillRecord = {
     content: string;
     kind: SkillFileKind;
   }>;
+  /** Switched off: kept in the library, but not given to any drone. */
+  disabled?: true;
   overlays?: {
     codex?: {
       openaiYaml?: string;

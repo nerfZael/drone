@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiSegmentedControl, UiTabs } from '../../ui/components';
+import { UiSegmentedControl, UiSwitch, UiTabs } from '../../ui/components';
 import {
   SKILL_FILE_KIND_OPTIONS,
   type SkillFileDraft,
@@ -26,6 +26,8 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
     skills,
     skillsSaving,
     skillsDeleting,
+    skillSwitching,
+    setSkillEnabled,
     skillsError,
     skillsNotice,
     selectedSkillId,
@@ -47,6 +49,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
   } = skillLibrary;
 
   const fileCountLabel = `${draft.files.length} ${draft.files.length === 1 ? 'file' : 'files'}`;
+  const selectedSkill = skills.find((skill) => skill.id === draft.id) ?? null;
 
   const handleSelectSkill = React.useCallback(
     async (skillId: string) => {
@@ -218,6 +221,8 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                           selected={active}
                           title={skill.name}
                           detail={skill.slug}
+                          meta={skill.disabled ? 'Off' : undefined}
+                          className={skill.disabled ? 'opacity-60' : undefined}
                           onClick={() => handleSelectSkill(skill.id)}
                         />
                       );
@@ -265,6 +270,17 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                     </button>
                   </div>
                 </div>
+
+                {selectedSkill ? (
+                  <UiSwitch
+                    data-skill-enabled-switch={selectedSkill.id}
+                    checked={!selectedSkill.disabled}
+                    onCheckedChange={(enabled) => void setSkillEnabled(selectedSkill.id, enabled)}
+                    disabled={skillSwitching !== null || skillsSaving || skillsDeleting}
+                    label="Give this skill to drones"
+                    description="Off keeps it here, with its files, and takes it away from every drone's agents from their next turn."
+                  />
+                ) : null}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="flex flex-col gap-1">
