@@ -62,6 +62,7 @@ import {
 } from './droneHub/canvas/use-drone-canvas-store';
 import { renameChatInFolds } from './droneHub/canvas/organized-board-folds';
 import { renameChatInSidebarPlaces } from './droneHub/app/sidebar-chat-rename';
+import { placeNewChatLastInSidebar } from './droneHub/app/sidebar-new-chat-place';
 import { forgetChatFolds, forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
 import {
   beginChatDeletion,
@@ -340,6 +341,30 @@ async function readCompanionProposalAttachments(paths: string[] | undefined) {
   return (await requestJson<{ attachments: import('@drone/assistant-chat').CompanionImageAttachment[] }>('/api/companion/attachments/read', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths }),
   })).attachments;
+}
+
+/**
+ * Saves a new chat as last in its drone's sidebar, before its card first shows, so it stays at the end of the
+ * organized board as the summary lists it and as its first message names it. Returns what puts the old places back.
+ */
+function placeNewChatLast(drone: DroneSummary, chatName: string): () => void {
+  const ui = useDroneHubUiStore.getState();
+  const before = {
+    sidebarChatOrderByDrone: ui.sidebarChatOrderByDrone,
+    sidebarChatGroupByChat: ui.sidebarChatGroupByChat,
+    sidebarChatNodeOrderByParent: ui.sidebarChatNodeOrderByParent,
+  };
+  const places = placeNewChatLastInSidebar(before, drone.id, drone.chats ?? [], chatName);
+  ui.setSidebarChatOrderByDrone(places.sidebarChatOrderByDrone);
+  if (places.sidebarChatGroupByChat !== before.sidebarChatGroupByChat) ui.setSidebarChatGroupByChat(places.sidebarChatGroupByChat);
+  if (places.sidebarChatNodeOrderByParent !== before.sidebarChatNodeOrderByParent) ui.setSidebarChatNodeOrderByParent(places.sidebarChatNodeOrderByParent);
+  return () => {
+    const now = useDroneHubUiStore.getState();
+    // Only what this put there: the user may have moved chats since.
+    if (now.sidebarChatOrderByDrone === places.sidebarChatOrderByDrone) now.setSidebarChatOrderByDrone(before.sidebarChatOrderByDrone);
+    if (now.sidebarChatGroupByChat === places.sidebarChatGroupByChat) now.setSidebarChatGroupByChat(before.sidebarChatGroupByChat);
+    if (now.sidebarChatNodeOrderByParent === places.sidebarChatNodeOrderByParent) now.setSidebarChatNodeOrderByParent(before.sidebarChatNodeOrderByParent);
+  };
 }
 
 function droneHubBusyDebugEnabled(): boolean {
@@ -4891,9 +4916,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         if (!opts?.onNameChosen) forgetStaleChatCard(latestDrone.id, candidate);
         else forgetChatFolds(latestDrone.id, candidate);
         opts?.onNameChosen?.(candidate);
+        // A clone is not named again by its first message, so the place its name gives it holds.
+        const unplaceChat = opts?.copyFromChat ? null : placeNewChatLast(latestDrone, candidate);
         const created = await createDroneChat(latestDrone, candidate, opts);
         // A created chat stays claimed until the drone summary lists it.
         if (created.ok) return { ok: true, chatName: candidate, error: null };
+        unplaceChat?.();
         claimed.delete(candidate);
         opts?.onNameReleased?.(candidate);
         const createError = String(created.error ?? '').trim();
@@ -5172,6 +5200,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       creationPromise: null as Promise<boolean> | null,
     };
     newDraftChatsRef.current.set(key, tracked);
+    const unplaceChat = placeNewChatLast(latestDrone, chatName);
     addOptimisticDraftChat(latestDrone.id, chatName);
     rememberStartupSeed([{ id: latestDrone.id, name: latestDrone.name }], {
       runtime: latestDrone.runtime === 'host' ? 'host' : 'container',
@@ -5197,6 +5226,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       tracked.serverCreated = result.ok === true;
       if (!result.ok) {
         newDraftChatsRef.current.delete(key);
+        unplaceChat();
         removeOptimisticDraftChat(latestDrone.id, chatName);
         unhideOptimisticallyRemovedDraftChat(latestDrone.id, chatName);
         clearStartupSeedForChat(latestDrone.id, chatName);
