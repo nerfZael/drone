@@ -1,5 +1,5 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
-import { chatSelectionKey } from '../app/chat-selection-model';
+import { chatSelectionKey, useChatViewKey } from '../app/chat-selection-model';
 import { continuesChat, chatPathRef } from '../app/chat-identity';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import type { SideChatKind } from '../chat/chat-send-shortcuts';
@@ -303,8 +303,9 @@ export type AssistantMessageFeatures = {
 };
 
 export function AssistantDock(props: React.ComponentProps<typeof NativeAssistantDock>) {
-  // Keyed by the chat's ID, so a renamed chat keeps its dock.
-  return <NativeAssistantDock key={chatSelectionKey(props.nativeChat.droneId, props.nativeChat.chatName)} {...props} />;
+  // Another chat gets a dock of its own; the same chat renamed keeps this one.
+  const key = useChatViewKey(props.nativeChat.droneId, props.nativeChat.chatName);
+  return <NativeAssistantDock key={key} {...props} />;
 }
 
 /** Marks a user message so lists such as Asks can scroll to it. */

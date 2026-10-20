@@ -1489,7 +1489,7 @@ export class ChatTranscriptRepository {
     return await this.database.writeTransaction('create canonical chat', (connection) => {
       if (this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`chat already exists: ${opts.chatName}`);
       if (opts.chatId && (
-        connection.prepare(`SELECT 1 FROM canonical_chats WHERE json_extract(metadata_json, '$.id') = ?`).get(opts.chatId)
+        connection.prepare(`SELECT 1 FROM canonical_chats WHERE trim(json_extract(metadata_json, '$.id')) = ?`).get(opts.chatId)
         || connection.prepare(`SELECT 1 FROM canonical_archived_chats WHERE json_extract(chat_json, '$.id') = ?`).get(opts.chatId)
       )) {
         throw new Error(`chat id already exists: ${opts.chatId}`);
@@ -2165,8 +2165,9 @@ export class ChatTranscriptRepository {
   chatNameForId(opts: { droneId: string; chatId: string }): string | null {
     return this.database.read((connection) => {
       const row = connection
-        .prepare(`SELECT chat_name FROM canonical_chats WHERE drone_id = ? AND json_extract(metadata_json, '$.id') = ?`)
-        .get(opts.droneId, opts.chatId) as { chat_name: string } | undefined;
+        // The same expression as the unique ID index, so the lookup uses it.
+        .prepare(`SELECT chat_name FROM canonical_chats WHERE trim(json_extract(metadata_json, '$.id')) = ? AND drone_id = ?`)
+        .get(opts.chatId, opts.droneId) as { chat_name: string } | undefined;
       return row?.chat_name ?? null;
     });
   }

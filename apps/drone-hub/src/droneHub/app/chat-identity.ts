@@ -99,13 +99,18 @@ export function publishChatIds(drones: readonly ChatIdSource[]): void {
     }
     if (batch.length > 0) seenRenames.push(batch);
   }
+  const previousByDrone = idsByDrone;
   idsByDrone = next;
   storeChatIds(next);
   for (const [droneId, local] of localIdsByDrone) {
     const listed = next.get(droneId) ?? {};
+    const previous = previousByDrone.get(droneId) ?? {};
     for (const [chatName, chatId] of Object.entries(local)) {
       // The summary caught up: it lists that ID, under this name or a later one.
       if (Object.values(listed).includes(chatId)) delete local[chatName];
+      // Another chat took the name since, so the create this ID was kept for never happened.
+      // (A name still listed under a just-deleted chat's ID keeps the ID kept here.)
+      else if (chatName in listed && listed[chatName] !== previous[chatName]) delete local[chatName];
     }
     if (Object.keys(local).length === 0) localIdsByDrone.delete(droneId);
   }

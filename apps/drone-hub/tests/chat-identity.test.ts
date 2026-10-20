@@ -121,3 +121,17 @@ test('a rename made while the app was closed is seen in the first summary', () =
     { droneId: 'drone', oldName: 'Notes', newName: 'Plan' },
   ]]);
 });
+
+test('an ID kept for a create that never happened does not hide the chat that later takes the name', () => {
+  publishChatIds([{ id: 'drone', chatIds: { Plan: 'chat-1' } }]);
+  // A draft chat left before the hub made it.
+  const abandoned = newChatId('drone', 'Untitled 2');
+  // Another device then makes a chat with that name.
+  publishChatIds([{ id: 'drone', chatIds: { Plan: 'chat-1', 'Untitled 2': 'chat-9' } }]);
+
+  expect(chatIdFor('drone', 'Untitled 2')).toBe('chat-9');
+  expect(chatPathRef('drone', 'Untitled 2')).toBe('chat-9');
+  // A new chat under that name later gets an ID of its own, not the abandoned one.
+  publishChatIds([{ id: 'drone', chatIds: { Plan: 'chat-1' } }]);
+  expect(newChatId('drone', 'Untitled 2')).not.toBe(abandoned);
+});

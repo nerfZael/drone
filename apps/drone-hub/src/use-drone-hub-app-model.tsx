@@ -4730,7 +4730,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         showNameSuggestionFailureToast(error);
       }
     },
-    [requestJson, setSelectedChat, setSidebarChatOrderByDrone, showNameSuggestionFailureToast],
+    [followChatRename, requestJson, setSelectedChat, showNameSuggestionFailureToast],
   );
   autoRenameChatFromFirstPromptRef.current = suggestAndRenameDroneChatFromMessage;
   const resolveNewChatConfiguration = React.useCallback(

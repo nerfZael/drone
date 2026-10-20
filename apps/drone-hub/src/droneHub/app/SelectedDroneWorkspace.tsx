@@ -96,7 +96,6 @@ import { rightPanelHeaderTabs, type RightPanelTab } from './app-config';
 import type { ChatModelOption, StartupSeedState } from './app-types';
 import {
   chatConfigResolutionState,
-  chatSelectionKey,
   genericChatComposerAvailable,
   shouldBlockChatContentForConfig,
   shouldShowDroneStartupFailureEmptyState,
@@ -2581,7 +2580,6 @@ export function SelectedDroneWorkspace({
           },
           renderChat: (chatName) => (
             <DetachedChatContent
-              key={chatSelectionKey(currentDrone.id, chatName)}
               chat={{ droneId: currentDrone.id, chatName, open: true }}
               drone={{ ...currentDrone, sideChats: sideChatWorkspace.sideChats }}
               context={{
@@ -2732,7 +2730,6 @@ export function SelectedDroneWorkspace({
                   />
                 ) : nativeChatActive ? (
                   <AssistantDock
-                    key={chatSelectionKey(currentDrone.id, activeChatName)}
                     nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
                     startupPrompt={
                       startupSeedForCurrentDrone?.agent?.kind === 'native' &&

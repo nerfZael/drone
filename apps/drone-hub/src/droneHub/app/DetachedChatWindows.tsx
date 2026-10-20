@@ -1,5 +1,6 @@
 import { ChatDeletingOverlay } from './ChatDeletingOverlay';
 import { chatPathRef } from './chat-identity';
+import { useChatViewKey } from './chat-selection-model';
 import { useDesktopChatRequests } from './desktop-chat-requests';
 import { DesktopChatWindow } from './DesktopChatWindow';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
@@ -39,7 +40,15 @@ export type DetachedChatWindowsProps = {
 const WindowContext = React.createContext<DetachedChatWindowsProps | null>(null);
 const nativeAdapter = adaptNativeAgentChatSurface();
 
-export function DetachedChatContent({ chat, drone, context, desktop = false }: { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean }) {
+type DetachedChatContentProps = { chat: DetachedChat; drone: DroneSummary; context: DetachedChatWindowsProps; desktop?: boolean };
+
+export function DetachedChatContent(props: DetachedChatContentProps) {
+  // Another chat starts over; the same chat renamed keeps what it shows.
+  const key = useChatViewKey(props.chat.droneId, props.chat.chatName);
+  return <DetachedChatContentView key={key} {...props} />;
+}
+
+function DetachedChatContentView({ chat, drone, context, desktop = false }: DetachedChatContentProps) {
   const forkBusy = useSideChatBusyStore(state => Boolean(state.busy[drone.id]));
   const [agent, setAgent] = React.useState<{ kind: string; id?: string } | null>(null);
   const [error, setError] = React.useState('');

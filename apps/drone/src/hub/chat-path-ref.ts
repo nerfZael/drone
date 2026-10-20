@@ -1,4 +1,6 @@
 const CHAT_PATH = /^\/api\/drones\/([^/]+)\/chats\/([^/]+)(\/.*)?$/;
+// Chat IDs are UUIDs, so any other segment is a name and needs no lookup.
+const CHAT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Chat routes name the chat in the path. A client may put the chat's stable ID
@@ -20,6 +22,7 @@ export function resolveChatIdInPath(
   } catch {
     return;
   }
+  if (!CHAT_ID.test(chatRef)) return;
   const chatName = chatNameForId({ droneId, chatId: chatRef });
   if (!chatName || chatName === chatRef) return;
   url.pathname = `/api/drones/${match[1]}/chats/${encodeURIComponent(chatName)}${match[3] ?? ''}`;

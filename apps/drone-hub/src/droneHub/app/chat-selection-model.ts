@@ -1,5 +1,6 @@
+import React from 'react';
 import type { ChatInfo } from '../../domain';
-import { chatIdentity } from './chat-identity';
+import { chatIdentity, continuesChat } from './chat-identity';
 
 export function chatNamesForConfigSelection(input: {
   chats?: readonly string[] | null;
@@ -23,6 +24,22 @@ export function chatSelectionKey(
   if (!droneId) return '';
   // Keyed by the chat's ID once known, so a renamed chat keeps what is cached for it.
   return `${droneId}\u0000${chatIdentity(droneId, chatNameRaw)}`;
+}
+
+/**
+ * A React key for a view of one chat. It stays the same while that chat is
+ * renamed, or becomes known by its ID, so the view is not mounted again.
+ */
+export function useChatViewKey(
+  droneIdRaw: string | null | undefined,
+  chatNameRaw: string | null | undefined,
+): string {
+  const key = chatSelectionKey(droneIdRaw, chatNameRaw);
+  const ref = React.useRef({ latest: key, shown: key });
+  if (ref.current.latest !== key) {
+    ref.current = { latest: key, shown: continuesChat(ref.current.latest, key) ? ref.current.shown : key };
+  }
+  return ref.current.shown;
 }
 
 export function chatInfoForSelection(
