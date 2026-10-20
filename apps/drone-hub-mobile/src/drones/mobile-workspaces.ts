@@ -14,7 +14,7 @@ export type BrowsableWorkspace = {
   browseId: string;
   name: string;
   kind: 'folder' | 'drone';
-  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Host drones' | 'Container drones';
+  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Chat homes' | 'Host drones' | 'Container drones';
   path?: string;
   droneId?: string;
   status?: string;
@@ -37,12 +37,13 @@ export const WORKSPACE_CATEGORIES: BrowsableWorkspace['category'][] = [
   'Workspaces',
   'Repositories',
   'Folders',
+  'Chat homes',
   'Host drones',
   'Container drones',
 ];
 /** Drones shown per group before "more", as on the desktop; a search looks through all of them. */
 export const DRONE_CAP = 5;
-const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Host drones', 'Container drones']);
+const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Chat homes', 'Host drones', 'Container drones']);
 
 export async function browseWorkspaces(request: RequestDroneControl, targetId: string, signal?: AbortSignal): Promise<BrowsableWorkspace[]> {
   const result = await request(targetId, 'workspaces.browse', {}, signal);

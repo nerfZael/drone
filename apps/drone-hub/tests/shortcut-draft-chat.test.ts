@@ -125,4 +125,23 @@ describe('shortcut draft chat lifecycle', () => {
     expect(sent).toBe(false);
     expect(calls).toEqual(['publish', 'offline']);
   });
+
+  test('sends when the chat turns out to be published already', async () => {
+    const calls: string[] = [];
+    const sent = await publishThenSendShortcutDraftChat({
+      publish: async () => {
+        calls.push('publish');
+        throw Object.assign(new Error('chat is not a draft: Ideas'), { status: 409 });
+      },
+      send: async () => {
+        calls.push('send');
+        return true;
+      },
+      onPublishError: () => {
+        calls.push('error');
+      },
+    });
+    expect(sent).toBe(true);
+    expect(calls).toEqual(['publish', 'send']);
+  });
 });

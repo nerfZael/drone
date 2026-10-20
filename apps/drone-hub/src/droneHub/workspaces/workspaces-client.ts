@@ -24,7 +24,7 @@ export type BrowsableWorkspace = {
   browseId: string;
   name: string;
   kind: 'folder' | 'drone';
-  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Host drones' | 'Container drones';
+  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Chat homes' | 'Host drones' | 'Container drones';
   path?: string;
   droneId?: string;
   status?: string;
@@ -88,6 +88,19 @@ export function subscribeWorkspacesChanged(callback: () => void): () => void {
     window.removeEventListener(CHANGED_EVENT, callback);
     unsubscribeHub();
   };
+}
+
+const CHAT_WORKSPACES_CHANGED_EVENT = 'drone-hub:chat-workspaces-changed';
+
+/** Tells File Explorers in this window that a chat's workspaces were changed here (they show them as roots). */
+export function notifyChatWorkspacesChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(CHAT_WORKSPACES_CHANGED_EVENT));
+}
+
+export function subscribeChatWorkspacesChanged(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener(CHAT_WORKSPACES_CHANGED_EVENT, callback);
+  return () => window.removeEventListener(CHAT_WORKSPACES_CHANGED_EVENT, callback);
 }
 
 /** The desktop app's folder dialog, when this window has one. */

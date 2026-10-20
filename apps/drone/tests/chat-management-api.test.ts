@@ -249,7 +249,7 @@ describeSocketSuite('chat management api', () => {
       expect(read.isError).not.toBe(true);
       expect(read.structuredContent).toMatchObject({
         draft: true, historyKind: 'messages', messages: [], pendingCount: 1, pendingTruncated: false,
-        pending: [{ id: (sent.structuredContent as any).runId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
+        pending: [{ id: (sent.structuredContent as any).messageId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
       });
     } finally {
       await client?.close();
@@ -763,6 +763,139 @@ describeSocketSuite('chat management api', () => {
       kind: 'builtin',
       id: 'codex',
     });
+  });
+
+  test('composer side chats are named from their first message and go with their source', async () => {
+    const droneId = 'drone-composer-side-chats';
+    await seedDrone(droneId);
+    const chatsPath = `/api/drones/${encodeURIComponent(droneId)}/chats`;
+    const create = (body: Record<string, unknown>) =>
+      apiFetch(chatsPath, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const prompt = (chat: string, text: string) =>
+      apiFetch(`${chatsPath}/${encodeURIComponent(chat)}/prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: text, autoRenameHandledByClient: true }),
+      });
+    const sideChatsOf = async () => {
+      const summaries = await apiFetch('/api/drones');
+      return (summaries.data.drones.find((drone: any) => drone.id === droneId)?.sideChats ?? []) as any[];
+    };
+
+    expect((await create({ name: 'review' })).r.status).toBe(201);
+    const side = await create({
+      name: 'side-0000000a',
+      copyFrom: 'review',
+      mode: 'copy-config',
+      sideChat: true,
+      sideChatPresentation: 'composer',
+    });
+    expect(side.r.status).toBe(201);
+    expect(side.data?.sideChatOrigin).toMatchObject({ sourceChatName: 'review', kind: 'new', presentation: 'composer' });
+    expect(side.data?.sideChatOrigin?.sourceChatId).toEqual(expect.any(String));
+    const nested = await create({
+      name: 'side-0000000b',
+      copyFrom: 'side-0000000a',
+      mode: 'copy-config',
+      sideChat: true,
+      sideChatPresentation: 'composer',
+    });
+    expect(nested.r.status).toBe(201);
+    // A floating side chat opens at a fork point, so it cannot start new.
+    expect(
+      (await create({ name: 'side-0000000c', copyFrom: 'review', mode: 'copy-config', sideChat: true })).r.status,
+    ).toBe(400);
+    expect(
+      (await create({ name: 'bad', copyFrom: 'review', mode: 'copy-config', sideChatPresentation: 'composer' })).r.status,
+    ).toBe(400);
+    expect(
+      (await create({ name: 'bad', copyFrom: 'review', mode: 'copy-config', sideChat: true, draft: true })).r.status,
+    ).toBe(400);
+
+    const sideChats = await sideChatsOf();
+    expect(sideChats.find((chat) => chat.name === 'side-0000000a')).toMatchObject({
+      sourceChatName: 'review',
+      kind: 'new',
+      presentation: 'composer',
+      createdAt: expect.any(String),
+    });
+    expect(sideChats.find((chat) => chat.name === 'side-0000000b')).toMatchObject({ sourceChatName: 'side-0000000a' });
+
+    // Renaming the source keeps its side chats: they follow its ID.
+    const renamed = await apiFetch(`${chatsPath}/review/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'qa' }),
+    });
+    expect(renamed.r.status).toBe(200);
+    expect((await sideChatsOf()).find((chat) => chat.name === 'side-0000000a')?.sourceChatName).toBe('qa');
+
+    const deleted = await apiFetch(`${chatsPath}/qa`, { method: 'DELETE' });
+    expect(deleted.r.status).toBe(200);
+    expect(deleted.data?.deletedChat).toBe('qa');
+    expect(deleted.data?.deletedSideChats).toEqual(['side-0000000a', 'side-0000000b']);
+    expect(deleted.data?.sideChatErrors).toBeUndefined();
+    expect(await sideChatsOf()).toEqual([]);
+    for (const chat of ['side-0000000a', 'side-0000000b']) {
+      expect((await apiFetch(`${chatsPath}/${chat}`)).r.status).toBe(404);
+    }
+
+    // Archiving a source archives its side chats too.
+    expect((await create({ name: 'plan' })).r.status).toBe(201);
+    expect(
+      (
+        await create({
+          name: 'side-0000000d',
+          copyFrom: 'plan',
+          mode: 'copy-config',
+          sideChat: true,
+          sideChatPresentation: 'composer',
+        })
+      ).r.status,
+    ).toBe(201);
+    const archived = await apiFetch(`${chatsPath}/plan/archive`, { method: 'POST' });
+    expect(archived.r.status).toBe(200);
+    expect(archived.data?.archivedChat).toBe('plan');
+    expect(archived.data?.archivedSideChats).toEqual(['side-0000000d']);
+    expect(await sideChatsOf()).toEqual([]);
+
+    // A side chat can still be removed on its own; its source stays.
+    expect((await create({ name: 'notes' })).r.status).toBe(201);
+    expect(
+      (
+        await create({
+          name: 'side-0000000e',
+          copyFrom: 'notes',
+          mode: 'copy-config',
+          sideChat: true,
+          sideChatPresentation: 'composer',
+        })
+      ).r.status,
+    ).toBe(201);
+    const alone = await apiFetch(`${chatsPath}/side-0000000e`, { method: 'DELETE' });
+    expect(alone.r.status).toBe(200);
+    expect(alone.data?.deletedSideChats).toBeUndefined();
+    expect((await apiFetch(`${chatsPath}/notes`)).r.status).toBe(200);
+
+    // Its first own message names it, once. (Prompts are kept off the chats deleted
+    // above: this test drone has no daemon to stop them on.)
+    expect(
+      (
+        await create({
+          name: 'side-0000000f',
+          copyFrom: 'notes',
+          mode: 'copy-config',
+          sideChat: true,
+          sideChatPresentation: 'composer',
+        })
+      ).r.status,
+    ).toBe(201);
+    expect((await prompt('side-0000000f', 'Check the lava cracks')).data?.autoRenameChat).toBe(true);
+    expect((await prompt('side-0000000f', 'And the terrain')).data?.autoRenameChat).toBe(false);
   });
 
   test('deletes default when another chat remains and protects a sole default', async () => {

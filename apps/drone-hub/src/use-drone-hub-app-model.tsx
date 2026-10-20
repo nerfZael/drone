@@ -20,7 +20,15 @@ import { flushSync } from 'react-dom';
 import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
 import { saveSideChatWorkspaceState } from './droneHub/app/side-chat-workspace-state';
 import { chatPathRef, currentChatName, forgetNewChatId, newChatId, renameChatId, takeSeenChatRenames } from './droneHub/app/chat-identity';
-import { moveChatCanvasCards, moveChatClientState, moveRenamedChatsClientState } from './droneHub/app/follow-chat-rename';
+import { moveChatBoardPlaces, moveChatClientState, moveRenamedChatsClientState } from './droneHub/app/follow-chat-rename';
+import {
+  addPendingComposerSideChat,
+  isGeneratedSideChatName,
+  newComposerSideChatName,
+  removePendingComposerSideChat,
+  sideChatDescendantNames,
+} from './droneHub/app/composer-side-chats';
+import type { SideChatKind } from './droneHub/chat/chat-send-shortcuts';
 import { keepFocusOnNextChatActivation } from './droneHub/app/focus-chat-window';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -52,7 +60,8 @@ import {
   selectCanvasBoard,
   useDroneCanvasStore,
 } from './droneHub/canvas/use-drone-canvas-store';
-import { forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
+import { placeNewChatLastInSidebar } from './droneHub/app/sidebar-new-chat-place';
+import { forgetChatFolds, forgetStaleChatCard, placeClonedChatOnDroneBoard, removeClonedChatFromDroneBoard } from './droneHub/canvas/drone-board';
 import {
   beginChatDeletion,
   markChatsDeleted,
@@ -247,6 +256,7 @@ import {
 } from './droneHub/app/helpers';
 
 import {
+  isDraftChatAlreadyPublishedError,
   publishThenSendShortcutDraftChat,
   shouldRetainOptimisticallyHiddenDraftChat,
   shortcutDraftChatDisposition,
@@ -255,9 +265,25 @@ import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
 import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-tabs-state';
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
-import { setExplorerWorkspace, useExplorerWorkspaceDrone } from './droneHub/workspaces/explorer-workspace-store';
+import {
+  OWN_EXPLORER_ROOT,
+  addExplorerRoot,
+  isOwnExplorerWorkspace,
+  revealInExplorerRoot,
+  setExplorerRootOpen,
+  useExplorerRoots,
+} from './droneHub/workspaces/explorer-roots';
+import type { ExplorerRootsEditor } from './droneHub/files/ExplorerRootsColumn';
+import type { EditorWorkspaceInfo } from './droneHub/app/DroneEditorDock';
+import {
+  OPEN_WORKSPACE_LINK_EVENT,
+  browsableWorkspacesForLinks,
+  openWorkspaceLink,
+  ownWorkspaceOf,
+  resolveWorkspaceLink,
+  type OpenWorkspaceLinkDetail,
+} from './droneHub/workspaces/workspace-links';
 import { ExplorerWorkspaceSwitcher } from './droneHub/workspaces/ExplorerWorkspaceSwitcher';
-import { useStandaloneEditorPaneProps } from './droneHub/app/DesktopEditorPane';
 import type {
   GlobalDictationDroneDestination,
   GlobalDictationSendResult,
@@ -313,6 +339,30 @@ async function readCompanionProposalAttachments(paths: string[] | undefined) {
   return (await requestJson<{ attachments: import('@drone/assistant-chat').CompanionImageAttachment[] }>('/api/companion/attachments/read', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths }),
   })).attachments;
+}
+
+/**
+ * Saves a new chat as last in its drone's sidebar, before its card first shows, so it stays at the end of the
+ * organized board as the summary lists it and as its first message names it. Returns what puts the old places back.
+ */
+function placeNewChatLast(drone: DroneSummary, chatName: string): () => void {
+  const ui = useDroneHubUiStore.getState();
+  const before = {
+    sidebarChatOrderByDrone: ui.sidebarChatOrderByDrone,
+    sidebarChatGroupByChat: ui.sidebarChatGroupByChat,
+    sidebarChatNodeOrderByParent: ui.sidebarChatNodeOrderByParent,
+  };
+  const places = placeNewChatLastInSidebar(before, drone.id, drone.chats ?? [], chatName);
+  ui.setSidebarChatOrderByDrone(places.sidebarChatOrderByDrone);
+  if (places.sidebarChatGroupByChat !== before.sidebarChatGroupByChat) ui.setSidebarChatGroupByChat(places.sidebarChatGroupByChat);
+  if (places.sidebarChatNodeOrderByParent !== before.sidebarChatNodeOrderByParent) ui.setSidebarChatNodeOrderByParent(places.sidebarChatNodeOrderByParent);
+  return () => {
+    const now = useDroneHubUiStore.getState();
+    // Only what this put there: the user may have moved chats since.
+    if (now.sidebarChatOrderByDrone === places.sidebarChatOrderByDrone) now.setSidebarChatOrderByDrone(before.sidebarChatOrderByDrone);
+    if (now.sidebarChatGroupByChat === places.sidebarChatGroupByChat) now.setSidebarChatGroupByChat(before.sidebarChatGroupByChat);
+    if (now.sidebarChatNodeOrderByParent === places.sidebarChatNodeOrderByParent) now.setSidebarChatNodeOrderByParent(before.sidebarChatNodeOrderByParent);
+  };
 }
 
 function droneHubBusyDebugEnabled(): boolean {
@@ -477,7 +527,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     // Publish the new name and both boards' positions in one render. Otherwise
     // placement can recreate the old name while the summary still lists it.
     flushSync(() => {
-      moveChatCanvasCards(droneId, oldName, newName);
+      moveChatBoardPlaces(droneId, oldName, newName);
       setOptimisticChatRenames((current) => {
         // A chat renamed again before the summary caught up goes straight to its latest name.
         const renames = Object.fromEntries(
@@ -924,6 +974,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones]);
+  const sideChatNodeIdSet = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const drone of drones) {
+      for (const sideChat of drone.sideChats ?? []) {
+        if (sideChat.presentation !== 'composer') continue;
+        const nodeId = createCanvasChatNodeId(drone.id, sideChat.name);
+        if (nodeId) out.add(nodeId);
+      }
+    }
+    return out;
+  }, [drones]);
   const markChatsUnread = React.useMemo(
     () =>
       (chatNodeIdsRaw: string[]): number => {
@@ -977,7 +1038,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const next: Record<string, boolean> = {};
     for (const drone of drones) {
       for (const nodeId of unreadChatNodeIdsForDrone(drone)) {
-        if (nodeId && validChatNodeIdSet.has(nodeId)) next[nodeId] = true;
+        if (nodeId && (validChatNodeIdSet.has(nodeId) || sideChatNodeIdSet.has(nodeId))) next[nodeId] = true;
       }
     }
     for (const [nodeId, marker] of manuallyMarkedUnreadChatsRef.current) {
@@ -1010,6 +1071,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     dronesError,
     dronesLoading,
     setUnreadAgentMessageByChatNodeId,
+    sideChatNodeIdSet,
     validChatNodeIdSet,
   ]);
   React.useEffect(() => {
@@ -2002,19 +2064,32 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const currentDrone = selectedDrone ? (sidebarDisplayDroneById[selectedDrone] ?? null) : null;
   const currentDroneId = currentDrone?.id ?? '';
-  // The selected drone's File Explorer can show another workspace, with an explorer and editor of its own; the
-  // drone's own files and open tabs stay as they were for when it switches back.
-  const { workspace: explorerWorkspace, drone: explorerWorkspaceDrone } = useExplorerWorkspaceDrone(currentDroneId, droneById);
-  // Set once the editor pane can be brought forward (below): opening a file shows the editor, as for the drone's own.
-  const focusEditorPaneRef = React.useRef<() => void>(() => {});
-  const standaloneEditor = useStandaloneEditorPaneProps(explorerWorkspaceDrone, () => focusEditorPaneRef.current());
-  // Only while switched, so the tool panes do not re-render with every Hub render otherwise. The editor shortcuts
-  // (quick open, new file, back and forward) act on whichever editor is shown.
-  const switchedEditorProps = explorerWorkspaceDrone ? standaloneEditor.pane : null;
-  const switchedEditorControls = explorerWorkspaceDrone ? standaloneEditor.controls : null;
+  // The selected drone's File Explorer shows other workspaces as roots below its own files: those the open chat can
+  // use and those added to it. Their files open in the drone's editor, beside its own.
+  const { roots: explorerRoots, ownOpen: explorerOwnOpen, workspaces: explorerWorkspaces } = useExplorerRoots({
+    drone: currentDrone,
+    chatName: currentDrone ? selectedChat || 'default' : null,
+    droneById,
+  });
+  const explorerRootsRef = React.useRef(explorerRoots);
+  explorerRootsRef.current = explorerRoots;
   const showOwnDroneFiles = React.useCallback(() => {
-    if (currentDroneId) setExplorerWorkspace(currentDroneId, null);
+    if (currentDroneId) setExplorerRootOpen(currentDroneId, OWN_EXPLORER_ROOT, true);
   }, [currentDroneId]);
+  /** Shows a file of another workspace under its root, when the explorer has one for it (by file route id). */
+  const revealInRootOf = React.useCallback((routeId: string, path: string) => {
+    const root = explorerRootsRef.current.find((item) => item.drone.id === routeId);
+    if (root && currentDroneId) revealInExplorerRoot(currentDroneId, root.workspace.id, path);
+  }, [currentDroneId]);
+  const editorWorkspaceOf = React.useCallback((routeId: string): EditorWorkspaceInfo | null => {
+    const root = explorerRoots.find((item) => item.drone.id === routeId);
+    if (root) return { name: root.workspace.name, homePath: droneHomePath(root.drone) };
+    // A tab whose root was removed since it opened.
+    const workspace = explorerWorkspaces?.find((item) => (item.kind === 'folder' ? item.browseId : item.droneId) === routeId);
+    if (workspace?.kind === 'folder' && workspace.path) return { name: workspace.name, homePath: workspace.path };
+    const other = droneById[routeId];
+    return other ? { name: other.name, homePath: droneHomePath(other) } : null;
+  }, [droneById, explorerRoots, explorerWorkspaces]);
   const visibleToolTabs =
     visibleToolTabsByDrone[currentDroneId] ?? EMPTY_VISIBLE_TOOL_TABS;
   const handleVisibleToolTabsChange = React.useCallback(
@@ -2557,12 +2632,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const chatName = String(selectedChat ?? '').trim() || 'default';
       const key = droneChatQueueKey(droneId, chatName);
       const tracked = newDraftChatsRef.current.get(key);
-      if (!tracked) return await sendPromptTextBase(payload, context);
-      tracked.submissionInFlight = true;
-
-      if (tracked.creationPromise && !(await tracked.creationPromise)) {
-        tracked.submissionInFlight = false;
-        return false;
+      // A draft the app no longer tracks (left with typed text, or kept across a reload) is still published by its
+      // first message: the Hub holds prompts sent to a draft until it is published.
+      const untrackedDraft = !tracked && droneByIdRef.current[droneId]?.draftChats?.[chatName] === true;
+      if (!tracked && !untrackedDraft) return await sendPromptTextBase(payload, context);
+      if (tracked) {
+        tracked.submissionInFlight = true;
+        if (tracked.creationPromise && !(await tracked.creationPromise)) {
+          tracked.submissionInFlight = false;
+          return false;
+        }
       }
 
       const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/publish`;
@@ -2579,8 +2658,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           return await sendPromptTextBase(payload, context);
         },
         onPublishError: (error) => {
-          tracked.submissionInFlight = false;
-          tracked.publishFailed = true;
+          if (tracked) {
+            tracked.submissionInFlight = false;
+            tracked.publishFailed = true;
+          }
           const message = String(error instanceof Error ? error.message : error ?? '').trim();
           showShortcutToast(
             message || 'The draft chat could not be published, so the message was not sent.',
@@ -3275,7 +3356,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           selectedDroneIds: [...selectedDroneIds],
           activePane: rightPanelTab,
           visiblePanes: visibleToolTabs,
-          openFile: openedEditorFile?.path ? { path: openedEditorFile.path } : null,
+          openFile: openedEditorFile?.path
+            ? {
+                path: openedEditorFile.path,
+                // A file of another workspace shown in this drone's editor.
+                ...(currentDrone && openedEditorFile.droneId !== currentDrone.id
+                  ? { workspace: editorWorkspaceOf(openedEditorFile.droneId)?.name ?? openedEditorFile.droneId }
+                  : {}),
+              }
+            : null,
         };
       },
       executeProposal: async (proposal, executionContext, onProgress) =>
@@ -3593,6 +3682,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     customAgents,
     companionWorkspace,
     deleteDrone,
+    editorWorkspaceOf,
     expandGroupsForDroneIds,
     openedEditorFile,
     rightPanelTab,
@@ -3806,7 +3896,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const focusEditorPane = React.useCallback(() => {
     requestRightPanelTab('editor');
   }, [requestRightPanelTab]);
-  focusEditorPaneRef.current = focusEditorPane;
   const pathNavigationVersion = React.useRef(0);
   const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number; kind?: 'file' | 'directory' } | null>(null);
   // Everything that reveals or opens one of the drone's files brings its explorer back to the drone's own files.
@@ -3822,11 +3911,41 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
       const tab = openedEditorFileTabs.find((entry) => entry.tabId === tabId);
-      if (tab && !tab.untitled) revealFileInExplorer(tab.path);
+      if (tab && !tab.untitled) {
+        if (tab.droneId && tab.droneId !== currentDroneId) revealInRootOf(tab.droneId, tab.path);
+        else revealFileInExplorer(tab.path);
+      }
       setActiveOpenedFileTab(tabId);
     },
-    [openedEditorFileTabs, revealFileInExplorer, setActiveOpenedFileTab],
+    [currentDroneId, openedEditorFileTabs, revealFileInExplorer, revealInRootOf, setActiveOpenedFileTab],
   );
+  /**
+   * Opens a file of another workspace (`droneId` as the file routes name it) in the drone's editor and shows it
+   * under its root; `rootId` names a root just added, which the roots do not list yet.
+   */
+  const openRootFileInEditor = React.useCallback(
+    (target: { droneId: string; path: string; name?: string; line?: number | null; column?: number | null }, rootId?: string) => {
+      if (!currentDroneId) return;
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
+      const name = String(target.name ?? '').trim() || target.path.split('/').filter(Boolean).pop() || target.path;
+      if (rootId) revealInExplorerRoot(currentDroneId, rootId, target.path);
+      else revealInRootOf(target.droneId, target.path);
+      openEditorFile({ path: target.path, name, line: target.line, column: target.column, droneId: target.droneId });
+      focusEditorPane();
+    },
+    [currentDroneId, focusEditorPane, openEditorFile, revealInRootOf],
+  );
+  const explorerRootsEditor = React.useMemo<ExplorerRootsEditor>(() => ({
+    activeFile: openedEditorFile && !openedEditorFile.untitled ? { droneId: openedEditorFile.droneId, path: openedEditorFile.path } : null,
+    onOpenFile: (root, entry) => openRootFileInEditor({ droneId: root.drone.id, path: entry.path, name: entry.name }),
+    onConfirmCloseOpenedFilesForPaths: (droneId, paths, actionLabel) => confirmCloseOpenedFileTabsForPaths(paths, actionLabel, droneId),
+    onCloseOpenedFilesForPaths: (droneId, paths) => closeOpenedFileTabsForPaths(paths, droneId),
+    onRemapOpenedFilesForPathChange: (droneId, sourcePath, targetPath) => remapOpenedFileTabsForPathChange(sourcePath, targetPath, droneId),
+  }), [
+    closeOpenedFileTabsForPaths, confirmCloseOpenedFileTabsForPaths, openRootFileInEditor, remapOpenedFileTabsForPathChange,
+    openedEditorFile?.droneId, openedEditorFile?.path, openedEditorFile?.untitled, // eslint-disable-line react-hooks/exhaustive-deps
+  ]);
   React.useEffect(() => {
     pathNavigationVersion.current += 1;
     setExplorerReveal(null);
@@ -3852,11 +3971,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId) return;
       showOwnDroneFiles();
       const diagnosticId = beginDesktopWorkspaceLoad('file-open', droneId, resolvedPath);
-      const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
+      const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === resolvedPath) ||
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
         focusEditorPane();
-        const cached = openedEditorFileTabs.some((tab) => tab.path === resolvedPath);
+        const cached = openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === resolvedPath);
         desktopWorkspaceLoads.mark(diagnosticId, 'openTabHit', cached ? 1 : 0);
         setPendingFileOpen(null);
         revealFileInExplorer(resolvedPath);
@@ -3929,14 +4048,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setPendingFileOpen(null);
       const name =
         String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
+      // A file of another workspace this drone's editor shows (a folder workspace is no drone to go to).
       const targetDrone = droneByIdRef.current[droneId];
-      if (targetDrone) setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
-      setExplorerWorkspace(droneId, null);
+      const inThisEditor = droneId !== currentDroneId && openedEditorFileTabs.some((tab) => tab.droneId === droneId && tab.path === path);
+      if (inThisEditor || !targetDrone) {
+        openRootFileInEditor({ droneId, path, name });
+        return;
+      }
+      setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
+      setExplorerRootOpen(droneId, OWN_EXPLORER_ROOT, true);
       showDroneWorkspace(droneId);
       openEditorLocation({ droneId, path, name });
       requestRightPanelTab('editor');
     },
-    [openEditorLocation, requestRightPanelTab, setFsPathForDrone, showDroneWorkspace],
+    [currentDroneId, openEditorLocation, openRootFileInEditor, openedEditorFileTabs, requestRightPanelTab, setFsPathForDrone, showDroneWorkspace],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: {
@@ -3965,17 +4090,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const createUntitledFileFromShortcut = React.useCallback(() => {
     if (!currentDrone?.id) return false;
     focusEditorPane();
-    if (switchedEditorControls) return switchedEditorControls.createUntitledFile();
     return createUntitledFile() != null;
-  }, [currentDrone?.id, createUntitledFile, focusEditorPane, switchedEditorControls]);
+  }, [currentDrone?.id, createUntitledFile, focusEditorPane]);
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
     if (!currentDrone?.id) return false;
     focusEditorPane();
-    if (switchedEditorControls) switchedEditorControls.openQuickOpen();
-    else openQuickOpen();
+    openQuickOpen();
     return true;
-  }, [currentDrone?.id, focusEditorPane, openQuickOpen, switchedEditorControls]);
+  }, [currentDrone?.id, focusEditorPane, openQuickOpen]);
 
   const revealEditorLocationFromRoot = React.useCallback(
     (pathRaw: string) => {
@@ -3988,23 +4111,33 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, focusEditorPane, revealFileInExplorer],
   );
+  /** Shows where Back or Forward went: under the drone's own files, or under the root of the workspace it is in. */
+  const revealEditorLocation = React.useCallback(
+    (location: { droneId: string; path: string }) => {
+      if (location.droneId && location.droneId !== currentDrone?.id) {
+        revealInRootOf(location.droneId, location.path);
+        focusEditorPane();
+      } else {
+        revealEditorLocationFromRoot(location.path);
+      }
+    },
+    [currentDrone?.id, focusEditorPane, revealEditorLocationFromRoot, revealInRootOf],
+  );
 
   const goBackEditorLocationFromShortcut = React.useCallback(() => {
-    if (switchedEditorControls) return switchedEditorControls.goBack();
     const location = goBackLocation();
     if (!location) return false;
-    revealEditorLocationFromRoot(location.path);
+    revealEditorLocation(location);
     return true;
-  }, [goBackLocation, revealEditorLocationFromRoot, switchedEditorControls]);
+  }, [goBackLocation, revealEditorLocation]);
 
   const goForwardEditorLocationFromShortcut = React.useCallback(() => {
-    if (switchedEditorControls) return switchedEditorControls.goForward();
     const location = goForwardLocation();
     if (!location) return false;
-    revealEditorLocationFromRoot(location.path);
+    revealEditorLocation(location);
     return true;
-  }, [goForwardLocation, revealEditorLocationFromRoot, switchedEditorControls]);
-  const anyQuickOpenOpen = quickOpenOpen || Boolean(switchedEditorControls?.quickOpenOpen);
+  }, [goForwardLocation, revealEditorLocation]);
+  const anyQuickOpenOpen = quickOpenOpen;
 
   React.useEffect(() => {
     const isBackShortcut = (event: KeyboardEvent): boolean =>
@@ -4040,6 +4173,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
       recordUiAction({ action: 'chat-file-link', droneId: currentDrone?.id, path: ref.path, line: ref.line, column: ref.column });
+      if (ref.link) {
+        openWorkspaceLink(ref.link);
+        return;
+      }
       const containerPath = resolveDroneFileOpenPath(currentDrone, ref.path);
       if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
@@ -4065,6 +4202,65 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     window.addEventListener(CHAT_OPEN_FILE_EVENT, openFile);
     return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
   }, [currentDrone?.id, openMarkdownFileReference]);
+  // Workspace links (`workspace://Guides/notes.md#L4`) from chats, previews and windows: a file of the drone's own
+  // workspace opens as any of its files; another workspace's opens in the drone's editor and under that workspace's
+  // root in the File Explorer, which is added when the explorer does not show it yet.
+  React.useEffect(() => {
+    if (!currentDrone) {
+      // Files open in a drone's editor; with none shown there is nowhere to open one.
+      const onOpenWithoutDrone = () => showShortcutToast('Open a drone to follow workspace links.', 'Workspace link');
+      window.addEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpenWithoutDrone);
+      return () => window.removeEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpenWithoutDrone);
+    }
+    const drone = currentDrone;
+    const onOpen = (event: Event) => {
+      const raw = (event as CustomEvent<OpenWorkspaceLinkDetail>).detail?.link ?? '';
+      void (async () => {
+        try {
+          const resolved = await resolveWorkspaceLink(raw, droneByIdRef.current);
+          if (!resolved.ok) {
+            showShortcutToast(resolved.error, 'Workspace link');
+            return;
+          }
+          const { workspace, path, root, link } = resolved.target;
+          const name = path.split('/').filter(Boolean).pop() || path;
+          const own = ownWorkspaceOf(drone, await browsableWorkspacesForLinks());
+          recordUiAction({ action: 'workspace-link', droneId: drone.id, path: `${workspace.id}:${path}`, line: link.line });
+          if (own?.id === workspace.id || isOwnExplorerWorkspace(drone, workspace)) {
+            if (root) {
+              showOwnDroneFiles();
+              requestRightPanelTab('editor');
+            } else {
+              openFileInFilesPane({ path, name, line: link.line, column: link.column });
+            }
+            return;
+          }
+          if (!explorerRootsRef.current.some((item) => item.workspace.id === workspace.id)) addExplorerRoot(drone.id, workspace);
+          if (root) {
+            setExplorerRootOpen(drone.id, workspace.id, true);
+            requestRightPanelTab('editor');
+            return;
+          }
+          const routeId = workspace.kind === 'folder' ? workspace.browseId : workspace.droneId;
+          if (!routeId) return;
+          // A folder is shown under the root; only a file opens in the editor.
+          const directory = await workspaceLinkIsDirectory(path, (parent) =>
+            requestJson(`/api/drones/${encodeURIComponent(routeId)}/fs/list?path=${encodeURIComponent(parent)}`),
+          ).catch(() => false);
+          if (directory) {
+            revealInExplorerRoot(drone.id, workspace.id, path, 'directory');
+            requestRightPanelTab('editor');
+            return;
+          }
+          openRootFileInEditor({ droneId: routeId, path, name, line: link.line, column: link.column }, workspace.id);
+        } catch (error: any) {
+          showShortcutToast(error?.message ?? String(error), 'Workspace link');
+        }
+      })();
+    };
+    window.addEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_WORKSPACE_LINK_EVENT, onOpen);
+  }, [currentDrone, openFileInFilesPane, openRootFileInEditor, requestRightPanelTab, showOwnDroneFiles, showShortcutToast]);
   const resolveDroneRepoFilePath = React.useCallback(
     (drone: DroneSummary | null, repoRelativePathRaw: string, repoRoot?: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')
@@ -4439,7 +4635,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedChat,
       selectedDrone,
       setSelectedChat,
-      setSidebarChatOrderByDrone,
       sidebarSelectableDroneIdSet,
     ],
   );
@@ -4448,8 +4643,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim();
       const prompt = String(promptRaw ?? '').trim();
-      if (!droneId || !isGeneratedChatName(chatName) || !prompt) return;
-      let originalChatSeen = (droneByIdRef.current[droneId]?.chats ?? []).includes(chatName);
+      if (!droneId || !(isGeneratedChatName(chatName) || isGeneratedSideChatName(chatName)) || !prompt) return;
+      const listsChat = (drone: DroneSummary | undefined) =>
+        Boolean(drone?.chats?.includes(chatName) || drone?.sideChats?.some((chat) => chat.name === chatName));
+      let originalChatSeen = listsChat(droneByIdRef.current[droneId]);
       try {
         const data = await requestJson<{ ok: true; name: string }>(
           '/api/drones/name-from-message',
@@ -4477,8 +4674,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         let candidateIndex = 1;
         let lastError = '';
         for (let attempt = 1; attempt <= 180; attempt += 1) {
-          const currentChats = droneByIdRef.current[droneId]?.chats ?? [];
-          if (currentChats.includes(chatName)) originalChatSeen = true;
+          if (listsChat(droneByIdRef.current[droneId])) originalChatSeen = true;
           else if (originalChatSeen) return;
           const candidate = buildSuggestedChatNameCandidate(base, candidateIndex);
           if (!candidate) {
@@ -4497,6 +4693,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             );
             followChatRename(droneId, chatName, candidate);
+            removePendingComposerSideChat(droneId, chatName);
             const { selectedDrone: activeDroneId, selectedChat: activeChatName } =
               useDroneHubUiStore.getState();
             if (activeDroneId === droneId && activeChatName === chatName) {
@@ -4695,10 +4892,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         claimed.set(candidate, Date.now());
         // A clone placed by the caller (onNameChosen) replaces the stored card itself.
         if (!opts?.onNameChosen) forgetStaleChatCard(latestDrone.id, candidate);
+        else forgetChatFolds(latestDrone.id, candidate);
         opts?.onNameChosen?.(candidate);
+        // A clone is not named again by its first message, so the place its name gives it holds.
+        const unplaceChat = opts?.copyFromChat ? null : placeNewChatLast(latestDrone, candidate);
         const created = await createDroneChat(latestDrone, candidate, opts);
         // A created chat stays claimed until the drone summary lists it.
         if (created.ok) return { ok: true, chatName: candidate, error: null };
+        unplaceChat?.();
         claimed.delete(candidate);
         opts?.onNameReleased?.(candidate);
         const createError = String(created.error ?? '').trim();
@@ -4838,6 +5039,75 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [cloneDroneChat, requestJson, selectDroneChat, selectedChat, selectedDrone, showShortcutToast],
   );
+  /**
+   * Sends to a new side chat of the source: a fork at its last completed answer,
+   * or a new chat with its agent, model, and reasoning. The side chat appears as a
+   * chip beside the source's composer and is not opened.
+   */
+  const sendPromptInSideChat = React.useCallback(
+    async (
+      drone: DroneSummary,
+      payload: ChatSendPayload,
+      context: ChatSendContext,
+      kind: SideChatKind,
+      sourceChatNameRaw?: string,
+    ): Promise<boolean> => {
+      const droneId = String(drone?.id ?? '').trim();
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!droneId || (!prompt && attachments.length === 0)) return false;
+      const sourceChatName = String(sourceChatNameRaw ?? '').trim() || resolveChatNameForDrone(
+        droneByIdRef.current[droneId] ?? drone,
+        selectedChat,
+      );
+      const chatName = newComposerSideChatName();
+      const createdAt = new Date().toISOString();
+      // Before its chip shows, so it is known by the ID it will be created with from its first render.
+      const chatId = newChatId(droneId, chatName);
+      addPendingComposerSideChat(droneId, { name: chatName, sourceChatName, kind, createdAt });
+      let created = false;
+      try {
+        await requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: chatName,
+            chatId,
+            copyFrom: sourceChatName,
+            mode: kind === 'fork' ? 'fork' : 'copy-config',
+            sideChat: true,
+            sideChatPresentation: 'composer',
+          }),
+        });
+        created = true;
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId,
+          chatName,
+          prompt,
+          attachments,
+          promptId: payload.promptId || makeId(),
+          submittedAt: createdAt,
+          deliveryMode: context.deliveryMode,
+          // Renamed here, like a new chat, so an open side chat stays open under its new name.
+          autoRenameHandledByClient: Boolean(prompt),
+        });
+        if (data.autoRenameChat) autoRenameChatFromFirstPromptRef.current(droneId, chatName, prompt);
+        return true;
+      } catch (error: any) {
+        // A created chat stays: its chip shows it, empty, and it can be archived from there.
+        if (!created) {
+          removePendingComposerSideChat(droneId, chatName);
+          forgetNewChatId(droneId, chatName, chatId);
+        }
+        showShortcutToast(
+          error?.message ?? String(error),
+          kind === 'fork' ? 'Fork to side chat failed' : 'New side chat failed',
+        );
+        return false;
+      }
+    },
+    [requestJson, selectedChat, showShortcutToast],
+  );
   const createQueuedNewChatNow = React.useCallback(
     async (actionIdRaw: string, source?: { droneId: string; chatName: string }): Promise<void> => {
       const actionId = String(actionIdRaw ?? '').trim();
@@ -4916,6 +5186,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     newDraftChatsRef.current.set(key, tracked);
     // Before the chat shows, so it is known by the ID it will be created with from its first render.
     newChatId(latestDrone.id, chatName);
+    const unplaceChat = placeNewChatLast(latestDrone, chatName);
     addOptimisticDraftChat(latestDrone.id, chatName);
     rememberStartupSeed([{ id: latestDrone.id, name: latestDrone.name }], {
       runtime: latestDrone.runtime === 'host' ? 'host' : 'container',
@@ -4941,6 +5212,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       tracked.serverCreated = result.ok === true;
       if (!result.ok) {
         newDraftChatsRef.current.delete(key);
+        unplaceChat();
         removeOptimisticDraftChat(latestDrone.id, chatName);
         unhideOptimisticallyRemovedDraftChat(latestDrone.id, chatName);
         clearStartupSeedForChat(latestDrone.id, chatName);
@@ -5079,11 +5351,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!drone) return { ok: false, error: 'The destination drone is no longer available.' };
       const key = droneChatQueueKey(droneId, chatName);
       const tracked = newDraftChatsRef.current.get(key);
-      if (tracked) {
-        tracked.submissionInFlight = true;
-        if (tracked.creationPromise && !(await tracked.creationPromise)) {
-          tracked.submissionInFlight = false;
-          return { ok: false, error: 'The destination draft chat could not be created.' };
+      if (tracked || drone.draftChats?.[chatName] === true) {
+        if (tracked) {
+          tracked.submissionInFlight = true;
+          if (tracked.creationPromise && !(await tracked.creationPromise)) {
+            tracked.submissionInFlight = false;
+            return { ok: false, error: 'The destination draft chat could not be created.' };
+          }
         }
         try {
           await requestJson<{ ok: true }>(
@@ -5096,15 +5370,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           );
           newDraftChatsRef.current.delete(key);
         } catch (publishError: unknown) {
-          tracked.submissionInFlight = false;
-          tracked.publishFailed = true;
-          return {
-            ok: false,
-            error:
-              publishError instanceof Error
-                ? publishError.message
-                : 'The destination draft chat could not be published.',
-          };
+          if (!isDraftChatAlreadyPublishedError(publishError)) {
+            if (tracked) {
+              tracked.submissionInFlight = false;
+              tracked.publishFailed = true;
+            }
+            return {
+              ok: false,
+              error:
+                publishError instanceof Error
+                  ? publishError.message
+                  : 'The destination draft chat could not be published.',
+            };
+          }
+          newDraftChatsRef.current.delete(key);
         }
       }
 
@@ -5549,6 +5828,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const allUntouched = kept.every((target) => untouched.has(droneChatQueueKey(target.droneId, target.chatName)));
       if (opts?.confirmed !== true && !allUntouched) {
         const defaultChatKept = deletable.some((target) => target.chatName === 'default' && !kept.includes(target));
+        const targetNames = new Set(kept.map((target) => `${target.droneId}\u0000${target.chatName}`));
+        const sideChatCount = [...new Set(kept.map((target) => target.droneId))].reduce((count, droneId) => {
+          const drone = drones.find((item) => item.id === droneId) ?? null;
+          const sources = kept.filter((target) => target.droneId === droneId).map((target) => target.chatName);
+          return count + sideChatDescendantNames(drone?.sideChats, sources)
+            .filter((chatName) => !targetNames.has(`${droneId}\u0000${chatName}`)).length;
+        }, 0);
         const question = buildCanvasChatDeleteConfirmation({
           targets: kept,
           droneLabelById: (droneId) => {
@@ -5558,6 +5844,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           deleteMode,
           isDraft: (droneId, chatName) =>
             drones.find((item) => item.id === droneId)?.draftChats?.[chatName] === true,
+          sideChatCount,
         });
         const confirmed = await confirmDelete(
           defaultChatKept
@@ -5683,7 +5970,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onReloadFromDisk={() => reloadFileTabFromDisk(tab.tabId)}
           onOverwriteFile={() => overwriteFileTab(tab.tabId)}
           onCloseFile={() => closeEditorFile(tab.tabId)}
-          onOpenResolvedFile={openFileInFilesPane}
+          onOpenResolvedFile={(next) => {
+            if (tab.droneId !== currentDrone.id) openRootFileInEditor({ ...next, droneId: tab.droneId });
+            else openFileInFilesPane(next);
+          }}
           onAppendFileDictationLine={appendAndSaveFileDictationLine}
           onOpenFileDictationTarget={openFileDictationTarget}
         />
@@ -5695,6 +5985,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentDrone,
       openFileDictationTarget,
       openFileInFilesPane,
+      openRootFileInEditor,
       openedEditorFileTabs,
       overwriteFileTab,
       reloadFileTabFromDisk,
@@ -5704,7 +5995,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const fileWindows = React.useMemo<WorkspaceFileWindows>(() => ({
     presetRootPath: defaultFsPathForCurrentDrone,
-    restorePresetFiles: (files) => { for (const file of files) openEditorFile({ path: file.path, name: file.name }); },
+    restorePresetFiles: (files) => { for (const file of files) openEditorFile({ path: file.path, name: file.name, droneId: file.droneId }); },
     render: renderFileWindow,
     openTabIds: openedEditorFileTabs.map((tab) => tab.tabId),
     dirtyTabIds: openedEditorFileTabs.filter((tab) => tab.dirty).map((tab) => tab.tabId),
@@ -5754,6 +6045,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           draftRepoLabel={canvasDraftRepoLabel}
           chatNodeStateById={chatNodeStateById}
           onActivateChatFromCanvas={onActivateChatFromCanvas}
+          onMoveSidebar={moveSidebar}
           onAssignCanvasDronesToOwner={async (ownerDroneId, targetDroneIds) =>
             openDroneDropActionModal(ownerDroneId, targetDroneIds)
           }
@@ -5848,7 +6140,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (entry.kind !== 'file') return false;
             return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
-          onOpenFileTargetInEditor={openFileInFilesPane}
+          onOpenFileTargetInEditor={(target) => {
+            if (target.droneId && target.droneId !== currentDrone?.id) openRootFileInEditor({ ...target, droneId: target.droneId });
+            else openFileInFilesPane(target);
+          }}
           pendingFileOpenPath={pendingFileOpen && pendingFileOpen.droneId === currentDrone?.id ? pendingFileOpen.path : null}
           openedFile={{
             path: openedEditorFile?.path ?? null,
@@ -5886,11 +6181,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             },
             onGoBack: () => {
               const location = goBackLocation();
-              if (location) revealEditorLocationFromRoot(location.path);
+              if (location) revealEditorLocation(location);
             },
             onGoForward: () => {
               const location = goForwardLocation();
-              if (location) revealEditorLocationFromRoot(location.path);
+              if (location) revealEditorLocation(location);
             },
           }}
           openedFileTabs={editorStripFileTabs}
@@ -5910,7 +6205,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!containerPath) return;
             const slash = containerPath.lastIndexOf('/');
             setFsPathForDrone(drone, slash > 0 ? containerPath.slice(0, slash) : '/');
-            setExplorerWorkspace(drone.id, null);
+            setExplorerRootOpen(drone.id, OWN_EXPLORER_ROOT, true);
             showDroneWorkspace(drone.id);
             requestRightPanelTab('editor');
           }}
@@ -5927,24 +6222,43 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!isSelectedDrone) showDroneWorkspace(drone.id);
             requestRightPanelTab('changes');
           }}
-          explorerSwitcher={isSelectedDrone && tab === 'editor' ? (
+          explorerSwitcher={isSelectedDrone && tab === 'editor' ? (placement) => (
             <ExplorerWorkspaceSwitcher
+              placement={placement}
               droneId={drone.id}
               droneName={uiDroneName(drone.name)}
               ownPath={droneHomePath(drone)}
               chatName={selectedChat || 'default'}
-              current={explorerWorkspace}
+              current={null}
               ownIsLocal={drone.runtime === 'host'}
+              roots={{
+                shownIds: new Set(explorerRoots.map((root) => root.workspace.id)),
+                onPick: (workspace) => {
+                  if (!workspace) setExplorerRootOpen(drone.id, OWN_EXPLORER_ROOT, true);
+                  else if (explorerRoots.some((root) => root.workspace.id === workspace.id)) setExplorerRootOpen(drone.id, workspace.id, true);
+                  else addExplorerRoot(drone.id, workspace);
+                },
+              }}
             />
           ) : undefined}
-          editorOverride={isSelectedDrone && explorerWorkspaceDrone && switchedEditorProps ? { ...switchedEditorProps, drone: explorerWorkspaceDrone } : null}
+          explorerRoots={isSelectedDrone ? {
+            droneId: drone.id,
+            ownName: uiDroneName(drone.name),
+            ownOpen: explorerOwnOpen,
+            roots: explorerRoots,
+            editor: explorerRootsEditor,
+          } : null}
+          editorWorkspaceOf={editorWorkspaceOf}
         />
       );
     },
     [
-      explorerWorkspace,
-      explorerWorkspaceDrone,
-      switchedEditorProps,
+      explorerRoots,
+      explorerOwnOpen,
+      explorerRootsEditor,
+      editorWorkspaceOf,
+      openRootFileInEditor,
+      revealEditorLocation,
       resolveDroneRepoFilePath,
       setFsPathForDrone,
       showDroneWorkspace,
@@ -6326,6 +6640,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupBroadcastPromptError,
     sendGroupBroadcastPrompt,
     sendPromptInNewDroneChat,
+    sendPromptInSideChat,
+    deleteCanvasChat,
     createQueuedNewChatNow,
     focusedNewChatActionId,
     consumeNewChatActionAutoFocus,

@@ -16,7 +16,7 @@ import {
   type ResolvedByteRange,
 } from './filesystem-media-range';
 import { hashHostFileWithSize } from './file-revision-watch';
-import { createHtmlPreviewSessions, htmlPreviewResponsePolicy } from './html-preview-sessions';
+import { createHtmlPreviewSessions, htmlPreviewFramedPath, htmlPreviewResponsePolicy } from './html-preview-sessions';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
@@ -174,23 +174,39 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     targetPath: string;
     prefix: string;
     headOnly: boolean;
+    /** A framed page must resolve inside this folder, following links. */
+    within?: string;
   }) => {
-    const { req, res, drone, targetPath } = input;
+    const { req, res, drone, targetPath, within } = input;
     const droneName = String(drone?.name ?? input.droneRef).trim() || input.droneRef;
+    const inside = (filePath: string, folder: string) => filePath.startsWith(folder === '/' ? '/' : `${folder}/`);
     let tmpDir: string | null = null;
     try {
       let sourcePath = path.resolve(targetPath);
+      let stat;
       if (droneRuntime(drone) !== 'host') {
         tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-hub-html-preview-'));
+        let realPath = targetPath;
         await withReadonlyDroneContainer(
           { requestedDroneName: droneName, droneEntry: drone },
           async ({ containerName }: any) => {
-            await dvmCopyFromContainer(containerName, targetPath, tmpDir);
+            // Links resolve inside the container. docker cp copies a link as a link,
+            // which read on the Hub's side would point into the Hub's own files.
+            const r = await dvmExec(containerName, 'realpath', ['-e', '--', targetPath, ...(within ? [within] : [])], { timeoutMs: 15_000 });
+            const [real, realFolder] = String(r.stdout ?? '').split('\n');
+            if (r.code !== 0 || !real || (within && !inside(real, realFolder ?? ''))) throw new Error(`file not found: ${targetPath}`);
+            realPath = real;
+            await dvmCopyFromContainer(containerName, realPath, tmpDir);
           },
         );
-        sourcePath = path.join(tmpDir, path.posix.basename(targetPath));
+        sourcePath = path.join(tmpDir, path.posix.basename(realPath));
+        stat = await fs.lstat(sourcePath);
+      } else {
+        if (within && !inside(await fs.realpath(sourcePath), await fs.realpath(within))) {
+          throw Object.assign(new Error(`file not found: ${targetPath}`), { code: 'ENOENT' });
+        }
+        stat = await fs.stat(sourcePath);
       }
-      const stat = await fs.stat(sourcePath);
       if (!stat.isFile()) {
         json(res, 404, { ok: false, error: `file not found: ${targetPath}` });
         return;
@@ -266,8 +282,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       // POST /api/drones/:id/fs/html-preview  { path, contentSecurityPolicy, documentPrefix }
       // DELETE /api/drones/:id/fs/html-preview/:token
       // GET/HEAD /api/drones/:id/fs/html-preview/:token/<absolute path>
-      // Serves one HTML file to a sandboxed preview, and other paths only as images or
-      // video, so relative image URLs resolve without the Hub page holding any bytes.
+      // Serves one HTML file to a sandboxed preview, HTML files in its folder to frames
+      // inside it, and other paths only as images or video, so relative URLs resolve
+      // without the Hub page holding any bytes.
       if (
         parts.length >= 5 &&
         parts[0] === 'api' &&
@@ -331,6 +348,11 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         res.setHeader('content-security-policy', htmlPreviewResponsePolicy(session.contentSecurityPolicy));
         res.setHeader('x-content-type-options', 'nosniff');
         res.setHeader('referrer-policy', 'no-referrer');
+        const framedPath = htmlPreviewFramedPath(session.path, requestedPath);
+        if (framedPath) {
+          await sendHtmlPreviewDocument({ req, res, drone: resolved.drone, droneRef, targetPath: framedPath, prefix: session.documentPrefix, headOnly: method === 'HEAD', within: path.posix.dirname(session.path) });
+          return;
+        }
         if (requestedPath !== session.path) {
           const mediaUrl = new URL(u.toString());
           mediaUrl.pathname = `/api/drones/${parts[2]}/fs/media`;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { desktopFileReadUrl } from '../src/droneHub/files/file-read-url';
+import { desktopFileMediaUrl, desktopFileReadUrl } from '../src/droneHub/files/file-read-url';
 import { desktopMediaFileKindForExtension } from '../src/droneHub/files/desktop-media-file-kind';
 
 describe('desktopFileReadUrl', () => {
@@ -38,5 +38,28 @@ describe('desktopFileReadUrl', () => {
       expect(url).not.toContain('metadata=1');
       expect(new URL(url, 'http://local').searchParams.get('path')).toBe(filePath);
     }
+  });
+});
+
+describe('desktopFileMediaUrl', () => {
+  test('checks sha256 revisions on the media route', () => {
+    expect(desktopFileMediaUrl('drone', '/work/clip.mp4', 'sha256:abc')).toBe(
+      '/api/drones/drone/fs/media?path=%2Fwork%2Fclip.mp4&revision=sha256%3Aabc',
+    );
+  });
+
+  test('sends metadata revisions of large files as an unchecked cache key', () => {
+    const url = new URL(
+      desktopFileMediaUrl('drone', '/tmp/side-by-side.mp4', 'metadata:12588070:1792068673000'),
+      'http://local',
+    );
+    expect(url.searchParams.get('revision')).toBeNull();
+    expect(url.searchParams.get('v')).toBe('metadata:12588070:1792068673000');
+  });
+
+  test('leaves the revision out when there is none', () => {
+    expect(desktopFileMediaUrl('drone', '/work/photo.png', null)).toBe(
+      '/api/drones/drone/fs/media?path=%2Fwork%2Fphoto.png',
+    );
   });
 });

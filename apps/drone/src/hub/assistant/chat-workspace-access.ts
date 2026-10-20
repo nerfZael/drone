@@ -206,6 +206,9 @@ export function localWorkspaceOptions(
               status: `Host drone${hostDrones.length === 1 ? '' : 's'}: ${hostDrones.join(', ')}`,
             }
           : {}),
+        ...(workspace.chatHome
+          ? { status: `Home of chat “${workspace.chatHome.chatName}” in ${workspace.chatHome.droneName}` }
+          : {}),
         read: true,
         write: true,
         execute: false,

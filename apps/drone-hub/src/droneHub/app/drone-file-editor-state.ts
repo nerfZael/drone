@@ -11,6 +11,8 @@ const EMPTY_OPENED_FILE_TABS_STATE: OpenedFileTabsState = { tabs: [], activeTabI
 export const EDITOR_LAST_FILE_STORAGE_KEY = profileStorageKey('droneHub.editorLastFileByDrone');
 
 export type RememberedEditorFile = {
+  /** The workspace the file is in, when it is not the drone's own (a tab opened from another workspace's root). */
+  droneId?: string;
   path: string;
   name: string;
   targetLine: number | null;
@@ -29,7 +31,9 @@ function normalizeRememberedEditorFile(raw: unknown): RememberedEditorFile | nul
   const candidate = raw as Partial<RememberedEditorFile>;
   const path = String(candidate.path ?? '').trim();
   if (!path) return null;
+  const droneId = String(candidate.droneId ?? '').trim();
   return {
+    ...(droneId ? { droneId } : {}),
     path,
     name: String(candidate.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path,
     targetLine: normalizePositiveInt(candidate.targetLine),
@@ -84,9 +88,12 @@ export function writeRememberedEditorFile(
 
 export function rememberedEditorFileFromTab(
   tab: OpenedFileTab | null | undefined,
+  /** The drone whose editor holds the tab. */
+  ownerDroneId?: string,
 ): RememberedEditorFile | null {
   if (!tab || tab.untitled) return null;
   return {
+    ...(ownerDroneId && tab.droneId && tab.droneId !== ownerDroneId ? { droneId: tab.droneId } : {}),
     path: tab.path,
     name: tab.name,
     targetLine: tab.targetLine,
@@ -104,7 +111,7 @@ export function restoredOpenedFileTabsStateByDrone(
   const restored: Record<string, OpenedFileTabsState> = {};
   for (const [droneId, file] of Object.entries(readRememberedEditorFileMap())) {
     const tab = createOpenedFileTab({
-      droneId,
+      droneId: file.droneId ?? droneId,
       path: file.path,
       name: file.name,
       targetLine: file.targetLine,

@@ -56,6 +56,7 @@ import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { registerAgentChatWorkspaceTools } from './mcp-workspace-tools';
 import { registerCurrentWorktreeTool } from './mcp-worktree-tools';
+import { CHANNEL_READ_ONLY_MCP_TOOL_NAMES, registerChannelMcpTools } from './channels/channel-mcp-tools';
 import type { WorkspaceToolDefinition } from './assistant/workspace-tool-definitions';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import { createHttpHubServices, type HubServices } from './application/hub-services';
@@ -262,8 +263,9 @@ async function requestJson(
       const detail = cleanString(data?.error || text, `HTTP ${response.status}`);
       const error = new Error(
         `Drone Hub request failed: ${method} ${pathname} returned ${response.status}: ${detail}`,
-      ) as Error & { status?: number };
+      ) as Error & { status?: number; body?: any };
       error.status = response.status;
+      error.body = data;
       throw error;
     }
     return data;
@@ -1433,6 +1435,31 @@ function chatPrincipal(
   return context.principal.kind === 'chat' ? context.principal : null;
 }
 
+/** The calling chat, recorded as the sender of messages and creator of chats. */
+function chatActor(context: McpToolRegistrationContext) {
+  const principal = chatPrincipal(context);
+  return principal
+    ? {
+        kind: 'chat' as const,
+        chatId: principal.chatId,
+        droneId: principal.droneId,
+        chatName: principal.chatName,
+      }
+    : null;
+}
+
+/** How far a message got when it could no longer be cancelled or edited. */
+function deliveredPhase(state: unknown): string {
+  const value = cleanString(state);
+  return value === 'sending' ? 'delivering' : value === 'sent' ? 'delivered_or_running' : value || 'unknown';
+}
+
+function requireChatActor(context: McpToolRegistrationContext, tool: string) {
+  const actor = chatActor(context);
+  if (!actor) throw new Error(`${tool} requires a Drone Hub chat connection`);
+  return actor;
+}
+
 function subscriptionSubscriber(context: McpToolRegistrationContext) {
   const principal = chatPrincipal(context);
   if (!principal) {
@@ -1468,6 +1495,61 @@ async function authorizeChatSubscriptionResource(
     !mcpChatAccessAllowsDrone(principal.accessScope, 'read', droneId, principal.selectedDroneRefs)
   ) {
     throw new Error('MCP principal is not authorized for the requested chat resource');
+  }
+}
+
+const CREATED_CHAT_SUBSCRIPTION_INTENT =
+  'You created this chat. When it goes idle, read its reply and continue the work you gave it; when it fails, decide whether to retry it.';
+
+const createdChatSubscriptionInputs = {
+  subscribe: z
+    .boolean()
+    .describe(
+      "Subscribe this chat to the new chat's chat.idle and chat.failed events. Defaults to true when called from a chat; set false for a chat you will not follow up on.",
+    )
+    .optional(),
+  subscriptionIntent: z
+    .string()
+    .describe('Intent delivered with those events. Defaults to following up on the work you gave the new chat.')
+    .optional(),
+};
+
+/**
+ * Subscribes the calling chat to a chat it just created, so the creator hears
+ * when the work it handed over finishes even if it never subscribes itself.
+ * Never fails the creation: problems come back as a warning instead.
+ */
+async function subscribeCreatorToCreatedChat(
+  context: McpToolRegistrationContext,
+  chatId: unknown,
+  options: { subscribe?: boolean; subscriptionIntent?: string },
+): Promise<Record<string, unknown>> {
+  const resourceId = cleanString(chatId);
+  if (options.subscribe === false || !chatPrincipal(context) || !resourceId) return {};
+  let events = ['chat.idle', 'chat.failed'];
+  try {
+    await authorizeChatSubscriptionResource(context, resourceId);
+  } catch {
+    // Failure events need read access to the new chat's drone; idle events do not.
+    events = ['chat.idle'];
+  }
+  try {
+    const response = await requestJson('/api/resource-subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: 'drone-hub',
+        resourceType: 'chat',
+        resourceId,
+        events,
+        intent: cleanString(options.subscriptionIntent) || CREATED_CHAT_SUBSCRIPTION_INTENT,
+        subscriber: subscriptionSubscriber(context),
+      }),
+    });
+    return { subscription: mcpSubscription(response?.subscription) };
+  } catch (error: any) {
+    return {
+      subscriptionWarning: `The chat was created, but this chat is not subscribed to it: ${error?.message ?? String(error)}. Call subscribe_to_resource_events with resourceId ${resourceId} to hear when it finishes.`,
+    };
   }
 }
 
@@ -1609,7 +1691,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Ask the user questions',
       description:
-        'Ask the user one or more multiple-choice questions asynchronously. Returns immediately with a requestId and a durable one-shot subscription. Continue working while the user considers the questions; they remain answerable after the current run finishes. Submitting or skipping sends a question_request.resolved event through the normal event system to this chat. Delivery follows the configured global or per-event queued/ASAP mode, batching, and rate limits. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. Queued messages and stopping the current run do not discard these questions. Prefer a small focused set even though up to 99 questions are supported.',
+        'Ask the user one or more multiple-choice questions asynchronously. Returns immediately with a requestId and a durable one-shot subscription. Continue working while the user considers the questions; they remain answerable after the current run finishes. Submitting or skipping sends a question_request.resolved event through the normal event system to this chat. Delivery follows the configured global or per-event queued/ASAP mode, batching, and rate limits. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. Another chat coordinating this one may answer on the user\'s behalf instead; result.respondedBy then names that chat, its reply is in notes, and questions it did not address individually are marked skipped. Queued messages and stopping the current run do not discard these questions. Prefer a small focused set even though up to 99 questions are supported.',
       inputSchema: {
         questions: z
           .array(
@@ -2593,6 +2675,18 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     });
   }
 
+  // Channels the user added this chat to: read, post, and choose what wakes it.
+  if (workspaceChat) {
+    registerChannelMcpTools(server, {
+      chat: () => {
+        const principal = chatPrincipal(context) ?? workspaceChat;
+        return { chatId: principal.chatId, droneId: principal.droneId, chatName: principal.chatName };
+      },
+      requestJson,
+      toolResult,
+    });
+  }
+
   server.registerTool(
     'list_chats',
     {
@@ -2636,13 +2730,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Clone drone chat',
       description:
-        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to put the clone in a temporary side chat instead of the sidebar; the operation is otherwise the same. The clone ends at the last completed answer of the source. Side chats and running sources require that checkpoint (a supported agent with a completed answer); an idle source without one is cloned whole instead. Side chats cannot be drafts.',
+        'Clone a chat history and configuration into a new chat on the same drone. Set sideChat=true to put the clone in a temporary side chat instead of the sidebar; the operation is otherwise the same. The clone ends at the last completed answer of the source. Side chats and running sources require that checkpoint (a supported agent with a completed answer); an idle source without one is cloned whole instead. Side chats cannot be drafts. When called from a chat, that chat is subscribed to the clone\'s idle and failure events (see subscribe).',
       inputSchema: {
         drone: z.string().trim().min(1),
         sourceChat: z.string().trim().min(1).describe('Source chat name.'),
         chat: z.string().trim().min(1).describe('New chat name. Must not already exist.'),
         draft: z.boolean().optional(),
         sideChat: z.boolean().optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
@@ -2662,10 +2757,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
             mode: 'fork',
             ...(args.draft === true ? { draft: true } : {}),
             ...(args.sideChat === true ? { sideChat: true } : {}),
+            ...(chatActor(context) ? { createdBy: chatActor(context) } : {}),
           }),
         },
       );
-      return toolResult(result);
+      return toolResult({
+        ...result,
+        ...(await subscribeCreatorToCreatedChat(context, result?.chatId, args)),
+      });
     },
   );
 
@@ -2674,7 +2773,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Create drone chat',
       description:
-        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", "openrouter", or "cerebras".',
+        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", "openrouter", or "cerebras". When called from a chat, that chat is subscribed to the new chat\'s idle and failure events, so you hear when the work you send it finishes (see subscribe); the result\'s subscription field shows it.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -2700,6 +2799,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         afterChat: z.string().optional(),
         beforeGroup: z.string().optional(),
         afterGroup: z.string().optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
@@ -2809,7 +2909,11 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
             // Stage every MCP-created chat as a draft until its requested
             // configuration has been applied. That makes rollback a hard delete
             // even when the user's normal delete mode is archive.
-            body: JSON.stringify({ name: chat, draft: true }),
+            body: JSON.stringify({
+              name: chat,
+              draft: true,
+              ...(chatActor(context) ? { createdBy: chatActor(context) } : {}),
+            }),
           });
           break;
         } catch (error: any) {
@@ -2902,6 +3006,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           layoutWarning = `The chat was created and configured, but its sidebar placement could not be saved: ${error?.message ?? String(error)}`;
         }
       }
+      const subscription = created
+        ? await subscribeCreatorToCreatedChat(context, result?.chatId, args)
+        : {};
       return toolResult({
         ok: true,
         drone: { id: resolved.id, name: resolved.name },
@@ -2916,6 +3023,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           : layoutWarning
             ? { warning: layoutWarning }
             : {}),
+        ...subscription,
       });
     },
   );
@@ -3308,7 +3416,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Send drone message',
       description:
-        'Send a message to a Drone Hub drone chat and return the run. deliveryMode "queue" (default) starts a new execution after the current one and after every message already queued; use it for new, separate tasks. deliveryMode "asap" jumps ahead of queued messages. When the chat\'s agent can accept input mid-run (Codex, Claude with unchanged model and effort, native agents), an asap message is injected into the execution in progress: the agent reads it mid-run, the message gets no separate reply, and its answer is part of that execution\'s final reply. Otherwise it starts as the next execution, ahead of the queue. Use asap only for corrections or information the current work needs now. Neither mode stops or cancels a running execution. Draft chats hold messages until published; status held_in_draft means accepted but not running.',
+        'Send a message to a Drone Hub drone chat and return its messageId. deliveryMode "queue" (default) starts a new execution after the current one and after every message already queued; use it for new, separate tasks or a planned sequence of phases. deliveryMode "asap" jumps ahead of queued messages. When the chat\'s agent can accept input mid-run (Codex, Claude with unchanged model and effort, native agents), an asap message is injected into the execution in progress: the agent reads it mid-run, the message gets no separate reply, and its answer is part of that execution\'s final reply. Otherwise it starts as the next execution, ahead of the queue. Use asap only for corrections or information the current work needs now. A message can be cancelled (cancel_messages) or edited (edit_message) by the chat that sent it only while it is still waiting in the queue. An asap message to an agent that accepts input mid-run is delivered almost at once, so treat it as final; an asap message to any other agent, and every queued message, waits until the agent is free. Neither mode stops a running execution; use stop_chat for chats you created. Draft chats hold messages until published; status held_in_draft means accepted but not running.',
       inputSchema: {
         drone: z.string(),
         chat: z
@@ -3328,20 +3436,28 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           .optional(),
         createChat: z
           .boolean()
-          .describe('Create the named chat before sending. Defaults to false.')
+          .describe(
+            'Create the named chat before sending. Defaults to false. When called from a chat and the chat is new, the calling chat is subscribed to its idle and failure events (see subscribe).',
+          )
           .optional(),
+        ...createdChatSubscriptionInputs,
       },
     },
     async (args) => {
       const chat = await resolveTargetChat(args.drone, args.chat);
+      const sender = chatActor(context);
+      let subscription: Record<string, unknown> = {};
       if (args.createChat) {
         await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
-        await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+        const created = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
           method: 'POST',
-          body: JSON.stringify({ name: chat }),
+          body: JSON.stringify({ name: chat, ...(sender ? { createdBy: sender } : {}) }),
         }).catch((error: any) => {
           if (error?.status !== 409) throw error;
+          return null;
         });
+        // Subscribe before the prompt starts so the first run's idle event is not missed.
+        if (created) subscription = await subscribeCreatorToCreatedChat(context, created.chatId, args);
       }
       // The prompt endpoint validates canonical existence with requireExistingChat.
       // Sidebar listings deliberately omit side/workflow chats and cannot validate recipients.
@@ -3349,6 +3465,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         prompt: args.message,
         submissionSource: 'assistant-tool',
         deliveryMode: args.deliveryMode ?? 'queue',
+        ...(sender ? { sentBy: sender } : {}),
         ...(!args.createChat ? { requireExistingChat: true } : {}),
         ...(cleanString(args.idempotencyKey)
           ? { promptId: chatScopedPromptId(cleanString(args.idempotencyKey), chat) }
@@ -3367,14 +3484,224 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         drone: cleanString(response?.id, args.drone),
         chat,
         deliveryMode: body.deliveryMode,
-        runId: cleanString(response?.promptId || body.promptId),
+        messageId: cleanString(response?.promptId || body.promptId),
         status:
           response?.draft === true ? 'held_in_draft' : cleanString(response?.pendingState, 'queued'),
         draft: response?.draft === true,
         ...(response?.draft === true
           ? { message: 'Message accepted and held until the draft chat is published. It has not started execution.' }
           : {}),
+        ...(response?.senderRecorded === false
+          ? {
+              senderRecorded: false,
+              warning:
+                'This message is not linked to your chat, either because the target drone is still starting or because idempotencyKey matched a message another chat sent. cancel_messages and edit_message will report it as not_yours.',
+            }
+          : {}),
+        ...subscription,
         raw: response,
+      });
+    },
+  );
+
+  /** Marks which pending messages the calling chat sent and can still change. */
+  const withCallerChatContext = (read: any) => {
+    const callerChatId = chatActor(context)?.chatId;
+    if (!Array.isArray(read?.pending)) return read;
+    return {
+      ...read,
+      pending: read.pending.map((item: any) => {
+        const sentByYou = Boolean(callerChatId) && item?.sentBy?.chatId === callerChatId;
+        return { ...item, sentByYou, editable: sentByYou && item?.phase === 'waiting' };
+      }),
+    };
+  };
+
+  const chatPendingPath = (drone: string, chat: string, messageId: string) =>
+    `/api/drones/${encodeURIComponent(drone)}/chats/${encodeURIComponent(chat)}/pending/${encodeURIComponent(messageId)}`;
+
+  server.registerTool(
+    'cancel_messages',
+    {
+      title: 'Cancel sent messages',
+      description:
+        'Cancel messages this chat sent with send_message, as long as they are still waiting in the queue. Each message reports its own outcome: cancelled (removed; it will never run), too_late (the agent already received it; phase says whether it is delivered or running, and it was not changed), not_yours (another chat or the user sent it), unsupported (it is still waiting but bundled with automated events and cannot be removed on its own), or not_found (no such waiting message: it finished, was already cancelled, or the id is wrong). Only a cancelled outcome means the message will not run.',
+      inputSchema: {
+        drone: z.string(),
+        chat: z.string().describe('Chat the messages were sent to.'),
+        messageIds: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .max(20)
+          .describe('messageId values returned by send_message or listed by read_chat.'),
+      },
+    },
+    async (args) => {
+      const actor = requireChatActor(context, 'cancel_messages');
+      const chat = chatName(args.chat);
+      const results = [];
+      for (const messageId of [...new Set(args.messageIds.map((id) => id.trim()))]) {
+        try {
+          const response = await requestJson(
+            `${chatPendingPath(args.drone, chat, messageId)}?sentByChatId=${encodeURIComponent(actor.chatId)}`,
+            { method: 'DELETE' },
+          );
+          results.push(
+            response?.cancelled === true
+              ? { messageId, outcome: 'cancelled' }
+              : response?.alreadySubmitted === true
+                ? { messageId, outcome: 'too_late', phase: deliveredPhase(response?.pendingState) }
+                : { messageId, outcome: 'unsupported' },
+          );
+        } catch (error: any) {
+          if (error?.status === 403) results.push({ messageId, outcome: 'not_yours' });
+          else if (error?.status === 404) results.push({ messageId, outcome: 'not_found' });
+          else results.push({ messageId, outcome: 'error', error: error?.message ?? String(error) });
+        }
+      }
+      return toolResult({ ok: true, drone: args.drone, chat, results });
+    },
+  );
+
+  server.registerTool(
+    'edit_message',
+    {
+      title: 'Edit a sent message',
+      description:
+        'Change a message this chat sent with send_message while it is still waiting in the queue. It keeps its place, so you can fix phase 2 of a queued plan without touching phase 3. mode "replace" (default) replaces the whole text; "append" adds the text after it, separated by a blank line. Outcomes: edited (the agent will receive the new text), too_late (the agent already received the original; nothing was changed), failed (delivery failed, so it will not run; send a new message instead), not_yours, unsupported (event notifications, recovery, and new-chat messages cannot be edited), or not_found.',
+      inputSchema: {
+        drone: z.string(),
+        chat: z.string().describe('Chat the message was sent to.'),
+        messageId: z.string().trim().min(1),
+        text: z.string().trim().min(1),
+        mode: z.enum(['replace', 'append']).optional(),
+      },
+    },
+    async (args) => {
+      const actor = requireChatActor(context, 'edit_message');
+      const chat = chatName(args.chat);
+      const base = { ok: true, drone: args.drone, chat, messageId: args.messageId };
+      try {
+        const response = await requestJson(chatPendingPath(args.drone, chat, args.messageId), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            text: args.text,
+            mode: args.mode ?? 'replace',
+            requireSentByChatId: actor.chatId,
+          }),
+        });
+        return toolResult({ ...base, outcome: 'edited', text: cleanString(response?.prompt) });
+      } catch (error: any) {
+        const status = cleanString(error?.body?.status);
+        if (error?.status === 403) return toolResult({ ...base, outcome: 'not_yours' });
+        if (error?.status === 404) return toolResult({ ...base, outcome: 'not_found' });
+        if (error?.status === 409 && status === 'too-late') {
+          return error.body?.state === 'failed'
+            ? toolResult({ ...base, outcome: 'failed' })
+            : toolResult({ ...base, outcome: 'too_late', phase: deliveredPhase(error.body?.state) });
+        }
+        if (error?.status === 409 && status === 'unsupported') {
+          return toolResult({ ...base, outcome: 'unsupported' });
+        }
+        throw error;
+      }
+    },
+  );
+
+  server.registerTool(
+    'stop_chat',
+    {
+      title: 'Stop a chat you created',
+      description:
+        'Stop the current execution of a chat that this chat created (with create_chat, clone_chat, or send_message createChat=true). Stopping also clears every message still waiting in that chat\'s queue, including ones the user sent; clearedMessageIds lists them. Chats created by the user or by another chat cannot be stopped with this tool.',
+      inputSchema: {
+        drone: z.string(),
+        chat: z.string(),
+      },
+    },
+    async (args) => {
+      const actor = requireChatActor(context, 'stop_chat');
+      const chat = chatName(args.chat);
+      try {
+        const response = await requestJson(
+          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/stop`,
+          { method: 'POST', body: JSON.stringify({ requireCreatedByChatId: actor.chatId }) },
+        );
+        return toolResult({
+          ok: true,
+          drone: args.drone,
+          chat,
+          stopped: response?.stopped === true,
+          stoppedMessageIds: Array.isArray(response?.stoppedPromptIds) ? response.stoppedPromptIds : [],
+          clearedMessageIds: Array.isArray(response?.clearedPromptIds) ? response.clearedPromptIds : [],
+        });
+      } catch (error: any) {
+        if (error?.status === 403) {
+          throw new Error(`stop_chat: ${chat} was not created by this chat, so it cannot stop it`);
+        }
+        throw error;
+      }
+    },
+  );
+
+  server.registerTool(
+    'answer_questions',
+    {
+      title: 'Answer another chat\'s questions',
+      description:
+        'Answer questions another chat asked with ask_questions, on the user\'s behalf. read_chat lists a chat\'s open questions under pendingQuestions, and chat.questions_asked subscriptions announce new ones. You do not need to pick from the offered choices: give a written response, and optionally a per-question answer. Questions without a per-question answer are recorded as skipped, with your response as the overall reply. The asking chat and the user both see the answer as coming from this chat. Outcomes: answered, or already_resolved (the user or another chat answered first; their result is included).',
+      inputSchema: {
+        drone: z.string(),
+        chat: z.string().describe('The chat that asked the questions.'),
+        requestId: z.string().trim().min(1),
+        response: z.string().trim().max(8_000).optional().describe('Your written reply to the whole request.'),
+        answers: z
+          .array(z.object({ questionId: z.string().trim().min(1), answer: z.string().trim().min(1).max(4_000) }))
+          .max(99)
+          .optional(),
+      },
+    },
+    async (args) => {
+      const actor = requireChatActor(context, 'answer_questions');
+      if (!cleanString(args.response) && !(args.answers?.length)) {
+        throw new Error('answer_questions needs a response or at least one answer');
+      }
+      const chat = chatName(args.chat);
+      const [droneId] = await resolveRequiredDroneIds([args.drone]);
+      const requestPath = `/api/chat-question-requests/${encodeURIComponent(args.requestId)}`;
+      const { request } = await requestJson(
+        `${requestPath}?droneId=${encodeURIComponent(droneId)}&chatName=${encodeURIComponent(chat)}`,
+        { method: 'GET' },
+      );
+      if (cleanString(request?.chatId) === actor.chatId) {
+        throw new Error('answer_questions cannot answer questions this chat asked itself');
+      }
+      const base = { ok: true, drone: args.drone, chat, requestId: args.requestId };
+      if (request?.status !== 'pending') {
+        return toolResult({ ...base, outcome: 'already_resolved', result: request?.result ?? null });
+      }
+      const answers = new Map((args.answers ?? []).map((item) => [item.questionId, item.answer]));
+      const questionIds = new Set<string>(
+        (request.questions ?? []).map((question: any) => cleanString(question?.id)),
+      );
+      const unknown = [...answers.keys()].filter((id) => !questionIds.has(id));
+      if (unknown.length > 0) throw new Error(`unknown question ids: ${unknown.join(', ')}`);
+      const { result } = await requestJson(`${requestPath}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({
+          responses: [...questionIds].map((questionId) =>
+            answers.has(questionId)
+              ? { questionId, outcome: 'custom', text: answers.get(questionId) }
+              : { questionId, outcome: 'skipped' },
+          ),
+          ...(cleanString(args.response) ? { notes: cleanString(args.response) } : {}),
+          respondedBy: actor,
+        }),
+      });
+      return toolResult({
+        ...base,
+        outcome: result?.respondedBy?.chatId === actor.chatId ? 'answered' : 'already_resolved',
+        result,
       });
     },
   );
@@ -3504,7 +3831,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Subscribe to resource events',
       description:
-        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Chat subscriptions also return idle, the current idle status; the subscription remains active for future events. If already idle, read_chat can retrieve its reply now. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Chat idle subscriptions do not require target-drone read access; without it, delivery includes status only, not message content. Chat failure and change-request subscriptions require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
+        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle, chat.failed, and chat.questions_asked (the chat asked new questions with ask_questions; answer them with answer_questions or leave them for the user). Chat subscriptions also return idle, the current idle status; the subscription remains active for future events. If already idle, read_chat can retrieve its reply now. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Chat idle subscriptions do not require target-drone read access; without it, delivery includes status only, not message content. Chat failure, chat question, and change-request subscriptions require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
       inputSchema: {
         provider: z.enum(['drone-hub', 'github']),
         resourceType: z.enum(['chat', 'repository', 'pull_request', 'change_request']),
@@ -3658,7 +3985,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. All chats return bounded visible messages with historyKind=messages. Text fields default to 4000 chars; maxCharsPerField goes up to 40000 with limit=1 (the cap is 80000/limit across a read), and truncated results carry a truncationHint. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
+      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, pending messages, and open questions. status is idle, working, queued, blocked, or draft. Each pending message has a phase (waiting, delivering, delivered, running), deliveryMode, queuePosition while waiting, sentBy when a chat sent it, and sentByYou/editable for messages this chat sent: only editable messages can still be cancelled or edited. pendingQuestions lists unanswered ask_questions requests from that chat; answer them with answer_questions. All chats return bounded visible messages with historyKind=messages. Text fields default to 4000 chars; maxCharsPerField goes up to 40000 with limit=1 (the cap is 80000/limit across a read), and truncated results carry a truncationHint. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -3677,7 +4004,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}&maxChars=${maxCharsPerField}&activity=${includeActivity ? 'full' : 'summary'}`,
           { method: 'GET' },
         );
-        return toolResult(response);
+        return toolResult(withCallerChatContext(response));
       } catch (error: any) {
         if (error?.status !== 410) throw error;
         const state = await requestJson(
@@ -3686,17 +4013,17 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         );
         const pendingSummary = pendingChatSummary(state, limit, maxCharsPerField);
         if (state?.draft === true) {
-          return toolResult({
+          return toolResult(withCallerChatContext({
             ok: true, drone: args.drone, chat, turns: [],
             ...pendingSummary, limit, maxCharsPerField, includeActivity,
-          });
+          }));
         }
         const response = await requestJson(
           `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/output`,
           { method: 'GET' },
         );
         const output = truncateString(cleanString(response?.output), maxCharsPerField * 2);
-        return toolResult({
+        return toolResult(withCallerChatContext({
           ok: true,
           drone: args.drone,
           chat,
@@ -3705,7 +4032,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           outputOriginalLength: output.originalLength,
           outputTruncated: output.truncated,
           truncated: output.truncated,
-        });
+        }));
       }
     },
   );
@@ -3723,6 +4050,9 @@ export type DroneHubMcpServer = McpServer & {
   setSpeechEnabled: (enabled: boolean) => void;
 };
 
+/** Act on another chat's queue, run, or questions; each needs the calling chat's identity. */
+const CHAT_CONTROL_TOOL_NAMES = ['cancel_messages', 'edit_message', 'stop_chat', 'answer_questions'];
+
 const WRITE_SCOPED_TOOLS = new Set([
   'set_drone_group',
   'rename_drones',
@@ -3737,6 +4067,7 @@ const WRITE_SCOPED_TOOLS = new Set([
   'move_chats',
   'move_chat_group',
   'send_message',
+  ...CHAT_CONTROL_TOOL_NAMES,
   ...CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
   ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
 ]);
@@ -3749,6 +4080,7 @@ const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
   'open_whiteboard',
   'close_whiteboard',
   'send_message',
+  ...CHAT_CONTROL_TOOL_NAMES,
   ...CHANGE_REQUEST_CHAT_EXECUTE_TOOL_NAMES,
 ]);
 
@@ -3833,9 +4165,12 @@ const READ_ONLY_MCP_TOOLS = new Set([
   'get_workflow',
   'list_workflow_runs',
   'get_workflow_run',
+  ...CHANNEL_READ_ONLY_MCP_TOOL_NAMES,
 ]);
 
 const DESTRUCTIVE_MCP_TOOLS = new Set([
+  'cancel_messages',
+  'stop_chat',
   'delete_chat',
   'delete_chat_group',
   'cancel_resource_subscription',

@@ -36,6 +36,7 @@ import { companionAttachmentFromFile, isCompanionPreviewable } from './companion
 import { CompanionTranscriptDialog, useCompanionTranscriptDialog } from './CompanionTranscriptDialog';
 import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
+import { openWorkspaceLink } from '../workspaces/workspace-links';
 
 function companionStatusLabel(status: CompanionStatus, recordingPaused: boolean): string {
   if (recordingPaused) return 'Paused';
@@ -461,10 +462,11 @@ export function CompanionOverlay() {
             <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}
               title={active ? 'Working' : 'Companion activity'}
               className="flex h-7 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
-              {active ? <svg className="h-3 w-3 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              {/* The wrapper spins, not the SVG, so the animation stays on the compositor. */}
+              {active ? <span className="block h-3 w-3 animate-spin text-[var(--accent)] motion-reduce:animate-none" aria-hidden="true"><svg className="block h-3 w-3" viewBox="0 0 12 12" fill="none">
                 <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
                 <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg> : <CompanionStatusIndicator status={companion.status} recordingPaused={companion.recordingPaused} />}
+              </svg></span> : <CompanionStatusIndicator status={companion.status} recordingPaused={companion.recordingPaused} />}
             </button>
           </Popover.Trigger>
           <Popover.Portal container={companionWindow.portalContainer} key={String(companionWindow.detached)}>
@@ -707,7 +709,11 @@ export function CompanionOverlay() {
               <div data-companion-selectable="true" className="cursor-auto select-text">
                 <ChatMessageBody role="assistant" text={companion.reply} autoExpand
                   // Paths in a reply refer to Companion home: open the file there, or select the folder.
-                  onOpenFileReference={reference => openCompanionHomeFiles({ path: reference.path, line: reference.line, column: reference.column })} />
+                  onOpenFileReference={reference => {
+                    // A link names its workspace; other references are files of the companion's home folder.
+                    if (reference.link && openWorkspaceLink(reference.link)) return;
+                    openCompanionHomeFiles({ path: reference.path, line: reference.line, column: reference.column });
+                  }} />
               </div>
             </div>
           ) : null}

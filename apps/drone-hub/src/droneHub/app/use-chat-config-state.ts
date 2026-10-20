@@ -549,7 +549,7 @@ export function useChatConfigState({
         throw new Error('The draft chat could not be created.');
       }
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

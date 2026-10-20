@@ -6,7 +6,7 @@ import type {
   ResourceSubscriptionType,
 } from './resource-subscription-types';
 
-const CHAT_EVENTS = ['chat.idle', 'chat.failed'] as const;
+const CHAT_EVENTS = ['chat.idle', 'chat.failed', 'chat.questions_asked'] as const;
 const GITHUB_REPOSITORY_EVENTS = [
   'pull_request.opened',
   'pull_request.comment.created',
@@ -21,6 +21,7 @@ const GITHUB_PULL_REQUEST_EVENTS = [
 const GITHUB_PULL_REQUEST_TERMINAL_EVENTS = ['pull_request.merged', 'pull_request.closed'] as const;
 const CHANGE_REQUEST_TERMINAL_EVENTS = ['change_request.merged', 'change_request.closed'] as const;
 const CRON_EVENTS = ['cron.triggered'] as const;
+const CHANNEL_EVENTS = ['channel.message', 'channel.mention'] as const;
 
 export const MCP_RESOURCE_SUBSCRIPTION_EVENTS = [
   ...CHAT_EVENTS,
@@ -57,6 +58,10 @@ const RESOURCE_SUBSCRIPTION_CAPABILITIES: Partial<
   },
   'drone-hub/cron': {
     supportedEvents: CRON_EVENTS,
+    terminalEvents: [],
+  },
+  'drone-hub/channel': {
+    supportedEvents: CHANNEL_EVENTS,
     terminalEvents: [],
   },
   'github/repository': {

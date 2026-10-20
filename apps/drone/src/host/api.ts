@@ -486,7 +486,14 @@ export type ClaudeBackgroundTaskRun = {
   runId: string;
   chatKey?: string;
   resident: boolean;
-  tasks: Array<{ id: string; type: string; description: string; startedAt: string }>;
+  tasks: Array<{
+    id: string;
+    type: string;
+    description: string;
+    startedAt: string;
+    dueAt?: string;
+    recurring?: boolean;
+  }>;
 };
 
 export async function claudeBackgroundTasksList(

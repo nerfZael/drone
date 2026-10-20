@@ -8,11 +8,18 @@ type OpenFileTarget = {
   name: string;
   line?: number | null;
   column?: number | null;
+  /** The workspace the file is in (as the file routes name it), when it is not the drone's own. */
+  droneId?: string;
 };
+
+/** Another workspace whose files the editor shows beside the drone's own. */
+export type EditorWorkspaceInfo = { name: string; homePath: string };
 
 type DroneEditorDockProps = {
   droneId: string;
   droneName: string;
+  /** Where the explorer starts, for links to the files it shows. */
+  homePath?: string;
   openedFile: DroneOpenedFileState;
   quickOpen: {
     open: boolean;
@@ -49,11 +56,14 @@ type DroneEditorDockProps = {
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (activeId: string, overId: string) => void;
   onOpenFileTargetInEditor: (target: OpenFileTarget) => void;
+  /** Tabs can hold files of other workspaces (explorer roots); what each of those is, by its file route id. */
+  workspaceOf?: (droneId: string) => EditorWorkspaceInfo | null;
 };
 
 export function DroneEditorDock({
   droneId,
   droneName,
+  homePath,
   openedFile,
   quickOpen,
   openedFileTabs,
@@ -68,7 +78,16 @@ export function DroneEditorDock({
   onActivateOpenedEditorFileTab,
   onReorderOpenedEditorFileTabs,
   onOpenFileTargetInEditor,
+  workspaceOf,
 }: DroneEditorDockProps) {
+  // The active file can be in another workspace; the panel reads, previews and links it there.
+  const activeDroneId = openedFileTabs.find((tab) => tab.tabId === activeOpenedFileTabId)?.droneId || droneId;
+  const foreign = activeDroneId !== droneId ? workspaceOf?.(activeDroneId) ?? null : null;
+  const openResolvedFile = (target: OpenFileTarget) =>
+    onOpenFileTargetInEditor(activeDroneId !== droneId ? { ...target, droneId: activeDroneId } : target);
+  const workspaceLabelForTab = workspaceOf
+    ? (tab: DroneOpenedFileTabState) => (tab.droneId && tab.droneId !== droneId ? workspaceOf(tab.droneId)?.name ?? null : null)
+    : undefined;
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
       <QuickOpenModal
@@ -84,8 +103,10 @@ export function DroneEditorDock({
       />
       {openedFile.path ? (
         <OpenedDroneFilePanel
-          droneId={droneId}
-          droneName={droneName}
+          droneId={activeDroneId}
+          droneName={foreign?.name ?? droneName}
+          workspaceHomePath={foreign ? foreign.homePath : homePath}
+          workspaceLabelForTab={workspaceLabelForTab}
           file={openedFile}
           fileTabs={openedFileTabs}
           activeTabId={activeOpenedFileTabId}
@@ -98,7 +119,7 @@ export function DroneEditorDock({
           onCloseFile={onCloseOpenedEditorFile}
           onActivateFileTab={onActivateOpenedEditorFileTab}
           onReorderFileTabs={onReorderOpenedEditorFileTabs}
-          onOpenResolvedFile={onOpenFileTargetInEditor}
+          onOpenResolvedFile={openResolvedFile}
         />
       ) : (
         <div className="h-full flex items-center justify-center px-6 text-center text-ui text-[var(--muted)]">

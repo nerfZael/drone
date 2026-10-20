@@ -1,17 +1,22 @@
 import type { ChatWorkspaceAccess, ChatWorkspaceOption, ChatWorkspaceTarget } from '@drone/assistant-chat';
 
-export type WorkspaceCategory = 'Repositories' | 'Folders' | 'Host drones' | 'Container drones';
+export type WorkspaceCategory = 'Repositories' | 'Folders' | 'Chat homes' | 'Host drones' | 'Container drones';
 export type Permission = 'read' | 'write' | 'execute';
 
-/** Folders and repositories list first so a large drone fleet never buries them. */
+/** Folders and repositories list first so a large drone fleet (or every chat's home) never buries them. */
 export const WORKSPACE_CATEGORIES: readonly WorkspaceCategory[] = [
   'Repositories',
   'Folders',
+  'Chat homes',
   'Host drones',
   'Container drones',
 ];
 
+/** Categories long enough to start capped: drones, and the home of every chat. */
+export const CAPPED_WORKSPACE_CATEGORIES: ReadonlySet<WorkspaceCategory> = new Set(['Chat homes', 'Host drones', 'Container drones']);
+
 export function workspaceCategory(option: ChatWorkspaceOption): WorkspaceCategory {
+  if (option.chatHome) return 'Chat homes';
   if (option.kind === 'host' && option.repository) return 'Repositories';
   if (option.kind === 'host' && option.runtime === 'host') return 'Host drones';
   if (option.kind === 'drone' && option.runtime !== 'host') return 'Container drones';

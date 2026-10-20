@@ -1,6 +1,9 @@
 import { focusedChatWindow } from './focused-chat-window';
 const SIDE_CHAT_SELECTOR = '[data-side-chat-name]';
 const COMPOSER_SELECTOR = '[data-active-composer-id]';
+/** Marks a surface whose composer takes keyboard shortcuts whenever the user works anywhere in it. */
+export const COMPOSER_SCOPE_SELECTOR = '[data-composer-scope]';
+const ACTIVE_COMPOSER_SCOPE_SELECTOR = '[data-composer-scope-active]';
 
 /** Fired after focus routing: which floating chat is active now, and what the user pressed. */
 export const ACTIVE_SIDE_CHAT_EVENT = 'drone-hub:active-side-chat-change';
@@ -37,6 +40,11 @@ export function routeComposerFocus(
     element.removeAttribute('data-side-chat-active'),
   );
   if (side) side.setAttribute('data-side-chat-active', 'true');
+  // Like a floating chat, a composer scope remembers being the target, so leaving it returns the shortcuts to the chat.
+  const hadActiveScope = Boolean(doc.querySelector(ACTIVE_COMPOSER_SCOPE_SELECTOR));
+  doc.querySelectorAll(ACTIVE_COMPOSER_SCOPE_SELECTOR).forEach((element) =>
+    element.removeAttribute('data-composer-scope-active'),
+  );
   doc.defaultView?.dispatchEvent(new CustomEvent<ActiveSideChatEventDetail>(ACTIVE_SIDE_CHAT_EVENT, {
     detail: { name: side?.dataset.sideChatName ?? null, target },
   }));
@@ -52,6 +60,19 @@ export function routeComposerFocus(
     return;
   }
 
+  // A surface with one composer of its own (a channel): clicking anywhere in it makes that composer the target,
+  // so Q records and S sends there rather than in the drone's chat.
+  const composerScope = target.closest<HTMLElement>(COMPOSER_SCOPE_SELECTOR);
+  if (composerScope) composerScope.setAttribute('data-composer-scope-active', 'true');
+  if (composerScope && !target.closest(COMPOSER_SELECTOR)) {
+    const scoped = composerScope.querySelector<HTMLElement>(COMPOSER_SELECTOR);
+    if (scoped?.dataset.activeComposerId) {
+      registry.focus(scoped.dataset.activeComposerId);
+      markEditorTarget(scoped.dataset.editorModeTargetId ?? '');
+      return;
+    }
+  }
+
   // Prefer the actual composer when its controls or editor receive focus.
   let composer = target.closest<HTMLElement>(COMPOSER_SELECTOR);
   if (!composer && side) {
@@ -63,10 +84,11 @@ export function routeComposerFocus(
     );
     composer = scope?.querySelector<HTMLElement>(COMPOSER_SELECTOR) ?? null;
   }
-  if (!composer && !side && hadActiveSide) {
+  const leftScope = hadActiveScope && !composerScope;
+  if (!composer && !side && (hadActiveSide || leftScope)) {
     composer = doc.querySelector<HTMLElement>(`[data-main-workspace-chat] ${COMPOSER_SELECTOR}`);
   }
-  if (!side && !hadActiveSide && !composer) return;
+  if (!side && !hadActiveSide && !leftScope && !composer) return;
   if (side) {
     const name = side.dataset.sideChatName;
     registry.focusWithin(() => {

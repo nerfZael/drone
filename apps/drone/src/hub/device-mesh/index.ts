@@ -13,6 +13,7 @@ import { DeviceMeshDiscovery } from './device-mesh-discovery';
 import { DevicePhoneDiscovery } from './device-phone-discovery';
 import { DeviceLanDiscovery } from './device-lan-discovery';
 import { DeviceHttpTransfers } from './device-http-transfers';
+import { DeviceHtmlPreviewSessions } from './device-html-preview-sessions';
 import { DeviceBrowserSessions } from './device-browser-sessions';
 import { HUB_REMOTE_PREFIX, HubRemoteSessions } from './hub-remote-sessions';
 import { HubRemoteViewers } from './hub-remote-viewers';
@@ -66,6 +67,11 @@ export async function createDeviceMeshService(options: {
     store,
     () => ingress?.status().publicEndpoint ?? null,
   );
+  const htmlPreviews = new DeviceHtmlPreviewSessions(
+    { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
+    store,
+    () => ingress?.status().publicEndpoint ?? null,
+  );
   const chatAttachments = new MeshChatAttachmentStore(
     path.join(options.rootDir, 'attachments'),
     async (source) => {
@@ -93,6 +99,7 @@ export async function createDeviceMeshService(options: {
       chatAttachments,
       {
         transfers,
+        htmlPreviews,
         browsers,
         sidebarCommands: options.sidebarCommands,
         hubServices: options.hubServices,
@@ -156,6 +163,7 @@ export async function createDeviceMeshService(options: {
     new ProviderCredentialsHttp(identity, router, store),
   ];
   extensions.push(transfers);
+  extensions.push(htmlPreviews);
   extensions.push(workspaceTransfers);
   extensions.push(hubRemoteSessions);
   const hubRemoteViewers = new HubRemoteViewers(options.rootDir, store, (...args) =>
@@ -233,6 +241,7 @@ export async function createDeviceMeshService(options: {
       browsers.close();
       await chatAttachments.close();
       transfers.close();
+      htmlPreviews.close();
       workspaceTransfers.close();
       resultUploads.close();
       speechClipUploads?.close();

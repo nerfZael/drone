@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  createMobileHtmlImageBudget,
+  createMobileHtmlRuntimeImages,
   embedMobileHtmlImages,
   loadMobileHtmlImages,
   mobileHtmlLocalImagePaths,
   MOBILE_HTML_PREVIEW_IMAGE_MAX_BYTES,
   MOBILE_HTML_PREVIEW_IMAGES_MAX_BYTES,
+  MOBILE_HTML_PREVIEW_MAX_IMAGES,
+  mobileHtmlPreviewImagePath,
   resolveMobileHtmlImagePath,
 } from '../src/drones/mobile-html-preview-images';
 
@@ -64,5 +68,71 @@ describe('mobile HTML preview images', () => {
     );
     expect(images.size).toBe(MOBILE_HTML_PREVIEW_IMAGES_MAX_BYTES / size);
     expect(failed).toBe(count - images.size);
+  });
+
+  test('maps blocked image URLs on the preview origin back to files', () => {
+    const page = 'https://drone-hub-preview.invalid/work/site/index.html';
+    expect(mobileHtmlPreviewImagePath(page, 'https://drone-hub-preview.invalid/work/site/img/a%20b.png')).toBe('/work/site/img/a b.png');
+    expect(mobileHtmlPreviewImagePath(page, 'https://drone-hub-preview.invalid/work/site/../x.png?v=1')).toBe('/work/x.png');
+    for (const url of ['https://example.com/work/a.png', 'https://u:p@drone-hub-preview.invalid/a.png', 'https://drone-hub-preview.invalid/', 'https://drone-hub-preview.invalid/%E0', 'nope']) {
+      expect(mobileHtmlPreviewImagePath(page, url)).toBeNull();
+    }
+  });
+
+  test('serves each image the running page asks for once, within the shared budget', async () => {
+    const budget = createMobileHtmlImageBudget();
+    budget.images = 2;
+    const delivered: string[] = [];
+    let failed = 0;
+    const asked: string[] = [];
+    const runtime = createMobileHtmlRuntimeImages({
+      documentUrl: 'https://drone-hub-preview.invalid/w/index.html',
+      readImage: async (path) => {
+        asked.push(path);
+        return { mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) };
+      },
+      budget,
+      signal: new AbortController().signal,
+      requestType: 'image',
+      deliver: (url, dataUrl) => delivered.push(`${url} ${dataUrl}`),
+      onFailed: () => { failed += 1; },
+    });
+    const ask = (url: string, type = 'image') => runtime.request(JSON.stringify({ type, url }));
+    ask('https://drone-hub-preview.invalid/w/bg.png');
+    ask('https://drone-hub-preview.invalid/w/bg.png');
+    ask('https://example.com/x.png');
+    ask('https://drone-hub-preview.invalid/w/other.png', 'navigate');
+    runtime.request('not json');
+    runtime.request({ type: 'image', url: 'https://drone-hub-preview.invalid/w/obj.png' });
+    ask('https://drone-hub-preview.invalid/w/hero.png');
+    ask('https://drone-hub-preview.invalid/w/third.png');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toEqual(['/w/bg.png', '/w/hero.png']);
+    expect(delivered).toEqual([
+      'https://drone-hub-preview.invalid/w/bg.png data:image/png;base64,AQID',
+      'https://drone-hub-preview.invalid/w/hero.png data:image/png;base64,AQID',
+    ]);
+    expect(failed).toBe(1);
+    expect(budget.bytes).toBe(MOBILE_HTML_PREVIEW_IMAGES_MAX_BYTES - 6);
+  });
+
+  test('images embedded up front and asked for later draw on one page budget', async () => {
+    const budget = createMobileHtmlImageBudget();
+    const source = Array.from({ length: MOBILE_HTML_PREVIEW_MAX_IMAGES }, (_, i) => `<img src="${i}.png">`).join('');
+    await loadMobileHtmlImages(source, '/w/index.html', async () => ({ mime: 'image/png', bytes: new Uint8Array(1) }), new AbortController().signal, budget);
+    expect(budget.images).toBe(0);
+    let failed = 0;
+    const runtime = createMobileHtmlRuntimeImages({
+      documentUrl: 'https://drone-hub-preview.invalid/w/index.html',
+      readImage: async () => ({ mime: 'image/png', bytes: new Uint8Array(1) }),
+      budget,
+      signal: new AbortController().signal,
+      requestType: 'image',
+      deliver: () => { throw new Error('over budget'); },
+      onFailed: () => { failed += 1; },
+    });
+    runtime.request(JSON.stringify({ type: 'image', url: 'https://drone-hub-preview.invalid/w/late.png' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(failed).toBe(1);
   });
 });

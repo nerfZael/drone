@@ -155,6 +155,41 @@ describe('DroneHub MCP workspace tools', () => {
     );
   });
 
+  test('grant_workspace_access grants from the calling chat, and reports a refusal as a tool error', async () => {
+    const definitions = await loadAgentChatWorkspaceToolDefinitions();
+    await withHub(
+      (_path, body) =>
+        body?.workspace === 'nope'
+          ? { ok: true, error: 'This chat has no workspace "nope". See list_workspaces.' }
+          : { ok: true, result: { workspace: 'host:chat-home-c1', changed: true, access: { read: true, write: true, execute: false } } },
+      async (requests) => {
+        const client = await connect({ principal: chatPrincipal, workspaceToolDefinitions: definitions });
+        const granted = await client.callTool({
+          name: 'grant_workspace_access',
+          arguments: { drone: 'drone-b', chat: 'review', workspace: 'host:chat-home-c1', write: true },
+        });
+        expect(granted.isError).not.toBe(true);
+        expect(granted.structuredContent).toEqual(expect.objectContaining({ changed: true }));
+        const refused = await client.callTool({
+          name: 'grant_workspace_access',
+          arguments: { drone: 'drone-b', chat: 'review', workspace: 'nope' },
+        });
+        expect(refused.isError).toBe(true);
+        expect(requests).toEqual([
+          {
+            path: '/api/drones/drone-a/chats/main%20chat/workspaces/grant',
+            body: { to: { drone: 'drone-b', chat: 'review' }, workspace: 'host:chat-home-c1', read: true, write: true, execute: false },
+          },
+          {
+            path: '/api/drones/drone-a/chats/main%20chat/workspaces/grant',
+            body: { to: { drone: 'drone-b', chat: 'review' }, workspace: 'nope', read: true, write: false, execute: false },
+          },
+        ]);
+        await client.close();
+      },
+    );
+  });
+
   test('cancelling a call cancels its Hub request', async () => {
     const definitions = await loadAgentChatWorkspaceToolDefinitions();
     const previous = { fetch: globalThis.fetch, url: process.env.DRONE_HUB_BASE_URL, token: process.env.DRONE_TOKEN };

@@ -4,6 +4,7 @@ import ts from 'typescript';
 import { OPEN_SIDE_CHAT_EVENT, type OpenSideChatDetail } from '../src/droneHub/app/side-chat-events';
 import { setSideChatBusy, useSideChatBusyStore } from '../src/droneHub/app/side-chat-busy-store';
 import { chatPathRef, forgetNewChatId, newChatId } from '../src/droneHub/app/chat-identity';
+import { withoutComposerSideChats } from '../src/droneHub/app/composer-side-chats';
 
 test('returning to a drone does not revive a previous visit’s request or clear a newer operation', async () => {
   const harness = sideChatHarness();
@@ -195,6 +196,7 @@ function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null, do
       if (name === '../canvas/use-drone-canvas-store')
         return { useDroneCanvasStore: { getState: () => ({ dropOptimisticBoardMembers: () => {} }) } };
       if (name === './chat-identity') return { chatPathRef, forgetNewChatId, newChatId };
+      if (name === './composer-side-chats') return { withoutComposerSideChats };
       throw new Error(`Unexpected import: ${name}`);
     },
     exports,

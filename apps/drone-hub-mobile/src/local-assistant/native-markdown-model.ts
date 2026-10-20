@@ -1,3 +1,5 @@
+import { leadingMarkdownStatus, type MarkdownStatus } from '@drone/markdown-status-icons';
+
 export type NativeMarkdownInline = {
   type: 'text' | 'strong' | 'emphasis' | 'strike' | 'code' | 'link';
   text: string;
@@ -268,4 +270,22 @@ export function parseNativeMarkdown(text: string): NativeMarkdownBlock[] {
     blocks.push({ type: 'paragraph', text: paragraph.join('\n') });
   }
   return blocks;
+}
+
+const LEADING_INLINE_DELIMITER = /^(?:~~|\*\*|__|\*|_)/;
+
+export type NativeMarkdownLeadingStatus = {
+  status: MarkdownStatus;
+  /** True when the emoji opens a struck-through span, as in `~~✅ Shipped~~`. */
+  dimmed: boolean;
+  /** The item source without the emoji, keeping any opening delimiter. */
+  text: string;
+};
+
+/** A status emoji that opens a list item, so the list can draw it in place of its bullet. */
+export function nativeMarkdownLeadingStatus(text: string): NativeMarkdownLeadingStatus | null {
+  const delimiter = LEADING_INLINE_DELIMITER.exec(text)?.[0] ?? '';
+  const lead = leadingMarkdownStatus(text.slice(delimiter.length));
+  if (!lead || (delimiter && !lead.rest)) return null;
+  return { status: lead.status, dimmed: delimiter === '~~', text: delimiter + lead.rest };
 }

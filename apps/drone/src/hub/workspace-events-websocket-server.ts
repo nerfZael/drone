@@ -51,8 +51,15 @@ export function createWorkspaceEventsWebSocketServer(
     const drone = context.drone;
     const droneName = String(drone?.name ?? context.id).trim() || context.id;
     const hostRuntime = deps.droneRuntime(drone) === 'host';
+    // A path this workspace refuses (e.g. outside a folder workspace) is not watched;
+    // throwing here would escape the socket handler and take the Hub down.
     const normalize = (raw: string): string => {
-      const normalized = deps.normalizeFsPathForRuntime(drone, raw, { fallbackToHome: false });
+      let normalized: string;
+      try {
+        normalized = deps.normalizeFsPathForRuntime(drone, raw, { fallbackToHome: false });
+      } catch {
+        return '';
+      }
       return normalized && hostRuntime ? path.resolve(normalized) : normalized;
     };
     const send = (message: unknown) => {

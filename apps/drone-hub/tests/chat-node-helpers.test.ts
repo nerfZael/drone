@@ -214,6 +214,24 @@ describe('chat node helpers', () => {
     ).toEqual(['chat:alpha::review']);
   });
 
+  test('composer side chats have their own read state; floating ones are never the main chat', () => {
+    const readState = (unread: boolean) => ({ unread, latestAgentTurnId: 'turn-1', latestAgentRevision: 1 });
+    expect(
+      unreadChatNodeIdsForDrone(
+        drone({
+          id: 'alpha',
+          name: 'Alpha',
+          chats: ['default'],
+          sideChats: [
+            { name: 'Lava cracks', sourceChatName: 'default', agent: { kind: 'builtin', id: 'claude' }, presentation: 'composer' },
+            { name: 'side-0000000a', sourceChatName: 'default', agent: { kind: 'builtin', id: 'claude' } },
+          ],
+          chatReadStates: { default: readState(false), 'Lava cracks': readState(true), 'side-0000000a': readState(true) },
+        }),
+      ),
+    ).toEqual(['chat:alpha::Lava%20cracks']);
+  });
+
   test('keeps a manual unread marker until its shared unread state has been observed', () => {
     const pending = { latestAgentRevision: 2, observedInSummary: false };
     expect(

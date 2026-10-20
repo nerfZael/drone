@@ -43,8 +43,9 @@ export function DesktopEditorPane({ drone, currentDroneId, paneKey, droneById }:
       drone={target}
       paneKey={paneKey}
       currentDroneId={currentDroneId}
-      explorerSwitcher={
+      explorerSwitcher={(placement) =>
         <ExplorerWorkspaceSwitcher
+          placement={placement}
           droneId={drone.id}
           droneName={uiDroneName(drone.name)}
           ownPath={droneHomePath(drone)}
@@ -67,6 +68,8 @@ export type StandaloneEditorControls = {
   quickOpenOpen: boolean;
   /** Opens a file of any drone or folder this editor has shown, whichever it shows now. */
   openLocation(location: { droneId: string; path: string; name: string }): void;
+  /** Opens a file of what it shows now, at a line when given, and reveals it in the explorer. */
+  openFile(target: { path: string; name?: string; line?: number | null; column?: number | null }): void;
 };
 
 /**
@@ -107,6 +110,17 @@ export function useStandaloneEditorPaneProps(
     openEditorFile({ ...next, path, name });
     onFileOpenedRef.current?.();
   }, [drone, openEditorFile, revealFileInExplorer]);
+  // A link followed from a tab of another workspace (a drone's file while the explorer shows a folder, or the
+  // reverse) opens in that tab's workspace, not in the one the explorer shows now.
+  const openTarget = React.useCallback((next: FileTarget & { droneId?: string }) => {
+    if (!next.droneId || next.droneId === drone?.id) {
+      openFile(next);
+      return;
+    }
+    const name = String(next.name ?? '').trim() || next.path.split('/').filter(Boolean).pop() || next.path;
+    openEditorFile({ ...next, name });
+    onFileOpenedRef.current?.();
+  }, [drone?.id, openEditorFile, openFile]);
   const activateTab = React.useCallback((tabId: string) => {
     const tab = openedFileTabs.find((entry) => entry.tabId === tabId);
     if (tab) revealFileInExplorer(tab.path);
@@ -125,6 +139,7 @@ export function useStandaloneEditorPaneProps(
     goForward: () => revealLocation(goForwardLocation()),
     quickOpenOpen: editor.quickOpenOpen,
     openLocation: openEditorLocation,
+    openFile: (target) => openFile({ ...target, name: target.name ?? '' }),
   };
   const pane: Omit<EditorWorkspacePaneProps, 'drone' | 'paneKey' | 'currentDroneId'> = {
     defaultFsPathForCurrentDrone: files.defaultFsPathForCurrentDrone,
@@ -144,7 +159,7 @@ export function useStandaloneEditorPaneProps(
     onOpenFileInEditor: (entry) => { if (entry.kind === 'file') openFile({ path: entry.path, name: entry.name }); },
     // Separate file windows belong to the Hub's dock, not to this editor.
     onOpenFileInPanel: () => false,
-    onOpenFileTargetInEditor: openFile,
+    onOpenFileTargetInEditor: openTarget,
     pendingFileOpenPath: null,
     openedFile: {
       path: editor.openedFile?.path ?? null,

@@ -5,9 +5,27 @@ import {
   stableSortTableRows,
   type NumericTableSortDirection,
 } from '@drone/markdown-table-sort';
+import {
+  hasMarkdownStatusEmoji,
+  splitMarkdownStatusEmoji,
+  type MarkdownStatus,
+  type MarkdownStatusKind,
+  type MarkdownStatusTone,
+} from '@drone/markdown-status-icons';
+import type { LucideIcon } from 'lucide-react-native';
 import ArrowRight from 'lucide-react-native/icons/arrow-right';
+import Ban from 'lucide-react-native/icons/ban';
+import CircleCheck from 'lucide-react-native/icons/circle-check';
+import CircleDashed from 'lucide-react-native/icons/circle-dashed';
+import CirclePause from 'lucide-react-native/icons/circle-pause';
+import CircleX from 'lucide-react-native/icons/circle-x';
 import Copy from 'lucide-react-native/icons/copy';
+import Hourglass from 'lucide-react-native/icons/hourglass';
+import Info from 'lucide-react-native/icons/info';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import SkipForward from 'lucide-react-native/icons/skip-forward';
 import WrapText from 'lucide-react-native/icons/text-wrap';
+import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import {
   Linking,
   Pressable,
@@ -15,6 +33,8 @@ import {
   Text,
   View,
   type GestureResponderEvent,
+  type StyleProp,
+  type TextStyle,
 } from 'react-native';
 import { EmbeddedHorizontalScrollView } from '../components/EmbeddedHorizontalScrollView';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
@@ -24,6 +44,7 @@ import { NativeMermaidDiagram } from './NativeMermaidDiagram';
 import {
   buildNativeMarkdownOutline,
   nativeMarkdownInlineText,
+  nativeMarkdownLeadingStatus,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
   type NativeMarkdownBlock,
@@ -174,6 +195,86 @@ function NativeMermaidBlock({ source }: { source: string }) {
   );
 }
 
+const STATUS_ICONS: Record<MarkdownStatusKind, LucideIcon> = {
+  done: CircleCheck,
+  failed: CircleX,
+  blocked: Ban,
+  warning: TriangleAlert,
+  'in-progress': RefreshCw,
+  waiting: Hourglass,
+  todo: CircleDashed,
+  skipped: SkipForward,
+  paused: CirclePause,
+  info: Info,
+};
+
+const STATUS_TONE_COLORS: Record<MarkdownStatusTone, string> = {
+  success: colors.online,
+  danger: colors.danger,
+  warning: colors.warning,
+  info: colors.info,
+  muted: colors.secondary,
+};
+
+const BODY_FONT_SIZE = 15;
+// Inline icons are views, so they need a pixel size; MarkdownText passes down
+// the font size of the text they sit in.
+const MarkdownFontSizeContext = React.createContext(BODY_FONT_SIZE);
+
+function MarkdownText({ style, ...props }: React.ComponentProps<typeof Text>) {
+  const fontSize = StyleSheet.flatten(style)?.fontSize ?? BODY_FONT_SIZE;
+  return (
+    <MarkdownFontSizeContext.Provider value={fontSize}>
+      <Text style={style} {...props} />
+    </MarkdownFontSizeContext.Provider>
+  );
+}
+
+function StatusIconGlyph({
+  status,
+  fontSize,
+  dimmed,
+  inline,
+}: {
+  status: MarkdownStatus;
+  fontSize: number;
+  dimmed: boolean;
+  inline: boolean;
+}) {
+  const Icon = STATUS_ICONS[status.kind];
+  return (
+    <Icon
+      accessibilityLabel={status.label}
+      color={STATUS_TONE_COLORS[status.tone]}
+      // Inline icons stay a little smaller: a taller view gets clipped by the line box.
+      size={Math.round(fontSize * (inline ? 1.05 : 1.15))}
+      strokeWidth={2.25}
+      style={[
+        // Inline views sit on the text baseline; drop the icon to the text's middle.
+        inline && { transform: [{ translateY: Math.round(fontSize * 0.12) }] },
+        dimmed && styles.statusIconDimmed,
+      ]}
+    />
+  );
+}
+
+function MarkdownStatusIcon({ status, dimmed }: { status: MarkdownStatus; dimmed: boolean }) {
+  const fontSize = React.useContext(MarkdownFontSizeContext);
+  return <StatusIconGlyph status={status} fontSize={fontSize} dimmed={dimmed} inline />;
+}
+
+/** Draws status emoji (✅ 🔄 ⏳ …) as theme-coloured line icons. */
+function StatusEmojiText({ text, dimmed = false }: { text: string; dimmed?: boolean }) {
+  if (!hasMarkdownStatusEmoji(text)) return text;
+  return splitMarkdownStatusEmoji(text).map((segment, index) =>
+    segment.type === 'text' ? (
+      segment.text
+    ) : (
+      <MarkdownStatusIcon key={`status:${index}`} status={segment.status} dimmed={dimmed} />
+    ),
+  );
+}
+
 function FileLinkedText({
   text,
   onOpenFileReference,
@@ -181,10 +282,10 @@ function FileLinkedText({
   text: string;
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
-  if (!onOpenFileReference) return text;
+  if (!onOpenFileReference) return <StatusEmojiText text={text} />;
   return splitMobileFileReferences(text).map((segment, index) =>
     segment.type === 'text' ? (
-      segment.text
+      <StatusEmojiText key={`text:${index}`} text={segment.text} />
     ) : (
       <Text
         key={`${segment.reference.path}:${index}`}
@@ -270,8 +371,10 @@ function InlineMarkdown({
                 text={renderedText}
                 onOpenFileReference={interactive ? onOpenFileReference : undefined}
               />
-            ) : (
+            ) : token.type === 'code' ? (
               renderedText
+            ) : (
+              <StatusEmojiText text={renderedText} dimmed={token.type === 'strike'} />
             )}
           </Text>
         );
@@ -361,7 +464,7 @@ function NativeMarkdownTable({
               const sortable = numericColumns.has(columnIndex);
               if (!sortable) {
                 return (
-                  <Text
+                  <MarkdownText
                     selectable
                     key={columnIndex}
                     style={[
@@ -376,7 +479,7 @@ function NativeMarkdownTable({
                       tone={tone}
                       onOpenFileReference={onOpenFileReference}
                     />
-                  </Text>
+                  </MarkdownText>
                 );
               }
               const direction = activeSort?.columnIndex === columnIndex
@@ -401,7 +504,7 @@ function NativeMarkdownTable({
                   ]}
                 >
                   <View style={styles.tableSortHeaderContent}>
-                    <Text
+                    <MarkdownText
                       style={[
                         styles.tableSortHeaderText,
                         comfortable && styles.tableCellComfortable,
@@ -413,7 +516,7 @@ function NativeMarkdownTable({
                         tone={tone}
                         interactive={false}
                       />
-                    </Text>
+                    </MarkdownText>
                     <Text
                       accessibilityElementsHidden
                       importantForAccessibility="no"
@@ -432,7 +535,7 @@ function NativeMarkdownTable({
           {orderedRows.map(({ row, originalIndex }) => (
             <View key={originalIndex} style={styles.tableRow}>
               {block.headers.map((_, cellIndex) => (
-                <Text
+                <MarkdownText
                   selectable
                   key={cellIndex}
                   style={[
@@ -446,7 +549,7 @@ function NativeMarkdownTable({
                     tone={tone}
                     onOpenFileReference={onOpenFileReference}
                   />
-                </Text>
+                </MarkdownText>
               ))}
             </View>
           ))}
@@ -475,7 +578,7 @@ function NativeMarkdownBlocks({
       {blocks.map((block, index) => {
         if (block.type === 'heading') {
           return (
-            <Text
+            <MarkdownText
               selectable
               key={`heading:${index}`}
               style={[
@@ -499,7 +602,7 @@ function NativeMarkdownBlocks({
                 tone={tone}
                 onOpenFileReference={onOpenFileReference}
               />
-            </Text>
+            </MarkdownText>
           );
         }
         if (block.type === 'code') {
@@ -526,7 +629,7 @@ function NativeMarkdownBlocks({
               {block.callout ? (
                 <Text style={[styles.calloutLabel, calloutStyle?.label]}>{block.callout}</Text>
               ) : null}
-              <Text
+              <MarkdownText
                 selectable
                 style={[
                   styles.quoteText,
@@ -540,41 +643,58 @@ function NativeMarkdownBlocks({
                   tone={tone}
                   onOpenFileReference={onOpenFileReference}
                 />
-              </Text>
+              </MarkdownText>
             </View>
           );
         }
         if (block.type === 'list') {
           return (
             <View key={`list:${index}`} style={styles.list}>
-              {block.items.map((item, itemIndex) => (
-                <View key={itemIndex} style={styles.listRow}>
-                  <Text style={styles.listMarker}>
-                    {item.checked == null
-                      ? block.ordered
-                        ? `${itemIndex + 1}.`
-                        : '•'
-                      : item.checked
-                        ? '☑'
-                        : '☐'}
-                  </Text>
-                  <Text
-                    selectable
-                    style={[
-                      styles.body,
-                      documentMode && styles.documentBody,
-                      toneTextStyle(tone),
-                      comfortable && comfortableTextStyle,
-                    ]}
-                  >
-                    <InlineMarkdown
-                      text={item.text}
-                      tone={tone}
-                      onOpenFileReference={onOpenFileReference}
-                    />
-                  </Text>
-                </View>
-              ))}
+              {block.items.map((item, itemIndex) => {
+                const itemTextStyle: StyleProp<TextStyle> = [
+                  styles.body,
+                  documentMode && styles.documentBody,
+                  toneTextStyle(tone),
+                  comfortable && comfortableTextStyle,
+                ];
+                // A bullet item that opens with a status emoji shows the icon in
+                // the bullet's place, so wrapped lines align under the text.
+                const lead = item.checked == null && !block.ordered
+                  ? nativeMarkdownLeadingStatus(item.text)
+                  : null;
+                const itemText = StyleSheet.flatten(itemTextStyle);
+                return (
+                  <View key={itemIndex} style={styles.listRow}>
+                    {lead ? (
+                      <View style={[styles.listStatusMarker, { height: itemText.lineHeight }]}>
+                        <StatusIconGlyph
+                          status={lead.status}
+                          fontSize={itemText.fontSize ?? BODY_FONT_SIZE}
+                          dimmed={lead.dimmed}
+                          inline={false}
+                        />
+                      </View>
+                    ) : (
+                      <Text style={styles.listMarker}>
+                        {item.checked == null
+                          ? block.ordered
+                            ? `${itemIndex + 1}.`
+                            : '•'
+                          : item.checked
+                            ? '☑'
+                            : '☐'}
+                      </Text>
+                    )}
+                    <MarkdownText selectable style={itemTextStyle}>
+                      <InlineMarkdown
+                        text={lead ? lead.text : item.text}
+                        tone={tone}
+                        onOpenFileReference={onOpenFileReference}
+                      />
+                    </MarkdownText>
+                  </View>
+                );
+              })}
             </View>
           );
         }
@@ -591,7 +711,7 @@ function NativeMarkdownBlocks({
           );
         }
         return (
-          <Text
+          <MarkdownText
             selectable
             key={`paragraph:${index}`}
             style={[
@@ -606,7 +726,7 @@ function NativeMarkdownBlocks({
               tone={tone}
               onOpenFileReference={onOpenFileReference}
             />
-          </Text>
+          </MarkdownText>
         );
       })}
     </View>
@@ -673,13 +793,13 @@ function DocumentSection({
   ];
   const headingContent = (
     <View style={styles.documentHeadingRow}>
-      <Text style={headingTextStyle}>
+      <MarkdownText style={headingTextStyle}>
         <InlineMarkdown
           text={section.heading.text}
           tone="assistant"
           onOpenFileReference={onOpenFileReference}
         />
-      </Text>
+      </MarkdownText>
       {canToggle && !expanded ? (
         <ArrowRight
           color={colors.mutedDim}
@@ -916,6 +1036,7 @@ const styles = StyleSheet.create({
   userText: { color: colors.userBubbleText },
   emphasis: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through', color: colors.muted },
+  statusIconDimmed: { opacity: 0.7 },
   link: { color: colors.link, textDecorationLine: 'underline' },
   fileLink: {
     color: colors.accentAlt,
@@ -1039,6 +1160,7 @@ const styles = StyleSheet.create({
   list: { gap: 5 },
   listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   listMarker: { width: 22, color: colors.chatListMarker, fontSize: 13, lineHeight: 21, textAlign: 'right' },
+  listStatusMarker: { width: 22, alignItems: 'flex-end', justifyContent: 'center' },
   divider: { height: 1, backgroundColor: colors.borderSubtle, marginVertical: 4 },
   tableBlock: { width: '100%', minWidth: 0, alignSelf: 'stretch' },
   tableToolbar: {

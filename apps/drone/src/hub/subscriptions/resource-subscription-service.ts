@@ -13,6 +13,12 @@ import crypto from 'node:crypto';
 import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
 import { CHAT_IDLE_PREVIEW_CHARS, CHAT_MESSAGE_MAX_CHARS } from '../chat-read/chat-read-limits';
 import { renderEventNotificationPrompt } from '@drone/assistant-chat';
+import {
+  CHANNEL_SUBSCRIPTION_INTENT,
+  channelEventContentForAgent,
+  channelSubscriptionEvents,
+  type ChannelSubscriptionMode,
+} from '../channels/channel-model';
 
 import { ManagedLoop } from '../../background/managed-loop';
 import { getPromptQueueRepository } from '../../host/prompt-queue-repository';
@@ -70,9 +76,17 @@ type SessionSubscriber = {
   subscriptionsChanged?(subscriptions: ResourceSubscription[]): void;
 };
 
+export type ChatPendingQuestions = {
+  requestId: string;
+  createdAt: string;
+  questions: Array<{ id: string; question: string }>;
+};
+
 export type ChatSubscriptionStatus = {
   idle: boolean;
   reason: string;
+  /** Unanswered ask_questions requests from the chat. */
+  pendingQuestions?: ChatPendingQuestions[];
   latest: {
     id?: string;
     role?: string;
@@ -93,6 +107,8 @@ export type ResourceSubscriptionServiceDependencies = {
     event?: ResourceEvent,
   ) => Promise<boolean>;
   readCustomEventHistorySourceIds?: (reader: ChatResourceLocation) => Promise<string[]>;
+  /** A channel's current name, for subscription labels. */
+  resolveChannelName?: (channelId: string) => string | null;
   wakePromptQueue: (droneId: string, chatName: string) => void;
   resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
   resolveChangeRequests?: (
@@ -318,6 +334,10 @@ export class ResourceSubscriptionService {
   ): ResourceSubscription {
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'custom_event') {
       return { ...subscription, resourceLabel: subscription.resourceId };
+    }
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'channel') {
+      const name = this.deps.resolveChannelName?.(subscription.resourceId);
+      return name ? { ...subscription, resourceLabel: `#${name}` } : subscription;
     }
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'question_request') {
       return {
@@ -721,6 +741,60 @@ export class ResourceSubscriptionService {
     return result;
   }
 
+  /**
+   * Puts a member chat's channel subscription in a mode: mentions only, every message, or none.
+   * Channel membership and read access are the caller's to check.
+   */
+  async setChannelSubscription(input: {
+    subscriber: ResourceSubscriptionSubscriber;
+    channelId: string;
+    mode: ChannelSubscriptionMode;
+  }): Promise<ResourceSubscription | null> {
+    const subscriber = normalizeSubscriber(input.subscriber);
+    const channelId = String(input.channelId ?? '').trim();
+    if (!channelId) throw new Error('channel ID is required');
+    const existing = this.deps.repository
+      .listForResource('drone-hub', 'channel', channelId)
+      .find((item) => item.subscriber.chatId === subscriber.chatId);
+    if (input.mode === 'none') {
+      if (existing) await this.cancel(existing.id, subscriber.chatId);
+      hubChangeEvents.emitChannelsChange(channelId, 'members');
+      return null;
+    }
+    const settings = await this.settings();
+    const result = await this.deps.repository.upsert({
+      subscriber,
+      provider: 'drone-hub',
+      resourceType: 'channel',
+      resourceId: channelId,
+      events: [...channelSubscriptionEvents(input.mode)],
+      intent: CHANNEL_SUBSCRIPTION_INTENT,
+      cursor: {},
+      maxActive: settings.maxActiveSubscriptionsPerConversation,
+    });
+    this.notifySessionSubscriptions(subscriber.chatId);
+    hubChangeEvents.emitChannelsChange(channelId, 'members');
+    return this.withResourceLabel(result.subscription);
+  }
+
+  /** Active and paused subscriptions to a channel, by subscribing chat. */
+  channelSubscriptions(channelId: string): Map<string, ResourceSubscription> {
+    return new Map(
+      this.deps.repository
+        .listForResource('drone-hub', 'channel', channelId)
+        .map((subscription) => [subscription.subscriber.chatId, subscription]),
+    );
+  }
+
+  /** Ends channel subscriptions, for removed members or a deleted channel (all of them when chatIds is omitted). */
+  async cancelChannelSubscriptions(channelId: string, chatIds?: readonly string[]): Promise<void> {
+    const only = chatIds ? new Set(chatIds) : null;
+    for (const subscription of this.deps.repository.listForResource('drone-hub', 'channel', channelId)) {
+      if (only && !only.has(subscription.subscriber.chatId)) continue;
+      await this.cancel(subscription.id, subscription.subscriber.chatId);
+    }
+  }
+
   async update(input: {
     id: string;
     subscriberChatId: string;
@@ -741,12 +815,14 @@ export class ResourceSubscriptionService {
         : {}),
     });
     if (subscription) this.notifySessionSubscriptions(subscription.subscriber.chatId);
+    if (subscription?.resourceType === 'channel') hubChangeEvents.emitChannelsChange(subscription.resourceId, 'members');
     return subscription ? this.withResourceLabel(subscription) : null;
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
     const subscription = await this.deps.repository.cancel(id, subscriberChatId);
     if (subscription) this.notifySessionSubscriptions(subscription.subscriber.chatId);
+    if (subscription?.resourceType === 'channel') hubChangeEvents.emitChannelsChange(subscription.resourceId, 'members');
     return subscription ? this.withResourceLabel(subscription) : null;
   }
 
@@ -845,7 +921,8 @@ export class ResourceSubscriptionService {
       if (
         subscription.resourceType === 'change_request' ||
         subscription.resourceType === 'question_request' ||
-        subscription.resourceType === 'custom_event'
+        subscription.resourceType === 'custom_event' ||
+        subscription.resourceType === 'channel'
       )
         continue;
       if (subscription.resourceType === 'cron') {
@@ -1066,7 +1143,8 @@ export class ResourceSubscriptionService {
             rejected.push({
               deliveryId: item.deliveryId,
               error: 'subscriber no longer has access to the resource',
-              permanent: false,
+              // Turning off a member's read access means it must not see these messages, even later.
+              permanent: current.resourceType === 'channel',
             });
             continue;
           }
@@ -1309,7 +1387,12 @@ function chatCursor(
       status.latest?.status === 'failed'
         ? String(status.latest?.id ?? '').trim()
         : '',
+    seenQuestionIds: pendingQuestionIds(status),
   };
+}
+
+function pendingQuestionIds(status: ChatSubscriptionStatus): string[] {
+  return (status.pendingQuestions ?? []).map((request) => request.requestId);
 }
 
 function normalizeChatCursor(
@@ -1327,6 +1410,10 @@ function normalizeChatCursor(
     lastLatestId: String(raw.lastLatestId ?? '').trim(),
     idleCauseId: String(raw.idleCauseId ?? '').trim(),
     lastFailureId: String(raw.lastFailureId ?? '').trim(),
+    // Cursors from before question events existed treat current questions as already seen.
+    seenQuestionIds: Array.isArray(raw.seenQuestionIds)
+      ? raw.seenQuestionIds.map((id) => String(id))
+      : pendingQuestionIds(status),
   };
 }
 
@@ -1351,6 +1438,17 @@ export function detectChatSubscriptionChanges(
     events.push(chatEvent(subscription, location, status, 'chat.failed', latestId));
     cursor.lastFailureId = latestId;
   }
+
+  const seenQuestionIds = new Set<string>(cursor.seenQuestionIds);
+  if (subscription.events.includes('chat.questions_asked')) {
+    for (const request of status.pendingQuestions ?? []) {
+      if (!seenQuestionIds.has(request.requestId)) {
+        events.push(chatQuestionsEvent(subscription, location, request));
+      }
+    }
+  }
+  // Only open requests are kept; request ids are never reused, so this stays bounded.
+  cursor.seenQuestionIds = pendingQuestionIds(status);
 
   if (!status.idle) {
     cursor.idleArmed = true;
@@ -1381,6 +1479,36 @@ export function detectChatSubscriptionChanges(
   cursor.lastIdle = status.idle;
   cursor.lastLatestId = latestId;
   return { cursor, events };
+}
+
+function chatQuestionsEvent(
+  subscription: ResourceSubscription,
+  location: ChatResourceLocation,
+  request: ChatPendingQuestions,
+): ResourceEvent {
+  const chatLabel = chatResourceSubscriptionLabel(location);
+  return {
+    id: crypto.randomUUID(),
+    providerEventId: `drone-hub:${subscription.resourceId}:chat.questions_asked:${request.requestId}`,
+    provider: 'drone-hub',
+    resourceType: 'chat',
+    resourceId: subscription.resourceId,
+    parentResourceId: null,
+    eventType: 'chat.questions_asked',
+    occurredAt: validIso(request.createdAt, new Date().toISOString()),
+    summary: `${chatLabel} asked ${request.questions.length === 1 ? 'a question' : `${request.questions.length} questions`}.`,
+    providerContent: {
+      chatLabel,
+      chatId: location.chatId,
+      droneId: location.droneId,
+      droneName: String(location.droneName ?? '').trim() || location.droneId,
+      chatName: location.chatName,
+      requestId: request.requestId,
+      questions: request.questions,
+      answerWith:
+        'Use read_chat to see the full questions and answer_questions to reply, or leave them for the user.',
+    },
+  };
 }
 
 function chatEvent(
@@ -1426,6 +1554,13 @@ function chatEvent(
           }
         : {}),
       reason: status.reason,
+      ...(eventType === 'chat.idle' && status.pendingQuestions?.length
+        ? {
+            pendingQuestionRequestIds: pendingQuestionIds(status),
+            pendingQuestionsHint:
+              'The chat is waiting on unanswered questions. Use read_chat to see them and answer_questions to reply.',
+          }
+        : {}),
     },
   };
 }
@@ -1447,7 +1582,10 @@ function subscriptionPromptEvents(batch: ResourceSubscriptionBatch) {
     occurredAt: item.event.occurredAt,
     intent: item.subscription.intent,
     summary: item.event.summary,
-    providerContent: item.event.providerContent,
+    providerContent:
+      item.event.resourceType === 'channel'
+        ? channelEventContentForAgent(item.event.providerContent)
+        : item.event.providerContent,
   }));
 }
 

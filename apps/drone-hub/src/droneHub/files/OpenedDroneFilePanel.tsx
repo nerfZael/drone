@@ -13,6 +13,7 @@ import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { copyText } from '../app/clipboard';
 import { requestJson } from '../http';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
+import { openWorkspaceLink, workspaceLinkForPath } from '../workspaces/workspace-links';
 import type { DroneFsTextChunkPayload } from '../types';
 import type { DroneOpenedFileState } from './opened-file-types';
 import {
@@ -38,6 +39,7 @@ import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 import { useHeldHtmlPreview } from './use-held-html-preview';
 import { readLargeHtmlSource } from './read-large-html-source';
 import { shouldRecoverPreviewAsSource, rememberPreviewRecovery } from './preview-recovery';
+import { desktopFileMediaUrl } from './file-read-url';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
@@ -276,6 +278,8 @@ function LargeTextFileViewer({
 type OpenedDroneFilePanelProps = {
   droneId: string;
   droneName: string;
+  /** Where its explorer starts, for workspace links to the file. */
+  workspaceHomePath?: string;
   file: DroneOpenedFileState;
   fileTabs?: DroneOpenedFileTabState[];
   activeTabId?: string | null;
@@ -286,6 +290,8 @@ type OpenedDroneFilePanelProps = {
   onCloseFile?: (tabId?: string | null) => void;
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
+  /** Labels tabs whose file is in another workspace than the drone's own. */
+  workspaceLabelForTab?: (tab: DroneOpenedFileTabState) => string | null;
   onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onAppendFileDictationLine?: (input: {
     droneId: string;
@@ -303,6 +309,7 @@ type OpenedDroneFilePanelProps = {
 export function OpenedDroneFilePanel({
   droneId,
   droneName,
+  workspaceHomePath,
   file,
   fileTabs = [],
   activeTabId = null,
@@ -313,6 +320,7 @@ export function OpenedDroneFilePanel({
   onCloseFile,
   onActivateFileTab,
   onReorderFileTabs,
+  workspaceLabelForTab,
   onOpenResolvedFile,
   onAppendFileDictationLine,
   onOpenFileDictationTarget,
@@ -597,10 +605,7 @@ export function OpenedDroneFilePanel({
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
-    const revisionQuery = fileRevision
-      ? `&revision=${encodeURIComponent(fileRevision)}`
-      : '';
-    return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(activeFilePath)}${revisionQuery}`;
+    return desktopFileMediaUrl(droneId, activeFilePath, fileRevision);
   }, [activeFilePath, droneId, fileKind, fileRevision]);
   const clearEditorTargetHighlight = React.useCallback(() => {
     if (editorTargetHighlightTimerRef.current != null) {
@@ -713,6 +718,15 @@ export function OpenedDroneFilePanel({
   // commands must read the current tab's save handler, not the first one's.
   const onSaveFileRef = React.useRef(onSaveFile);
   onSaveFileRef.current = onSaveFile;
+  // A link to this file at the cursor's line, to paste into documents and chats.
+  const copyWorkspaceLinkRef = React.useRef<(line: number | null) => void>(() => {});
+  copyWorkspaceLinkRef.current = (line) => {
+    const path = activeFilePath;
+    if (!path) return;
+    void workspaceLinkForPath({ shownId: droneId, homePath: workspaceHomePath ?? '', path, line })
+      .then((link) => (link ? copyText(link) : false))
+      .catch(() => false);
+  };
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
@@ -730,6 +744,13 @@ export function OpenedDroneFilePanel({
       });
       editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
         languageActionsRef.current?.findReferences();
+      });
+      editor.addAction({
+        id: 'drone-hub.copy-workspace-link',
+        label: 'Copy Workspace Link',
+        contextMenuGroupId: '9_cutcopypaste',
+        contextMenuOrder: 10,
+        run: (current) => copyWorkspaceLinkRef.current(current.getPosition()?.lineNumber ?? null),
       });
       applyEditorCursorTarget();
       syncIncomingEditorValue(editor);
@@ -818,10 +839,13 @@ export function OpenedDroneFilePanel({
     editorRef.current?.focus?.();
   }, [activeFilePath, fileLoading, fileTargetLine, openedFileEditorVisible]);
 
-  const openMarkdownPreviewLink = React.useCallback(
-    (href: string): boolean => {
+  const openPreviewLink = React.useCallback(
+    (href: string, fromPath?: string): boolean => {
+      // A file in a workspace, this one or another: the Hub's window opens it.
+      if (openWorkspaceLink(href)) return true;
       if (!onOpenResolvedFile) return false;
-      const resolved = resolveMarkdownPreviewLinkTarget(activeFilePath, href);
+      // A link in a page framed inside an HTML preview is relative to that page.
+      const resolved = resolveMarkdownPreviewLinkTarget(fromPath ?? activeFilePath, href);
       if (!resolved) return false;
       const name = resolved.path.split('/').filter(Boolean).pop() || resolved.path;
       onOpenResolvedFile({
@@ -998,6 +1022,7 @@ export function OpenedDroneFilePanel({
           onActivateTab={(tabId) => onActivateFileTab?.(tabId)}
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
+          workspaceLabel={workspaceLabelForTab}
           trailingActions={
             (onAppendFileDictationLine && onOpenFileDictationTarget) ||
             openedFileIsMarkdown ||
@@ -1335,7 +1360,7 @@ export function OpenedDroneFilePanel({
                 key={activeFileViewModeKey}
                 searchRequest={previewSearchRequest}
                 text={fileContent ?? ''}
-                onOpenLink={openMarkdownPreviewLink}
+                onOpenLink={openPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}
                 alignment={markdownPreviewAlignment}
                 targetLine={fileTargetLine}
@@ -1344,7 +1369,7 @@ export function OpenedDroneFilePanel({
             ) : openedFileShowsHtmlPreview && htmlPreviewLoading ? (
               <UiCenteredLoadingState message="Loading HTML file…" />
             ) : openedFileShowsHtmlPreview ? (
-              <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={openedFileIsLargeText ? null : heldHtmlPreview.source} fileName={fileName} droneId={droneId} filePath={activeFilePath} />
+              <IsolatedHtmlPreview key={`${activeFileViewModeKey}:${heldHtmlPreview.renderSeq}`} source={openedFileIsLargeText ? null : heldHtmlPreview.source} fileName={fileName} droneId={droneId} filePath={activeFilePath} onOpenLink={openPreviewLink} />
             ) : openedFileEditorVisible ? (
               <AppShortcutBoundary
                 data-editor-zoom-surface="file-editor"

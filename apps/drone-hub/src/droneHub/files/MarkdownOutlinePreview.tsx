@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { rehypeStatusIcons } from '@drone/assistant-markdown';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { parseMarkdownOutline, type MarkdownOutlineSection } from './markdown-outline';
 import type { MarkdownPreviewAlignment } from './markdown-preview-alignment';
@@ -16,6 +17,7 @@ type MarkdownOutlinePreviewProps = {
 };
 
 const HEADING_REMARK_PLUGINS = [remarkGfm];
+const HEADING_REHYPE_PLUGINS = [rehypeStatusIcons];
 
 function MarkdownHeadingParagraph({ children }: React.ComponentProps<'p'>) {
   return <>{children}</>;
@@ -100,6 +102,7 @@ function HeadingTitle({ text }: { text: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={HEADING_REMARK_PLUGINS}
+      rehypePlugins={HEADING_REHYPE_PLUGINS}
       skipHtml
       components={HEADING_MARKDOWN_COMPONENTS}
     >

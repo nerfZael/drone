@@ -9,6 +9,9 @@ export type ChatBackgroundTask = {
   type: string;
   description: string;
   startedAt: string;
+  /** When a wake-up Claude scheduled should fire. */
+  dueAt?: string;
+  recurring?: boolean;
 };
 
 // Most chats have no background work; check them rarely and watch active ones closely.
@@ -26,16 +29,30 @@ function normalizeTasks(raw: unknown): ChatBackgroundTask[] {
         type: String(task?.type ?? ''),
         description: String(task?.description ?? '').trim(),
         startedAt: String(task?.startedAt ?? ''),
+        ...(typeof task?.dueAt === 'string' ? { dueAt: task.dueAt } : {}),
+        ...(task?.recurring === true ? { recurring: true } : {}),
       },
     ];
   });
 }
 
-function taskTypeLabel(type: string): string {
+function taskTypeLabel(task: Pick<ChatBackgroundTask, 'type' | 'recurring'>): string {
+  const { type } = task;
+  if (type === 'wakeup') return 'Scheduled wake-up';
+  if (type === 'cron') return task.recurring ? 'Recurring schedule' : 'Scheduled task';
   if (type === 'local_bash') return 'Command or watch';
   if (type === 'local_agent') return 'Subagent';
   if (type === 'remote_agent') return 'Remote agent';
   return type.replace(/_/g, ' ');
+}
+
+function dueLabel(dueAt: string | undefined, now: number): string {
+  const ms = Date.parse(dueAt ?? '');
+  if (!Number.isFinite(ms)) return '';
+  const minutes = Math.round((ms - now) / 60_000);
+  if (minutes < 1) return 'Due now';
+  if (minutes < 60) return `Due in ${minutes}m`;
+  return `Due ${new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function startedLabel(startedAt: string, now: number): string {
@@ -148,7 +165,11 @@ export function ChatBackgroundTaskIndicator({
   }, [open]);
 
   if (tasks.length === 0) return null;
-  const summary = `Watching ${tasks.length} background task${tasks.length === 1 ? '' : 's'}`;
+  const onlySchedules = tasks.every((task) => task.type === 'wakeup' || task.type === 'cron');
+  const plural = tasks.length === 1 ? '' : 's';
+  const summary = onlySchedules
+    ? `${tasks.length} scheduled wake-up${plural}`
+    : `Watching ${tasks.length} background task${plural}`;
   const now = Date.now();
 
   const stopAll = async () => {
@@ -178,7 +199,7 @@ export function ChatBackgroundTaskIndicator({
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((current) => !current)}
-        title={tasks.map((task) => task.description || taskTypeLabel(task.type)).join('\n')}
+        title={tasks.map((task) => task.description || taskTypeLabel(task)).join('\n')}
         className="inline-flex min-h-7 max-w-full items-center gap-1.5 rounded px-1.5 text-[.6875rem] font-medium text-[var(--muted-dim)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--chat-composer-control-fg)]"
       >
         <span className="text-[var(--accent)]">
@@ -197,7 +218,8 @@ export function ChatBackgroundTaskIndicator({
               Background tasks
             </div>
             <div className="mt-0.5 text-10 text-[var(--muted-dim)]">
-              Claude left these running. When one reports, this chat starts a turn on its own.
+              Claude left these running or scheduled. When one reports or comes due, this chat
+              starts a turn on its own.
             </div>
           </div>
           <div className="max-h-[min(20rem,55vh)] overflow-y-auto p-1.5">
@@ -210,7 +232,10 @@ export function ChatBackgroundTaskIndicator({
                   {task.description || task.id}
                 </div>
                 <div className="mt-1 text-10 text-[var(--muted-dim)]">
-                  {[taskTypeLabel(task.type), startedLabel(task.startedAt, now)]
+                  {[
+                    taskTypeLabel(task),
+                    task.dueAt ? dueLabel(task.dueAt, now) : startedLabel(task.startedAt, now),
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </div>

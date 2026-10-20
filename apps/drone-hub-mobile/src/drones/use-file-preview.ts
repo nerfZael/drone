@@ -494,6 +494,24 @@ export function useFilePreview({
     [request, requestDroneControl],
   );
 
+  // Lets the rendered page load its media by URL, as a browser would. Files on the
+  // phone itself have no Hub to serve them; those pages keep embedded images.
+  const openHtmlMediaSession = React.useCallback(
+    async (path: string, signal: AbortSignal): Promise<string | null> => {
+      if (!request || request.phoneTarget) return null;
+      const result = await requestDroneControl(
+        request.targetId,
+        'file.preview',
+        { droneId: request.droneId, chatName: request.chatName, path, htmlPreviewSession: true },
+        signal,
+      );
+      // The preview validates the URL before it reaches the page's policy.
+      const mediaBase = result?.htmlPreview?.mediaBase;
+      return typeof mediaBase === 'string' ? mediaBase : null;
+    },
+    [request, requestDroneControl],
+  );
+
   const openExplorer = React.useCallback(() => {
     if (!selectedDrone) return;
     const context = { targetId, droneId: selectedDrone.id, chatName, phoneTarget };
@@ -670,6 +688,7 @@ export function useFilePreview({
     openExplorer,
     close,
     readImage,
+    openHtmlMediaSession,
     retry: () => {
       if (request && requestIsCurrent) {
         void load(request, { background: previewRef.current != null });

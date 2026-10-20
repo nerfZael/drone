@@ -11,6 +11,14 @@ export type QueuedChatOrigin = {
 
 export type DroneChatCreationMode = 'empty' | 'clone-history' | 'copy-config';
 
+/** The chat that created this chat through a Drone Hub MCP tool. */
+export type ChatCreator = {
+  kind: 'chat';
+  chatId: string;
+  droneId: string;
+  chatName: string;
+};
+
 export type CreateDroneChatInput = {
   droneId: string;
   droneEntry: any;
@@ -20,9 +28,12 @@ export type CreateDroneChatInput = {
   draft?: boolean;
   queuedOrigin?: QueuedChatOrigin;
   sideChat?: boolean;
+  /** Show the side chat as a chip beside its source's composer instead of a floating window. */
+  sideChatPresentation?: 'composer';
   checkpointId?: string;
   /** The ID the client chose; a create retried with it returns the chat it made. */
   chatId?: string;
+  createdBy?: ChatCreator;
 };
 
 export type CreateDroneChatResult = {
@@ -126,8 +137,17 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       ? deps.readChatFromStore({ droneId: input.droneId, chatName: sourceChatName }).chat
       : null;
     let checkpoint: ReturnType<typeof completedChatCheckpoint> | undefined;
-    if (input.sideChat && (input.creationMode !== 'clone-history' || !sourceBeforeCreate)) {
+    // A side chat is a fork of its source, or (copy-config) a new chat with its agent configuration.
+    if (input.sideChat && (input.creationMode === 'empty' || !sourceBeforeCreate)) {
       throw new Error('Side chat creation requires an existing source chat');
+    }
+    if (input.sideChat && input.draft) throw new Error('Side chats cannot be drafts');
+    if (input.sideChatPresentation && !input.sideChat) {
+      throw new Error('A side chat presentation requires a side chat');
+    }
+    // A floating side chat opens at its fork point; only a composer side chat starts new.
+    if (input.sideChat && input.creationMode === 'copy-config' && !input.sideChatPresentation) {
+      throw new Error('A new side chat requires a side chat presentation');
     }
     const sourceRunning =
       input.creationMode === 'clone-history' &&
@@ -248,9 +268,23 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
           if (input.chatId) entry.id = input.chatId;
           if (input.draft) entry.draft = true;
           if (input.queuedOrigin) entry.queuedChatOrigin = input.queuedOrigin;
-          if (input.sideChat && checkpoint) {
+          if (input.createdBy) entry.createdBy = input.createdBy;
+          const startsNew = input.creationMode === 'copy-config';
+          if (input.sideChat && (checkpoint || startsNew)) {
+            const sourceChatId = String(source?.id ?? '').trim();
             entry.visibility = 'side-chat';
-            entry.sideChatOrigin = { sourceChatName, checkpointId: checkpoint.checkpointId };
+            entry.sideChatOrigin = {
+              sourceChatName,
+              ...(sourceChatId ? { sourceChatId } : {}),
+              ...(checkpoint ? { checkpointId: checkpoint.checkpointId } : {}),
+              ...(input.sideChatPresentation
+                ? { kind: startsNew ? 'new' : 'fork', presentation: input.sideChatPresentation }
+                : {}),
+            };
+            // A side chat works where its source works: same drone, so the grants stay valid.
+            if (input.sideChatPresentation && source?.workspaceAccess) {
+              entry.workspaceAccess = structuredClone(source.workspaceAccess);
+            }
           }
           if (input.creationMode === 'clone-history' && source) {
             const sourceChatId = String(source.id ?? '').trim();

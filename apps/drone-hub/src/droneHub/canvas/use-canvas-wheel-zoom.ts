@@ -25,9 +25,13 @@ export function useCanvasWheelZoom(
   getView: () => DroneCanvasBoard,
   setViewport: (panX: number, panY: number, scale: number) => void,
   onZoom: () => void = () => {},
+  /** True while the view is fixed: the wheel and a pinch then do nothing, not even zoom the window. */
+  isLocked: () => boolean = () => false,
 ) {
   const onZoomRef = React.useRef(onZoom);
   onZoomRef.current = onZoom;
+  const isLockedRef = React.useRef(isLocked);
+  isLockedRef.current = isLocked;
 
   React.useEffect(() => {
     const viewport = viewportRef.current;
@@ -76,6 +80,10 @@ export function useCanvasWheelZoom(
 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      if (isLockedRef.current()) {
+        stop();
+        return;
+      }
       canvasPerf.wheel();
       onZoomRef.current();
       const deltaPx = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * viewport.clientHeight : event.deltaY;

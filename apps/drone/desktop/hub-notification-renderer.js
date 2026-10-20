@@ -13,9 +13,14 @@ document.addEventListener('keydown', (event) => { if (event.key === 'Escape') br
 bridge.read().then((payload) => {
   const named = payload.name && payload.kind !== 'test';
   document.querySelector('.card').classList.toggle('failed', payload.kind === 'failed');
-  document.getElementById('symbol').textContent = payload.kind === 'failed' ? '!' : payload.kind === 'message' ? '•' : '✓';
+  document.getElementById('symbol').textContent =
+    payload.kind === 'failed' ? '!' : payload.kind === 'message' ? '•' : payload.kind === 'channel_mention' ? '@' : '✓';
   document.getElementById('name').textContent = named ? payload.name : '';
-  document.getElementById('suffix').textContent = named ? ` ${payload.kind === 'message' ? 'sent a message' : payload.kind}` : payload.title;
+  // A channel mention's title starts with the chat's name and says where it mentioned you.
+  const suffix = payload.kind === 'message' ? 'sent a message'
+    : payload.kind === 'channel_mention' && payload.title.startsWith(payload.name) ? payload.title.slice(payload.name.length).trim()
+      : payload.kind;
+  document.getElementById('suffix').textContent = named ? ` ${suffix}` : payload.title;
   document.getElementById('body').textContent = payload.body;
   document.getElementById('body').title = payload.body;
   document.getElementById('open').setAttribute('aria-label', `${payload.title}. Open in Drone Hub`);

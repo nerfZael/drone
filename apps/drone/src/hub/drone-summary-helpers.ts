@@ -52,6 +52,30 @@ export function resolveChatCloneSources(chats: unknown): Record<string, string> 
   return out;
 }
 
+/**
+ * Chat name -> the chat of the same drone that created it through the DroneHub tools (an orchestrator's workers).
+ * The creator's chat ID wins over its name, as for clone sources; a creator that is gone or in another drone drops out.
+ */
+export function resolveChatCreators(chats: unknown, droneId: string): Record<string, string> {
+  const entries = chats && typeof chats === 'object' ? (Object.entries(chats) as Array<[string, any]>) : [];
+  const nameById = new Map<string, string>();
+  for (const [chatName, entry] of entries) {
+    const id = String(entry?.id ?? '').trim();
+    if (id) nameById.set(id, chatName);
+  }
+  const known = new Set(entries.map(([chatName]) => chatName));
+  const out: Record<string, string> = {};
+  for (const [chatName, entry] of entries) {
+    const creator = entry?.createdBy;
+    if (creator?.kind !== 'chat' || String(creator?.droneId ?? '').trim() !== droneId) continue;
+    const byId = nameById.get(String(creator?.chatId ?? '').trim());
+    const byName = String(creator?.chatName ?? '').trim();
+    const source = byId ?? (known.has(byName) ? byName : '');
+    if (source && source !== chatName) out[chatName] = source;
+  }
+  return out;
+}
+
 export function summarizeDroneActivity(
   entry: any,
   canonicalMessageAtByChatId?: ReadonlyMap<string, string>,

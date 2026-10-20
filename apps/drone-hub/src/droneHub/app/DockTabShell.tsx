@@ -3,7 +3,7 @@ import type { IDockviewPanelHeaderProps } from 'dockview';
 import { usePanelTitle } from './ChatWindowTab';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 import { desktopToolTabSupported, desktopToolWindowsAvailable, useDesktopToolWindows } from './desktop-tool-windows';
-import { expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPreferences } from './workspace-panel-expansion';
+import { CHAT_EXPANSION_KEY, expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPreferences } from './workspace-panel-expansion';
 
 /**
  * A dock tab that carries its own controls before the close button: the
@@ -11,9 +11,15 @@ import { expansionKeyForPanel, requestPanelExpansionToggle, usePanelExpansionPre
  * Middle-click closes, like dockview's stock tab; double-click expands the
  * window over its neighbours until the next double-click.
  */
-export function DockTabShell({ api, children }: {
+export function DockTabShell({ api, children, expandable = true, onClick, collapsed }: {
   api: IDockviewPanelHeaderProps['api'];
   children?: React.ReactNode;
+  /** False for a window that never expands over its neighbours: no expand switch, and double-click does nothing. */
+  expandable?: boolean;
+  /** A click on the tab itself, not on one of its buttons. */
+  onClick?: () => void;
+  /** For a window that collapses to its tab bar: whether it is collapsed now. */
+  collapsed?: boolean;
 }) {
   const title = usePanelTitle(api);
   const middleButtonDown = React.useRef(false);
@@ -22,6 +28,10 @@ export function DockTabShell({ api, children }: {
       className="dv-default-tab"
       data-testid="dockview-dv-default-tab"
       title={title}
+      aria-expanded={collapsed === undefined ? undefined : !collapsed}
+      onClick={(event) => {
+        if (onClick && !(event.target as Element).closest('button, .dv-default-tab-action')) onClick();
+      }}
       onPointerDown={(event) => {
         middleButtonDown.current = event.button === 1;
         if (event.button === 1) event.preventDefault();
@@ -34,13 +44,13 @@ export function DockTabShell({ api, children }: {
         middleButtonDown.current = false;
       }}
       onDoubleClick={(event) => {
-        if ((event.target as Element).closest('button, .dv-default-tab-action')) return;
+        if (!expandable || (event.target as Element).closest('button, .dv-default-tab-action')) return;
         if (api.group) requestPanelExpansionToggle(api.group.id);
       }}
     >
       <span className="dv-default-tab-content">{title}</span>
       {/* Controls that render nothing (outside the desktop app) leave the slot empty, and CSS drops the divider with it. */}
-      <span className="dh-dock-tab-controls"><ExpandOnFocusButton panelId={api.id} />{children}</span>
+      <span className="dh-dock-tab-controls">{expandable ? <ExpandOnFocusButton api={api} /> : null}{children}</span>
       <span className="dh-dock-tab-divider" aria-hidden="true" />
       <div
         className="dv-default-tab-action"
@@ -61,12 +71,29 @@ export function DockTabShell({ api, children }: {
 /** Stops a tab control's press from dragging or activating the tab. */
 export const stopTabEvent = (event: React.SyntheticEvent) => event.stopPropagation();
 
-/** Turns expand on focus on or off for this kind of window, in every layout. */
-function ExpandOnFocusButton({ panelId }: { panelId: string | undefined }) {
-  const key = panelId ? expansionKeyForPanel(panelId) : '';
+function useDockedInGrid(api: IDockviewPanelHeaderProps['api']): boolean {
+  const [docked, setDocked] = React.useState(() => api.location.type === 'grid');
+  React.useEffect(() => {
+    const update = () => setDocked(api.location.type === 'grid');
+    update();
+    const disposables = [api.onDidLocationChange(update), api.onDidGroupChange(update)];
+    return () => disposables.forEach((disposable) => disposable.dispose());
+  }, [api]);
+  return docked;
+}
+
+/**
+ * Turns expand on focus on or off for this kind of window, in every layout.
+ * For chats it keeps them at their reading width instead. Floating windows
+ * do neither, so theirs is left out.
+ */
+export function ExpandOnFocusButton({ api }: { api: IDockviewPanelHeaderProps['api'] }) {
+  const key = api.id ? expansionKeyForPanel(api.id) : '';
   const on = usePanelExpansionPreferences((state) => Boolean(key && state.enabled[key]));
   const toggle = usePanelExpansionPreferences((state) => state.toggle);
-  if (!key) return null;
+  const docked = useDockedInGrid(api);
+  if (!key || !docked) return null;
+  const chat = key === CHAT_EXPANSION_KEY;
   return (
     <button
       type="button"
@@ -74,10 +101,14 @@ function ExpandOnFocusButton({ panelId }: { panelId: string | undefined }) {
       aria-checked={on}
       className="dh-dock-tab-button"
       data-expand-on-focus-toggle=""
-      title={on
-        ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
-        : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
-      aria-label="Expand on focus"
+      title={chat
+        ? on
+          ? 'Reading width is on: chats are held at the width where their replies stop wrapping, and neighbouring windows take the rest. Click to turn off.'
+          : 'Reading width: hold chats at the width where their replies stop wrapping, and let neighbouring windows take the rest.'
+        : on
+          ? 'Expand on focus is on: the window grows over its neighbours while you work in it. Click to turn off.'
+          : 'Expand on focus: grow over neighbouring windows while you work in this one. Double-click the tab to expand it once.'}
+      aria-label={chat ? 'Reading width' : 'Expand on focus'}
       onPointerDown={stopTabEvent}
       onDoubleClick={stopTabEvent}
       onClick={(event) => {
@@ -86,7 +117,7 @@ function ExpandOnFocusButton({ panelId }: { panelId: string | undefined }) {
       }}
     >
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M10 2h4v4M6 14H2v-4M14 2 9.5 6.5M2 14l4.5-4.5" />
+        <path d={chat ? 'M2 3v10M14 3v10M5 8h6M7 6 5 8l2 2M9 6l2 2-2 2' : 'M10 2h4v4M6 14H2v-4M14 2 9.5 6.5M2 14l4.5-4.5'} />
       </svg>
     </button>
   );

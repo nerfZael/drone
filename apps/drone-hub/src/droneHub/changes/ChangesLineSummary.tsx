@@ -57,3 +57,18 @@ export function ChangesLineSummary({ counts }: { counts: ChangesLineSummaryCount
     </div>
   );
 }
+
+/** Added and deleted lines, small enough for a dock tab; the file count is in its tooltip. */
+export function ChangesTabLineCounts({ counts }: { counts: ChangesLineSummaryCounts }) {
+  const files = `${counts.changed} changed ${counts.changed === 1 ? 'file' : 'files'}`;
+  return (
+    <span
+      className="ml-1.5 flex shrink-0 items-center gap-1 font-mono text-9 tabular-nums"
+      title={`${files}: ${counts.additions} lines added, ${counts.deletions} lines deleted`}
+      aria-label={`${files}, ${counts.additions} lines added, ${counts.deletions} lines deleted`}
+    >
+      <span className="text-[var(--green)]">+{counts.additions}</span>
+      <span className="text-[var(--red)]">−{counts.deletions}</span>
+    </span>
+  );
+}

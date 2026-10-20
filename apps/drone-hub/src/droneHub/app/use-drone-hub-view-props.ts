@@ -407,6 +407,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     groupBroadcastPromptError,
     sendGroupBroadcastPrompt,
     sendPromptInNewDroneChat,
+    sendPromptInSideChat,
+    deleteCanvasChat,
     createQueuedNewChatNow,
     focusedNewChatActionId,
     consumeNewChatActionAutoFocus,
@@ -768,6 +770,9 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           sendPromptText,
           onSendPromptInNewChat: (payload, context, sourceChatName) =>
             sendPromptInNewDroneChat(currentDrone, payload, context, sourceChatName),
+          onSendPromptInSideChat: (payload, context, kind, sourceChatName) =>
+            sendPromptInSideChat(currentDrone, payload, context, kind, sourceChatName),
+          onDeleteSideChat: (chatName) => deleteCanvasChat(currentDrone.id, chatName),
           publishSelectedDraft,
           publishingDraft,
           canStopResponse,

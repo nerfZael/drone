@@ -10,8 +10,9 @@ import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
-import { DockTabShell, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
+import { DockTabShell, ExpandOnFocusButton, OpenDesktopToolButton, stopTabEvent } from './DockTabShell';
 import { OCCUPIED_GROUP_CONSTRAINTS, useWorkspacePanelExpansion } from './workspace-panel-expansion';
+import { isWorkspacePanelCollapsed, syncCollapsedWorkspacePanels, toggleWorkspacePanelCollapse } from './workspace-panel-collapse';
 import { ChatsDockTab } from './ChatsDockTab';
 import { TerminalHeaderControlsContext } from '../terminal/terminal-header-controls-context';
 import {
@@ -29,11 +30,11 @@ import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { consumeKeepFocusOnChatActivation, focusChatWindow } from './focus-chat-window';
 import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT, type FocusSideChatDetail } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
-import { EditorPaneContext } from './editor-pane-context';
+import { EditorPaneContext, ExplorerTabControlsContext } from './editor-pane-context';
 import { OPEN_FILE_EXPLORER_EVENT } from '../files/file-explorer-navigation';
 import { closeCanvasChatPanel, leaveCanvasFullView, useCanvasFullViewStore } from '../canvas/canvas-full-view';
 import { openedFileTabId } from './opened-file-tabs';
-import { ChangesExplorerContext } from '../changes/changes-explorer-context';
+import { ChangesExplorerContext, ChangesExplorerTabContext } from '../changes/changes-explorer-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
 import { dropOverlayContextFromEvent, emptySlotDirectionForDrop, isCollapsedEmptySlot, isNoOpDropOverlay } from './workspace-drop-overlay';
 import {
@@ -119,7 +120,8 @@ type DockableDroneWorkspaceProps = {
   sharedLayout?: boolean;
 };
 
-export type WorkspaceFileWindow = { tabId: string; path: string; name: string };
+/** `droneId` names the workspace the file is in (as the file routes take it); another than the drone's own for an explorer root's file. */
+export type WorkspaceFileWindow = { tabId: string; path: string; name: string; droneId?: string };
 export type WorkspaceFileWindows = {
   presetRootPath?: string;
   restorePresetFiles?: (files: WorkspaceFileWindow[]) => void;
@@ -660,6 +662,7 @@ function MainChatTab({ api }: IDockviewPanelHeaderProps) {
     <div className="dv-default-tab" data-testid="dockview-dv-default-tab" title={title}
       data-chat-drone-id={ctx.droneId} data-chat-name={chatName}>
       <span className="dv-default-tab-content">{title} <ChatUsageBadge droneId={ctx.droneId} chatName={chatName} /></span>
+      <span className="dh-dock-tab-controls"><ExpandOnFocusButton api={api} /></span>
     </div>
   );
 }
@@ -697,6 +700,18 @@ function usePairedViewVisible(containerApi: DockviewApi, explorerId: string): bo
   return visible;
 }
 
+/** Whether the panel's window is collapsed to its tab bar (see workspace-panel-collapse). */
+function usePanelCollapsed(api: IDockviewPanelHeaderProps['api'], containerApi: DockviewApi): boolean {
+  const read = React.useCallback(() => isWorkspacePanelCollapsed(containerApi, api.id), [api, containerApi]);
+  const [collapsed, setCollapsed] = React.useState(read);
+  React.useEffect(() => {
+    setCollapsed(read());
+    const disposable = api.onDidParametersChange(() => setCollapsed(read()));
+    return () => disposable.dispose();
+  }, [api, read]);
+  return collapsed;
+}
+
 function ToolPanel({ api, containerApi, params }: IDockviewPanelProps<{ tab?: unknown; paneKey?: WorkspacePaneKey }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   const isExplorer = EXPLORER_PANEL_IDS.includes(api.id);
@@ -706,6 +721,13 @@ function ToolPanel({ api, containerApi, params }: IDockviewPanelProps<{ tab?: un
   const paneKey = params.paneKey ?? 'single';
   const previewHostedHere = Boolean(tab && tab === ctx.previewTab);
   const onPreviewHostChanged = ctx.onPreviewHostChanged;
+  const collapsed = usePanelCollapsed(api, containerApi);
+  const changesExplorerHost = api.id === CHANGES_EXPLORER_PANEL_ID ? ctx.changesExplorerHost : null;
+
+  // A collapsed explorer is down to its tab bar; keyboard focus must not land in its hidden tree.
+  React.useLayoutEffect(() => {
+    changesExplorerHost?.toggleAttribute('inert', collapsed);
+  }, [changesExplorerHost, collapsed]);
 
   React.useLayoutEffect(() => {
     if (!previewHostedHere) return;
@@ -729,15 +751,19 @@ function ToolPanel({ api, containerApi, params }: IDockviewPanelProps<{ tab?: un
       className="dh-utility-panel relative h-full"
     >
       <EditorPaneContext.Provider value={api.id === EXPLORER_PANEL_ID ? 'explorer' : 'editor'}>
+        <ExplorerTabControlsContext.Provider value={api.id === EXPLORER_PANEL_ID && ctx.tabBarShown ? ctx.explorerTabControls : null}>
         <TerminalHeaderControlsContext.Provider value>
           <ChangesExplorerContext.Provider value={tab === 'changes' ? ctx.changesExplorerHost : undefined}>
+          <ChangesExplorerTabContext.Provider value={tab === 'changes' ? ctx.changesExplorerTabSlot : null}>
             {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : (
-              <React.Fragment key={tab === 'canvas' ? 'canvas' : ctx.droneId}>
+              <React.Fragment key={tab === 'canvas' || tab === 'channels' ? tab : ctx.droneId}>
                 {ctx.renderToolPane(tab, paneKey)}
               </React.Fragment>
             )}
+          </ChangesExplorerTabContext.Provider>
           </ChangesExplorerContext.Provider>
         </TerminalHeaderControlsContext.Provider>
+        </ExplorerTabControlsContext.Provider>
       </EditorPaneContext.Provider>
     </UiPanel>
   );
@@ -817,6 +843,38 @@ function TerminalDockTab({ api, params }: IDockviewPanelHeaderProps<{ paneKey?: 
   );
 }
 
+/** The File Explorer's tab: the explorer puts its workspace controls in it, so the pane needs no toolbar row. */
+function ExplorerDockTab({ api }: IDockviewPanelHeaderProps) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
+  return (
+    <DockTabShell api={api} expandable={false}>
+      <span ref={ctx.setExplorerTabControls} className="contents" data-explorer-tab-controls="" />
+    </DockTabShell>
+  );
+}
+
+/**
+ * The Changes Explorer's tab: its line counts beside the name, and a click
+ * collapses the window to this tab bar (or opens it again) when another
+ * window sits above or below it.
+ */
+function ChangesExplorerDockTab({ api, containerApi }: IDockviewPanelHeaderProps) {
+  const { setChangesExplorerTabSlot } = React.useContext(DockableDroneWorkspaceContext);
+  const collapsed = usePanelCollapsed(api, containerApi);
+  const slotRef = React.useRef<HTMLSpanElement | null>(null);
+  React.useLayoutEffect(() => {
+    const slot = slotRef.current;
+    setChangesExplorerTabSlot(slot);
+    // A moved window can mount its new tab before the old one goes; only the old slot is cleared.
+    return () => setChangesExplorerTabSlot((current) => (current === slot ? null : current));
+  }, [setChangesExplorerTabSlot]);
+  return (
+    <DockTabShell api={api} expandable={false} collapsed={collapsed} onClick={() => toggleWorkspacePanelCollapse(containerApi, api.id)}>
+      <span ref={slotRef} className="contents" data-changes-explorer-tab-counts="" />
+    </DockTabShell>
+  );
+}
+
 /** Any other tool's tab: its name, the desktop-window button, and the X. */
 function ToolDockTab({ api, containerApi }: IDockviewPanelHeaderProps) {
   // Older saved panels can have a different tool in their params than their ID.
@@ -859,11 +917,14 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   if (sideChat) {
     const displayedName = displaced || chatName;
     return <ChatWindowTab key={displayedName} {...props} data-side-chat-name={displayedName} data-chat-drone-id={ctx.droneId} data-chat-name={displayedName} chatName={displayedName} droneId={ctx.droneId}
-      onRename={!displaced && onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
+      onRename={!displaced && onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown}
+      controls={<ExpandOnFocusButton api={props.api} />} />;
   }
   if (!closeable) return <MainChatTab {...props} />;
   if (tabFromPanelId(props.api.id) === 'terminal') return <TerminalDockTab {...props} />;
   if (tabFromPanelId(props.api.id) === 'chats') return <ChatsDockTab {...props} />;
+  if (props.api.id === EXPLORER_PANEL_ID) return <ExplorerDockTab {...props} />;
+  if (props.api.id === CHANGES_EXPLORER_PANEL_ID) return <ChangesExplorerDockTab {...props} />;
   // The preview stays in the Hub: its session lives in a layer above the dock, not in the panel.
   if (props.api.id.startsWith(TOOL_PANEL_PREFIX) && tabFromPanelId(props.api.id) !== 'preview') return <ToolDockTab {...props} />;
   return (
@@ -965,6 +1026,13 @@ const DockableDroneWorkspaceContext = React.createContext<{
   onPreviewHostChanged: () => void;
   changesExplorerHost: HTMLElement | null;
   setChangesExplorerHost: (element: HTMLDivElement | null) => void;
+  /** The slot in the Changes Explorer's tab where Changes shows its line counts. */
+  changesExplorerTabSlot: HTMLElement | null;
+  setChangesExplorerTabSlot: React.Dispatch<React.SetStateAction<HTMLSpanElement | null>>;
+  /** The slot in the File Explorer's tab, and whether tab bars show at all (one docked window hides them). */
+  explorerTabControls: HTMLElement | null;
+  setExplorerTabControls: (element: HTMLSpanElement | null) => void;
+  tabBarShown: boolean;
 }>({
   droneId: '',
   chatContent: null,
@@ -974,6 +1042,11 @@ const DockableDroneWorkspaceContext = React.createContext<{
   onPreviewHostChanged: () => {},
   changesExplorerHost: null,
   setChangesExplorerHost: () => {},
+  changesExplorerTabSlot: null,
+  setChangesExplorerTabSlot: () => {},
+  explorerTabControls: null,
+  setExplorerTabControls: () => {},
+  tabBarShown: true,
 });
 
 export function DockableDroneWorkspace({
@@ -1012,6 +1085,8 @@ export function DockableDroneWorkspace({
   const revealFloatingSideChats = React.useCallback(() => revealFloatingSideChatsRef.current?.(), []);
   const apiRef = React.useRef<DockviewApi | null>(null);
   const [changesExplorerHost, setChangesExplorerHost] = React.useState<HTMLDivElement | null>(null);
+  const [changesExplorerTabSlot, setChangesExplorerTabSlot] = React.useState<HTMLSpanElement | null>(null);
+  const [explorerTabControls, setExplorerTabControls] = React.useState<HTMLSpanElement | null>(null);
   const restoringPresetRef = React.useRef(false);
   const sideChatsRef = React.useRef(sideChats);
   sideChatsRef.current = sideChats;
@@ -1124,8 +1199,13 @@ export function DockableDroneWorkspace({
       onPreviewHostChanged: markPreviewHostChanged,
       changesExplorerHost,
       setChangesExplorerHost,
+      changesExplorerTabSlot,
+      setChangesExplorerTabSlot,
+      explorerTabControls,
+      setExplorerTabControls,
+      tabBarShown: workspacePanelCount > 1,
     }),
-    [currentDrone.id, chatContent, mainChatName, displacedMainChatName, renderDisplacedMainChat, onRestoreMainChat, mainChatControls, sideChats, renderSideChat, renderSideChatHeaderActions, onCloseSideChat, onRenameSideChat, markPreviewHostChanged, previewTab, renderToolPane, renderFilePane, openFileTabIdSet, dirtyFileTabIdSet, changesExplorerHost],
+    [currentDrone.id, chatContent, mainChatName, displacedMainChatName, renderDisplacedMainChat, onRestoreMainChat, mainChatControls, sideChats, renderSideChat, renderSideChatHeaderActions, onCloseSideChat, onRenameSideChat, markPreviewHostChanged, previewTab, renderToolPane, renderFilePane, openFileTabIdSet, dirtyFileTabIdSet, changesExplorerHost, changesExplorerTabSlot, explorerTabControls, workspacePanelCount],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel, file: FilePanel }), []);
 
@@ -1410,6 +1490,7 @@ export function DockableDroneWorkspace({
       finishSideChatVisibility();
       restoringPresetRef.current = false;
       suppressSaveRef.current = previouslySuppressed;
+      if (apiRef.current) syncCollapsedWorkspacePanels(apiRef.current);
       updateWorkspacePanelState();
       const active = apiRef.current?.activePanel;
       const tab = active ? tabFromPanel(active) : null;
@@ -1430,6 +1511,12 @@ export function DockableDroneWorkspace({
         for (const panel of Object.values(layout.panels)) {
           if (panel.contentComponent !== 'file' || !panel.params) continue;
           delete panel.params.presetRelativePath;
+          delete panel.params.presetWorkspaceId;
+          // A file of another workspace stays that workspace's file, whichever drone the preset is applied to.
+          if (panel.params.droneId && panel.params.droneId !== currentDrone.id) {
+            panel.params.presetWorkspaceId = panel.params.droneId;
+            continue;
+          }
           if (root && panel.params.path?.startsWith(`${root}/`)) {
             panel.params.presetRelativePath = panel.params.path.slice(root.length + 1);
           }
@@ -1487,6 +1574,11 @@ export function DockableDroneWorkspace({
     return () => window.removeEventListener(ALIGN_FLOATING_CHATS_EVENT, align);
   }, [currentDrone.id, floatingWindows, persistCurrentLayout]);
 
+  // Compact headers are shorter, and collapsed windows are held at their tab bar's height.
+  React.useLayoutEffect(() => {
+    if (apiRef.current) syncCollapsedWorkspacePanels(apiRef.current);
+  }, [paneHeaderMode]);
+
   const pointerDownRef = React.useRef(false);
   React.useEffect(() => {
     const down = () => { pointerDownRef.current = true; };
@@ -1540,7 +1632,7 @@ export function DockableDroneWorkspace({
         arrangingWorkspaceRef.current = true;
         suppressSaveRef.current = true;
         try { action(); } finally {
-          try { syncEmptyWorkspaceSlots(api); } finally {
+          try { syncEmptyWorkspaceSlots(api); syncCollapsedWorkspacePanels(api); } finally {
             arrangingWorkspaceRef.current = false;
             suppressSaveRef.current = previouslySuppressed;
           }
@@ -1614,6 +1706,7 @@ export function DockableDroneWorkspace({
         migrateWorkspaceExplorerPanels(api);
         refreshWorkspacePanelTitles(api);
         syncEmptyWorkspaceSlots(api);
+        syncCollapsedWorkspacePanels(api);
         // A drone opens on its agent chat, not on whichever pane was last active.
         api.getPanel(CHAT_PANEL_ID)?.api.setActive();
       } else {
@@ -1790,6 +1883,7 @@ export function DockableDroneWorkspace({
       // (see the pointerup effect): pulling a view out from under Dockview's
       // divider drag would break the drag still in progress.
       if (!suppressSaveRef.current) syncEmptyWorkspaceSlots(api, { removeCollapsed: !pointerDownRef.current });
+      syncCollapsedWorkspacePanels(api);
       updateWorkspacePanelState();
       schedulePersistCurrentLayout();
     });
@@ -2064,7 +2158,7 @@ export function DockableDroneWorkspace({
                 </UiPanel>
               ) : (
                 <UiPanel flush surface="alternate" className="h-full">
-                  <React.Fragment key={activeToolTab === 'canvas' ? 'canvas' : currentDrone.id}>
+                  <React.Fragment key={activeToolTab === 'canvas' || activeToolTab === 'channels' ? activeToolTab : currentDrone.id}>
                     {renderToolPane(activeToolTab, 'single')}
                   </React.Fragment>
                 </UiPanel>

@@ -144,5 +144,5 @@ export class CompanionLiveConnection {
     if (!this.capturing) { this.capturing = true; this.options.timing?.once('capture_started'); this.options.onCapturing?.(); }
     this.buffer.append(audio);
   }
-  private fail(error: string): void { if (!this.closed) { this.close(); this.options.onError(error); } }
+  private fail(error: string): void { if (!this.closed) { this.options.timing?.failed(error); this.close(); this.options.onError(error); } }
 }

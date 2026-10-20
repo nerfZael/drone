@@ -1,4 +1,6 @@
 import { readDirectoryWithRetry } from './read-directory-with-retry';
+import { workspaceLinkForPath } from '../workspaces/workspace-links';
+import { copyText } from '../app/clipboard';
 import { desktopWorkspaceCommitted, beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './workspace-load-telemetry';
 import { workspaceExplorerLocation, workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
@@ -157,7 +159,7 @@ function InlineSpinner() {
 export function DroneFilesDock({
   droneId,
   path,
-  homePath: _homePath,
+  homePath,
   entries,
   loading,
   error,
@@ -301,6 +303,16 @@ export function DroneFilesDock({
     },
     [],
   );
+
+  // The active file went to another explorer (a root of another workspace) or was closed: the row that showed it
+  // here is no longer selected, so only one explorer marks the file being edited.
+  const previousActiveFilePathRef = React.useRef(activeOpenedFilePath);
+  React.useEffect(() => {
+    const previous = previousActiveFilePathRef.current;
+    previousActiveFilePathRef.current = activeOpenedFilePath;
+    if (!previous || activeOpenedFilePath) return;
+    setSelectedPaths((current) => (current.size === 1 && current.has(previous) ? new Set() : current));
+  }, [activeOpenedFilePath]);
 
   const explorerTree = React.useMemo(
     () =>
@@ -1075,6 +1087,19 @@ export function DroneFilesDock({
     [uploadFilesToCurrentPath, uploading],
   );
 
+  /** A link others can open from a document or a chat: this workspace, and the entry's path in it. */
+  const copyEntryLink = React.useCallback(async (entry: DroneFsEntry) => {
+    setActionError(null);
+    try {
+      const link = await workspaceLinkForPath({ shownId: droneId, homePath: String(homePath ?? ''), path: entry.path });
+      if (!link) throw new Error('This workspace has no link.');
+      if (!(await copyText(link))) throw new Error('Could not copy the link.');
+      setActionStatus('Link copied');
+    } catch (copyError: any) {
+      setActionError(copyError?.message ?? String(copyError));
+    }
+  }, [droneId, homePath]);
+
   const downloadEntry = React.useCallback(
     (entry: DroneFsEntry) => {
       if (entry.kind !== 'file' && entry.kind !== 'directory') return;
@@ -1387,7 +1412,7 @@ export function DroneFilesDock({
       onDrop={readOnly ? undefined : onPanelDrop}
       onKeyDown={handleExplorerKeyDown}
     >
-      {workspaceExplorerLocation(_homePath, normalizedPath).outside ? (
+      {workspaceExplorerLocation(homePath, normalizedPath).outside ? (
         <UiPanelStatusStrip tone="info">
           <span title={normalizedPath}>Outside workspace · {normalizedPath}</span>
         </UiPanelStatusStrip>
@@ -1494,6 +1519,11 @@ export function DroneFilesDock({
           onPaste={() => {
             pasteClipboard();
             setContextMenu(null);
+          }}
+          onCopyLink={() => {
+            const entry = contextMenu.entry;
+            setContextMenu(null);
+            if (entry) void copyEntryLink(entry);
           }}
           onDownload={() => {
             if (contextMenu.entry) downloadEntry(contextMenu.entry);

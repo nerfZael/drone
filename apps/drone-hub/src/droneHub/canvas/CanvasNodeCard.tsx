@@ -3,7 +3,9 @@ import { canvasPerf } from './canvas-perf';
 import { UiSpinner } from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { DroneRuntimeIcon } from '../app/DroneRuntimeIndicator';
-import type { DetailedCard } from './detailed-card-model';
+import { WORKER_STATE_OF, type DetailedCard } from './detailed-card-model';
+import { STATE_COLOR } from '../entity/EntityWork';
+import { SIDE_CHAT_SQUARES_SHOWN } from './organized-board-layout';
 import { SidebarItemStateIndicator } from '../overview/DroneCard';
 
 export type DroneCanvasIndicatorState = {
@@ -24,10 +26,27 @@ export type CanvasNodeActions = {
   onNodeDoubleClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   /** The pointer is over a card (an id) or left it (null): the steps panel follows it. */
   hoverCard: (id: string | null) => void;
+  /** Opens a chat shown as a square on a card, as the main chat. */
+  openSideChat: (id: string) => void;
+  /** A square pressed on card `hostId`: dragged off, it comes out as a card; onto another card, it moves there. */
+  startSquareDrag: (hostId: string, square: CanvasSideChatSquare, event: React.MouseEvent) => void;
   setInlineRenameDraft: (value: string) => void;
   submitInlineRename: () => Promise<void>;
   cancelInlineRename: () => void;
   focusViewportElement: () => void;
+};
+
+/** A side chat on its source's card, on the organized board. */
+export type CanvasSideChatSquare = {
+  nodeId: string;
+  chatName: string;
+  /** A chat folded into the card, or one of its side chats. */
+  kind: 'chat' | 'side-chat';
+  /** A side chat the composer shows: it moves to other cards, but is never a card itself. */
+  composer: boolean;
+  detail: DetailedCard;
+  /** It is the chat open in the main chat. */
+  open: boolean;
 };
 
 type CanvasNodeCardProps = {
@@ -44,6 +63,8 @@ type CanvasNodeCardProps = {
   inlineEditing: boolean;
   assignmentHoverTarget: boolean;
   assignmentHoverTargetCount: number;
+  /** Cards dragged over it fold into it on release. */
+  foldTarget?: boolean;
   isActiveSidebarChat: boolean;
   indicatorState: DroneCanvasIndicatorState | null;
   deleting: boolean;
@@ -60,6 +81,7 @@ type CanvasNodeCardProps = {
   nodeElementByDroneIdRef: React.MutableRefObject<Record<string, HTMLButtonElement | null>>;
   inlineRenameInputRef: React.MutableRefObject<HTMLInputElement | null>;
   inlineRenameSettledRef: React.MutableRefObject<boolean>;
+  sideChatSquares?: readonly CanvasSideChatSquare[];
 };
 
 export const CanvasNodeCard = React.memo(function CanvasNodeCard({
@@ -74,6 +96,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
   inlineEditing,
   assignmentHoverTarget,
   assignmentHoverTargetCount,
+  foldTarget,
   isActiveSidebarChat,
   indicatorState,
   deleting,
@@ -90,6 +113,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
   nodeElementByDroneIdRef,
   inlineRenameInputRef,
   inlineRenameSettledRef,
+  sideChatSquares,
 }: CanvasNodeCardProps) {
   const perfStart = canvasPerf.renderStart();
   React.useLayoutEffect(() => canvasPerf.renderEnd('card', perfStart));
@@ -149,7 +173,7 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
         // edge, so the two read apart when they are different cards and stack when they are the same.
         selected || dragging || inlineEditing
           ? 'border-[var(--act)]'
-          : assignmentHoverTarget
+          : assignmentHoverTarget || foldTarget
             ? 'border-[var(--accent)]'
             : draftNode
               ? 'border-dashed border-[var(--user-border)] hover:border-[var(--muted)]'
@@ -286,9 +310,71 @@ export const CanvasNodeCard = React.memo(function CanvasNodeCard({
           </span>
         )}
       </span>
+      {sideChatSquares?.length && !inlineEditing ? <SideChatSquares nodeId={nodeId} squares={sideChatSquares} actions={actions} /> : null}
     </CardElement>
   );
 });
+
+const stopCardEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+
+/** Like the Entity's worker squares: one per side chat, coloured by its state; a click opens it as the main chat. */
+function SideChatSquares({ nodeId, squares, actions }: {
+  nodeId: string;
+  squares: readonly CanvasSideChatSquare[];
+  actions: React.MutableRefObject<CanvasNodeActions>;
+}) {
+  const shown = squares.slice(0, SIDE_CHAT_SQUARES_SHOWN);
+  const more = squares.length - shown.length;
+  return (
+    <span className="ml-2 flex flex-shrink-0 items-center gap-[3px]" data-canvas-side-chat-squares="">
+      {shown.map((square) => {
+        const { detail } = square;
+        const unread = detail.unread && detail.icon === 'idle';
+        const color = STATE_COLOR[WORKER_STATE_OF[detail.state]];
+        // Never worked yet: an outline, as the Entity draws a queued worker. Read and done: quieter.
+        const style: React.CSSProperties = detail.state === 'idle' && !unread
+          ? { boxShadow: 'inset 0 0 0 1px var(--muted)' }
+          : { background: unread ? STATE_COLOR.done : color, opacity: unread ? 1 : detail.state === 'done' ? 0.45 : 0.85 };
+        const label = `${square.chatName} · ${unread ? 'new reply' : detail.label}`;
+        const what = square.kind === 'chat' ? 'chat' : 'side chat';
+        const drag = square.composer
+          ? 'Drag onto another card to move it there'
+          : 'Drag it off to show it as a card, or onto another card to move it there';
+        return (
+          <span
+            key={square.nodeId}
+            role="button"
+            aria-label={`Open ${what} ${label}`}
+            title={`${label}\nClick to open it. ${drag}; Shift+drag takes them all`}
+            data-canvas-side-chat-square={square.chatName}
+            data-state={unread ? 'unread' : detail.state}
+            className={`h-2.5 w-2.5 flex-shrink-0 cursor-pointer rounded-[2px] ${
+              square.open ? 'outline outline-2 outline-offset-1 outline-[var(--fg)]' : 'hover:outline hover:outline-2 hover:outline-offset-1 hover:outline-[var(--fg)]'
+            }`}
+            style={style}
+            data-canvas-square-kind={square.kind}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              actions.current.startSquareDrag(nodeId, square, event);
+            }}
+            onDoubleClick={stopCardEvent}
+            onMouseEnter={() => actions.current.hoverCard(square.nodeId)}
+            onMouseLeave={() => actions.current.hoverCard(nodeId)}
+            onClick={(event) => {
+              event.stopPropagation();
+              actions.current.openSideChat(square.nodeId);
+            }}
+          />
+        );
+      })}
+      {more > 0 ? (
+        <span className="ml-1 w-5 flex-shrink-0 font-mono text-10 text-[var(--muted)]" title={squares.slice(SIDE_CHAT_SQUARES_SHOWN).map((square) => square.chatName).join('\n')}>
+          +{more}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 const CANVAS_NODE_META_CHIP_CLASS =
   'inline-flex min-w-0 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)]';

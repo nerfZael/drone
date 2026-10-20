@@ -28,6 +28,9 @@ import {
 } from './app-config';
 import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
 import { isDroneStartingOrSeeding } from './helpers';
+import type { ExplorerRootsProps } from '../files/ExplorerRootsColumn';
+import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
+import type { EditorWorkspaceInfo } from './DroneEditorDock';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
 const loadDroneChatsDock = async () => (await import('./DroneChatsDock')).DroneChatsDock;
@@ -36,6 +39,7 @@ const loadDroneChangeRequestsDock = async () =>
   (await import('../changeRequests/DroneChangeRequestsDock')).DroneChangeRequestsDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
 const loadDroneFilesDock = async () => (await import('../files/DroneFilesDock')).DroneFilesDock;
+const loadExplorerRootsColumn = async () => (await import('../files/ExplorerRootsColumn')).ExplorerRootsColumn;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDronePullRequestsDock = async () =>
@@ -43,6 +47,7 @@ const loadDronePullRequestsDock = async () =>
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 const loadWhiteboardDock = async () => (await import('../whiteboard/WhiteboardDock')).WhiteboardDock;
 const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
+const loadChannelsDock = async () => (await import('../channels/ChannelsDock')).ChannelsDock;
 const loadDroneEditorDock = async () => (await import('./DroneEditorDock')).DroneEditorDock;
 const loadDroneEditorWorkspace = async () => (await import('./DroneEditorWorkspace')).DroneEditorWorkspace;
 
@@ -135,6 +140,8 @@ type RightPanelTabContentProps = {
     }
   >;
   onActivateChatFromCanvas: (droneId: string, chatName: string) => void;
+  /** The sidebar's own move, for chats moved on the organized canvas board. */
+  onMoveSidebar?: (intent: SidebarMoveIntent) => Promise<unknown>;
   onAssignCanvasDronesToOwner: (
     ownerDroneId: string,
     targetDroneIds: string[],
@@ -214,7 +221,8 @@ type RightPanelTabContentProps = {
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
   onOpenFileInPanel: (entry: DroneFsEntry) => boolean;
-  onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
+  /** `droneId` names another workspace's file (as the file routes take it), opened in this drone's editor. */
+  onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null; droneId?: string }) => void;
   pendingFileOpenPath?: string | null;
   openedFile: DroneOpenedFileState;
   quickOpen: {
@@ -257,10 +265,15 @@ type RightPanelTabContentProps = {
   onRevealChangesFileInFiles: (paneKey: PaneKey, repoRelativePath: string, repoRoot?: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string, repoRoot?: string) => void;
   onShowChanges: () => void;
-  /** Chooses which workspace the Editor's File Explorer shows. */
-  explorerSwitcher?: React.ReactNode;
-  /** The Editor's props when its File Explorer is switched to another workspace (that workspace as `drone`). */
-  editorOverride?: Omit<EditorWorkspacePaneProps, 'paneKey' | 'currentDroneId' | 'explorerSwitcher'> | null;
+  /**
+   * Chooses which workspace the Editor's File Explorer shows, or adds one as a root: in the explorer's header row, or
+   * in its dock tab when it has one.
+   */
+  explorerSwitcher?: (placement: 'header' | 'tab') => React.ReactNode;
+  /** Other workspaces the File Explorer shows as roots below the drone's own files, with tabs in the drone's editor. */
+  explorerRoots?: ExplorerRootsProps | null;
+  /** What the other workspaces of the editor's tabs are, by file route id. */
+  editorWorkspaceOf?: (droneId: string) => EditorWorkspaceInfo | null;
 };
 
 export function RightPanelTabContent(props: RightPanelTabContentProps) {
@@ -279,6 +292,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
   chatNodeStateById,
   onActivateChatFromCanvas,
   onAssignCanvasDronesToOwner,
+  onMoveSidebar,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
   onRenameCanvasChat,
@@ -373,6 +387,12 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
           ) : <UiPaneState kind="empty" title="Select a drone to view its chats." />}
         </PaneModule>
       );
+    case 'channels':
+      return (
+        <PaneModule tab={tab} load={loadChannelsDock}>
+          {(ChannelsDock) => <ChannelsDock droneById={droneById} onOpenChat={onActivateChatFromCanvas} />}
+        </PaneModule>
+      );
     case 'workflows':
       return (
         <PaneModule tab={tab} load={loadDroneWorkflowsDock}>
@@ -402,6 +422,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
               chatNodeStateById={chatNodeStateById}
               onActivateChat={onActivateChatFromCanvas}
               onAssignDronesToOwner={onAssignCanvasDronesToOwner}
+              onMoveSidebar={onMoveSidebar}
               onSendCanvasPrompt={onSendCanvasPrompt}
               onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
               onRenameChat={onRenameCanvasChat}
@@ -476,7 +497,7 @@ export function RightPanelTabContent(props: RightPanelTabContentProps) {
       );
 
     case 'editor':
-      return <EditorWorkspacePane {...props} {...(props.editorOverride ?? {})} />;
+      return <EditorWorkspacePane {...props} />;
 
     case 'preview':
       return (
@@ -610,7 +631,8 @@ export type EditorWorkspacePaneProps = Pick<RightPanelTabContentProps,
   | 'onOpenedEditorFileContentChange' | 'onSaveOpenedEditorFile' | 'onAppendFileDictationLine'
   | 'onOpenFileDictationTarget' | 'onCloseOpenedEditorFile' | 'onConfirmCloseOpenedEditorFilesForPaths'
   | 'onCloseOpenedEditorFilesForPaths' | 'onRemapOpenedEditorFilesForPathChange'
-  | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs' | 'explorerSwitcher'>;
+  | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs' | 'explorerSwitcher' | 'explorerRoots'
+  | 'editorWorkspaceOf'>;
 
 /** The Editor tool: file explorer beside the editor, both bound to one drone's editor state. */
 export function EditorWorkspacePane({
@@ -650,9 +672,14 @@ export function EditorWorkspacePane({
   onActivateOpenedEditorFileTab,
   onReorderOpenedEditorFileTabs,
   explorerSwitcher,
+  explorerRoots,
+  editorWorkspaceOf,
 }: EditorWorkspacePaneProps) {
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
-  const renderFileExplorer = (explorerZoom: number) => (
+  // A file of another workspace is active: the drone's own explorer has none of its files open.
+  const activeTabDroneId = openedFileTabs.find((entry) => entry.tabId === activeOpenedFileTabId)?.droneId;
+  const ownOpenedFile = activeTabDroneId && activeTabDroneId !== drone.id ? { ...openedFile, path: null, name: null } : openedFile;
+  const renderOwnExplorer = (explorerZoom: number) => (
     <PaneModule tab="editor" load={loadDroneFilesDock}>
       {(DroneFilesDock) => (
         <DroneFilesDock
@@ -681,18 +708,26 @@ export function EditorWorkspacePane({
           onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
           onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
           onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
-          openedFile={openedFile}
+          openedFile={ownOpenedFile}
           zoom={explorerZoom}
         />
       )}
     </PaneModule>
   );
+  const renderFileExplorer = (explorerZoom: number) => explorerRoots && explorerRoots.roots.length > 0 ? (
+    <PaneModule tab="editor" load={loadExplorerRootsColumn}>
+      {(ExplorerRootsColumn) => (
+        <ExplorerRootsColumn {...explorerRoots} own={renderOwnExplorer(explorerZoom)} zoom={explorerZoom} />
+      )}
+    </PaneModule>
+  ) : renderOwnExplorer(explorerZoom);
   const fileEditorContent = (
     <PaneModule tab="editor" load={loadDroneEditorDock}>
       {(DroneEditorDock) => (
         <DroneEditorDock
           droneId={drone.id}
           droneName={drone.name}
+          homePath={defaultFsPathForCurrentDrone}
           openedFile={openedFile}
           quickOpen={quickOpen}
           openedFileTabs={openedFileTabs}
@@ -707,6 +742,7 @@ export function EditorWorkspacePane({
           onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
           onOpenFileTargetInEditor={onOpenFileTargetInEditor}
+          workspaceOf={editorWorkspaceOf}
         />
       )}
     </PaneModule>

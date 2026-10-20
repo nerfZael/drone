@@ -17,6 +17,13 @@ export type DesktopToolWindow = {
  */
 const SELECTED_DRONE_ONLY_TABS: ReadonlySet<RightPanelTab> = new Set<RightPanelTab>(['preview', 'links']);
 
+/** Tools that show the Hub, not a drone: their window needs no drone and has nothing to pin. */
+const DRONE_INDEPENDENT_TABS: ReadonlySet<RightPanelTab> = new Set<RightPanelTab>(['channels']);
+
+export function droneIndependentToolTab(tab: RightPanelTab): boolean {
+  return DRONE_INDEPENDENT_TABS.has(tab);
+}
+
 export function desktopToolTabSupported(tab: RightPanelTab | null): tab is RightPanelTab {
   return Boolean(tab) && !SELECTED_DRONE_ONLY_TABS.has(tab!);
 }

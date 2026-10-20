@@ -68,6 +68,9 @@ export function registerDesktopEventRoutes(
     const unsubscribeWorkspaces = hubChangeEvents.onUserWorkspacesChange(() => {
       deps.writeSseEvent(res, 'workspaces_changed', { at: deps.nowIso() });
     });
+    const unsubscribeChannels = hubChangeEvents.onChannelsChange(({ channelId, scope }) => {
+      deps.writeSseEvent(res, 'channels_changed', { channelId, scope, at: deps.nowIso() });
+    });
 
     deps.droneRegistryBroadcaster.start();
     deps.droneChatBroadcaster.start();
@@ -106,6 +109,7 @@ export function registerDesktopEventRoutes(
       unsubscribeChat();
       unsubscribeDeliveries();
       unsubscribeWorkspaces();
+      unsubscribeChannels();
       deps.droneRegistryBroadcaster.stopIfIdle();
       deps.droneChatBroadcaster.stopIfIdle();
     };

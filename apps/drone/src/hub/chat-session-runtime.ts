@@ -21,6 +21,7 @@ import type { DroneRuntime } from '../host/runtime';
 import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
 import { normalizeSilentCompletion } from '../host/silent-completion';
 import { readChatPromptDispatchStateFromStore } from './transcript-store';
+import { isComposerSideChatEntry, isGeneratedSideChatName } from './side-chat-checkpoint';
 
 type TranscriptTurn = any;
 
@@ -686,16 +687,22 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     chatName: string;
     chatEntry: any;
   }): Promise<boolean> {
-    if (!isGeneratedChatName(opts.chatName)) return false;
+    const sideChatName = isGeneratedSideChatName(opts.chatName);
+    if (!isGeneratedChatName(opts.chatName) && !sideChatName) return false;
     try {
       await importResolvedChatToStore(opts.droneId, opts.chatName, opts.chatEntry);
       const stored = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
       if (String(stored.chat?.[CHAT_AUTO_RENAME_ATTEMPTED_AT_FIELD] ?? '').trim()) return false;
-      const transcript = countTranscriptTurnsFromStore({
+      // Only a composer side chat is named from its message; floating forks keep their names.
+      if (sideChatName && !isComposerSideChatEntry(stored.chat ?? opts.chatEntry)) return false;
+      const pending = await readPendingPrompts({
         droneId: opts.droneId,
         chatName: opts.chatName,
       });
-      const pending = await readPendingPrompts({
+      // A forked side chat carries its source's turns, so its first own message
+      // is the first one sent to it; the attempt claim keeps it to that message.
+      if (sideChatName) return pending.length === 0;
+      const transcript = countTranscriptTurnsFromStore({
         droneId: opts.droneId,
         chatName: opts.chatName,
       });
@@ -744,7 +751,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     prompt: string;
     expectedCreatedAt: string;
   }): Promise<void> {
-    if (!isGeneratedChatName(opts.chatName)) return;
+    if (!isGeneratedChatName(opts.chatName) && !isGeneratedSideChatName(opts.chatName)) return;
     const key = `${opts.droneId}\u0000${opts.chatName}`;
     if (CHAT_AUTO_RENAME_IN_FLIGHT.has(key)) return;
     CHAT_AUTO_RENAME_IN_FLIGHT.add(key);

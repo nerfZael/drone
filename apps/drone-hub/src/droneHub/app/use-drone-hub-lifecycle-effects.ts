@@ -25,6 +25,7 @@ import { requestSidebarRootDroneDraft } from './sidebar-drone-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { useActiveComposer } from '../chat/ActiveComposerContext';
 import { isChatVoiceShortcutDoubleTap } from '../chat/chat-voice-shortcut';
+import { recordingSideChatShortcut } from '../chat/chat-send-shortcuts';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
 import { COMPANION_WINDOW_SHORTCUT_CANCEL } from '../companion/companion-window-shortcuts';
@@ -644,6 +645,13 @@ export function useDroneHubLifecycleEffects({
       if (!document.querySelector('[role="dialog"][aria-modal="true"]') &&
         e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey &&
         activeComposer.sendRecordingInClonedChat()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      const sideChatKind = recordingSideChatShortcut(e);
+      if (sideChatKind && !document.querySelector('[role="dialog"][aria-modal="true"]') &&
+        activeComposer.sendRecordingInSideChat(sideChatKind)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         return;

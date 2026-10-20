@@ -27,6 +27,7 @@ import {
 } from './local-hub-request';
 import { DeviceReadBudget } from './device-read-budget';
 import type { DeviceHttpTransfers } from './device-http-transfers';
+import type { DeviceHtmlPreviewSessions } from './device-html-preview-sessions';
 import type { DeviceBrowserSessions } from './device-browser-sessions';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
@@ -440,6 +441,7 @@ export function createDroneControlCapability(
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
     transfers?: DeviceHttpTransfers;
+    htmlPreviews?: DeviceHtmlPreviewSessions;
     browsers?: DeviceBrowserSessions;
     sidebarCommands?: SidebarCommandService;
     hubServices?: HubServices;
@@ -1201,6 +1203,11 @@ export function createDroneControlCapability(
             path: filePath,
             revision: watch.revision,
           };
+        }
+        if (payload.htmlPreviewSession === true) {
+          // Older phones never ask; older Hubs ignore the flag and the phone falls back.
+          if (!options?.htmlPreviews) throw new Error('HTML preview media is unavailable on this Hub');
+          return { htmlPreview: options.htmlPreviews.create(sourceDeviceId, droneId, filePath) };
         }
         const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
         if (payload.metadataOnly === true) {

@@ -193,4 +193,97 @@ describe('chat management route helpers', () => {
       },
     });
   });
+
+  test('deleting or archiving a chat takes its side chats from the store, even when the drone carries no chats', async () => {
+    const stored: Record<string, any> = {
+      plan: { id: 'plan-id' },
+      fork: { id: 'fork-id', visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'plan', sourceChatId: 'plan-id' } },
+      nested: { id: 'nested-id', visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'fork', sourceChatId: 'fork-id' } },
+      other: { id: 'other-id' },
+    };
+    const run = async (mode: 'permanent' | 'archive', method: 'DELETE' | 'POST', stuck = '') => {
+      const calls: string[] = [];
+      let response: any = null;
+      const res = {
+        headersSent: false,
+        statusCode: 0,
+        setHeader: () => {},
+        end(data: string) {
+          response = { status: this.statusCode, body: JSON.parse(data) };
+          this.headersSent = true;
+        },
+      };
+      const dependencies = new Proxy(
+        {
+          normalizeChatName: (value: unknown) => String(value),
+          resolveDroneOrRespond: async () => ({ id: 'drone-a', drone: { id: 'drone-a', name: 'Alpha' } }),
+          resolveEffectiveDeleteActionSettings: async () => ({ mode, archiveRetention: '1d' }),
+          isDraftChatEntry: () => false,
+          stopSingleDroneChatActivity: async ({ chatName }: any) => {
+            if (chatName === stuck) throw new Error('daemon unreachable');
+            calls.push(`stop:${chatName}`);
+          },
+          importDroneChatsFromRegistry: async () => {},
+          listChatsFromStore: () => ({ available: true, chats: Object.keys(stored) }),
+          readChatMetadataFromStore: ({ chatName }: any) => ({ available: true, chat: stored[chatName] ?? null }),
+          buildNewChatEntry: () => ({}),
+          deleteActiveChatFromStore: async ({ chatName }: any) => {
+            calls.push(`delete:${chatName}`);
+            return { deletedChat: stored[chatName], chats: ['other'] };
+          },
+          archiveChatById: async ({ chatName }: any) => {
+            calls.push(`archive:${chatName}`);
+            return { hadDrone: true, hadChat: true, archived: true, chats: ['other'] };
+          },
+          collectDockerSnapshotImageRefsFromChatEntry: () => [],
+          inferChatAgent: () => ({ kind: 'builtin', id: 'claude' }),
+          projectCanonicalChatsToRegistry: async () => {},
+          removeDockerSnapshotImagesBestEffort: async () => {},
+          nowIso: () => '2026-10-15T00:00:00.000Z',
+        },
+        {
+          get(target, property) {
+            return property in target
+              ? target[property as keyof typeof target]
+              : () => {
+                  throw new Error(`unexpected dependency call: ${String(property)}`);
+                };
+          },
+        },
+      );
+      const handler = createChatManagementRouteHandler(dependencies as any);
+      const parts = ['api', 'drones', 'drone-a', 'chats', 'plan', ...(method === 'POST' ? ['archive'] : [])];
+      await handler({
+        req: { headers: {} } as any,
+        res: res as any,
+        url: new URL(`http://hub.test/${parts.join('/')}`),
+        method,
+        parts,
+      });
+      return { calls, response };
+    };
+
+    const deleted = await run('permanent', 'DELETE');
+    expect(deleted.calls).toEqual(['stop:fork', 'stop:nested', 'stop:plan', 'delete:plan', 'delete:fork', 'delete:nested']);
+    expect(deleted.response.body).toMatchObject({ ok: true, deletedChat: 'plan', deletedSideChats: ['fork', 'nested'] });
+
+    // The delete setting archives instead: the side chats are archived as well.
+    const archivedByDelete = await run('archive', 'DELETE');
+    expect(archivedByDelete.calls.filter((call) => !call.startsWith('stop:'))).toEqual([
+      'archive:plan',
+      'archive:fork',
+      'archive:nested',
+    ]);
+    expect(archivedByDelete.response.body).toMatchObject({ archivedChat: 'plan', archivedSideChats: ['fork', 'nested'] });
+
+    const archived = await run('permanent', 'POST');
+    expect(archived.calls.filter((call) => !call.startsWith('stop:'))).toEqual(['archive:plan', 'archive:fork', 'archive:nested']);
+
+    // A side chat that cannot stop keeps everything: nothing is left without its source.
+    for (const [mode, method] of [['permanent', 'DELETE'], ['archive', 'DELETE'], ['permanent', 'POST']] as const) {
+      const stuck = await run(mode, method, 'nested');
+      expect(stuck.calls).toEqual(['stop:fork']);
+      expect(stuck.response).toMatchObject({ status: 500, body: { ok: false, error: 'could not stop side chat nested: daemon unreachable' } });
+    }
+  });
 });

@@ -45,10 +45,10 @@ async function catalogFolder(id: string): Promise<FolderWorkspace | undefined> {
   return folder ? { id: folder.id, name: folder.name, root: async () => folder.path } : undefined;
 }
 
-/** Throws EACCES when a host path escapes a folder workspace's root. */
+/** Throws EACCES (answered as 403) when a host path escapes a folder workspace's root. */
 export function assertInsideFolderWorkspace(root: string, candidate: string): void {
   const relative = path.relative(root, path.resolve(root, candidate));
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw Object.assign(new Error('That path is outside this workspace.'), { code: 'EACCES' });
+    throw Object.assign(new Error('That path is outside this workspace.'), { code: 'EACCES', statusCode: 403 });
   }
 }

@@ -169,5 +169,5 @@ export class MobileCompanionLiveConnection {
     this.markCapturing();
     this.buffer.append(audio);
   }
-  private fail(error: string): void { if (!this.closed) { this.close(); this.options.onError(error); } }
+  private fail(error: string): void { if (!this.closed) { this.options.timing?.failed(error); this.close(); this.options.onError(error); } }
 }

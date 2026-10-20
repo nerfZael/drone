@@ -1,6 +1,6 @@
 import { useCompanionLiveSettingsStore, type CompanionLiveSettingsStore } from './companion-live-settings-store';
 import React from 'react';
-import { CompanionLiveTiming, type CompanionClientTelemetry, companionLiveReconnectDelay, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
+import { CompanionLiveTiming, type CompanionClientTelemetry, CompanionLiveReconnectBackoff, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
 import { CompanionLiveAnnouncement } from './CompanionLiveAnnouncement';
@@ -35,15 +35,15 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
   const pageActive = React.useRef(true);
   const desiredTarget = React.useRef<LiveTarget | null>(null);
   const desiredMuted = React.useRef(false);
-  const reconnectAttempt = React.useRef(0);
+  const [backoff] = React.useState(() => new CompanionLiveReconnectBackoff());
   const cancelScheduledReconnect = React.useRef<(() => void) | null>(null);
   const startAttempt = React.useRef<(target: LiveTarget, reconnecting: boolean) => Promise<void>>(async () => {});
 
   const cancelReconnect = React.useCallback((resetAttempts = true) => {
     cancelScheduledReconnect.current?.();
     cancelScheduledReconnect.current = null;
-    if (resetAttempts) reconnectAttempt.current = 0;
-  }, []);
+    if (resetAttempts) backoff.reset();
+  }, [backoff]);
 
   const stop = React.useCallback(() => {
     desiredTarget.current = null;
@@ -99,16 +99,23 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
     return Boolean(await settingsStore.save({ systemPrompt }));
   }, [settingsStore]);
 
-  const scheduleReconnect = React.useCallback((target: LiveTarget) => {
+  const scheduleReconnect = React.useCallback((target: LiveTarget, error: string) => {
     if (!mounted.current || desiredTarget.current !== target) return;
     cancelScheduledReconnect.current?.();
-    const delay = companionLiveReconnectDelay(reconnectAttempt.current++);
+    const delay = backoff.next();
+    if (delay === null) {
+      // Keep failing sessions visible instead of reconnecting forever.
+      void stop();
+      setState((previous) => ({ ...previous, hasStarted: true, status: 'error', error: `Live voice stopped after repeated failures: ${error}` }));
+      return;
+    }
     setState((previous) => ({
       ...previous,
       hasStarted: true,
       status: 'connecting',
       capturing: false,
-      error: '',
+      // The reason stays visible while reconnecting; ready clears it.
+      error: `Reconnecting: ${error}`,
       queued: 0,
       playbackBlocked: false,
       workspaceLabel: target.workspaceLabel,
@@ -118,7 +125,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       if (!mounted.current || desiredTarget.current !== target || active.current) return;
       void startAttempt.current(target, true);
     }, delay);
-  }, [reconnectSchedule]);
+  }, [backoff, reconnectSchedule, stop]);
 
   startAttempt.current = async (target, reconnecting) => {
     if (active.current || desiredTarget.current !== target || !enabledRef.current || !pageActive.current) return;
@@ -142,13 +149,14 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
       onCapturing: () => update({ capturing: true }),
       onReady: (backendModel) => {
         if (active.current !== session) return;
-        reconnectAttempt.current = 0;
+        backoff.ready();
         session.replies?.ready();
         session.announcement?.connected();
         update({ status: 'listening', error: '', backendModel });
       },
       onError: (error) => {
         if (active.current !== session) return;
+        console.warn('[CompanionLive] Session failed', error);
         if (session.announcement) {
           stop();
           setState((previous) => ({ ...previous, error }));
@@ -159,7 +167,7 @@ export function useCompanionLive(controller?: CompanionClientController, reconne
         session.abort.abort();
         pendingCleanup.current = Promise.all([pendingCleanup.current, session.connection.close()]).then(() => undefined);
         active.current = null;
-        scheduleReconnect(target);
+        scheduleReconnect(target, error);
       },
       onPlaybackBlocked: (playbackBlocked) => {
         if (active.current !== session) return;

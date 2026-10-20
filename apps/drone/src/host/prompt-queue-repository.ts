@@ -27,6 +27,19 @@ export type PromptSubmissionSource =
   | 'queue-action'
   | 'system';
 
+/** The chat that sent a prompt through an assistant tool. */
+export type PromptSender = {
+  kind: 'chat';
+  chatId: string;
+  droneId: string;
+  chatName: string;
+};
+
+export type PromptQueueEditResult =
+  | { status: 'edited'; state: 'queued'; prompt: string }
+  | { status: 'not-found'; state: null }
+  | { status: 'not-owner' | 'too-late' | 'unsupported'; state: PromptQueueState };
+
 export type PromptQueuedEvent = {
   droneId: string;
   chatName: string;
@@ -57,6 +70,7 @@ export type PromptQueueItem = {
     images: Array<{ type: 'image'; data: string; mimeType: string }>;
   };
   deliveryMode?: 'queue' | 'asap';
+  sentBy?: PromptSender;
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PromptQueueState;
@@ -406,6 +420,19 @@ function recordFromRow(row: PromptRow | undefined): PromptQueueRecord | null {
     ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}),
     ...(row.last_error ? { lastError: row.last_error } : {}),
   };
+}
+
+/**
+ * Native preparation keeps the prompt first and may add lines after it, such as
+ * uploaded-file references. Returns what follows the prompt, or null when the
+ * prepared text was built from different prompt text.
+ */
+function nativePromptSuffix(nativeText: string, prompt: string): string | null {
+  // Native submission trims the prompt before adding anything after it.
+  const base = prompt.trim();
+  if (!nativeText.startsWith(base)) return null;
+  const suffix = nativeText.slice(base.length);
+  return suffix === '' || suffix.startsWith('\n') ? suffix : null;
 }
 
 function addMs(iso: string, ms: number): string {
@@ -1262,6 +1289,9 @@ export class PromptQueueRepository {
         } else if (humanText !== undefined && input.startsWith(humanText)) {
           nativePrompt = { ...nativePrompt, text: current.prompt + input.slice(humanText.length) };
         } else return current;
+      } else if (current && nativePromptSuffix(nativePrompt.text, current.prompt) === null) {
+        // The prompt was edited after the caller read it; the next pass prepares the new text.
+        return current;
       }
       // Preserve the original message and attachment references for the transcript.
       // Preparation is idempotent and cannot alter an already claimed delivery.
@@ -1665,6 +1695,85 @@ export class PromptQueueRepository {
         return true;
       },
     );
+  }
+
+  /**
+   * Records the chat that sent a prompt; a sender, once set, never changes.
+   * Returns whether the prompt now belongs to this sender, so a retry is still true.
+   */
+  async stampSender(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    sentBy: PromptSender;
+  }): Promise<boolean> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
+    return await this.database.writeTransaction('stamp prompt sender', (connection) => {
+      connection
+        .prepare(
+          `UPDATE prompts SET payload_json = json_set(payload_json, '$.sentBy', json(?))
+           WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+             AND json_type(payload_json, '$.sentBy') IS NULL`,
+        )
+        .run(JSON.stringify(opts.sentBy), opts.droneId, opts.chatName, opts.promptId);
+      return (
+        rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId)?.sentBy?.chatId ===
+        opts.sentBy.chatId
+      );
+    });
+  }
+
+  /**
+   * Rewrites a prompt that is still waiting, keeping its place in the queue.
+   * The state check and the write are one statement, so an edit can never
+   * land on a prompt the pump has already claimed.
+   */
+  async editQueued(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    text: string;
+    /** append adds the text after the current prompt, separated by a blank line. */
+    mode?: 'replace' | 'append';
+    requireSentByChatId?: string;
+  }): Promise<PromptQueueEditResult> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
+    const text = String(opts.text ?? '').trim();
+    if (!text) throw new Error('missing prompt');
+    return await this.database.writeTransaction('edit queued prompt', (connection) => {
+      const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+      if (!current || current.state === 'cancelled') return { status: 'not-found', state: null };
+      if (opts.requireSentByChatId && current.sentBy?.chatId !== opts.requireSentByChatId)
+        return { status: 'not-owner', state: current.state };
+      if (current.state !== 'queued') return { status: 'too-late', state: current.state };
+      if (current.eventBundle || current.action || current.queueInterruption)
+        return { status: 'unsupported', state: current.state };
+      const pause = rowForPause(connection, opts.droneId, opts.chatName);
+      if (pause?.recoveryPromptId === current.id) return { status: 'unsupported', state: current.state };
+      const prompt = opts.mode === 'append' ? `${current.prompt}\n\n${text}` : text;
+      const nativeSuffix = current.nativePrompt
+        ? nativePromptSuffix(current.nativePrompt.text, current.prompt)
+        : '';
+      if (nativeSuffix === null) return { status: 'unsupported', state: current.state };
+      const updatedAt = new Date().toISOString();
+      const next: PromptQueueItem = {
+        ...current,
+        prompt,
+        ...(current.nativePrompt
+          ? { nativePrompt: { ...current.nativePrompt, text: prompt + nativeSuffix } }
+          : {}),
+        updatedAt,
+      };
+      const info = connection
+        .prepare(
+          `UPDATE prompts SET prompt = ?, payload_json = ?, updated_at = ?
+           WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'queued'`,
+        )
+        .run(prompt, JSON.stringify(next), updatedAt, opts.droneId, opts.chatName, current.id);
+      return Number(info.changes ?? 0) === 1
+        ? { status: 'edited', state: 'queued', prompt }
+        : { status: 'too-late', state: current.state };
+    });
   }
 
   async cancelQueued(opts: {

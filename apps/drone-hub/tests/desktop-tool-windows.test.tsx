@@ -76,7 +76,8 @@ test('a dock tab offers the desktop window only in the desktop app and opens its
   const restore = installDom(dom);
   const container = dom.document.createElement('div');
   const root = createRoot(container as unknown as HTMLElement);
-  const api = { title: 'Chats', onDidTitleChange: () => ({ dispose: () => {} }), close: () => {} };
+  const noEvent = () => ({ dispose: () => {} });
+  const api = { title: 'Chats', location: { type: 'grid' }, onDidTitleChange: noEvent, onDidLocationChange: noEvent, onDidGroupChange: noEvent, close: () => {} };
   try {
     await act(async () => { root.render(<ChatsDockTab api={api as never} containerApi={{} as never} params={{}} tabLocation="header" />); });
     expect(container.querySelector('[data-open-desktop-tool]')).toBeNull();

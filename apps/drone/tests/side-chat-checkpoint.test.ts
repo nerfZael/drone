@@ -3,7 +3,12 @@ import {
   createDroneChatCreator,
   type DroneChatCreationDependencies,
 } from '../src/hub/chat-creation-service';
-import { completedChatCheckpoint } from '../src/hub/side-chat-checkpoint';
+import {
+  completedChatCheckpoint,
+  isComposerSideChatEntry,
+  isGeneratedSideChatName,
+  sideChatDescendantNames,
+} from '../src/hub/side-chat-checkpoint';
 import { partitionWorkflowChatEntries } from '../src/hub/workflows/workflow-chat-metadata';
 import { readChatFromStore, upsertChatInStore } from '../src/hub/transcript-store';
 import { withTempDroneDataDir } from './test-helpers';
@@ -124,6 +129,7 @@ describe('side chat checkpoints', () => {
     expect(result.chat.visibility).toBe('side-chat');
     expect(result.chat.sideChatOrigin).toEqual({
       sourceChatName: 'main',
+      sourceChatId: 'source-id',
       checkpointId: 'answer-1',
     });
     expect(result.chat.chatForkOrigin).toMatchObject({
@@ -228,6 +234,88 @@ describe('side chat checkpoints', () => {
     });
   }
 
+  test('a composer fork records its kind, keeps the fork point, and keeps its source workspaces', async () => {
+    const harness = creatorHarness('codex');
+    const workspaceAccess = { targets: [{ id: 'host:guides', read: true }], defaultTargetId: 'host:guides' };
+    Object.assign(harness.source, { workspaceAccess });
+    const result = await harness.create({ sideChatPresentation: 'composer' });
+    expect(result.chat.visibility).toBe('side-chat');
+    expect(result.chat.sideChatOrigin).toEqual({
+      sourceChatName: 'main',
+      sourceChatId: 'source-id',
+      checkpointId: 'answer-1',
+      kind: 'fork',
+      presentation: 'composer',
+    });
+    expect(result.chat.turns.map((turn: any) => turn.id)).toEqual(['answer-1']);
+    expect(result.chat.workspaceAccess).toEqual(workspaceAccess);
+    expect(result.chat.workspaceAccess).not.toBe(workspaceAccess);
+    expect(isComposerSideChatEntry(result.chat)).toBe(true);
+  });
+
+  test('a new composer side chat starts empty with its source agent and no fork point', async () => {
+    // Cursor cannot fork from a checkpoint, but a new side chat needs none.
+    const harness = creatorHarness('cursor');
+    const result = await harness.create({ creationMode: 'copy-config', sideChatPresentation: 'composer' });
+    expect(result.chat.visibility).toBe('side-chat');
+    expect(result.chat.agent).toEqual({ kind: 'builtin', id: 'cursor' });
+    expect(result.chat.turns).toBeUndefined();
+    expect(result.chat.cloneOrigin).toBeUndefined();
+    expect(result.chat.sideChatOrigin).toEqual({
+      sourceChatName: 'main',
+      sourceChatId: 'source-id',
+      kind: 'new',
+      presentation: 'composer',
+    });
+  });
+
+  test('rejects side chats without a source, as drafts, new floating ones, and presentations without a side chat', async () => {
+    const harness = creatorHarness('codex');
+    await expect(harness.create({ draft: true })).rejects.toThrow('cannot be drafts');
+    await expect(harness.create({ creationMode: 'copy-config' })).rejects.toThrow(
+      'A new side chat requires a side chat presentation',
+    );
+    await expect(harness.create({ sideChat: false, sideChatPresentation: 'composer' })).rejects.toThrow(
+      'requires a side chat',
+    );
+    await expect(harness.create({ sourceChatName: 'missing', creationMode: 'copy-config' })).rejects.toThrow(
+      'requires an existing source chat',
+    );
+    expect(harness.chats.has('side')).toBe(false);
+  });
+
+  test('finds side chats of side chats, by source ID after a rename, and stops at kept ones', () => {
+    const chats = {
+      'renamed main': { id: 'main-id' },
+      a: { id: 'a-id', visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'main', sourceChatId: 'main-id' } },
+      b: { id: 'b-id', visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'a', sourceChatId: 'a-id' } },
+      // A fork's cloneOrigin carries the ID even where sideChatOrigin predates it.
+      c: {
+        id: 'c-id',
+        visibility: 'side-chat',
+        sideChatOrigin: { sourceChatName: 'gone', checkpointId: 'x' },
+        cloneOrigin: { sourceChatName: 'gone', sourceChatId: 'main-id' },
+      },
+      kept: { id: 'kept-id', cloneOrigin: { sourceChatName: 'a', sourceChatId: 'a-id' } },
+      'side of kept': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'kept', sourceChatId: 'kept-id' } },
+      other: { id: 'other-id' },
+      'side of other': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'other' } },
+    };
+    expect(sideChatDescendantNames(chats, 'renamed main')).toEqual(['a', 'c', 'b']);
+    expect(sideChatDescendantNames(chats, 'a')).toEqual(['b']);
+    expect(sideChatDescendantNames(chats, 'kept')).toEqual(['side of kept']);
+    expect(sideChatDescendantNames(chats, 'b')).toEqual([]);
+    expect(sideChatDescendantNames(null, 'main')).toEqual([]);
+  });
+
+  test('recognizes only the generated side chat name', () => {
+    expect(isGeneratedSideChatName('side-0a1b2c3d')).toBe(true);
+    expect(isGeneratedSideChatName('side-0a1b2c3')).toBe(false);
+    expect(isGeneratedSideChatName('side-review')).toBe(false);
+    expect(isComposerSideChatEntry({ visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'main' } })).toBe(false);
+    expect(isComposerSideChatEntry({ sideChatOrigin: { presentation: 'composer' } })).toBe(false);
+  });
+
   test('passes the captured native boundary and rolls back a failed fork', async () => {
     const harness = creatorHarness('native');
     await expect(harness.create()).rejects.toThrow('native failure');
@@ -279,7 +367,7 @@ function creatorHarness(agentId: string, overrides: Partial<DroneChatCreationDep
     source,
     chats,
     nativeForks,
-    create: () =>
+    create: (input: Partial<Parameters<typeof create>[0]> = {}) =>
       create({
         droneId: 'drone',
         droneEntry: { busyChats: ['main'] },
@@ -287,6 +375,7 @@ function creatorHarness(agentId: string, overrides: Partial<DroneChatCreationDep
         sourceChatName: 'main',
         creationMode: 'clone-history',
         sideChat: true,
+        ...input,
       }),
   };
 }

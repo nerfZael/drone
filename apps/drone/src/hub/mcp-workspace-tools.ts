@@ -15,10 +15,12 @@ const RENAMED_PARAMETERS: Record<string, string> = {
   destinationTarget: 'destinationWorkspace',
 };
 const PARAMETER_DESCRIPTIONS: Record<string, string> = {
-  workspace: 'Workspace id from list_workspaces; omitted calls use the default workspace.',
+  workspace: 'Workspace id from list_workspaces; omitted calls use the default workspace, or the workspace a workspace:// path names.',
   sourceWorkspace: 'Workspace id from list_workspaces to copy from.',
   destinationWorkspace: 'Workspace id from list_workspaces to copy to.',
 };
+export const GRANT_WORKSPACE_ACCESS_TOOL_NAME = 'grant_workspace_access';
+
 const READ_ONLY_TOOLS = new Set([
   'list_workspaces',
   'read_file',
@@ -151,7 +153,7 @@ export function registerAgentChatWorkspaceTools(
     {
       title: 'List workspaces',
       description:
-        "List the workspaces this chat may use through the other DroneHub workspace tools: repositories and folders on this device, drone containers, and folders shared by other devices. Shows each workspace's id, what it allows (read, write, execute), the default, and which one is your own workspace.",
+        "List the workspaces this chat may use through the other DroneHub workspace tools: repositories and folders on this device, drone containers, and folders shared by other devices. Shows each workspace's id, what it allows (read, write, execute), the default, which one is your own workspace, which one is your home (a folder of your own, deleted with this chat), and its link. To link to a file in a workspace from Markdown you write (a README, a report, a chat reply), append the path relative to the workspace's root to its link, percent-encoding spaces, and #L12 for a line: [the loop](workspace://Guides/gauntlet-loop.md#L40). The user opens these links in DroneHub, and every path argument of these tools accepts one as written.",
       inputSchema: {},
       annotations: annotations('list_workspaces'),
     },
@@ -161,6 +163,47 @@ export function registerAgentChatWorkspaceTools(
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
+      };
+    },
+  );
+
+  server.registerTool(
+    GRANT_WORKSPACE_ACCESS_TOOL_NAME,
+    {
+      title: 'Grant workspace access',
+      description:
+        "Give another chat access you have to one of your workspaces (see list_workspaces), your home included, so it can work on the same files. You can grant only permissions you hold on that workspace; Read is always included. They are added to whatever the other chat already has there, and you cannot take them back later: only the user removes access, in that chat's Workspaces picker. Name the chat by its drone and chat name, as list_chats shows them.",
+      inputSchema: {
+        drone: z.string().describe('Drone (name or id) of the chat to grant access to.'),
+        chat: z.string().describe('Name of the chat to grant access to.'),
+        workspace: z.string().describe('Workspace id (or name) from list_workspaces.'),
+        write: z.boolean().optional().describe('Also grant Write. You must have Write there.'),
+        execute: z.boolean().optional().describe('Also grant Execute (bash). You must have Execute there.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: { drone: string; chat: string; workspace: string; write?: boolean; execute?: boolean }, extra: { signal?: AbortSignal }) => {
+      const chat = input.chat();
+      const response = await requestJson(
+        `/api/drones/${encodeURIComponent(chat.droneId)}/chats/${encodeURIComponent(chat.chatName)}/workspaces/grant`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            to: { drone: args.drone, chat: args.chat },
+            workspace: args.workspace,
+            read: true,
+            write: args.write === true,
+            execute: args.execute === true,
+          }),
+          ...(extra?.signal ? { signal: extra.signal } : {}),
+        },
+        TOOL_TIMEOUT_MS,
+      );
+      if (typeof response?.error === 'string')
+        return { content: [{ type: 'text' as const, text: response.error }], isError: true };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(response?.result, null, 2) }],
+        structuredContent: response?.result,
       };
     },
   );

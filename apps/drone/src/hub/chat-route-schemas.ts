@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+/** A chat acting through Drone Hub MCP tools: who sent a message or created a chat. */
+export const chatActorSchema = z.object({
+  kind: z.literal('chat'),
+  chatId: z.string().trim().min(1).max(200),
+  droneId: z.string().trim().min(1).max(200),
+  chatName: z.string().trim().min(1).max(200),
+});
+
 export const chatPromptBodySchema = z
   .object({
     prompt: z.unknown().optional(),
@@ -14,8 +22,15 @@ export const chatPromptBodySchema = z
     deliveryMode: z.enum(['queue', 'asap']).optional(),
     autoRenameHandledByClient: z.boolean().optional(),
     requireExistingChat: z.boolean().optional(),
+    sentBy: chatActorSchema.optional(),
   })
   .passthrough();
+
+export const pendingPromptEditBodySchema = z.object({
+  text: z.string().trim().min(1),
+  mode: z.enum(['replace', 'append']).optional(),
+  requireSentByChatId: z.string().trim().min(1).optional(),
+});
 
 export const chatCreateBodySchema = z
   .object({
@@ -27,10 +42,12 @@ export const chatCreateBodySchema = z
     fromChat: z.unknown().optional(),
     mode: z.enum(['fork', 'copy-config']).optional(),
     sideChat: z.boolean().optional(),
+    sideChatPresentation: z.literal('composer').optional(),
     checkpointId: z.string().trim().min(1).optional(),
     chatId: z.string().trim().min(1).optional(),
     draft: z.unknown().optional(),
     isDraft: z.unknown().optional(),
+    createdBy: chatActorSchema.optional(),
   })
   .passthrough();
 

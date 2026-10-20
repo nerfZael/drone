@@ -4,9 +4,9 @@ import { subscribeDesktopEvents } from '../app/desktop-events';
 import { subscribeDeviceMeshChanges } from '../app/device-mesh-events';
 import { IconSpinner } from '../icons';
 import { AddWorkspaceControls } from '../workspaces/AddWorkspaceControls';
-import { subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
+import { notifyChatWorkspacesChanged, subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
 import {
-  WORKSPACE_CATEGORIES,
+  CAPPED_WORKSPACE_CATEGORIES, WORKSPACE_CATEGORIES,
   addWorkspace,
   removeWorkspace,
   setPermission,
@@ -93,15 +93,18 @@ export function WorkspaceAccessPicker({
   const saveTimerRef = React.useRef<number | null>(null);
   const painting = React.useRef<{ key: Permission; value: boolean } | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
-  // Edits made before the first catalog arrived: kept, and saved once it does.
-  const editedEarly = React.useRef(false);
+  // Edits the Hub has not accepted yet, in order. Each sets values outright, so they replay onto whatever the Hub has
+  // now: a cached or outdated catalog never drops what changed elsewhere, and a refused save is not lost.
+  const pendingRef = React.useRef<Array<(current: ChatWorkspaceAccess) => ChatWorkspaceAccess>>([]);
+  const [pendingCount, setPendingCount] = React.useState(0);
+  // Automatic retries of a save the Hub refused because the access had changed meanwhile.
+  const conflictRetriesRef = React.useRef(0);
   const flushSaveRef = React.useRef<() => Promise<void>>(async () => undefined);
   loadedRef.current = loaded;
   draftRef.current = draft;
   catalogRef.current = catalog;
-  const dirty = Boolean(catalog && draft && workspaceAccessSignature(catalog.access) !== workspaceAccessSignature(draft));
-  const dirtyRef = React.useRef(dirty);
-  dirtyRef.current = dirty;
+  // Busy until every edit is saved: closing waits for it, and nothing is left unsaved without a save on the way.
+  const dirty = pendingCount > 0;
   const locked = disabled;
   const selectedCount = draft?.targets.length ?? 0;
 
@@ -144,7 +147,23 @@ export function WorkspaceAccessPicker({
     }
   }, [requestJson, endpoint]);
 
-  /** Reloads the catalog and every other device already loaded; edits still being saved stay as they are. */
+  const setPending = React.useCallback((changes: Array<(current: ChatWorkspaceAccess) => ChatWorkspaceAccess>) => {
+    pendingRef.current = changes;
+    setPendingCount(changes.length);
+  }, []);
+  const scheduleSave = React.useCallback(() => {
+    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushSaveRef.current(); }, SAVE_DEBOUNCE_MS);
+  }, []);
+  /** Takes the Hub's catalog as the base and shows the edits not saved yet on top of it. */
+  const adopt = React.useCallback((result: ChatWorkspaceCatalog) => {
+    catalogRef.current = { ...(catalogRef.current ?? result), access: result.access, revision: result.revision };
+    const replayed = pendingRef.current.reduce((access, change) => change(access), result.access);
+    draftRef.current = replayed;
+    setDraft(replayed);
+  }, []);
+
+  /** Reloads the catalog and every other device already loaded; edits not saved yet are replayed onto it. */
   const reload = React.useCallback(async (initial: boolean) => {
     if (initial) setInitialLoading(true);
     try {
@@ -152,24 +171,25 @@ export function WorkspaceAccessPicker({
       if (!alive.current) return;
       const previous = initial ? new Set<string>() : new Set(loadedRef.current);
       const base = new Set(result.workspaces.map((workspace) => workspace.deviceId));
-      setCatalog((current) => current && !initial ? {
+      const merged = catalogRef.current && !initial ? {
         ...result,
-        workspaces: [...result.workspaces, ...current.workspaces.filter((option) => !base.has(option.deviceId) && previous.has(option.deviceId))],
-      } : result);
-      setDraft((current) => (current && (dirtyRef.current || editedEarly.current) ? current : result.access));
+        workspaces: [...result.workspaces, ...catalogRef.current.workspaces.filter((option) => !base.has(option.deviceId) && previous.has(option.deviceId))],
+      } : result;
+      catalogRef.current = merged;
+      setCatalog(merged);
+      adopt(result);
       setLoaded(new Set([...base, ...previous]));
-      if (editedEarly.current) {
-        editedEarly.current = false;
-        if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushSaveRef.current(); }, SAVE_DEBOUNCE_MS);
-      }
+      // Edits made before this catalog arrived (or against an outdated one) save now, on top of it.
+      if (pendingRef.current.length && !savingRef.current && saveTimerRef.current == null) scheduleSave();
       if (!initial) for (const deviceId of previous) if (!base.has(deviceId)) void loadDevice(deviceId);
     } catch (loadError: any) {
       if (alive.current && initial) setError(loadError?.message ?? String(loadError));
+      // With nothing to save onto, edits would keep the picker busy (and its dialog open) for good.
+      if (alive.current && !catalogRef.current) setPending([]);
     } finally {
       if (alive.current) setInitialLoading(false);
     }
-  }, [loadDevice, requestJson, endpoint]);
+  }, [adopt, loadDevice, requestJson, endpoint, scheduleSave, setPending]);
 
   React.useEffect(() => { void reload(true); }, [reload]);
 
@@ -202,38 +222,64 @@ export function WorkspaceAccessPicker({
     }
   }, [loadDevice]);
 
-  // Edits save on their own. Rapid clicks coalesce, a save in flight queues one more, and a rejected save falls back to
-  // what the Hub last accepted.
+  // Edits save on their own. Rapid clicks coalesce and a save in flight queues one more. A save refused because the
+  // access changed elsewhere replays the edits onto the new access and tries again; any other refusal drops them and
+  // shows what the Hub has.
   const flushSave = React.useCallback(async () => {
-    const current = draftRef.current;
     const base = catalogRef.current;
-    if (!current || !base || workspaceAccessSignature(current) === workspaceAccessSignature(base.access)) return;
+    // Without a catalog the edits wait for it: reload saves them once it arrives.
+    if (!base || !pendingRef.current.length) return;
     if (savingRef.current) { savePendingRef.current = true; return; }
+    const sentChanges = pendingRef.current;
+    const current = sentChanges.reduce((access, change) => change(access), base.access);
+    if (workspaceAccessSignature(current) === workspaceAccessSignature(base.access)) {
+      // The edits cancel out, or the Hub already has them.
+      setPending(pendingRef.current.slice(sentChanges.length));
+      adopt(base);
+      return;
+    }
     savingRef.current = true;
     setSaving(true);
     setError(null);
-    const sent = workspaceAccessSignature(current);
     try {
       const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(endpoint), { method: 'POST', body: JSON.stringify({ access: current, revision: base.revision }) });
       if (!alive.current) return;
+      conflictRetriesRef.current = 0;
+      setPending(pendingRef.current.slice(sentChanges.length));
       setCatalog((existing) => existing ? { ...existing, access: result.access, revision: result.revision } : result);
-      setDraft((latest) => (latest && workspaceAccessSignature(latest) === sent ? result.access : latest));
+      adopt(result);
+      notifyChatWorkspacesChanged();
     } catch (saveError: any) {
       if (!alive.current) return;
-      setError(saveError?.message ?? String(saveError));
-      setDraft(base.access);
-      if (/changed elsewhere/i.test(String(saveError?.message ?? ''))) void reload(false);
+      const message = saveError?.message ?? String(saveError);
+      const conflict = /changed elsewhere/i.test(String(message));
+      if (conflict && conflictRetriesRef.current < 2) {
+        conflictRetriesRef.current += 1;
+        // Reload replays the edits onto the new access and saves them again.
+        savePendingRef.current = false;
+        savingRef.current = false;
+        setSaving(false);
+        await reload(false);
+        return;
+      }
+      conflictRetriesRef.current = 0;
+      setError(message);
+      setPending([]);
+      adopt(catalogRef.current ?? base);
+      if (conflict) void reload(false);
     } finally {
-      savingRef.current = false;
-      if (alive.current) setSaving(false);
+      if (savingRef.current) {
+        savingRef.current = false;
+        if (alive.current) setSaving(false);
+      }
       if (savePendingRef.current) { savePendingRef.current = false; void flushSave(); }
     }
-  }, [reload, requestJson, endpoint]);
+  }, [adopt, reload, requestJson, endpoint, setPending]);
 
   flushSaveRef.current = flushSave;
 
   const update = React.useCallback((change: (current: ChatWorkspaceAccess) => ChatWorkspaceAccess) => {
-    if (!catalogRef.current) editedEarly.current = true;
+    setPending([...pendingRef.current, change]);
     setDraft((current) => {
       if (!current) return current;
       const next = change(current);
@@ -242,9 +288,8 @@ export function WorkspaceAccessPicker({
       if (removed.length) setGone((list) => [...list.filter((item) => !removed.some((r) => r.id === item.id)), ...removed]);
       return next;
     });
-    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushSave(); }, SAVE_DEBOUNCE_MS);
-  }, [flushSave]);
+    scheduleSave();
+  }, [scheduleSave, setPending]);
 
   const byId = new Map<string, ChatWorkspaceOption>();
   for (const option of catalog?.workspaces ?? []) byId.set(option.id, option);
@@ -419,7 +464,7 @@ export function WorkspaceAccessPicker({
                 {WORKSPACE_CATEGORIES.map((category) => {
                   let rows = options.filter((option) => workspaceCategory(option) === category);
                   if (!rows.length) return null;
-                  const drones = category === 'Container drones' || category === 'Host drones';
+                  const drones = CAPPED_WORKSPACE_CATEGORIES.has(category);
                   const total = rows.length;
                   if (drones && !allDrones && !term) rows = rows.filter((option, index) => index < DRONE_CAP || draft?.targets.some((target) => target.id === option.id));
                   return (

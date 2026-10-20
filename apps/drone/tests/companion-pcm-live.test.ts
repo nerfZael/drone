@@ -119,3 +119,26 @@ test('PCM persists Hub handoffs and scoped client timings, and forwards only ack
   expect(JSON.stringify(report)).not.toContain('secret');
   expect(telemetry.events('other-session')).toEqual([]);
 });
+
+test('PCM records provider errors and client failure reasons without their message text', async () => {
+  const { CompanionLiveTelemetry } = await import('../src/hub/companion/companion-live-telemetry');
+  const telemetry = new CompanionLiveTelemetry();
+  const h = harness({ telemetry });
+  const warn = console.warn; const warnings: unknown[][] = []; console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    h.session.handle({ type: 'live_start', transport: 'pcm', timingSessionId: 'live-fail' }); await tick();
+    h.upstream.readyState = WebSocket.OPEN; h.upstream.emit('open');
+    h.event({ type: 'session.started' });
+    h.event({ type: 'error', error: { type: 'invalid_request_error', code: 'unknown_delegation', message: 'Delegation d was already resolved' } });
+    expect(h.messages.at(-1)).toMatchObject({ type: 'live_event', event: { type: 'error' } });
+    h.session.handle({ type: 'live_ping', timingEvents: [
+      { sessionId: 'live-fail', sequence: 1, stage: 'session_failed', elapsedMs: 9, resultSequence: 0, reason: 'live-voice-reported-an-error-start-again' },
+    ] });
+    h.session.close(); await tick();
+    const events = telemetry.report([], 'live-fail').events;
+    expect(events.find(e => e.stage === 'hub_provider_error')?.reason).toBe('invalid-request-error-unknown-delegation');
+    expect(events.find(e => e.stage === 'session_failed')?.reason).toBe('live-voice-reported-an-error-start-again');
+    expect(JSON.stringify(events)).not.toContain('already resolved');
+    expect(warnings[0]?.[0]).toBe('[companion-live] Live provider error');
+  } finally { console.warn = warn; }
+});

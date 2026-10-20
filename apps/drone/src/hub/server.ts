@@ -5,6 +5,7 @@ import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
 import { readChatIdleStatus } from './chat-idle-status';
+import { getChatQuestionRequestService } from './chat-question-requests';
 import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
@@ -178,6 +179,7 @@ import {
   resetTranscriptStoreForTests,
   restoreArchivedChatInStore,
   rollbackTranscriptToTurnInStore,
+  subscribeChatRemovals,
   transcriptTurnsSourceHash,
   type ChatReadState,
   upsertChatInStore,
@@ -334,6 +336,7 @@ import { registerRepoWorktreeRoutes } from './routes/repo-worktree-routes';
 import { RepoWorktrees, type DroneRepoGit } from './repo-worktrees';
 import { registerUserWorkspaceRoutes } from './routes/user-workspace-routes';
 import { userWorkspaces } from './user-workspaces';
+import { chatHomes } from './chat-homes';
 import { registerFolderWorkspace, resolveFolderWorkspace } from './folder-workspaces';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { createFileRevisionWatcher } from './file-revision-watch';
@@ -380,6 +383,9 @@ import {
 } from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
+import { ChannelRepository } from './channels/channel-repository';
+import { ChannelService } from './channels/channel-service';
+import { registerChannelRoutes } from './channels/channel-routes';
 import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
@@ -604,6 +610,7 @@ import {
   isDraftChatEntry,
   isDraftDroneEntry,
   resolveChatCloneSources,
+  resolveChatCreators,
   resolveChatCreatedAt,
   resolveChatIds,
   summarizeDroneActivity,
@@ -4139,6 +4146,7 @@ async function startDroneHubApiServerWithLifecycle(
     createOrEnqueueNewChatAction,
     createOrEnqueuePromptUnified,
     dequeueProvisioning,
+    editQueuedPendingPrompt,
     enqueuePendingPromptPump,
     enqueueProvisioning,
     enqueueProvisioningForAllPending,
@@ -4160,6 +4168,7 @@ async function startDroneHubApiServerWithLifecycle(
     stopChatResponse,
     stopPromptRuntimeBackgroundWork,
     stopSingleDroneChatActivity,
+    stampPendingPromptSender,
   } = promptRuntime;
   let releaseMcpProjectionConfig = () => {};
   let releaseNativeChatRuntimePort = () => {};
@@ -5288,21 +5297,14 @@ async function startDroneHubApiServerWithLifecycle(
         isThreadBusy,
       }),
     ]);
-    const sideChats = sideChatEntries.map(([name, entry]: [string, any]) => ({
-      name,
-      ...entry.sideChatOrigin,
-      ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
-      agent: inferChatAgent(entry, d),
-      busy: busySideChats.includes(name),
-    }));
-    const approvalChats = chats.flatMap((chatName) => {
+    const chatRequiresApproval = (chatName: string): boolean => {
       const chatEntry = d.chats?.[chatName];
       const agent = inferChatAgent(chatEntry, d);
       if (agent.kind === 'native') {
         const threadId = String(chatEntry?.id ?? '').trim();
-        return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+        return Boolean(threadId && assistantService.threadRequiresApproval(threadId));
       }
-      if (
+      return (
         agent.kind === 'builtin' &&
         agent.id === 'codex' &&
         chatRequiresCodexApprovalForSummary({
@@ -5311,13 +5313,24 @@ async function startDroneHubApiServerWithLifecycle(
           entry: chatEntry,
           preferEntry: true,
         })
-      ) {
-        return [chatName];
-      }
-      return [];
-    });
+      );
+    };
+    const sideChats = sideChatEntries.map(([name, entry]: [string, any]) => ({
+      name,
+      ...entry.sideChatOrigin,
+      ...(chatCloneSources[name] ? { sourceChatName: chatCloneSources[name] } : {}),
+      ...(entry?.createdAt ? { createdAt: String(entry.createdAt) } : {}),
+      agent: inferChatAgent(entry, d),
+      busy: busySideChats.includes(name),
+      // Its own unread and approval state: a side chat does not mark the drone in the sidebar.
+      unread: storedReadStates[name]?.unread === true,
+      approval: chatRequiresApproval(name),
+    }));
+    const approvalChats = chats.filter(chatRequiresApproval);
+    // Side chats have read states of their own (opening one marks it read) but
+    // stay out of `unreadChats`, which describes the drone.
     const chatReadStates = Object.fromEntries(
-      chats.map((chatName) => {
+      [...chats, ...sideChatNames].map((chatName) => {
         const state = storedReadStates[chatName];
         return [
           chatName,
@@ -5371,6 +5384,7 @@ async function startDroneHubApiServerWithLifecycle(
       workflowChats,
       sideChats,
       chatCloneSources,
+      chatCreators: resolveChatCreators(d.chats, droneId),
       chatCreatedAt: resolveChatCreatedAt(d.chats),
       chatIds: resolveChatIds(d.chats),
       unreadChats,
@@ -5664,12 +5678,25 @@ async function startDroneHubApiServerWithLifecycle(
   const readIdleStatus = async (target: { droneId: string; chatName: string }) => {
     const registry = readCanonicalChatActivityModel(target.droneId, target.chatName) ??
       await loadCanonicalActiveModel();
-    return readChatIdleStatus(registry, target, nativeChatIsBusy);
+    const status = await readChatIdleStatus(registry, target, nativeChatIsBusy);
+    const pendingQuestions = getChatQuestionRequestService()
+      .listPending(target.droneId, target.chatName)
+      .map((request) => ({
+        requestId: request.id,
+        createdAt: request.createdAt,
+        questions: request.questions.map(({ id, question }) => ({ id, question })),
+      }));
+    return pendingQuestions.length > 0 ? { ...status, pendingQuestions } : status;
   };
   const resourceSubscriptionDatabase = getHubDatabase();
   const resourceSubscriptionRepository = resourceSubscriptionDatabase
     ? new ResourceSubscriptionRepository(resourceSubscriptionDatabase)
     : null;
+  // Channels share the Hub database with subscriptions: a message and its events commit together.
+  const channelRepository =
+    resourceSubscriptionDatabase && resourceSubscriptionRepository
+      ? new ChannelRepository(resourceSubscriptionDatabase)
+      : null;
   const resourceSubscriptionService = resourceSubscriptionRepository
     ? new ResourceSubscriptionService({
         repository: resourceSubscriptionRepository,
@@ -5684,11 +5711,14 @@ async function startDroneHubApiServerWithLifecycle(
           getChangeRequestRepository().getByNumbers(requestNumbers),
         readCustomEventHistorySourceIds:
           createCustomEventHistorySourceReader(loadCanonicalActiveModel),
+        resolveChannelName: (channelId) => channelRepository?.getChannel(channelId)?.name ?? null,
         authorizeDelivery: createResourceSubscriptionDeliveryAuthorizer({
           resolveChatResource: (resourceId) =>
             resourceSubscriptionRepository.resolveChatResource(resourceId),
           resolveChangeRequest: (requestNumber) =>
             getChangeRequestRepository().getByNumber(requestNumber),
+          canReadChannel: (channelId, chatId) =>
+            Boolean(channelRepository?.getMember(channelId, chatId)?.canRead),
           loadRegistry: loadCanonicalActiveModel,
         }),
         log: hubLog,
@@ -5731,8 +5761,19 @@ async function startDroneHubApiServerWithLifecycle(
         await updateChatInStore({ ...chat, update: (current: any) => ({ ...current, workspaceAccess: access }) });
         await projectCanonicalChatToRegistry(chat.droneId, chat.chatName);
       },
+      id: async (chat) => {
+        const id = readChatMetadataFromStore(chat).chat?.id;
+        return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+      },
     }),
   );
+  // A chat's home goes with the chat: swept after chats are removed, and every few minutes for removals made elsewhere.
+  const stopChatHomeRemovals = subscribeChatRemovals(() => chatHomes().scheduleSweep());
+  const stopChatHomeSweeps = chatHomes().startSweeping();
+  registerBackgroundResource('chat home sweeps', async () => {
+    stopChatHomeRemovals();
+    stopChatHomeSweeps();
+  });
   // Worktrees of a drone's repository: the Changes explorer can show one, and agent chats report the one they work in.
   registerRepoWorktreeRoutes(apiRouter, {
     worktrees: repoWorktrees,
@@ -5930,7 +5971,12 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
   });
   registerBackgroundResource('change request events', changeRequestFeature.stop);
-  registerChatReadRoutes(apiRouter, new ChatReadService(readChatSnapshot));
+  registerChatReadRoutes(
+    apiRouter,
+    new ChatReadService(readChatSnapshot, (droneId, chatName) =>
+      getChatQuestionRequestService().listPending(droneId, chatName),
+    ),
+  );
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),
@@ -6053,6 +6099,31 @@ async function startDroneHubApiServerWithLifecycle(
   });
 
   registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);
+  registerChannelRoutes(
+    apiRouter,
+    channelRepository && resourceSubscriptionRepository
+      ? new ChannelService({
+          repository: channelRepository,
+          subscriptions: resourceSubscriptionService,
+          appendEventInTransaction: (connection, event) =>
+            resourceSubscriptionRepository.appendEventInTransaction(connection, event),
+          resolveChats: (chatIds) => resourceSubscriptionRepository.resolveChatResources(chatIds),
+          notifyUserMention: ({ channel, message, author }) =>
+            hubChangeEvents.emitDesktopNotification({
+              id: `channel:${message.id}`,
+              kind: 'channel_mention',
+              droneId: author.droneId,
+              droneName: author.droneName || author.droneId,
+              chatName: author.chatName,
+              channelId: channel.id,
+              channelName: channel.name,
+              body: message.text.slice(0, 500),
+            }),
+          log: hubLog,
+        })
+      : null,
+    (chatId) => resourceSubscriptionRepository?.resolveChatResource(chatId) ?? null,
+  );
 
   registerFleetRoutes(apiRouter, {
     fleet: hubApplication.fleet,
@@ -6284,6 +6355,7 @@ async function startDroneHubApiServerWithLifecycle(
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
     deleteActiveChatFromStore,
+    editQueuedPendingPrompt,
     deleteNativeChatSession: (nativeChatId: string) => nativeChatLifecycle.delete(nativeChatId),
     discoverAndRememberModelsForBuiltinAgent,
     dockerSnapshotAfterAgentMessageEnabledForChat,
@@ -6360,6 +6432,7 @@ async function startDroneHubApiServerWithLifecycle(
     restoreDockerSnapshotForTranscriptTurn,
     setChatAgentConfig,
     shouldAutoRenameChatOnPrompt,
+    stampPendingPromptSender,
     stopChatResponse,
     stopSingleDroneChatActivity,
     updateStoredUserTimeZone,

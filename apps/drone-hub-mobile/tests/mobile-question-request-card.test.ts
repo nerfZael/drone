@@ -37,6 +37,7 @@ describe('mobile question request card', () => {
 
     expect(source).toContain('accessibilityRole="summary"');
     expect(source).toContain('Answers submitted');
+    expect(source).toContain('Answered by chat ${respondedBy.chatName}');
     expect(source).toContain('Additional notes');
     expect(source).toContain('responseText(responses.get(question.id))');
     expect(source).toContain('backgroundColor: colors.chatCard');

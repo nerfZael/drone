@@ -489,7 +489,8 @@ describe('Drone Hub assistant MCP transport', () => {
       expect(sendMessageDescription).toContain('injected into the execution in progress');
       expect(sendMessageDescription).toContain('gets no separate reply');
       expect(sendMessageDescription).toContain('Otherwise it starts as the next execution');
-      expect(sendMessageDescription).toContain('Neither mode stops or cancels');
+      expect(sendMessageDescription).toContain('Neither mode stops a running execution');
+      expect(sendMessageDescription).toContain('only while it is still waiting in the queue');
       const hostAskResult = await client.callTool({
         name: 'ask_questions',
         arguments: {
@@ -1099,6 +1100,221 @@ describe('Drone Hub assistant MCP transport', () => {
       } finally {
         await allowedClient?.close();
         await deniedClient?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('subscribes the creating chat to chats it creates unless it opts out', async () => {
+    await withTempDroneDataDir('drone-mcp-creator-subscription-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body =
+          method !== 'GET' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'drone-b', name: 'Drone B', runtime: 'container' }],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones/drone-b/chats' && method === 'POST') {
+          if (body.name === 'Existing') {
+            return Response.json({ ok: false, error: 'chat already exists' }, { status: 409 });
+          }
+          return Response.json(
+            { ok: true, chat: body.name, chatId: `id-${body.name}` },
+            { status: 201 },
+          );
+        }
+        if (/^\/api\/drones\/drone-b\/chats\/[^/]+\/(config|publish|prompt)$/.test(url.pathname)) {
+          return Response.json({ ok: true, id: 'drone-b', promptId: 'prompt-1', pendingState: 'queued' });
+        }
+        if (url.pathname.startsWith('/api/resource-subscriptions/chat-resource/')) {
+          const chatId = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+          return Response.json({ ok: true, resource: { chatId, droneId: 'drone-b' } });
+        }
+        if (url.pathname === '/api/resource-subscriptions' && method === 'POST') {
+          if (body.resourceId === 'id-Full') {
+            return Response.json(
+              { ok: false, error: 'active subscription limit reached (max 50)' },
+              { status: 409 },
+            );
+          }
+          return Response.json({
+            ok: true,
+            created: true,
+            subscription: {
+              id: `subscription-${body.resourceId}`,
+              ...body,
+              subscriber: body.subscriber,
+              cursor: {},
+              status: 'active',
+            },
+          });
+        }
+        return Response.json(
+          { ok: false, error: `unexpected request: ${method} ${url.pathname}` },
+          { status: 500 },
+        );
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'creator-subscription-test-token';
+
+      const principal = (readDroneIds: string[]) => ({
+        kind: 'chat' as const,
+        tokenId: 'chat:drone-a:Reviewer',
+        name: 'Drone A / Reviewer',
+        droneId: 'drone-a',
+        chatName: 'Reviewer',
+        chatId: 'reviewer-chat',
+        accessScope: {
+          readMode: 'selected' as const,
+          writeMode: 'all' as const,
+          executeMode: 'all' as const,
+          droneIds: readDroneIds,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        selectedDroneRefs: readDroneIds,
+      });
+      const subscriptionBodies = () =>
+        requests
+          .filter((request) => request.pathname === '/api/resource-subscriptions')
+          .map((request) => request.body);
+      let reader: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      let idleOnly: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      let user: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        reader = await createInProcessDroneHubMcpClient({
+          correlationId: 'creator-subscription-reader',
+          principal: principal(['drone-a', 'drone-b']),
+        });
+
+        const worker = await reader.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-b', chat: 'Worker', agent: 'codex' },
+        });
+        expect(worker.isError).not.toBe(true);
+        expect(subscriptionBodies()).toEqual([
+          {
+            provider: 'drone-hub',
+            resourceType: 'chat',
+            resourceId: 'id-Worker',
+            events: ['chat.idle', 'chat.failed'],
+            intent: expect.stringContaining('You created this chat.'),
+            subscriber: { chatId: 'reviewer-chat', droneId: 'drone-a', chatName: 'Reviewer' },
+          },
+        ]);
+        expect(worker.structuredContent?.subscription).toMatchObject({
+          id: 'subscription-id-Worker',
+          events: ['chat.idle', 'chat.failed'],
+        });
+        expect(worker.structuredContent?.subscription).not.toHaveProperty('subscriber');
+
+        const quiet = await reader.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-b', chat: 'Quiet', agent: 'codex', subscribe: false },
+        });
+        expect(quiet.isError).not.toBe(true);
+        expect(quiet.structuredContent).not.toHaveProperty('subscription');
+
+        const clone = await reader.callTool({
+          name: 'clone_chat',
+          arguments: {
+            drone: 'drone-b',
+            sourceChat: 'Worker',
+            chat: 'Copy',
+            subscriptionIntent: 'Review its next round.',
+          },
+        });
+        expect(clone.isError).not.toBe(true);
+        expect(clone.structuredContent).toMatchObject({
+          chatId: 'id-Copy',
+          subscription: { resourceId: 'id-Copy' },
+        });
+
+        const helper = await reader.callTool({
+          name: 'send_message',
+          arguments: { drone: 'drone-b', chat: 'Helper', message: 'Start', createChat: true },
+        });
+        expect(helper.isError).not.toBe(true);
+        expect(helper.structuredContent?.subscription).toMatchObject({ resourceId: 'id-Helper' });
+        const helperOrder = requests
+          .map((request) => request.pathname)
+          .filter(
+            (pathname) =>
+              pathname === '/api/resource-subscriptions' ||
+              pathname === '/api/drones/drone-b/chats/Helper/prompt',
+          );
+        expect(helperOrder.slice(-2)).toEqual([
+          '/api/resource-subscriptions',
+          '/api/drones/drone-b/chats/Helper/prompt',
+        ]);
+
+        const existing = await reader.callTool({
+          name: 'send_message',
+          arguments: { drone: 'drone-b', chat: 'Existing', message: 'Again', createChat: true },
+        });
+        expect(existing.isError).not.toBe(true);
+        expect(existing.structuredContent).not.toHaveProperty('subscription');
+
+        const full = await reader.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-b', chat: 'Full', agent: 'codex' },
+        });
+        expect(full.isError).not.toBe(true);
+        expect(full.structuredContent).toMatchObject({ created: true, resourceId: 'id-Full' });
+        expect(String(full.structuredContent?.subscriptionWarning)).toContain(
+          'active subscription limit reached (max 50)',
+        );
+
+        expect(subscriptionBodies().map((body) => [body.resourceId, body.intent])).toEqual([
+          ['id-Worker', expect.stringContaining('You created this chat.')],
+          ['id-Copy', 'Review its next round.'],
+          ['id-Helper', expect.stringContaining('You created this chat.')],
+          ['id-Full', expect.stringContaining('You created this chat.')],
+        ]);
+
+        idleOnly = await createInProcessDroneHubMcpClient({
+          correlationId: 'creator-subscription-idle-only',
+          principal: principal(['drone-a']),
+        });
+        const unreadable = await idleOnly.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-b', chat: 'Unreadable', agent: 'codex' },
+        });
+        expect(unreadable.isError).not.toBe(true);
+        expect(subscriptionBodies().at(-1)).toMatchObject({
+          resourceId: 'id-Unreadable',
+          events: ['chat.idle'],
+        });
+
+        user = await createInProcessDroneHubMcpClient({ correlationId: 'creator-subscription-user' });
+        const count = subscriptionBodies().length;
+        const userClone = await user.callTool({
+          name: 'clone_chat',
+          arguments: { drone: 'drone-b', sourceChat: 'Worker', chat: 'User copy' },
+        });
+        expect(userClone.isError).not.toBe(true);
+        expect(subscriptionBodies()).toHaveLength(count);
+      } finally {
+        await reader?.close();
+        await idleOnly?.close();
+        await user?.close();
         globalThis.fetch = previousFetch;
         if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
         else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;

@@ -1,5 +1,6 @@
 import React from 'react';
-import { EditorPaneContext } from './editor-pane-context';
+import { createPortal } from 'react-dom';
+import { EditorPaneContext, ExplorerTabControlsContext } from './editor-pane-context';
 import { profileStorageKey } from '../../profile-storage';
 import { WorkspaceExplorerHeader } from './WorkspaceExplorerHeader';
 import {
@@ -27,8 +28,11 @@ type StoredExplorerLayout = {
 type DroneEditorWorkspaceProps = {
   explorer: (zoom: number) => React.ReactNode;
   editor: React.ReactNode;
-  /** Chooses which workspace the explorer shows; heads the explorer in every layout. */
-  switcher?: React.ReactNode;
+  /**
+   * Chooses which workspace the explorer shows; heads the explorer in every layout, from the docked explorer's own
+   * tab when it has one.
+   */
+  switcher?: (placement: 'header' | 'tab') => React.ReactNode;
 };
 
 const EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLayout');
@@ -36,6 +40,7 @@ const EXPLORER_DRAG_TYPE = 'application/x-drone-hub-editor-explorer';
 
 export function DroneEditorWorkspace({ explorer, editor, switcher }: DroneEditorWorkspaceProps) {
   const pane = React.useContext(EditorPaneContext);
+  const tabControls = React.useContext(ExplorerTabControlsContext);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = React.useRef<number | null>(null);
   const explorerDragActiveRef = React.useRef(false);
@@ -160,7 +165,7 @@ export function DroneEditorWorkspace({ explorer, editor, switcher }: DroneEditor
       aria-label="File Explorer"
     >
       {pane === 'combined' ? <WorkspaceExplorerHeader
-        title={switcher}
+        title={switcher?.('header')}
         zoom={explorerZoom}
         onDecreaseZoom={() =>
           setExplorerZoom((current) => clampWorkspaceExplorerZoom(current - WORKSPACE_EXPLORER_ZOOM_STEP))
@@ -174,9 +179,9 @@ export function DroneEditorWorkspace({ explorer, editor, switcher }: DroneEditor
           onDragEnd: handleExplorerDragEnd,
           title: 'Drag to move the File Explorer to the other side',
         } : undefined}
-      /> : switcher ? (
-        <div className="dh-utility-panel-chrome flex h-8 shrink-0 items-center border-b border-[var(--border-subtle)] px-2">{switcher}</div>
-      ) : null}
+      /> : !switcher ? null : tabControls ? createPortal(switcher('tab'), tabControls) : (
+        <div className="dh-utility-panel-chrome flex h-8 shrink-0 items-center border-b border-[var(--border-subtle)] px-2">{switcher('header')}</div>
+      )}
       <div className="min-h-0 flex-1">{explorer(explorerZoom)}</div>
     </aside>
   );

@@ -7,6 +7,8 @@ import {
   useDroneCanvasStore,
   type OptimisticBoardMember,
 } from './use-drone-canvas-store';
+import { withoutComposerSideChats } from '../app/composer-side-chats';
+import { forgetChatInFolds } from './organized-board-folds';
 
 const BRANCH_GAP_X_PX = 56;
 const SLOT_GAP_Y_PX = 18;
@@ -49,7 +51,8 @@ export function buildDroneBoardMembers(
     });
   };
   for (const chatName of drone?.chats ?? []) add(chatName, drone?.chatCloneSources?.[chatName]);
-  for (const sideChat of drone?.sideChats ?? []) add(sideChat.name, sideChat.sourceChatName);
+  // Composer side chats are chips beside their source's composer, not cards.
+  for (const sideChat of withoutComposerSideChats(drone?.sideChats)) add(sideChat.name, sideChat.sourceChatName);
   for (const member of optimistic) {
     if (now - member.addedAt < OPTIMISTIC_MEMBER_TTL_MS) add(member.chatName, member.sourceChatName);
   }
@@ -212,6 +215,18 @@ export function forgetStaleChatCard(droneIdRaw: string, chatNameRaw: string): vo
   if (!droneId || !nodeId) return;
   const actions = getCanvasBoardActions(droneId);
   if (selectCanvasBoard(useDroneCanvasStore.getState(), droneId).nodesByDroneId[nodeId]) actions.removeNodes([nodeId]);
+  forgetChatFolds(droneId, chatNameRaw);
+}
+
+/** A name taken by a new chat: what the organized board folded under it belonged to a chat that is gone. */
+export function forgetChatFolds(droneIdRaw: string, chatNameRaw: string): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim();
+  if (!droneId || !chatName) return;
+  const canvas = useDroneCanvasStore.getState();
+  const folds = canvas.chatFoldsByDrone[droneId];
+  const next = forgetChatInFolds(folds, chatName);
+  if (next && next !== folds) canvas.setChatFolds(droneId, next);
 }
 
 /**

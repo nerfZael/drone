@@ -3,6 +3,7 @@ import React from 'react';
 import { requestJson } from '../http';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { ChatBackgroundTaskIndicator, useChatBackgroundTasks } from './ChatBackgroundTaskIndicator';
+import { ChatHomeIndicator } from './ChatHomeIndicator';
 import { DroneRuntimeIndicator, type DroneRuntime } from './DroneRuntimeIndicator';
 import {
   chatSubscriptionEventLabel,
@@ -223,6 +224,7 @@ export function DroneChatComposerMetadata({
   initialSubscriptions,
   branch,
   showWorkspaceInfo = true,
+  sideChatChips,
 }: {
   runtime: DroneRuntime;
   droneId?: string | null;
@@ -231,10 +233,12 @@ export function DroneChatComposerMetadata({
   initialSubscriptions?: unknown;
   branch?: string | null;
   showWorkspaceInfo?: boolean;
+  /** The chat's side chats, left of the branch. */
+  sideChatChips?: React.ReactNode;
 }) {
   const subscriptions = useChatResourceSubscriptions(chatId, initialSubscriptions);
   const backgroundTasks = useChatBackgroundTasks(droneId, chatName);
-  if (!showWorkspaceInfo && subscriptions.length === 0 && backgroundTasks.tasks.length === 0) {
+  if (!showWorkspaceInfo && !sideChatChips && subscriptions.length === 0 && backgroundTasks.tasks.length === 0) {
     return null;
   }
 
@@ -254,7 +258,12 @@ export function DroneChatComposerMetadata({
         />
         <ChatSubscriptionIndicator subscriptions={subscriptions} />
       </div>
-      {showWorkspaceInfo ? <DroneBranchIndicator branch={branch} /> : null}
+      <div className="flex min-w-0 shrink items-center gap-2">
+        {sideChatChips}
+        {showWorkspaceInfo ? <DroneBranchIndicator branch={branch} /> : null}
+        {/* Last, so it keeps its place whether or not there is a branch. */}
+        {showWorkspaceInfo ? <ChatHomeIndicator droneId={droneId} chatName={chatName} /> : null}
+      </div>
     </div>
   );
 }

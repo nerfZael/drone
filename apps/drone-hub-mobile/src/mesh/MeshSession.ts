@@ -193,8 +193,8 @@ export class MeshSession {
       ),
       maxHops: 1,
     };
-    const workspacePayload = payload as { droneId?: string; path?: string; watch?: string; metadataOnly?: boolean };
-    const observation = (capability === 'drone-control' && ['file.preview', 'files.list'].includes(operation) && !workspacePayload?.watch && !workspacePayload?.metadataOnly
+    const workspacePayload = payload as { droneId?: string; path?: string; watch?: string; metadataOnly?: boolean; htmlPreviewSession?: boolean };
+    const observation = (capability === 'drone-control' && ['file.preview', 'files.list'].includes(operation) && !workspacePayload?.watch && !workspacePayload?.metadataOnly && !workspacePayload?.htmlPreviewSession
       ? mobileWorkspaceLoads.observe({ targetDeviceId, droneId: workspacePayload.droneId, path: workspacePayload.path }, operation, unsigned.requestId)
       : null) ?? observeMobileChatRequest(
       targetDeviceId,

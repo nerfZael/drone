@@ -3,12 +3,13 @@ import { WorkspaceAccessPicker } from '../assistant/WorkspaceAccessPicker';
 import { requestJson } from '../http';
 import { closeChatWorkspaces, useChatWorkspacesStore, type ChatWorkspacesTarget } from './chat-workspaces-store';
 import { IconFolder } from '../icons';
+import { chatPathRef } from './chat-identity';
 
 type ChatInfo = { agent?: { kind?: string }; chatId?: string | null; name?: string };
 type Source = { endpoint: string; note: string | null } | { error: string };
 
 const chatPath = ({ droneId, chatName }: ChatWorkspacesTarget) =>
-  `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`;
+  `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}`;
 
 /**
  * Where a chat's workspaces are chosen. A built-in chat keeps its own selection (its tools are blip's); any other

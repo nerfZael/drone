@@ -2,6 +2,7 @@ import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { chatSelectionKey } from '../app/chat-selection-model';
 import { continuesChat, chatPathRef } from '../app/chat-identity';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
+import type { SideChatKind } from '../chat/chat-send-shortcuts';
 import React from 'react';
 import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
@@ -320,6 +321,7 @@ function NativeAssistantDock({
   startupPrompt,
   onStartupPromptReconciled,
   onSendPromptInNewChat,
+  onSendPromptInSideChat,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId = '',
   onCreateNewChatAutoFocusHandled,
@@ -336,6 +338,7 @@ function NativeAssistantDock({
   startupPrompt?: AssistantStartupPrompt | null;
   onStartupPromptReconciled?: () => void;
   onSendPromptInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onSendPromptInSideChat?: (payload: ChatSendPayload, context: ChatSendContext, kind: SideChatKind) => Promise<boolean>;
   onCreateQueuedNewChatNow?: (promptId: string) => Promise<void>;
   focusedNewChatActionId?: string;
   onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
@@ -1550,6 +1553,22 @@ function NativeAssistantDock({
     [onSendPromptInNewChat, waitForScopeSave],
   );
 
+  const sendPromptInSideChat = React.useCallback(
+    async (sharedPayload: ChatSendPayload, context: ChatSendContext, kind: SideChatKind): Promise<boolean> => {
+      if (!onSendPromptInSideChat) return false;
+      const referencedDroneSnapshot = referencedDronesRef.current.slice();
+      const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
+      if (!prompt && sharedPayload.attachments.length === 0) return false;
+      setError(null);
+      setAttachmentError(null);
+      if (!(await waitForScopeSave())) return false;
+      const sent = await onSendPromptInSideChat({ ...sharedPayload, prompt }, context, kind);
+      if (sent) setReferencedDrones([]);
+      return sent;
+    },
+    [onSendPromptInSideChat, waitForScopeSave],
+  );
+
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
     const requestSeq = beginSnapshotMutation();
@@ -2752,6 +2771,7 @@ function NativeAssistantDock({
               stopping={assistantStopBusy}
               onSend={async (payload, context) => await sendPrompt(payload, context.deliveryMode)}
               onSendInNewChat={onSendPromptInNewChat ? sendPromptInNewChat : undefined}
+              onSendInSideChat={onSendPromptInSideChat ? sendPromptInSideChat : undefined}
             />
           </div>
         )}

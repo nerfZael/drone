@@ -29,12 +29,22 @@ const MIN_USEFUL_GROWTH_PX = 8;
 /** A window with expand on focus can be dragged down to its tab bar and a sliver of content. */
 const COMPACT_GROUP_CONSTRAINTS = { minimumWidth: 40, minimumHeight: 40 };
 export const OCCUPIED_GROUP_CONSTRAINTS = { minimumWidth: 100, minimumHeight: 100 };
+/** Occupied, with any maximum lifted (Dockview's own "no maximum"). */
+const FREE_GROUP_CONSTRAINTS = { ...OCCUPIED_GROUP_CONSTRAINTS, maximumWidth: Number.MAX_SAFE_INTEGER };
 /** Focus that follows a key press this recently is the user's; other focus changes are programmatic. */
 const KEYBOARD_FOCUS_WINDOW_MS = 800;
 
+/**
+ * The main chat and its side chats share one setting. It doesn't float them
+ * on focus: it keeps them at their reading width in the grid.
+ */
+export const CHAT_EXPANSION_KEY = 'chat';
+/** The transcript's side padding, used when a chat has no reply to measure it from. */
+const CHAT_TRANSCRIPT_PADDING_PX = 48;
+
 export function expansionKeyForPanel(panelId: string): string {
   if (panelId.startsWith(FILE_PANEL_PREFIX)) return 'file';
-  if (panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) return 'side-chat';
+  if (panelId === 'agent-chat' || panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) return CHAT_EXPANSION_KEY;
   return panelId;
 }
 
@@ -143,6 +153,34 @@ export function measureDiffOverflowPx(root: HTMLElement): number | null {
   return Math.max(0, Math.ceil((needed - sample.clientWidth) * codeColumns));
 }
 
+/**
+ * Width a docked chat needs for its replies to stop re-wrapping. Reply prose is
+ * capped at --chat-prose-max, so past that a wider window changes nothing.
+ * Tables and other wide blocks may keep wrapping; they don't count. Null when
+ * the chat isn't on screen.
+ */
+export function chatReadingWidthPx(groupElement: HTMLElement): number | null {
+  const scroller = groupElement.querySelector<HTMLElement>('[data-chat-transcript-scroll]');
+  if (!scroller || scroller.clientWidth === 0) return null;
+  let reply: HTMLElement | null = null;
+  for (const candidate of scroller.querySelectorAll<HTMLElement>('.dh-markdown--transcript')) {
+    if (!reply || candidate.clientWidth > reply.clientWidth) reply = candidate;
+  }
+  const transcript = reply && reply.clientWidth > 0 ? reply.closest<HTMLElement>('.dh-chat-transcript') : null;
+  // Beside a reply: the transcript's padding and anything else in its row.
+  const inner = reply && transcript ? transcript.clientWidth - reply.clientWidth : CHAT_TRANSCRIPT_PADDING_PX;
+  // Around the transcript: the window's border and the scrollbar.
+  const outer = groupElement.getBoundingClientRect().width - scroller.clientWidth;
+  // Resolved in the reply's font, so the cap's ch units match it.
+  const probe = groupElement.ownerDocument.createElement('div');
+  probe.className = 'dh-markdown';
+  probe.style.cssText = 'position:absolute;visibility:hidden;height:0;width:var(--chat-prose-max);max-width:none';
+  (transcript ? reply! : scroller).appendChild(probe);
+  const prose = probe.getBoundingClientRect().width;
+  probe.remove();
+  return prose > 0 ? Math.ceil(outer + inner + prose) : null;
+}
+
 export type ExpansionRect = { left: number; top: number; width: number; height: number };
 export type ExpansionPlan = { axis: 'x' | 'y'; rect: ExpansionRect };
 
@@ -249,6 +287,8 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
     let lastKeyAt = -Infinity;
     const compacted = new Set<DockviewGroupPanel>();
     const styled = new Set<DockviewGroupPanel>();
+    /** Chats held at their reading width, by the minimum width they were given. */
+    const fitted = new Map<DockviewGroupPanel, number>();
 
     const gridGroups = () => api.groups.filter((group) => group.api.location.type === 'grid' && group.panels.length > 0);
     const groupOf = (target: EventTarget | null) =>
@@ -259,8 +299,9 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
     };
     const enabledFor = (group: DockviewGroupPanel) => {
       const key = keyOf(group);
-      return Boolean(key && enabled[key]);
+      return Boolean(key && key !== CHAT_EXPANSION_KEY && enabled[key]);
     };
+    const readingWidthFor = (group: DockviewGroupPanel) => Boolean(enabled[CHAT_EXPANSION_KEY]) && keyOf(group) === CHAT_EXPANSION_KEY;
     const plan = (group: DockviewGroupPanel, extraWidth: number | null) => planPanelExpansion({
       // The group's parent is its slot in the grid, which keeps its size while the group floats over it.
       slot: toRect((group.element.parentElement ?? group.element).getBoundingClientRect()),
@@ -268,8 +309,50 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
       extraWidth,
     });
 
+    /** Whether another window (or empty slot) sits beside the group, to take the width a fixed chat leaves. */
+    const hasRowNeighbour = (group: DockviewGroupPanel) => {
+      const rect = group.element.getBoundingClientRect();
+      return api.groups.some((other) => {
+        if (other === group || other.api.location.type !== 'grid') return false;
+        const near = other.element.getBoundingClientRect();
+        return near.width > 0 && Math.min(rect.bottom, near.bottom) - Math.max(rect.top, near.top) > 1;
+      });
+    };
+    /**
+     * Holds a chat at exactly its reading width: it pushes its neighbours
+     * aside, and its divider doesn't move. Alone in its row it fills the row,
+     * since nothing beside it could take the rest.
+     */
+    const fitChat = (group: DockviewGroupPanel) => {
+      const target = chatReadingWidthPx(group.element);
+      if (target == null) return;
+      // In a small window the neighbours keep their minimum.
+      const width = Math.min(target, root.clientWidth - OCCUPIED_GROUP_CONSTRAINTS.minimumWidth);
+      if (width < OCCUPIED_GROUP_CONSTRAINTS.minimumWidth || !hasRowNeighbour(group)) {
+        releaseChat(group);
+        return;
+      }
+      if (fitted.get(group) === width) return;
+      fitted.set(group, width);
+      group.api.setConstraints({ minimumWidth: width, maximumWidth: width, minimumHeight: OCCUPIED_GROUP_CONSTRAINTS.minimumHeight });
+      if (Math.round(group.api.width) !== width) group.api.setSize({ width });
+    };
+    const releaseChat = (group: DockviewGroupPanel) => {
+      if (!fitted.delete(group) || !api.groups.includes(group)) return;
+      group.api.setConstraints(FREE_GROUP_CONSTRAINTS);
+      // Lifting a maximum doesn't relayout by itself: a chat left alone in its row would keep
+      // its width beside a gap. Dockview's layout takes a force flag its types leave out.
+      (api.layout as (width: number, height: number, force: boolean) => void).call(api, api.width, api.height, true);
+    };
+
     const apply = () => {
       const groups = gridGroups();
+      for (const group of fitted.keys()) {
+        if (!groups.includes(group) || !readingWidthFor(group)) releaseChat(group);
+      }
+      for (const group of groups) {
+        if (readingWidthFor(group)) fitChat(group);
+      }
       if (expanded && !groups.includes(expanded.group)) expanded = null;
       if (expanded && !expanded.pinned && !enabledFor(expanded.group)) expanded = null;
       for (const group of styled) {
@@ -354,6 +437,8 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
     doc.addEventListener('keydown', onKeyDown, true);
     doc.addEventListener('focusin', onFocusIn, true);
     win.addEventListener('resize', apply);
+    // The reading width is in the chat's web font, which can arrive after the first measure.
+    doc.fonts?.addEventListener('loadingdone', apply);
     win.addEventListener(TOGGLE_PANEL_EXPANSION_EVENT, onToggle);
     const layout = api.onDidLayoutChange(apply);
     const active = api.onDidActivePanelChange(apply);
@@ -370,6 +455,7 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
       doc.removeEventListener('keydown', onKeyDown, true);
       doc.removeEventListener('focusin', onFocusIn, true);
       win.removeEventListener('resize', apply);
+      doc.fonts?.removeEventListener('loadingdone', apply);
       win.removeEventListener(TOGGLE_PANEL_EXPANSION_EVENT, onToggle);
       layout.dispose();
       active.dispose();
@@ -381,6 +467,7 @@ export function useWorkspacePanelExpansion({ apiRef, workspaceRef, readyVersion 
       for (const group of compacted) {
         if (api.groups.includes(group)) group.api.setConstraints(OCCUPIED_GROUP_CONSTRAINTS);
       }
+      for (const group of [...fitted.keys()]) releaseChat(group);
     };
   }, [apiRef, workspaceRef, readyVersion]);
 }

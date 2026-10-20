@@ -11,9 +11,10 @@ import {
   subscribeWorkspacesChanged,
   type BrowsableWorkspace,
 } from './workspaces-client';
+import { chatPathRef } from '../app/chat-identity';
 
-const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Host drones', 'Container drones'];
-const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Host drones', 'Container drones']);
+const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Chat homes', 'Host drones', 'Container drones'];
+const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Chat homes', 'Host drones', 'Container drones']);
 /** Drones shown per group before "more", as in the workspace picker; a search looks through all of them. */
 const DRONE_CAP = 5;
 
@@ -32,6 +33,14 @@ function ChevronIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 shrink-0" aria-hidden="true">
       <path d="m4.5 6.25 3.5 3.5 3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 shrink-0" aria-hidden="true">
+      <path d="M8 3.25v9.5M3.25 8h9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -74,7 +83,16 @@ export function ExplorerWorkspaceSwitcher({
   current,
   storeKey,
   ownIsLocal = false,
+  roots,
+  placement = 'header',
 }: {
+  /** In a header row with its label and settings, or as bare buttons in the File Explorer's dock tab. */
+  placement?: 'header' | 'tab';
+  /**
+   * The explorer shows several workspaces as roots: picking one adds it (or shows it, when it is there already)
+   * instead of switching to it; null is the drone's own files.
+   */
+  roots?: { shownIds: ReadonlySet<string>; onPick(workspace: BrowsableWorkspace | null): void };
   droneId: string;
   /** The drone's own files are a folder on this device (a host drone), so they can open in the file manager. */
   ownIsLocal?: boolean;
@@ -101,7 +119,7 @@ export function ExplorerWorkspaceSwitcher({
       const [all, chat] = await Promise.all([
         loadBrowsableWorkspaces(),
         chatName
-          ? requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/workspaces`).catch(() => null)
+          ? requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/workspaces`).catch(() => null)
           : Promise.resolve(null),
       ]);
       lastWorkspaces = all;
@@ -127,7 +145,8 @@ export function ExplorerWorkspaceSwitcher({
   const isOwn = (workspace: BrowsableWorkspace) =>
     (workspace.kind === 'drone' && workspace.droneId === droneId) || (Boolean(ownPath) && workspace.kind === 'folder' && workspace.path === ownPath);
   const choose = (workspace: BrowsableWorkspace | null) => {
-    setExplorerWorkspace(storeKey ?? droneId, workspace && !isOwn(workspace) ? workspace : null, droneId);
+    if (roots) roots.onPick(workspace && !isOwn(workspace) ? workspace : null);
+    else setExplorerWorkspace(storeKey ?? droneId, workspace && !isOwn(workspace) ? workspace : null, droneId);
     setOpen(false);
     setQuery('');
   };
@@ -159,10 +178,11 @@ export function ExplorerWorkspaceSwitcher({
     const items = capped ? all.filter((workspace, index) => index < DRONE_CAP || workspace.id === current?.id) : all;
     return { category, items, hidden: all.length - items.length };
   }).filter((group) => group.items.length > 0);
-  const label = current ? current.name : droneName;
+  // With other workspaces as roots, each root names itself; the title names them all.
+  const label = current ? current.name : roots && roots.shownIds.size > 0 ? 'Workspaces' : droneName;
 
   const row = (key: string, workspace: BrowsableWorkspace | null, title: string, detail?: string) => {
-    const selected = workspace ? current?.id === workspace.id : !current;
+    const selected = roots ? !workspace || roots.shownIds.has(workspace.id) : workspace ? current?.id === workspace.id : !current;
     return (
       <button
         key={key}
@@ -186,22 +206,46 @@ export function ExplorerWorkspaceSwitcher({
     <div className="px-2 pb-0.5 pt-2 text-[10px] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">{text}</div>
   );
 
+  const inTab = placement === 'tab';
+  // A tab's buttons must not drag or double-click the tab they sit in.
+  const stopTabEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+  const tabEvents = inTab ? { onPointerDown: stopTabEvent, onDoubleClick: stopTabEvent } : {};
+  const iconButtonClass = inTab
+    ? 'dh-dock-tab-button'
+    : 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] transition-colors hover:bg-[var(--hover)]';
+  const triggerTitle = roots
+    ? 'Add a workspace to this File Explorer'
+    : current ? `Showing ${current.name}${current.path ? ` (${current.path})` : ''}. Click to switch workspace.` : 'Switch the workspace this File Explorer shows';
+
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-0.5" data-explorer-workspace-switcher>
+    <div className={inTab ? 'contents' : 'flex min-w-0 flex-1 items-center gap-0.5'} data-explorer-workspace-switcher>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
-          <button
-            ref={triggerRef}
-            type="button"
-            title={current ? `Showing ${current.name}${current.path ? ` (${current.path})` : ''}. Click to switch workspace.` : 'Switch the workspace this File Explorer shows'}
-            aria-label={`Workspace: ${label}`}
-            className={`inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-medium)] px-1.5 text-ui transition-colors hover:bg-[var(--hover)] ${
-              current ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'
-            }`}
-          >
-            <span className="min-w-0 truncate font-[var(--weight-emphasis)]">{label}</span>
-            <ChevronIcon />
-          </button>
+          {inTab ? (
+            <button
+              ref={triggerRef}
+              type="button"
+              title={triggerTitle}
+              aria-label={roots ? 'Add a workspace to this File Explorer' : `Workspace: ${label}`}
+              className={`${iconButtonClass} ${current ? 'text-[var(--accent)]' : ''}`}
+              {...tabEvents}
+            >
+              {roots ? <PlusIcon /> : <FolderIcon />}
+            </button>
+          ) : (
+            <button
+              ref={triggerRef}
+              type="button"
+              title={triggerTitle}
+              aria-label={roots ? `${label}: add a workspace` : `Workspace: ${label}`}
+              className={`inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-medium)] px-1.5 text-ui transition-colors hover:bg-[var(--hover)] ${
+                current ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'
+              }`}
+            >
+              <span className="min-w-0 truncate font-[var(--weight-emphasis)]">{label}</span>
+              {roots ? <PlusIcon /> : <ChevronIcon />}
+            </button>
+          )}
         </Popover.Trigger>
         <Popover.Portal container={triggerRef.current?.ownerDocument.body}>
           <Popover.Content
@@ -216,7 +260,7 @@ export function ExplorerWorkspaceSwitcher({
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search workspaces"
+                placeholder={roots ? 'Add a workspace' : 'Search workspaces'}
                 aria-label="Search workspaces"
                 className="h-7 min-w-0 flex-1 rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-xs text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
               />
@@ -271,7 +315,8 @@ export function ExplorerWorkspaceSwitcher({
           onClick={() => setExplorerWorkspace(storeKey ?? droneId, null, droneId)}
           title={`Back to ${droneName}`}
           aria-label={`Back to ${droneName}`}
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+          className={`${iconButtonClass} ${inTab ? '' : 'text-[var(--muted)] hover:text-[var(--fg)]'}`}
+          {...tabEvents}
         >
           <BackHomeIcon />
         </button>
@@ -282,23 +327,25 @@ export function ExplorerWorkspaceSwitcher({
           onClick={openFolder}
           title={openError || 'Open in file manager'}
           aria-label="Open in file manager"
-          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] transition-colors hover:bg-[var(--hover)] ${
-            openError ? 'text-[var(--red)]' : 'text-[var(--muted)] hover:text-[var(--fg)]'
-          }`}
+          className={`${iconButtonClass} ${openError ? 'text-[var(--red)]' : inTab ? '' : 'text-[var(--muted)] hover:text-[var(--fg)]'}`}
+          {...tabEvents}
         >
           <OpenFolderIcon />
         </button>
       ) : null}
       {openError ? <span role="alert" className="sr-only">{openError}</span> : null}
-      <button
-        type="button"
-        onClick={openWorkspacesSettings}
-        title="Workspace settings"
-        aria-label="Workspace settings"
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)]"
-      >
-        <GearIcon />
-      </button>
+      {/* A tab has no room for it; the list's own "Manage workspaces…" opens the same settings. */}
+      {inTab ? null : (
+        <button
+          type="button"
+          onClick={openWorkspacesSettings}
+          title="Workspace settings"
+          aria-label="Workspace settings"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+        >
+          <GearIcon />
+        </button>
+      )}
     </div>
   );
 }

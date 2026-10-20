@@ -59,9 +59,13 @@ export function handleHubRequestFailure(opts: {
   respond?: HubJsonResponder;
 }): void {
   const { req, res, error, log, logMessage = 'request handler crashed', respond = sendJson } = opts;
-  log('error', logMessage, {
+  const descriptor = describeHubError(error);
+  // An error that names a client status (e.g. a path outside a folder workspace) is a refused request, not a crash.
+  const refused = descriptor.statusCode < 500;
+  log(refused ? 'warn' : 'error', refused ? 'request refused' : logMessage, {
     method: String(req.method ?? 'GET').toUpperCase(),
     path: String(req.url ?? ''),
+    ...(refused ? { status: descriptor.statusCode } : {}),
     error: errorMessage(error),
   });
   if (res.writableEnded) return;
@@ -69,6 +73,5 @@ export function handleHubRequestFailure(opts: {
     res.end();
     return;
   }
-  const descriptor = describeHubError(error);
   respond(res, descriptor.statusCode, descriptor.body);
 }

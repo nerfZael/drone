@@ -121,6 +121,16 @@ test('remaps file window IDs and paths across drones without changing the saved 
   expect(preset.panels['file-tab:old']?.params?.path).toBe('/old/src/app.ts');
 });
 
+test("a file window of another workspace keeps that workspace's file on any drone", () => {
+  layout();
+  api.addPanel({ id: 'file-tab:guides', component: 'file', params: { path: '/hub/Guides/loop.md', presetWorkspaceId: 'host:guides', tabId: 'guides' } });
+  const mapped = remapPresetFiles(captureWorkspacePreset(api), 'destination', '/new');
+  const file = Object.values(mapped.panels).find(panel => panel.contentComponent === 'file')!;
+  expect(file.params?.path).toBe('/hub/Guides/loop.md');
+  expect(file.params?.droneId).toBe('host:guides');
+  expect(file.params?.tabId).toBe('file:host%3Aguides:%2Fhub%2FGuides%2Floop.md');
+});
+
 test('restores tab order and empty split regions as well as window sizes', () => {
   layout();
   api.addPanel({ id: 'tool:canvas', component: 'tool', position: { referencePanel: 'tool:editor', direction: 'within' } });

@@ -20,8 +20,10 @@ export function usePanelTitle(api: IDockviewPanelHeaderProps['api']): string {
  * pointer directly) turns the name into an inline editor. Enter saves, Escape
  * or leaving the field cancels.
  */
-export function ChatWindowTab({ api, containerApi: _containerApi, params: _params, tabLocation: _tabLocation, chatName, droneId, onRename, ...rest }: IDockviewPanelHeaderProps & {
+export function ChatWindowTab({ api, containerApi: _containerApi, params: _params, tabLocation: _tabLocation, chatName, droneId, onRename, controls, ...rest }: IDockviewPanelHeaderProps & {
   chatName: string;
+  /** Buttons after the name, such as expand on focus. */
+  controls?: React.ReactNode;
   /** Shows the chat's estimated cost after its name. */
   droneId?: string;
   onRename?: ChatWindowRename;
@@ -43,7 +45,7 @@ export function ChatWindowTab({ api, containerApi: _containerApi, params: _param
     const onDoubleClick = (event: MouseEvent) => {
       if (editingRef.current || event.button !== 0) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest('.dv-right-actions-container, .dv-left-actions-container, .dv-pre-actions-container')) return;
+      if (target?.closest('.dv-right-actions-container, .dv-left-actions-container, .dv-pre-actions-container, .dh-dock-tab-controls')) return;
       event.preventDefault();
       setError('');
       setDraft(chatName);
@@ -94,6 +96,7 @@ export function ChatWindowTab({ api, containerApi: _containerApi, params: _param
     <div ref={rootRef} {...rest} className="dv-default-tab" data-testid="dockview-dv-default-tab"
       title={onRename ? `${title}\nDouble-click to rename` : title}>
       <span className="dv-default-tab-content">{title}{droneId ? <> <ChatUsageBadge droneId={droneId} chatName={chatName} /></> : null}</span>
+      {controls ? <span className="dh-dock-tab-controls">{controls}</span> : null}
     </div>
   );
 }

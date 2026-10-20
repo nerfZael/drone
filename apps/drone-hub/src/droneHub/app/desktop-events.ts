@@ -12,6 +12,7 @@ const EVENT_NAMES = [
   'chat_delta',
   'chat_stream_error',
   'workspaces_changed',
+  'channels_changed',
 ] as const;
 
 export type DesktopEventName = (typeof EVENT_NAMES)[number];

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { dispatchAssistantOpenDroneChat } from '../assistant/open-drone-chat-event';
 import { subscribeDesktopEvents } from './desktop-events';
 import { useDesktopNotificationSettings } from './desktop-notification-settings';
+import { isChannelBeingRead, openChannel } from '../channels/channels-ui-store';
 
 export function useDesktopNotifications(): void {
   useEffect(() => {
@@ -14,7 +15,8 @@ export function useDesktopNotifications(): void {
         void desktop.clearNotifications?.().catch((error) => settings.setError(String(error?.message || error)));
       }
     });
-    const offClick = desktop.onNotificationClick?.(({ droneId, chatName }) => dispatchAssistantOpenDroneChat(droneId, chatName));
+    const offClick = desktop.onNotificationClick?.(({ droneId, chatName, channelId }) =>
+      channelId ? openChannel(channelId) : dispatchAssistantOpenDroneChat(droneId, chatName));
     const offError = desktop.onNotificationError?.((error) => useDesktopNotificationSettings.getState().setError(error));
     const unsubscribe = subscribeDesktopEvents({ handlers: {
       desktop_notification: (event) => {
@@ -22,6 +24,8 @@ export function useDesktopNotifications(): void {
         if (!data?.id || !data.droneId || !data.chatName || seen.has(data.id)) return;
         seen.add(data.id);
         if (seen.size > 1000) seen.delete(seen.values().next().value!);
+        // A mention in the channel you are reading needs no alert.
+        if (data.kind === 'channel_mention' && isChannelBeingRead(data.channelId)) return;
         const settings = useDesktopNotificationSettings.getState();
         const payload = desktopNotificationPayload(data, settings);
         if (!payload) return;

@@ -5,7 +5,7 @@ import {
   normalizePromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
 import { stageChatAttachmentUpload, type ChatImageAttachment } from '../chat-attachments';
-import { chatPromptBodySchema } from '../chat-route-schemas';
+import { chatPromptBodySchema, pendingPromptEditBodySchema } from '../chat-route-schemas';
 import { parseBoolParam } from '../hub-format';
 import { readJsonBody, sendJson as json } from '../hub-http';
 import type { PendingPromptState } from '../pendingPromptEnqueue';
@@ -28,6 +28,7 @@ type ChatPromptRouteDependencyName =
   | 'droneTerminalPrompt'
   | 'dvmExec'
   | 'dvmSessionRead'
+  | 'editQueuedPendingPrompt'
   | 'enqueuePendingPromptPump'
   | 'ensureChatEntry'
   | 'ensureHubChatSessionRunning'
@@ -62,6 +63,7 @@ type ChatPromptRouteDependencyName =
   | 'resolveDroneOrPendingForReadRef'
   | 'resolveDroneOrRespond'
   | 'shouldAutoRenameChatOnPrompt'
+  | 'stampPendingPromptSender'
   | 'stopChatResponse'
   | 'updateStoredUserTimeZone'
   | 'waitForDroneDaemonReady'
@@ -121,6 +123,7 @@ export function createChatPromptRouteHandler(
     droneTerminalPrompt,
     dvmExec,
     dvmSessionRead,
+    editQueuedPendingPrompt,
     enqueuePendingPromptPump,
     ensureChatEntry,
     ensureHubChatSessionRunning,
@@ -155,6 +158,7 @@ export function createChatPromptRouteHandler(
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
     shouldAutoRenameChatOnPrompt,
+    stampPendingPromptSender,
     stopChatResponse,
     updateStoredUserTimeZone,
     waitForDroneDaemonReady,
@@ -433,6 +437,17 @@ export function createChatPromptRouteHandler(
             json(res, r.status, { ok: false, error: r.error });
             return;
           }
+          // Stamp before responding: the sender cannot cancel or edit an id it has not received.
+          // A drone that is still starting keeps prompts outside the queue, so nothing is stamped.
+          const senderRecorded =
+            body?.sentBy && submissionSource === 'assistant-tool'
+              ? await stampPendingPromptSender({
+                  droneId,
+                  chatName: chat,
+                  promptId: r.id,
+                  sentBy: body.sentBy,
+                })
+              : undefined;
           const autoRenameFromFirstPrompt = autoRenameCandidateFromFirstPrompt
             ? await claimChatAutoRenameFromFirstPrompt({ droneId, chatName: chat })
             : false;
@@ -466,6 +481,7 @@ export function createChatPromptRouteHandler(
             draft: isDraftChatEntry(existingChatEntry),
             ...(isDraftChatEntry(existingChatEntry) ? { executionStatus: 'held_in_draft' } : {}),
             autoRenameChat: autoRenameFromFirstPrompt,
+            ...(senderRecorded === undefined ? {} : { senderRecorded }),
           });
           return;
         } catch (e: any) {
@@ -608,6 +624,22 @@ export function createChatPromptRouteHandler(
           const droneId = resolved.id;
           const drone = resolved.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+          const body = await readJsonBody(req).catch(() => null);
+          const requireCreatedByChatId = String(body?.requireCreatedByChatId ?? '').trim();
+          if (requireCreatedByChatId) {
+            const chat = readChatMetadataFromStore({ droneId, chatName }).chat as any;
+            if (!chat) {
+              json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+              return;
+            }
+            if (String(chat?.createdBy?.chatId ?? '') !== requireCreatedByChatId) {
+              json(res, 403, {
+                ok: false,
+                error: 'only the chat that created this chat can stop it',
+              });
+              return;
+            }
+          }
           const result = await stopChatResponse({ droneId, chatName, droneEntry: drone });
           json(res, 200, {
             ok: true,
@@ -943,7 +975,24 @@ export function createChatPromptRouteHandler(
           const droneId = resolved.id;
           const drone = resolved.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
-          const result = await cancelQueuedPendingPrompt({ droneId, chatName, promptId });
+          const requireSentByChatId = String(u.searchParams.get('sentByChatId') ?? '').trim();
+          const result = await cancelQueuedPendingPrompt({
+            droneId,
+            chatName,
+            promptId,
+            ...(requireSentByChatId ? { requireSentByChatId } : {}),
+          });
+          if (result.status === 'not-owner') {
+            json(res, 403, {
+              ok: false,
+              error: 'this message was not sent by the requesting chat',
+              promptId,
+              cancelled: false,
+              alreadySubmitted: false,
+              pendingState: result.pendingState ?? null,
+            });
+            return;
+          }
           if (result.status === 'not-found') {
             json(res, 404, {
               ok: false,
@@ -976,6 +1025,80 @@ export function createChatPromptRouteHandler(
           const msg = e?.message ?? String(e);
           const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // PATCH /api/drones/:id/chats/:chat/pending/:promptId
+      // Rewrite a queued message in place; it keeps its position in the queue.
+      if (
+        method === 'PATCH' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'pending'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const promptId = String(decodeURIComponent(parts[6] ?? '')).trim();
+        if (!isSafePromptId(promptId)) {
+          json(res, 400, { ok: false, error: 'invalid promptId' });
+          return;
+        }
+        let body: any = null;
+        try {
+          body = parseRequestSchema(
+            pendingPromptEditBodySchema,
+            await readJsonBody(req),
+            'pending prompt edit',
+          );
+        } catch (error: any) {
+          json(res, 400, { ok: false, error: error?.message ?? String(error) });
+          return;
+        }
+        try {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const result = await editQueuedPendingPrompt({
+            droneId: resolved.id,
+            chatName,
+            promptId,
+            text: body.text,
+            mode: body.mode,
+            requireSentByChatId: body.requireSentByChatId,
+          });
+          const status =
+            result.status === 'edited'
+              ? 200
+              : result.status === 'not-found'
+                ? 404
+                : result.status === 'not-owner'
+                  ? 403
+                  : 409;
+          json(res, status, {
+            ok: result.status === 'edited',
+            id: resolved.id,
+            chat: chatName,
+            promptId,
+            ...result,
+            ...(result.status === 'not-owner'
+              ? { error: 'this message was not sent by the requesting chat' }
+              : result.status === 'too-late'
+                ? { error: 'the message was already delivered to the agent' }
+                : result.status === 'unsupported'
+                  ? { error: 'automated, recovery, and new-chat messages cannot be edited' }
+                  : result.status === 'not-found'
+                    ? { error: `unknown pending prompt: ${promptId}` }
+                    : {}),
+          });
+          return;
+        } catch (error: any) {
+          const message = error?.message ?? String(error);
+          json(res, /unknown drone/i.test(message) ? 404 : /still starting/i.test(message) ? 409 : 500, {
+            ok: false,
+            error: message,
+          });
           return;
         }
       }

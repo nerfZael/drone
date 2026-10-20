@@ -544,6 +544,61 @@ describe('chat subscription transitions', () => {
     expect(idle.cursor.idleArmed).toBe(false);
   });
 
+  test('announces each new question request once, and lists open ones on idle', () => {
+    const subscription = {
+      ...chatSubscription,
+      events: ['chat.idle', 'chat.questions_asked'] as ResourceSubscription['events'],
+    };
+    const working = { idle: false, reason: 'working', latest: { id: 'run', role: 'user', status: 'sending' } };
+    const askedEarlier = { requestId: 'questions_old', createdAt: '2026-10-14T10:00:00.000Z', questions: [{ id: 'a', question: 'Old?' }] };
+    const asked = { requestId: 'questions_new', createdAt: '2026-10-14T10:05:00.000Z', questions: [{ id: 'b', question: 'Which?' }, { id: 'c', question: 'When?' }] };
+
+    // A cursor from before question events existed: an already open request is not announced.
+    const upgraded = detectChatSubscriptionChanges(subscription, location, {
+      ...working,
+      pendingQuestions: [askedEarlier],
+    });
+    expect(upgraded.events).toHaveLength(0);
+    expect(upgraded.cursor.seenQuestionIds).toEqual(['questions_old']);
+
+    const next = detectChatSubscriptionChanges({ ...subscription, cursor: upgraded.cursor }, location, {
+      ...working,
+      pendingQuestions: [askedEarlier, asked],
+    });
+    expect(next.events.map((event) => event.eventType)).toEqual(['chat.questions_asked']);
+    expect(next.events[0]?.summary).toContain('asked 2 questions');
+    expect(next.events[0]?.providerContent).toMatchObject({
+      requestId: 'questions_new',
+      questions: asked.questions,
+    });
+
+    const idle = detectChatSubscriptionChanges({ ...subscription, cursor: next.cursor }, location, {
+      idle: true,
+      reason: 'settled',
+      latest: { id: 'run', role: 'assistant', status: 'sent' },
+      pendingQuestions: [askedEarlier, asked],
+    });
+    expect(idle.events.map((event) => event.eventType)).toEqual(['chat.idle']);
+    expect(idle.events[0]?.providerContent.pendingQuestionRequestIds).toEqual([
+      'questions_old',
+      'questions_new',
+    ]);
+  });
+
+  test('does not announce questions to subscriptions that did not ask for them', () => {
+    const result = detectChatSubscriptionChanges(
+      { ...chatSubscription, cursor: { ...chatSubscription.cursor, seenQuestionIds: [] } },
+      location,
+      {
+        idle: false,
+        reason: 'working',
+        latest: null,
+        pendingQuestions: [{ requestId: 'questions_x', createdAt: '', questions: [] }],
+      },
+    );
+    expect(result.events).toHaveLength(0);
+  });
+
   test('emits failure without also emitting idle', () => {
     const failed = detectChatSubscriptionChanges(
       { ...chatSubscription, cursor: { ...chatSubscription.cursor, idleArmed: true } },

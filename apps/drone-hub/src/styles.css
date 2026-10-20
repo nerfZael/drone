@@ -1995,6 +1995,55 @@ code, pre {
   font-weight: var(--weight-strong);
 }
 
+/* Status emoji (✅ 🔄 ⏳ …) drawn as line icons in the theme's status colours.
+   Not scoped to .dh-markdown: the Companion display renders markdown too. */
+.dh-md-status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1em;
+  vertical-align: -.14em;
+  color: var(--muted-dim);
+}
+.dh-md-status--success { color: var(--green); }
+.dh-md-status--danger { color: var(--red); }
+.dh-md-status--warning { color: var(--yellow); }
+.dh-md-status--info { color: var(--info); }
+del .dh-md-status,
+.dh-md-status--dimmed { opacity: .7; }
+.dh-md-status__icon {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* A bullet item that opens with a status emoji shows the icon in the bullet's
+   place, centred on the first line, so wrapped lines align under the text. */
+li.dh-md-status-item { list-style: none; }
+li.dh-md-status-item,
+.dh-md-status-line { position: relative; }
+.dh-md-status--lead {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  height: 1lh;
+  margin-right: .2em;
+}
+.dh-md-status__text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .dh-markdown a {
   color: var(--link);
   text-decoration: underline;
@@ -2042,6 +2091,19 @@ code, pre {
   border-radius: 3px;
   color: var(--link-strong);
   text-decoration-color: var(--link-strong);
+}
+/* Channels: @mentions read as names, not links. */
+.dh-channel-message-body .dh-markdown button.dh-markdown-text-mention {
+  border-radius: 4px;
+  padding: 0 3px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.dh-channel-message-body .dh-markdown button.dh-markdown-text-mention:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
 }
 .dh-markdown a.dh-inline-code-link {
   text-decoration: none;
@@ -3413,7 +3475,14 @@ select:disabled optgroup {
   display: contents;
 }
 
-.dh-dock-tab-controls:empty + .dh-dock-tab-divider {
+/* In a narrow Changes Explorer its name gives way to the line counts beside it. */
+.dh-dockable-workspace .dv-tabs-and-actions-container.dv-single-tab:has([data-changes-explorer-tab-counts]) .dv-tab {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.dh-dock-tab-controls:empty + .dh-dock-tab-divider,
+.dh-dock-tab-controls:not(:has(button)) + .dh-dock-tab-divider {
   display: none;
 }
 

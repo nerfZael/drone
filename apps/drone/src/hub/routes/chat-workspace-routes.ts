@@ -12,7 +12,7 @@ export const AGENT_CHAT_WORKSPACE_LIST_TOOL = 'list_workspaces';
  */
 export function registerChatWorkspaceRoutes(
   router: HubRouter,
-  workspaces: Pick<AgentChatWorkspaces, 'catalog' | 'save' | 'list' | 'run'>,
+  workspaces: Pick<AgentChatWorkspaces, 'catalog' | 'save' | 'list' | 'run' | 'grant' | 'home'>,
   resolveChat: (params: Readonly<Record<string, string>>) => Promise<AgentChat> = resolveStoredChat,
 ) {
   const statusOf = (error: any) => (typeof error?.status === 'number' ? error.status : 400);
@@ -26,6 +26,16 @@ export function registerChatWorkspaceRoutes(
     }
   });
 
+  // The chat's home folder (the composer's Home pill), made on first ask like the rest of its first selection.
+  router.get('/api/drones/:drone/chats/:chat/workspaces/home', async ({ params, json, fail }) => {
+    try {
+      const chat = await resolveChat(params);
+      json(200, { ok: true, home: await workspaces.home(chat) });
+    } catch (error: any) {
+      fail(statusOf(error), error?.message ?? String(error));
+    }
+  });
+
   router.post('/api/drones/:drone/chats/:chat/workspaces', async ({ params, readJson, json, fail }) => {
     try {
       const body = await readJson<{ access?: unknown; revision?: unknown }>();
@@ -33,6 +43,35 @@ export function registerChatWorkspaceRoutes(
       json(200, await workspaces.save(chat, body?.access, String(body?.revision ?? '')));
     } catch (error: any) {
       fail(statusOf(error), error?.message ?? String(error));
+    }
+  });
+
+  // One chat gives another access it holds (the grant_workspace_access tool). Like a tool, a refusal answers 200.
+  router.post('/api/drones/:drone/chats/:chat/workspaces/grant', async ({ params, readJson, json, fail }) => {
+    const body = await readJson<{
+      to?: { drone?: unknown; chat?: unknown };
+      workspace?: unknown;
+      read?: unknown;
+      write?: unknown;
+      execute?: unknown;
+    }>();
+    let from: AgentChat;
+    try {
+      from = await resolveChat(params);
+    } catch (error: any) {
+      return fail(statusOf(error), error?.message ?? String(error));
+    }
+    try {
+      const to = await resolveChat({ drone: String(body?.to?.drone ?? ''), chat: String(body?.to?.chat ?? '') });
+      const result = await workspaces.grant(from, to, {
+        workspace: String(body?.workspace ?? ''),
+        read: body?.read === true,
+        write: body?.write === true,
+        execute: body?.execute === true,
+      });
+      json(200, { ok: true, result: { ...result, drone: to.droneId, chat: to.chatName } });
+    } catch (error: any) {
+      json(200, { ok: true, error: error?.message ?? String(error) });
     }
   });
 

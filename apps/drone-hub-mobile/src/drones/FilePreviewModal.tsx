@@ -66,7 +66,7 @@ import {
   type MobileHtmlPreviewMode,
 } from './file-preview-model';
 import { RenderedHtmlPreview } from './RenderedHtmlPreview';
-import type { MobileHtmlImageReader } from './mobile-html-preview-images';
+import type { MobileHtmlImageReader, MobileHtmlMediaSessionOpener } from './mobile-html-preview-images';
 import { MobileFileExplorer } from './MobileFileExplorer';
 import { ZoomableImageStage } from './ZoomableImageStage';
 import {
@@ -270,6 +270,7 @@ export function FilePreviewModal({
   outsideWorkspace = false,
   requestDroneControl,
   readPreviewImage,
+  openPreviewMediaSession,
   onOpenPath,
   onSave,
   onClose,
@@ -305,6 +306,7 @@ export function FilePreviewModal({
     payload?: any,
   ) => Promise<any>;
   readPreviewImage?: MobileHtmlImageReader;
+  openPreviewMediaSession?: MobileHtmlMediaSessionOpener;
   onOpenPath(path: string, line?: number | null): void;
   onSave(content: string, expectedRevision?: string | null): Promise<boolean>;
   onClose(): void;
@@ -795,7 +797,7 @@ export function FilePreviewModal({
               </View>
             ) : preview?.kind === 'text' && htmlPreview && htmlMode === 'rendered' ? (
               preview.content ? (
-                <RenderedHtmlPreview source={preview.content} path={preview.path} readImage={readPreviewImage} />
+                <RenderedHtmlPreview source={preview.content} path={preview.path} readImage={readPreviewImage} openMediaSession={openPreviewMediaSession} />
               ) : (
                 <View style={styles.centerState}>
                   <Text style={styles.stateTitle}>Empty HTML file</Text>

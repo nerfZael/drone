@@ -33,10 +33,12 @@ describe('desktop workspace picker', () => {
     expect(WORKSPACE_CATEGORIES).toEqual([
       'Repositories',
       'Folders',
+      'Chat homes',
       'Host drones',
       'Container drones',
     ]);
     expect(workspaceCategory({ ...base, kind: 'host', repository: true })).toBe('Repositories');
+    expect(workspaceCategory({ ...base, kind: 'host', chatHome: { chatId: 'c', droneId: 'd', chatName: 'Fix', droneName: 'd' } })).toBe('Chat homes');
     expect(workspaceCategory({ ...base, kind: 'host', repository: false })).toBe('Folders');
     expect(workspaceCategory({ ...base, kind: 'host', runtime: 'host' })).toBe('Host drones');
     expect(workspaceCategory({ ...base, runtime: 'container' })).toBe('Container drones');

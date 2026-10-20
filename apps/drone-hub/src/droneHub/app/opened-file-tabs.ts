@@ -199,23 +199,27 @@ export function updateFileTabContent(tabs: OpenedFileTab[], tabIdRaw: string | n
   return tabs.map((tab) => (tab.tabId === tabId && tab.kind === 'text' ? { ...tab, content: next } : tab));
 }
 
-export function dirtyFileTabsForPaths(tabs: OpenedFileTab[], paths: string[]): OpenedFileTab[] {
+/** One editor's strip can hold tabs of several workspaces; path operations then apply to `droneId`'s tabs only. */
+const inWorkspace = (tab: OpenedFileTab, droneId?: string | null) => !droneId || tab.droneId === droneId;
+
+export function dirtyFileTabsForPaths(tabs: OpenedFileTab[], paths: string[], droneId?: string | null): OpenedFileTab[] {
   const normalizedPaths = paths.map(normalizeOpenedFilePath).filter(Boolean);
   if (normalizedPaths.length === 0) return [];
-  return tabs.filter((tab) => openedFileTabDirty(tab) && normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
+  return tabs.filter((tab) => inWorkspace(tab, droneId) && openedFileTabDirty(tab) && normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
 }
 
 export function remapFileTabsForPathChange(
   state: OpenedFileTabsState,
   sourcePath: string,
   targetPath: string,
+  droneId?: string | null,
 ): OpenedFileTabsState {
   const nextTabs: OpenedFileTab[] = [];
   const tabIndexById = new Map<string, number>();
   let activeTabId = state.activeTabId;
 
   for (const tab of state.tabs) {
-    const nextPath = remapPath(sourcePath, targetPath, tab.path);
+    const nextPath = inWorkspace(tab, droneId) ? remapPath(sourcePath, targetPath, tab.path) : null;
     const nextTab = nextPath
       ? {
           ...tab,
@@ -243,10 +247,10 @@ export function remapFileTabsForPathChange(
   return { tabs: nextTabs, activeTabId };
 }
 
-export function closeFileTabsForPaths(state: OpenedFileTabsState, paths: string[]): OpenedFileTabsState {
+export function closeFileTabsForPaths(state: OpenedFileTabsState, paths: string[], droneId?: string | null): OpenedFileTabsState {
   const normalizedPaths = paths.map(normalizeOpenedFilePath).filter(Boolean);
   if (normalizedPaths.length === 0) return state;
-  const tabs = state.tabs.filter((tab) => !normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
+  const tabs = state.tabs.filter((tab) => !inWorkspace(tab, droneId) || !normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
   if (tabs.length === state.tabs.length) return state;
   if (state.activeTabId && tabs.some((tab) => tab.tabId === state.activeTabId)) {
     return { tabs, activeTabId: state.activeTabId };

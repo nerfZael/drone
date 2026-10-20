@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { CompanionLiveTiming } from '../src/companion-live-timing';
+import { liveTimingReason, CompanionLiveTiming } from '../src/companion-live-timing';
 
 test('timings correlate dispatch without content and sample audio once per result', () => {
   let now = 10;
@@ -74,4 +74,15 @@ test('failed backend outcomes have their own timing stage', () => {
   expect(events.at(-1)).toMatchObject({ stage: 'backend_error', delegationId: 'delegation', resultSequence: 1 });
   expect(events.some(e => e.stage === 'backend_result')).toBe(false);
   timing.close();
+});
+
+test('Live timing records failure reasons as codes and one dropped-playback mark per result', () => {
+  const records: Record<string, unknown>[] = [];
+  const timing = new CompanionLiveTiming(() => 0, (record) => records.push(record));
+  timing.failed('Live voice playback fell behind. Start again.');
+  timing.playback({ stage: 'dropped', queueMs: 9_250, durationMs: 3_000 });
+  timing.playback({ stage: 'dropped', queueMs: 9_300, durationMs: 3_000 });
+  expect(records.filter(r => r.stage === 'session_failed').map(r => r.reason)).toEqual(['live-voice-playback-fell-behind-start-again']);
+  expect(records.filter(r => r.stage === 'playback_dropped')).toHaveLength(1);
+  expect(liveTimingReason('!!!')).toBe('unknown');
 });

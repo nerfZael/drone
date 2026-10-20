@@ -132,13 +132,20 @@ function validatePayload(input) {
       typeof input.body !== 'string' || input.body.length > 600 ||
       (input.target != null && (typeof input.target.droneId !== 'string' || !input.target.droneId ||
         input.target.droneId.length > 200 || typeof input.target.chatName !== 'string' || !input.target.chatName ||
-        input.target.chatName.length > 200))) throw new Error('Invalid notification');
+        input.target.chatName.length > 200 ||
+        (input.target.channelId != null && (typeof input.target.channelId !== 'string' || input.target.channelId.length > 200))))) {
+    throw new Error('Invalid notification');
+  }
   const durationSeconds = input.durationSeconds ?? 8;
   if (![0, 5, 8, 15, 30].includes(durationSeconds)) throw new Error('Invalid notification duration');
   return { title: input.title, body: input.body, silent: input.silent === true, durationSeconds,
     name: typeof input.name === 'string' ? input.name.slice(0, 180) : '',
-    kind: ['finished', 'failed', 'message'].includes(input.kind) ? input.kind : 'test',
-    target: input.target ? { droneId: input.target.droneId, chatName: input.target.chatName } : null };
+    kind: ['finished', 'failed', 'message', 'channel_mention'].includes(input.kind) ? input.kind : 'test',
+    target: input.target ? {
+      droneId: input.target.droneId,
+      chatName: input.target.chatName,
+      ...(input.target.channelId ? { channelId: input.target.channelId } : {}),
+    } : null };
 }
 
 module.exports = { registerDesktopNotifications };

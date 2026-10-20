@@ -1,9 +1,10 @@
 import { parseChatWorkspaceAccess, validateChatWorkspaceSelection } from '@drone/assistant-chat';
 import type { ChatWorkspaceAccess, ChatWorkspaceOption } from '@drone/assistant-chat';
 
-export type WorkspaceCategory = 'Repositories' | 'Folders' | 'Host drones' | 'Container drones';
+export type WorkspaceCategory = 'Repositories' | 'Folders' | 'Chat homes' | 'Host drones' | 'Container drones';
 
 export function workspaceCategory(option: ChatWorkspaceOption): WorkspaceCategory {
+  if (option.chatHome) return 'Chat homes';
   if (option.kind === 'host' && option.repository) return 'Repositories';
   if (option.kind === 'host' && option.runtime === 'host') return 'Host drones';
   if (option.kind === 'drone' && option.runtime !== 'host') return 'Container drones';

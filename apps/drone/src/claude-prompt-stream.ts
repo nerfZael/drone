@@ -37,9 +37,14 @@ export type ClaudeStreamTurn = {
 
 export type ClaudeBackgroundTask = {
   id: string;
+  /** Claude's task type, or `wakeup`/`cron` for a wake-up Claude scheduled. */
   type: string;
   description: string;
   startedAt: string;
+  /** When a scheduled wake-up should fire. */
+  dueAt?: string;
+  /** A cron schedule that fires until deleted. */
+  recurring?: boolean;
 };
 
 export type ClaudeStreamState = {
@@ -47,7 +52,7 @@ export type ClaudeStreamState = {
   responseMessageId: string;
   turns?: ClaudeStreamTurn[];
   backgroundTasks?: ClaudeBackgroundTask[];
-  /** True while the run is idle but kept alive for its background tasks. */
+  /** True while the run is idle but kept alive for its background tasks or wake-ups. */
   resident?: boolean;
 };
 
@@ -134,8 +139,9 @@ type RunnerConfig = {
   prompt: string;
   socketPath: string;
   statePath: string;
-  /** Test hook; production uses the runner default. */
+  /** Test hooks; production uses the runner defaults. */
   idleCloseGraceMs?: number;
+  scheduleLateMs?: number;
 };
 
 // Self-contained because this runs under the durable tmux wrapper, independently
@@ -150,6 +156,15 @@ function runClaudeStream(config: RunnerConfig) {
   // when they report. A task that ends without waking Claude must not keep
   // the run alive forever, so an idle run without tasks closes after a grace.
   const IDLE_CLOSE_GRACE_MS = config.idleCloseGraceMs ?? 15_000;
+  // ScheduleWakeup and CronCreate keep their timers inside Claude and report
+  // nothing, so the run tracks them from the tool calls. A wake-up that has
+  // not fired this long after it was due is dropped.
+  const SCHEDULE_LATE_MS = config.scheduleLateMs ?? 5 * 60_000;
+  // ScheduleWakeup fires at its reported time; a one-shot cron job up to 90 s early.
+  const scheduleEarlyMs = (schedule: ClaudeBackgroundTask) =>
+    schedule.type === 'cron' ? 95_000 : 5_000;
+  // Claude ends recurring jobs after 7 days.
+  const RECURRING_MAX_MS = 7 * 24 * 60 * 60_000 + 60 * 60_000;
   const MAX_CLOSED_TURNS = 100;
   const child = spawn(config.cmd, config.args, {
     env: { ...process.env, DRONE_CLAUDE_STREAM: '1' },
@@ -160,6 +175,9 @@ function runClaudeStream(config: RunnerConfig) {
   const unacknowledged = new Set<string>();
   const turns: Turn[] = [];
   const tasks = new Map<string, ClaudeBackgroundTask>();
+  const schedules = new Map<string, ClaudeBackgroundTask>();
+  const scheduleCalls = new Map<string, { name: string; input: any }>();
+  let scheduleSweepTimer: ReturnType<typeof setTimeout> | null = null;
   // Task reports since the last turn ended; a wake turn shows them.
   let notifications: string[] = [];
   // Reports from a turn whose tasks all ended in it, for a wake right after it.
@@ -192,8 +210,8 @@ function runClaudeStream(config: RunnerConfig) {
         messageIds: [...accepted],
         responseMessageId,
         turns,
-        backgroundTasks: [...tasks.values()],
-        resident: accepting && !openTurn && tasks.size > 0,
+        backgroundTasks: [...tasks.values(), ...schedules.values()],
+        resident: accepting && !openTurn && tasks.size + schedules.size > 0,
       }),
       { mode: 0o600 },
     );
@@ -211,10 +229,11 @@ function runClaudeStream(config: RunnerConfig) {
     child.stdin.end();
     persist();
   };
-  // Close once nothing can produce another turn. Tasks keep the run resident.
+  // Close once nothing can produce another turn. Tasks and wake-ups keep the
+  // run resident.
   const settle = (afterTasksEnded: boolean) => {
     if (!accepting || openTurn || unacknowledged.size > 0) return;
-    if (tasks.size > 0) {
+    if (tasks.size > 0 || schedules.size > 0) {
       clearIdleTimer();
       return;
     }
@@ -224,6 +243,112 @@ function runClaudeStream(config: RunnerConfig) {
     }
     clearIdleTimer();
     idleTimer = setTimeout(stopAccepting, IDLE_CLOSE_GRACE_MS);
+  };
+  const scheduleDeadline = (schedule: ClaudeBackgroundTask) =>
+    schedule.dueAt
+      ? Date.parse(schedule.dueAt) + SCHEDULE_LATE_MS
+      : schedule.recurring
+        ? Date.parse(schedule.startedAt) + RECURRING_MAX_MS
+        : Infinity;
+  const armScheduleSweep = () => {
+    if (scheduleSweepTimer) clearTimeout(scheduleSweepTimer);
+    scheduleSweepTimer = null;
+    const deadline = Math.min(...[...schedules.values()].map(scheduleDeadline));
+    if (!Number.isFinite(deadline)) return;
+    scheduleSweepTimer = setTimeout(sweepSchedules, Math.max(0, deadline - Date.now()));
+  };
+  // Drop wake-ups that never fired, so they cannot keep the run alive forever.
+  const sweepSchedules = () => {
+    scheduleSweepTimer = null;
+    if (openTurn) {
+      scheduleSweepTimer = setTimeout(sweepSchedules, 30_000);
+      return;
+    }
+    let dropped = false;
+    for (const [id, schedule] of schedules) {
+      if (scheduleDeadline(schedule) <= Date.now()) dropped = schedules.delete(id) || dropped;
+    }
+    armScheduleSweep();
+    if (!dropped) return;
+    persist();
+    settle(true);
+  };
+  const toolResultText = (content: unknown): string =>
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((part: any) => (typeof part?.text === 'string' ? part.text : '')).join('\n')
+        : '';
+  // A one-shot cron pins minute, hour, day and month, in Claude's local time.
+  const pinnedCronDue = (expression: string): string | undefined => {
+    const fields = expression.trim().split(/\s+/);
+    const [minute, hour, day, month] = fields.slice(0, 4).map(Number);
+    if (fields.length !== 5 || ![minute, hour, day, month].every(Number.isInteger))
+      return undefined;
+    const now = new Date();
+    let due = new Date(now.getFullYear(), month! - 1, day, hour, minute);
+    if (due.getTime() < now.getTime() - SCHEDULE_LATE_MS)
+      due = new Date(now.getFullYear() + 1, month! - 1, day, hour, minute);
+    return due.toISOString();
+  };
+  const applySchedule = (name: string, input: any, result: string) => {
+    const now = Date.now();
+    if (name === 'ScheduleWakeup') {
+      // Claude keeps one pending wake-up; a new one replaces it.
+      if (input?.stop === true) schedules.delete('wakeup');
+      else {
+        const reported = Number(/\(in (\d+)s\)/.exec(result)?.[1]);
+        const seconds = Number.isFinite(reported)
+          ? reported
+          : Math.min(3600, Math.max(60, Number(input?.delaySeconds) || 60));
+        schedules.set('wakeup', {
+          id: 'wakeup',
+          type: 'wakeup',
+          description: String(input?.reason || input?.prompt || '').trim(),
+          startedAt: new Date(now).toISOString(),
+          dueAt: new Date(now + seconds * 1000).toISOString(),
+        });
+      }
+    } else if (name === 'CronCreate') {
+      const jobId = /\btask ([0-9a-z]+)/i.exec(result)?.[1];
+      if (!jobId) return;
+      const recurring = input?.recurring !== false;
+      const dueAt = recurring ? undefined : pinnedCronDue(String(input?.cron ?? ''));
+      schedules.set(`cron:${jobId}`, {
+        id: `cron:${jobId}`,
+        type: 'cron',
+        description: String(input?.prompt ?? '')
+          .trim()
+          .slice(0, 300),
+        startedAt: new Date(now).toISOString(),
+        ...(dueAt ? { dueAt } : {}),
+        ...(recurring ? { recurring } : {}),
+      });
+    } else if (name === 'CronDelete') {
+      schedules.delete(`cron:${String(input?.id ?? '').trim()}`);
+    }
+    armScheduleSweep();
+    persist();
+  };
+  /** The one-shot wake-up that is due now, removed now that it has fired. */
+  const takeDueSchedule = (): ClaudeBackgroundTask | undefined => {
+    const due = [...schedules.values()]
+      .filter(
+        (schedule) =>
+          !schedule.recurring &&
+          schedule.dueAt &&
+          Date.parse(schedule.dueAt) - scheduleEarlyMs(schedule) <= Date.now(),
+      )
+      .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))[0];
+    if (due) {
+      schedules.delete(due.id);
+      armScheduleSweep();
+    }
+    return due;
+  };
+  const scheduleSummary = (schedule: ClaudeBackgroundTask) => {
+    const label = schedule.type === 'wakeup' ? 'Scheduled wake-up' : 'Scheduled task';
+    return schedule.description ? `${label}: ${schedule.description}` : label;
   };
   const openTurnAt = (turn: Turn) => {
     clearIdleTimer();
@@ -313,16 +438,23 @@ function runClaudeStream(config: RunnerConfig) {
       turns.length > 0
     ) {
       wakeCount += 1;
+      // A wake-up Claude scheduled fires with no report of its own.
+      const dueSchedule = notifications.length > 0 ? undefined : takeDueSchedule();
       // Monitor events wake Claude without a report; name the only live task.
       const onlyTask = tasks.size === 1 ? [...tasks.values()][0] : undefined;
+      const recurringSchedule = [...schedules.values()].find((schedule) => schedule.recurring);
       const summaries =
         notifications.length > 0
           ? notifications
-          : endedTurnNotifications.length > 0
-            ? endedTurnNotifications
-            : onlyTask?.description
-              ? [`"${onlyTask.description}" reported`]
-              : [];
+          : dueSchedule
+            ? [scheduleSummary(dueSchedule)]
+            : endedTurnNotifications.length > 0
+              ? endedTurnNotifications
+              : onlyTask?.description
+                ? [`"${onlyTask.description}" reported`]
+                : recurringSchedule
+                  ? [scheduleSummary(recurringSchedule)]
+                  : [];
       openTurnAt({
         id: `${config.id}-wake-${wakeCount}`,
         start: written,
@@ -336,6 +468,22 @@ function runClaudeStream(config: RunnerConfig) {
     written += Buffer.byteLength(line, 'utf8') + 1;
     if (!topLevel) return;
     if (event.type === 'user' && event.uuid) unacknowledged.delete(event.uuid);
+    const content = Array.isArray(event.message?.content) ? event.message.content : [];
+    for (const part of content) {
+      if (
+        event.type === 'assistant' &&
+        part?.type === 'tool_use' &&
+        ['ScheduleWakeup', 'CronCreate', 'CronDelete'].includes(part.name)
+      )
+        scheduleCalls.set(String(part.id), { name: part.name, input: part.input });
+      const call =
+        event.type === 'user' && part?.type === 'tool_result'
+          ? scheduleCalls.get(String(part.tool_use_id))
+          : undefined;
+      if (!call) continue;
+      scheduleCalls.delete(String(part.tool_use_id));
+      if (!part.is_error) applySchedule(call.name, call.input, toolResultText(part.content));
+    }
     if (event.type === 'system' && event.subtype === 'task_notification') {
       const summary = String(event.summary ?? '').trim();
       if (summary && openTurn?.wake) {
@@ -380,8 +528,10 @@ function runClaudeStream(config: RunnerConfig) {
   });
   child.on('close', (code) => {
     clearIdleTimer();
-    // Background tasks die with Claude.
+    if (scheduleSweepTimer) clearTimeout(scheduleSweepTimer);
+    // Background tasks and scheduled wake-ups die with Claude.
     tasks.clear();
+    schedules.clear();
     accepting = false;
     server.close();
     try {

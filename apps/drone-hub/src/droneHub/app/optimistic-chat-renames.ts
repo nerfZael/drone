@@ -35,6 +35,7 @@ export function applyOptimisticChatRenames(drone: DroneSummary, renamesRaw: Reco
   );
   if (Object.keys(renames).length === 0) return drone;
   const chatCloneSources = renameKeys(drone.chatCloneSources, renames);
+  const chatCreators = renameKeys(drone.chatCreators, renames);
   return {
     ...drone,
     chats: renameList(drone.chats, renames) ?? [],
@@ -47,6 +48,9 @@ export function applyOptimisticChatRenames(drone: DroneSummary, renamesRaw: Reco
     chatCloneSources: chatCloneSources
       ? Object.fromEntries(Object.entries(chatCloneSources).map(([name, source]) => [name, renameEntry(source, renames)]))
       : chatCloneSources,
+    chatCreators: chatCreators
+      ? Object.fromEntries(Object.entries(chatCreators).map(([name, creator]) => [name, renameEntry(creator, renames)]))
+      : chatCreators,
     chatCreatedAt: renameKeys(drone.chatCreatedAt, renames),
     chatIds: renameKeys(drone.chatIds, renames),
     chatReadStates: renameKeys(drone.chatReadStates, renames),

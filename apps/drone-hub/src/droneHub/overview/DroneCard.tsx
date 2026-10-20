@@ -306,39 +306,36 @@ export function SidebarDeletingStatusIndicator() {
   );
 }
 
-function SidebarOperationSpinnerRing() {
+// Spin the HTML wrapper, never the <svg>: Chromium cannot composite animations on
+// SVG elements, so a spinning <svg> repaints and re-layerizes the whole page every frame.
+function SidebarSpinnerRing({ className = '', operation = false }: { className?: string; operation?: boolean }) {
   return (
-    <svg
-      data-sidebar-operation-spinner="true"
-      className="block h-3 w-3 animate-[spin_1.6s_linear_infinite]"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+    <span
+      data-sidebar-operation-spinner={operation ? 'true' : undefined}
+      className={`block h-3 w-3 animate-[spin_1.6s_linear_infinite] ${className}`}
       aria-hidden="true"
     >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
+      <svg
+        className="block h-3 w-3"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+    </span>
   );
 }
 
+function SidebarOperationSpinnerRing() {
+  return <SidebarSpinnerRing operation />;
+}
+
 export function SidebarWorkingStatusIndicator() {
-  return (
-    <svg
-      className="block h-3 w-3 animate-[spin_1.6s_linear_infinite] text-[var(--yellow)]"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <SidebarSpinnerRing className="text-[var(--yellow)]" />;
 }
 
 export function SidebarApprovalStatusIndicator() {

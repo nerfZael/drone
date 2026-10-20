@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 
 // Sessions let a sandboxed HTML preview load its own document and local images by
 // URL, so the Hub page never holds the file or its images in memory. A session
 // grants nothing beyond what the authenticated Hub page that created it could read.
 export type HtmlPreviewSession = {
   droneId: string;
-  /** The previewed HTML file. Every other path is served only as an image or video. */
+  /** The previewed HTML file. Other HTML files in its folder are served to frames, other paths only as images or video. */
   path: string;
   /** Applied with `sandbox allow-scripts` to every response for this session. */
   contentSecurityPolicy: string;
@@ -18,6 +19,17 @@ const MAX_SESSIONS = 64;
 const IDLE_MS = 60 * 60 * 1000;
 const MAX_POLICY_LENGTH = 4096;
 const MAX_PREFIX_LENGTH = 64 * 1024;
+
+/**
+ * A page framed inside a preview: an HTML file in the previewed file's folder or
+ * below it, served the same way. Returns the normalized path, or null.
+ */
+export function htmlPreviewFramedPath(previewPath: string, requestedPath: string): string | null {
+  const target = path.posix.normalize(requestedPath);
+  const folder = path.posix.dirname(previewPath);
+  if (!/\.html?$/i.test(target)) return null;
+  return target.startsWith(folder === '/' ? '/' : `${folder}/`) ? target : null;
+}
 
 export function htmlPreviewResponsePolicy(contentSecurityPolicy: string): string {
   return `sandbox allow-scripts; ${contentSecurityPolicy}`;
