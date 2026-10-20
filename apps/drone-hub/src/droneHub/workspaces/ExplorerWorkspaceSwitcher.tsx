@@ -11,6 +11,7 @@ import {
   subscribeWorkspacesChanged,
   type BrowsableWorkspace,
 } from './workspaces-client';
+import { chatPathRef } from '../app/chat-identity';
 
 const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Chat homes', 'Host drones', 'Container drones'];
 const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Chat homes', 'Host drones', 'Container drones']);
@@ -118,7 +119,7 @@ export function ExplorerWorkspaceSwitcher({
       const [all, chat] = await Promise.all([
         loadBrowsableWorkspaces(),
         chatName
-          ? requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/workspaces`).catch(() => null)
+          ? requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/workspaces`).catch(() => null)
           : Promise.resolve(null),
       ]);
       lastWorkspaces = all;

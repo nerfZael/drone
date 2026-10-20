@@ -1,11 +1,7 @@
 import { create } from 'zustand';
-import { detachedChatKey } from './detached-chat-store';
+import { chatWindowKey, openChatWindowKey } from './detached-chat-store';
 
 export type DesktopChat = { droneId: string; chatName: string; request: number };
-
-function desktopChatWindowKey(windows: Record<string, DesktopChat>, droneId: string, chatName: string): string | null {
-  return Object.keys(windows).find((key) => windows[key]!.droneId === droneId && windows[key]!.chatName === chatName) ?? null;
-}
 
 // Desktop views have their own lifecycle and never alter the Hub's detached
 // panels, selected chat, or workspace layout.
@@ -20,12 +16,12 @@ export const useDesktopChatRequests = create<{
   request(droneId, chatName) {
     if (!window.droneHubDesktop?.setChatWindowAlwaysOnTop) return;
     const windows = get().windows;
-    const key = desktopChatWindowKey(windows, droneId, chatName) ?? detachedChatKey(droneId, chatName);
+    const key = openChatWindowKey(windows, droneId, chatName);
     set({ windows: { ...windows, [key]: { droneId, chatName, request: (windows[key]?.request ?? 0) + 1 } } });
   },
   rename(droneId, oldName, newName) {
     const windows = get().windows;
-    const key = desktopChatWindowKey(windows, droneId, oldName);
+    const key = chatWindowKey(windows, droneId, oldName);
     if (!key || oldName === newName) return;
     set({ windows: { ...windows, [key]: { ...windows[key]!, chatName: newName } } });
   },

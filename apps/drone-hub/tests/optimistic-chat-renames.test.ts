@@ -11,6 +11,7 @@ const drone = {
   sideChats: [{ name: 'side-1', sourceChatName: 'plan', checkpointId: 'c1', agent: { kind: 'builtin' } }],
   chatCloneSources: { 'side-1': 'plan', 'plan copy': 'plan' },
   chatCreatedAt: { plan: '2026-09-23T10:00:00Z' },
+  chatIds: { default: 'id-default', plan: 'id-plan' },
   busyChats: ['plan'],
   draftChats: { plan: false },
 } as unknown as DroneSummary;
@@ -21,6 +22,7 @@ test('a renamed chat shows under its new name everywhere the summary names it', 
   expect(renamed.sideChats?.[0].sourceChatName).toBe('plan b');
   expect(renamed.chatCloneSources).toEqual({ 'side-1': 'plan b', 'plan copy': 'plan b' });
   expect(renamed.chatCreatedAt).toEqual({ 'plan b': '2026-09-23T10:00:00Z' });
+  expect(renamed.chatIds).toEqual({ default: 'id-default', 'plan b': 'id-plan' });
   expect(renamed.busyChats).toEqual(['plan b']);
   expect(renamed.draftChats).toEqual({ 'plan b': false });
 });

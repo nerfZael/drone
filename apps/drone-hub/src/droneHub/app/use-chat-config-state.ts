@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatPathRef } from './chat-identity';
 import type {
   AgentApprovalPolicy,
   AgentPermissionMode,
@@ -321,7 +322,7 @@ export function useChatConfigState({
       const model = remembered.model || null;
       const reasoning = remembered.reasoning || null;
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -392,7 +393,7 @@ export function useChatConfigState({
         ...(hasReasoning ? { reasoning } : {}),
       };
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -438,7 +439,7 @@ export function useChatConfigState({
         throw new Error('The draft chat could not be created.');
       }
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -475,7 +476,7 @@ export function useChatConfigState({
         throw new Error('The draft chat could not be created.');
       }
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -512,7 +513,7 @@ export function useChatConfigState({
         throw new Error('The draft chat could not be created.');
       }
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -548,7 +549,7 @@ export function useChatConfigState({
         throw new Error('The draft chat could not be created.');
       }
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${chatPathRef(selectedDrone, chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

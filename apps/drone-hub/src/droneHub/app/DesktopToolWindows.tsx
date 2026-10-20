@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatSelectionKey } from './chat-selection-model';
 import type { DroneSummary } from '../types';
 import type { RightPanelTab } from './app-config';
 import { desktopPaneKey, type PaneKey } from './pane-key';
@@ -102,7 +103,7 @@ function DesktopToolWindowView({ window: item, props }: { window: DesktopToolWin
       sideChatNames: (drone.sideChats ?? []).map((chat) => chat.name),
       onSelectChat: (chatName) => dispatchAssistantOpenDroneChat(drone.id, chatName),
       renderChat: (chatName) => (
-        <DetachedChatContent key={chatName} desktop chat={{ droneId: drone.id, chatName, open: true }} drone={drone}
+        <DetachedChatContent key={chatSelectionKey(drone.id, chatName)} desktop chat={{ droneId: drone.id, chatName, open: true }} drone={drone}
           context={{ ...chatContext, currentDroneId, visible: true }} />
       ),
     } : undefined;

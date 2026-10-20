@@ -2,7 +2,7 @@ import { CacheExpiryTimer } from '@drone/hub-model';
 import type { ChatInfo } from '../../domain';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { chatSelectionKey } from './chat-selection-model';
-import { deleteNativeChatSnapshot, renameNativeChatSnapshot } from '../assistant/native-chat-cache';
+import { deleteNativeChatSnapshotByKey, renameNativeChatSnapshot } from '../assistant/native-chat-cache';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 
 export const CHAT_RUNTIME_CACHE_TTL_MS = 30_000;
@@ -105,12 +105,15 @@ export function writeChatRuntimeCache(
 }
 
 export function deleteChatRuntimeCache(key: string): void {
-  const separator = key.indexOf('\u0000');
-  if (separator >= 0) deleteNativeChatSnapshot(key.slice(0, separator), key.slice(separator + 1));
+  if (key) deleteNativeChatSnapshotByKey(key);
   if (key) cache.delete(key);
   if (cache.size === 0) expiry.clear();
 }
 
+/**
+ * A chat whose ID is known keeps its key across a rename; only the name in its
+ * cached config changes. A chat known only by name moves to the new key.
+ */
 export function renameChatRuntimeCache(
   droneId: string,
   oldChatName: string,
@@ -118,11 +121,13 @@ export function renameChatRuntimeCache(
 ): void {
   const oldKey = chatRuntimeCacheKey(droneId, oldChatName);
   const newKey = chatRuntimeCacheKey(droneId, newChatName);
-  if (!oldKey || !newKey || oldKey === newKey) return;
+  if (!oldKey || !newKey) return;
   const oldEntry = cache.get(oldKey);
-  if (!oldEntry) deleteChatRuntimeCache(newKey);
-  // Native chats keep their warm view in a cache of their own.
-  renameNativeChatSnapshot(droneId, oldChatName, newChatName);
+  if (oldKey !== newKey) {
+    if (!oldEntry) deleteChatRuntimeCache(newKey);
+    // Native chats keep their warm view in a cache of their own.
+    renameNativeChatSnapshot(droneId, oldChatName, newChatName);
+  }
   if (!oldEntry) return;
   const renamedEntry = { ...oldEntry };
   const oldChatInfo = oldEntry.chatInfo;

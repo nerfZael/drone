@@ -128,6 +128,51 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('creates a chat under a client-chosen ID and reaches it by that ID across renames', async () => {
+    const droneId = 'drone-chat-client-id';
+    await seedDrone(droneId);
+    const chatId = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const create = (body: object) => apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const created = await create({ name: 'review', chatId });
+    expect(created.r.status).toBe(201);
+    expect(created.data?.chatId).toBe(chatId);
+    // A retried create finds the chat it made instead of failing or duplicating it.
+    const retried = await create({ name: 'review', chatId });
+    expect(retried.r.status).toBe(201);
+    expect(retried.data?.chatId).toBe(chatId);
+    expect((await create({ name: 'other', chatId })).r.status).toBe(409);
+    expect((await create({ name: 'other', chatId: 'not-a-uuid' })).r.status).toBe(400);
+
+    const rename = (newName: string) => apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatId}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    });
+    expect((await rename('plan')).data?.chat).toBe('plan');
+    // The same ID still reaches the chat under its new name.
+    const second = await rename('roadmap');
+    expect(second.data?.oldChat).toBe('plan');
+    expect(second.data?.chat).toBe('roadmap');
+  });
+
+  test('rejects chat names with control characters, which clients use to tell chat IDs from names', async () => {
+    const droneId = 'drone-chat-control-name';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '\u0001review' }),
+    });
+    expect(created.r.status).toBe(400);
+    expect(String(created.data?.error)).toContain('control characters');
+  });
+
   test('MCP discovers and messages side chats while draft reads expose held messages', async () => {
     const droneId = 'drone-side-chat-catalog';
     await seedDrone(droneId);

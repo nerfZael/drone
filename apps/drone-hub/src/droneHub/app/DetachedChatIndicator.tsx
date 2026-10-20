@@ -1,6 +1,6 @@
 import { useDesktopChatRequests } from './desktop-chat-requests';
 import React from 'react';
-import { detachedChatKey, useDetachedChatStore } from './detached-chat-store';
+import { chatWindowKey, useDetachedChatStore } from './detached-chat-store';
 import type { SidebarContextMenuItem } from './SidebarContextMenu';
 
 export function IconDetachedChat({ className = 'h-3.5 w-3.5' }: { className?: string }) {
@@ -9,13 +9,14 @@ export function IconDetachedChat({ className = 'h-3.5 w-3.5' }: { className?: st
 
 export function DetachedChatIndicator({ droneId, chatName }: { droneId: string; chatName?: string }) {
   const open = useDetachedChatStore((s) => chatName
-    ? Boolean(s.chats[detachedChatKey(droneId, chatName)]?.open)
+    ? Object.values(s.chats).some((chat) => chat.open && chat.droneId === droneId && chat.chatName === chatName)
     : Object.values(s.chats).some((chat) => chat.open && chat.droneId === droneId));
   return open ? <span className="inline-flex shrink-0 text-[var(--info)]" role="img" aria-label="Chat detached" title="Chat is open in a detached window"><IconDetachedChat /></span> : null;
 }
 
 export function detachChatMenuItem(droneId: string, chatName: string): SidebarContextMenuItem {
-  const open = useDetachedChatStore.getState().chats[detachedChatKey(droneId, chatName)]?.open;
+  const chats = useDetachedChatStore.getState().chats;
+  const open = chats[chatWindowKey(chats, droneId, chatName) ?? '']?.open;
   return {
     id: 'detach-chat', label: open ? 'Focus detached chat' : 'Detach chat', icon: <IconDetachedChat />,
     onSelect: () => useDetachedChatStore.getState().detach(droneId, chatName),

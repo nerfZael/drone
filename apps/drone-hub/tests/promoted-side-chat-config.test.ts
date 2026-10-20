@@ -1,5 +1,6 @@
 import React from 'react';
 import { expect, test } from 'bun:test';
+import * as chatIdentity from '../src/droneHub/app/chat-identity';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import * as selection from '../src/droneHub/app/chat-selection-model';
@@ -44,6 +45,7 @@ function configHarness(cache = new Map<string, any>(), requestJson: (url: string
   const dependencies: Record<string, unknown> = {
     react,
     './chat-selection-model': selection,
+    './chat-identity': chatIdentity,
     './helpers': { isDroneStartingOrSeeding },
     './hooks': { isNotFoundError: () => false },
     './use-agent-model-catalog': { useAgentModelCatalog: () => ({ models: [], loading: false }) },

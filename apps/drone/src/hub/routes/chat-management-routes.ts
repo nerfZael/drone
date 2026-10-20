@@ -78,6 +78,8 @@ type ChatManagementRouteDependencyName =
   | 'stopSingleDroneChatActivity'
   | 'updateChatInStore';
 
+const CHAT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type ChatManagementRouteDependencies =
   LegacyRouteDependencyContract<ChatManagementRouteDependencyName>;
 
@@ -399,10 +401,18 @@ export function createChatManagementRouteHandler(
             : 'clone-history'
           : 'empty';
         const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
+        // A client may choose the new chat's ID, so it knows the chat before the reply
+        // and a retried create finds the chat it already made.
+        const chatId = String(body?.chatId ?? '').trim();
+        if (chatId && !CHAT_ID_PATTERN.test(chatId)) {
+          json(res, 400, { ok: false, error: 'chat id must be a UUID' });
+          return;
+        }
         try {
           const created = await createDroneChat({
             droneId,
             chatName,
+            ...(chatId ? { chatId: chatId.toLowerCase() } : {}),
             droneEntry: resolved.drone,
             creationMode,
             ...(copyFrom ? { sourceChatName: copyFrom } : {}),

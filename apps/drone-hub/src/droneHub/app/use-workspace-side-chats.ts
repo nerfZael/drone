@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatPathRef, forgetNewChatId, newChatId } from './chat-identity';
 import { setSideChatBusy } from './side-chat-busy-store';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { requestJson } from '../http';
@@ -84,6 +85,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
       }
       // A unique name avoids retries that could accidentally move the checkpoint.
       const name = `side-${crypto.randomUUID().slice(0, 8)}`;
+      const chatId = newChatId(drone.id, name);
       busyRef.current = true;
       setSideChatBusy(drone.id, true);
       setBusy('create');
@@ -98,6 +100,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name,
+          chatId,
           copyFrom: sourceChatName,
           mode: 'fork',
           sideChat: true,
@@ -122,6 +125,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
           setFocusRequest({ droneId: drone.id, chatName: name });
         })
         .catch((error) => {
+          forgetNewChatId(drone.id, name, chatId);
           if (workspace.active) setStatus(error instanceof Error ? error.message : String(error));
         })
         .finally(() => {
@@ -158,7 +162,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         if (!workspace.active) return;
         setStatus(null);
         await requestJson(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}${keep ? '/keep' : ''}`,
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${chatPathRef(drone.id, chatName)}${keep ? '/keep' : ''}`,
           { method: keep ? 'POST' : 'DELETE' },
         );
         if (!keep) useDroneCanvasStore.getState().dropOptimisticBoardMembers(drone.id, [chatName]);

@@ -1,11 +1,13 @@
 import type { ServerResponse } from 'node:http';
 
-type ChatRef = { droneId: string; chatName: string };
+/** `chatId` is the chat's stable ID where known, so clients can match a chat across renames. */
+type ChatRef = { droneId: string; chatName: string; chatId?: string };
 export type DroneChatEventSubscriber = (event: string, data: any) => void;
 
 export class DroneChatBroadcaster {
   readonly clients = new Set<ServerResponse>();
   readonly lastByKey = new Map<string, string>();
+  private readonly chatIdByKey = new Map<string, string>();
   private readonly subscribers = new Set<DroneChatEventSubscriber>();
 
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -50,11 +52,13 @@ export class DroneChatBroadcaster {
     return `${this.deps.normalizeDroneId(droneIdRaw)}\u0000${this.deps.normalizeChatName(chatNameRaw)}`;
   }
 
-  private parseKey(key: string): ChatRef | null {
+  private parseKey(key: string, chatIdByKey: ReadonlyMap<string, string> = this.chatIdByKey): ChatRef | null {
     const [droneIdRaw, chatNameRaw] = String(key ?? '').split('\u0000');
     const droneId = this.deps.normalizeDroneId(droneIdRaw);
     const chatName = this.deps.normalizeChatName(chatNameRaw);
-    return droneId && chatName ? { droneId, chatName } : null;
+    if (!droneId || !chatName) return null;
+    const chatId = chatIdByKey.get(key);
+    return chatId ? { droneId, chatName, chatId } : { droneId, chatName };
   }
 
   private fingerprint(chatEntry: any): string {
@@ -88,9 +92,10 @@ export class DroneChatBroadcaster {
     });
   }
 
-  private async buildSnapshot(): Promise<Map<string, string>> {
+  private async buildSnapshot(): Promise<{ next: Map<string, string>; chatIds: Map<string, string> }> {
     const model = await this.deps.loadModel();
     const next = new Map<string, string>();
+    const chatIds = new Map<string, string>();
     for (const [droneIdRaw, drone] of Object.entries(model?.drones ?? {}) as Array<[string, any]>) {
       const droneId = this.deps.normalizeDroneId(droneIdRaw || drone?.id);
       if (!droneId) continue;
@@ -98,15 +103,21 @@ export class DroneChatBroadcaster {
         [string, any]
       >) {
         const chatName = this.deps.normalizeChatName(chatNameRaw);
-        if (chatName) next.set(this.key(droneId, chatName), this.fingerprint(chatEntry));
+        if (!chatName) continue;
+        const key = this.key(droneId, chatName);
+        next.set(key, this.fingerprint(chatEntry));
+        const chatId = String(chatEntry?.id ?? '').trim();
+        if (chatId) chatIds.set(key, chatId);
       }
     }
-    return next;
+    return { next, chatIds };
   }
 
-  private replaceSnapshot(next: Map<string, string>): void {
+  private replaceSnapshot(next: Map<string, string>, chatIds: Map<string, string>): void {
     this.lastByKey.clear();
     for (const [key, fingerprint] of next) this.lastByKey.set(key, fingerprint);
+    this.chatIdByKey.clear();
+    for (const [key, chatId] of chatIds) this.chatIdByKey.set(key, chatId);
     this.snapshotInitialized = true;
   }
 
@@ -164,13 +175,15 @@ export class DroneChatBroadcaster {
         (this.snapshotInitialized || this.lastByKey.size > 0) &&
         claimedChanges.size > 0
       ) {
-        const chats = Array.from(claimedChanges.values());
+        const chats = Array.from(claimedChanges.keys())
+          .map((key) => this.parseKey(key))
+          .filter((chat): chat is ChatRef => Boolean(chat));
         this.broadcast('chat_delta', { ok: true, chats, removed: [], at: this.deps.nowIso() });
         return;
       }
-      const next = await this.buildSnapshot();
+      const { next, chatIds } = await this.buildSnapshot();
       if (broadcastSnapshot || (!this.snapshotInitialized && this.lastByKey.size === 0)) {
-        this.replaceSnapshot(next);
+        this.replaceSnapshot(next, chatIds);
         this.broadcast('snapshot', this.snapshot);
         return;
       }
@@ -179,7 +192,7 @@ export class DroneChatBroadcaster {
       const removed: ChatRef[] = [];
       for (const [key, fingerprint] of next) {
         if (this.lastByKey.get(key) === fingerprint) continue;
-        const parsed = this.parseKey(key);
+        const parsed = this.parseKey(key, chatIds);
         if (parsed) chats.push(parsed);
       }
       for (const key of this.lastByKey.keys()) {
@@ -187,7 +200,7 @@ export class DroneChatBroadcaster {
         const parsed = this.parseKey(key);
         if (parsed) removed.push(parsed);
       }
-      this.replaceSnapshot(next);
+      this.replaceSnapshot(next, chatIds);
       if (chats.length > 0 || removed.length > 0) {
         this.broadcast('chat_delta', {
           ok: true,

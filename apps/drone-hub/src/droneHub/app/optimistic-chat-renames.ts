@@ -52,6 +52,7 @@ export function applyOptimisticChatRenames(drone: DroneSummary, renamesRaw: Reco
       ? Object.fromEntries(Object.entries(chatCreators).map(([name, creator]) => [name, renameEntry(creator, renames)]))
       : chatCreators,
     chatCreatedAt: renameKeys(drone.chatCreatedAt, renames),
+    chatIds: renameKeys(drone.chatIds, renames),
     chatReadStates: renameKeys(drone.chatReadStates, renames),
     draftChats: renameKeys(drone.draftChats, renames),
     unreadChats: renameList(drone.unreadChats, renames),

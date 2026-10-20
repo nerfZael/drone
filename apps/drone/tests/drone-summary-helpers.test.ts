@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveChatCloneSources, resolveChatCreatedAt, resolveChatCreators, summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
+import { resolveChatCloneSources, resolveChatCreatedAt, resolveChatCreators, resolveChatIds, summarizeDroneActivity } from '../src/hub/drone-summary-helpers';
 
 describe('drone summary helpers', () => {
   test('reports each chat\'s creation time, skipping missing or invalid ones', () => {
@@ -10,6 +10,11 @@ describe('drone summary helpers', () => {
       broken: { createdAt: 'not a date' },
     })).toEqual({ default: '2026-09-01T10:00:00.000Z' });
     expect(resolveChatCreatedAt(null)).toEqual({});
+  });
+
+  test('reports each chat\'s stable ID, skipping chats without one', () => {
+    expect(resolveChatIds({ default: { id: 'chat-1' }, legacy: {}, blank: { id: ' ' } })).toEqual({ default: 'chat-1' });
+    expect(resolveChatIds(null)).toEqual({});
   });
 
   test('resolves clone sources by chat ID so renames keep the link and deleted sources drop out', () => {

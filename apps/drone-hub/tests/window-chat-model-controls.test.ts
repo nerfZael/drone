@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import * as chatIdentity from '../src/droneHub/app/chat-identity';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import * as selection from '../src/droneHub/app/chat-selection-model';
@@ -30,6 +31,7 @@ test('window model picker loads its own configuration and saves model/reasoning 
   };
   const dependencies: Record<string, any> = {
     react, './chat-selection-model': selection, './external-agent-composer-controls': builder,
+    './chat-identity': chatIdentity,
     './helpers': { isDroneStartingOrSeeding }, './hooks': { isNotFoundError: () => false },
     './subagents-menu-action': subagents,
     './agent-model-picks': { chatAgentKey, rememberAgentModelPick() {}, rememberedAgentModelPick: () => ({ model: '', reasoning: '' }) },

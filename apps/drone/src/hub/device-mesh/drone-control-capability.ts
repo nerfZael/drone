@@ -414,6 +414,15 @@ export function deviceMeshDroneSummary(drone: any) {
       : [],
     chatReadStates:
       drone?.chatReadStates && typeof drone.chatReadStates === 'object' ? drone.chatReadStates : {},
+    chatIds:
+      drone?.chatIds && typeof drone.chatIds === 'object' && !Array.isArray(drone.chatIds)
+        ? Object.fromEntries(
+            Object.entries(drone.chatIds).filter(
+              (entry): entry is [string, string] =>
+                Boolean(String(entry[0]).trim()) && typeof entry[1] === 'string' && Boolean(entry[1].trim()),
+            ),
+          )
+        : {},
     createdAt: String(drone?.createdAt ?? ''),
     lastActivityAt: String(drone?.lastActivityAt ?? ''),
     lastMessageAt: String(drone?.lastMessageAt ?? ''),

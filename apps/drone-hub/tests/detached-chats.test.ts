@@ -3,7 +3,7 @@ import { keepsNativeContextMenu } from '../src/droneHub/app/use-chat-context-men
 import { placeDetachedChat } from '../src/droneHub/app/detached-chat-placement';
 import { resolveChatNameForDrone } from '../src/droneHub/app/helpers';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { detachedChatKey, detachableDroneChat, normalizeDetachedChats, useDetachedChatStore } from '../src/droneHub/app/detached-chat-store';
+import { detachedChatKey, detachableDroneChat, normalizeDetachedChats, openChatWindowKey, useDetachedChatStore } from '../src/droneHub/app/detached-chat-store';
 import { consumeChatFileOpen, requestChatFileOpen, CHAT_OPEN_FILE_EVENT } from '../src/droneHub/app/chat-file-navigation';
 import { ASSISTANT_OPEN_DRONE_CHAT_EVENT } from '../src/droneHub/assistant/open-drone-chat-event';
 import { agentRunChangesDroneId, hasRequestedAgentRunChanges, requestAgentRunChanges, consumeRequestedAgentRunChanges, CHANGES_OPEN_AGENT_RUN_EVENT } from '../src/droneHub/changes/navigation';
@@ -45,8 +45,10 @@ describe('detached chat state', () => {
     state.detach('a', 'review');
     state.saveBounds(detachedChatKey('a', 'review'), bounds);
     state.rename('a', 'review', 'planning');
-    expect(useDetachedChatStore.getState().chats[detachedChatKey('a', 'review')]).toBeUndefined();
-    expect(useDetachedChatStore.getState().chats[detachedChatKey('a', 'planning')]).toEqual({ droneId: 'a', chatName: 'planning', open: true, bounds });
+    // The window keeps its key, so it stays open in place on the renamed chat.
+    expect(useDetachedChatStore.getState().chats).toEqual({
+      [detachedChatKey('a', 'review')]: { droneId: 'a', chatName: 'planning', open: true, bounds },
+    });
     state.detach('b', 'default');
     state.forgetDrone('a');
     expect(Object.values(useDetachedChatStore.getState().chats).map(c => c.droneId)).toEqual(['b']);
@@ -172,4 +174,11 @@ describe('chat windows alongside the main chat', () => {
     expect(keepsNativeContextMenu(element(false, '  '))).toBe(false);
     expect(keepsNativeContextMenu(null)).toBe(true);
   });
+});
+
+test('a chat that takes the old name of a renamed chat gets a window of its own', () => {
+  const key = detachedChatKey('drone', 'Plan');
+  const chats = { [key]: { droneId: 'drone', chatName: 'Roadmap', open: true } };
+  expect(openChatWindowKey(chats, 'drone', 'Roadmap')).toBe(key);
+  expect(openChatWindowKey(chats, 'drone', 'Plan')).not.toBe(key);
 });

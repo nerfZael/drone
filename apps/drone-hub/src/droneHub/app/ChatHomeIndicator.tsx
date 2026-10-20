@@ -4,6 +4,7 @@ import { formatWorkspaceLink } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { openWorkspaceLink } from '../workspaces/workspace-links';
 import { subscribeChatWorkspacesChanged, subscribeWorkspacesChanged } from '../workspaces/workspaces-client';
+import { chatPathRef } from './chat-identity';
 
 export type ChatHome = {
   id: string;
@@ -27,7 +28,7 @@ export function useChatHome(droneIdRaw: string | null | undefined, chatNameRaw: 
     const load = () => {
       const current = ++request;
       void requestJson<{ home?: ChatHome | null }>(
-        `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/workspaces/home`,
+        `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/workspaces/home`,
       )
         .then((response) => {
           if (cancelled || current !== request) return;

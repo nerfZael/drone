@@ -1,4 +1,5 @@
 import { queuedChatNames } from './queued-chat-names';
+import { resolveChatIdInPath } from './chat-path-ref';
 import { COMPANION_HOME_TARGET_ID, ensureCompanionHome } from './companion/companion-attachments';
 import { ChatReadService } from './chat-read/ChatReadService';
 import { registerChatReadRoutes } from './routes/chat-read-routes';
@@ -160,6 +161,7 @@ import {
   listChatReadStatesForDronesFromStore,
   listChatReadStatesFromStore,
   listArchivedChatsFromStore,
+  chatNameForIdFromStore,
   listChatsFromStore,
   listExpiredArchivedChatsFromStore,
   markChatReadInStore,
@@ -610,6 +612,7 @@ import {
   resolveChatCloneSources,
   resolveChatCreators,
   resolveChatCreatedAt,
+  resolveChatIds,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
 import { mergeNativeBusyChatNames } from './native-drone-summary';
@@ -2729,6 +2732,8 @@ function parseChatNameForMutation(raw: any, fieldName = 'chat name'): string {
   if (text.length > CHAT_NAME_MAX_LEN)
     throw new Error(`${fieldName} is too long (max ${CHAT_NAME_MAX_LEN} chars)`);
   if (/[\r\n\t]/.test(text)) throw new Error(`${fieldName} contains invalid whitespace`);
+  // Clients key chats by name or by ID; a control character never appears in either.
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw new Error(`${fieldName} contains control characters`);
   if (/[\\/]/.test(text)) throw new Error(`${fieldName} cannot include / or \\`);
   return text;
 }
@@ -5381,6 +5386,7 @@ async function startDroneHubApiServerWithLifecycle(
       chatCloneSources,
       chatCreators: resolveChatCreators(d.chats, droneId),
       chatCreatedAt: resolveChatCreatedAt(d.chats),
+      chatIds: resolveChatIds(d.chats),
       unreadChats,
       chatReadStates,
       draftChats,
@@ -6557,6 +6563,7 @@ async function startDroneHubApiServerWithLifecycle(
       if (prepareHubHttpRequest(req, res, allowedOrigins, json)) return;
 
       const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+      resolveChatIdInPath(u, chatNameForIdFromStore);
       const pathname = u.pathname;
       if (await deviceMesh.handleHttp(req, res, u)) return;
       if (pathname === '/mcp') {

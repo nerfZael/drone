@@ -1,4 +1,5 @@
 import React from 'react';
+import { chatPathRef } from './chat-identity';
 import type { PromptQueueInterruptionResolution } from '@drone/assistant-chat';
 
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
@@ -31,7 +32,7 @@ export function usePendingPromptInterruption(input: {
       setErrorById((current) => removeRecordKey(current, promptId));
       try {
         await input.requestJson<{ ok: true }>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(promptId)}/interruption`,
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/pending/${encodeURIComponent(promptId)}/interruption`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

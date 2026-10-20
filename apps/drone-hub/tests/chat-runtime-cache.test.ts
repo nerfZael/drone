@@ -14,6 +14,7 @@ import {
 import type { BlipHistoryPage } from '@blip/protocol';
 import type { AssistantSnapshot } from '../src/droneHub/assistant/assistant-types';
 import { readNativeChatSnapshot, writeNativeChatHistory, writeNativeChatSnapshot } from '../src/droneHub/assistant/native-chat-cache';
+import { chatIdentityTesting, publishChatIds, renameChatId } from '../src/droneHub/app/chat-identity';
 
 function chatInfo(chat: string, agent: any) {
   return {
@@ -33,7 +34,10 @@ function chatInfo(chat: string, agent: any) {
   } as any;
 }
 
-afterEach(() => chatRuntimeCacheTesting.reset());
+afterEach(() => {
+  chatRuntimeCacheTesting.reset();
+  chatIdentityTesting.reset();
+});
 
 describe('chat runtime cache', () => {
   test('retains stale display content without making configuration fresh or crossing chat identities', () => {
@@ -147,6 +151,24 @@ describe('chat runtime cache', () => {
 
     expect(readNativeChatSnapshot('drone-1', 'old-native')).toBeNull();
     expect(readNativeChatSnapshot('drone-1', 'new-native')?.initialHistory?.entries).toHaveLength(1);
+  });
+
+  test('a chat with a known ID keeps its cache key across a rename and only its cached name changes', () => {
+    publishChatIds([{ id: 'drone-1', chatIds: { 'old-name': 'chat-1' } }]);
+    const key = chatRuntimeCacheKey('drone-1', 'old-name');
+    writeChatRuntimeCache(key, {
+      chatInfo: chatInfo('old-name', { kind: 'native' }),
+      transcripts: [{ id: 'turn-1' } as any],
+    });
+
+    renameChatId('drone-1', 'old-name', 'new-name');
+    renameChatRuntimeCache('drone-1', 'old-name', 'new-name');
+
+    expect(chatRuntimeCacheKey('drone-1', 'new-name')).toBe(key);
+    expect(readFreshChatRuntimeCache(key)).toMatchObject({
+      chatInfo: { chat: 'new-name' },
+      transcripts: [{ id: 'turn-1' }],
+    });
   });
 
   test('invalidates a stale destination when the renamed source was not cached', () => {

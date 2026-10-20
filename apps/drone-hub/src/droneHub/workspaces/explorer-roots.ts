@@ -12,6 +12,7 @@ import {
   subscribeWorkspacesChanged,
   type BrowsableWorkspace,
 } from './workspaces-client';
+import { chatPathRef } from '../app/chat-identity';
 
 /**
  * The workspaces a drone's File Explorer shows below the drone's own files, as roots of their own: those the open
@@ -307,7 +308,7 @@ export function useExplorerRoots({ drone, chatName, droneById }: {
     let request = 0;
     const load = () => {
       const current = ++request;
-      void requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName!)}/workspaces`)
+      void requestJson<ChatWorkspaceCatalog>(`/api/drones/${encodeURIComponent(droneId)}/chats/${chatPathRef(droneId, chatName)}/workspaces`)
         .then((catalog) => {
           if (cancelled || current !== request) return;
           const ids = (catalog?.access.targets ?? []).filter((target) => target.kind !== 'remote').map((target) => target.id);

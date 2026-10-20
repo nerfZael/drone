@@ -119,4 +119,31 @@ describe('DroneChatBroadcaster', () => {
     expect(events.some(({ event }) => event === 'snapshot')).toBe(true);
     broadcaster.stop();
   });
+  test('names each changed or removed chat by its stable ID too, so clients match it across renames', async () => {
+    let drones: any = { 'drone-1': { chats: { Plan: { id: 'chat-1', turns: [] } } } };
+    const events: Array<{ event: string; data: any }> = [];
+    const broadcaster = new DroneChatBroadcaster({
+      loadModel: async () => ({ drones }),
+      normalizeDroneId: (value) => String(value).trim(),
+      normalizeChatName: (value) => String(value).trim(),
+      nowIso: () => '2026-10-11T00:00:00.000Z',
+      writeSseEvent: (_response, event, data) => events.push({ event, data }),
+    });
+    broadcaster.clients.add({ destroyed: false, writableEnded: false, write() {} } as any);
+    await broadcaster.refresh();
+    expect(events.at(-1)?.data.chats).toEqual([{ droneId: 'drone-1', chatName: 'Plan', chatId: 'chat-1' }]);
+
+    // Renamed: the old name is removed and the new one changed, both carrying the ID.
+    drones = { 'drone-1': { chats: { Roadmap: { id: 'chat-1', turns: [] } } } };
+    await broadcaster.refresh();
+    expect(events.at(-1)?.data).toMatchObject({
+      chats: [{ droneId: 'drone-1', chatName: 'Roadmap', chatId: 'chat-1' }],
+      removed: [{ droneId: 'drone-1', chatName: 'Plan', chatId: 'chat-1' }],
+    });
+
+    broadcaster.schedule(0, { droneId: 'drone-1', chatName: 'Roadmap' });
+    await Bun.sleep(20);
+    expect(events.at(-1)?.data.chats).toEqual([{ droneId: 'drone-1', chatName: 'Roadmap', chatId: 'chat-1' }]);
+    broadcaster.stop();
+  });
 });
