@@ -5765,6 +5765,7 @@ async function startDroneHubApiServerWithLifecycle(
         const id = readChatMetadataFromStore(chat).chat?.id;
         return typeof id === 'string' && id.trim() ? id.trim() : undefined;
       },
+      native: async (chat) => (readChatMetadataFromStore(chat).chat?.agent as { kind?: unknown } | undefined)?.kind === 'native',
     }),
   );
   // A chat's home goes with the chat: swept after chats are removed, and every few minutes for removals made elsewhere.

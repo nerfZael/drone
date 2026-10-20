@@ -23,6 +23,8 @@ export type AgentChatWorkspaceStore = {
   write(chat: AgentChat, access: ChatWorkspaceAccess): Promise<void>;
   /** The chat's stable id, which names its home; `undefined` for a chat without one. */
   id(chat: AgentChat): Promise<string | undefined>;
+  /** True for a native chat: DroneHub's own agent keeps its workspaces on its assistant thread, not here. */
+  native?(chat: AgentChat): Promise<boolean>;
 };
 
 export type WorkspaceGrant = { workspace: string; read?: boolean; write?: boolean; execute?: boolean };
@@ -92,7 +94,8 @@ export class AgentChatWorkspaces {
       const device = catalog.devices.find((item) => item.id === target.deviceId);
       return {
         id: target.id,
-        name: target.name,
+        // As the catalog names it now: a selection keeps the name it had when chosen (a home's chat is renamed later).
+        name: option?.name ?? target.name,
         kind: target.kind,
         device: target.deviceName,
         ...(option?.path ? { path: option.path } : {}),
@@ -116,6 +119,8 @@ export class AgentChatWorkspaces {
    * chat's workspaces: the folder stays the chat's). Null for a chat without an id.
    */
   async home(chat: AgentChat): Promise<{ id: string; path: string; access: { read: boolean; write: boolean; execute: boolean } | null } | null> {
+    // A native chat's workspaces are its assistant thread's; a home made here would be one it cannot use.
+    if (await this.store.native?.(chat)) return null;
     const chatId = await this.store.id(chat);
     if (!chatId) return null;
     const access = await this.read(chat);
@@ -132,6 +137,9 @@ export class AgentChatWorkspaces {
    */
   async grant(from: AgentChat, to: AgentChat, request: WorkspaceGrant) {
     if (chatKey(from) === chatKey(to)) throw new Error('A chat cannot grant workspace access to itself.');
+    if (await this.store.native?.(to)) {
+      throw new Error(`"${to.chatName}" is a native chat; only the user chooses its workspaces, in its Workspaces picker.`);
+    }
     const source = await this.catalog(from);
     const held = resolveWorkspaceRef(String(request.workspace ?? ''), source.access.targets);
     if (!held) {

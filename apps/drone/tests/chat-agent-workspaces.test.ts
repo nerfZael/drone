@@ -14,17 +14,19 @@ afterEach(() => {
 });
 
 /** Chats with ids get homes in a temporary folder: `box/default` is chat `c-box`, and so on. */
-function fixture(options: { homes?: boolean } = {}) {
+function fixture(options: { homes?: boolean; native?: string[] } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-homes-'));
   temporary.push(directory);
   const ids: Record<string, string> = { 'box/default': 'c-box', 'other/default': 'c-other', 'local/default': 'c-local' };
+  /** A chat's name now, by id, when it was renamed after its home was chosen. */
+  const renamed: Record<string, string> = {};
   const homes = new ChatHomes(
     () => directory,
     () => ({
       available: true,
       chats: Object.entries(ids).map(([key, chatId]) => {
         const [droneId, chatName] = key.split('/');
-        return { chatId, droneId: droneId!, chatName: chatName!, archived: false };
+        return { chatId, droneId: droneId!, chatName: renamed[chatId] ?? chatName!, archived: false };
       }),
     }),
   );
@@ -57,10 +59,11 @@ function fixture(options: { homes?: boolean } = {}) {
         stored.set(key(chat), structuredClone(access));
       },
       id: async (chat) => (options.homes ? ids[key(chat)] : undefined),
+      native: async (chat) => Boolean(options.native?.includes(key(chat))),
     },
     homes,
   );
-  return { workspaces, stored, calls, directory };
+  return { workspaces, stored, calls, directory, renamed };
 }
 
 describe('agent chat workspaces', () => {
@@ -253,6 +256,21 @@ describe('chat homes', () => {
     expect(await fixture().workspaces.home(chat)).toBeNull();
   });
 
+  test('a native chat gets no home here: its workspaces are its assistant thread\'s', async () => {
+    const { workspaces, directory } = fixture({ homes: true, native: ['box/default'] });
+    expect(await workspaces.home({ droneId: 'box', chatName: 'default' })).toBeNull();
+    expect(fs.existsSync(path.join(directory, 'c-box'))).toBe(false);
+  });
+
+  test("lists the home under its chat's name now, not the one it had when chosen", async () => {
+    const { workspaces, renamed } = fixture({ homes: true });
+    const chat = { droneId: 'box', chatName: 'default' };
+    await workspaces.catalog(chat);
+    renamed['c-box'] = 'Review Mech';
+    const listed = await workspaces.list(chat);
+    expect(listed.workspaces.find((item) => item.home)?.name).toBe('Review Mech home (box)');
+  });
+
   test('tools reach the home folder by its workspace id', async () => {
     const { workspaces, calls } = fixture({ homes: true });
     const chat = { droneId: 'box', chatName: 'default' };
@@ -286,6 +304,13 @@ describe('granting workspace access', () => {
       expect.objectContaining({ changed: false, access: { read: true, write: true, execute: false } }),
     );
     await workspaces.run(two, 'write_file', { path: 'from-two.md', content: 'x', target: home });
+  });
+
+  test('a native chat cannot be granted access: only the user chooses its workspaces', async () => {
+    const { workspaces } = fixture({ homes: true, native: ['other/default'] });
+    await expect(workspaces.grant(one, two, { workspace: chatHomeTargetId('c-box'), read: true })).rejects.toThrow(
+      'is a native chat',
+    );
   });
 
   test('a chat cannot grant what it does not hold', async () => {
