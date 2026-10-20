@@ -22,6 +22,8 @@ export type ChatWorkspaceOption = ChatWorkspaceTarget & {
   runtime?: string;
   status?: string;
   repository?: boolean;
+  /** Set when the folder is an agent chat's home, deleted with the chat. */
+  chatHome?: { chatId: string; droneId: string; chatName: string; droneName: string };
 };
 
 export type ChatWorkspaceCatalog = {

@@ -3,6 +3,7 @@ import React from 'react';
 import { requestJson } from '../http';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { ChatBackgroundTaskIndicator, useChatBackgroundTasks } from './ChatBackgroundTaskIndicator';
+import { ChatHomeIndicator } from './ChatHomeIndicator';
 import { DroneRuntimeIndicator, type DroneRuntime } from './DroneRuntimeIndicator';
 import {
   chatSubscriptionEventLabel,
@@ -249,6 +250,7 @@ export function DroneChatComposerMetadata({
             <DroneRuntimeIndicator runtime={runtime} />
           </div>
         ) : null}
+        {showWorkspaceInfo ? <ChatHomeIndicator droneId={droneId} chatName={chatName} /> : null}
         <ChatBackgroundTaskIndicator
           droneId={String(droneId ?? '').trim()}
           chatName={String(chatName ?? '').trim()}

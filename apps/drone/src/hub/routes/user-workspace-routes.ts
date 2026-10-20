@@ -13,7 +13,7 @@ export type BrowsableWorkspace = {
   browseId: string;
   name: string;
   kind: 'folder' | 'drone';
-  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Host drones' | 'Container drones';
+  category: 'Home' | 'Workspaces' | 'Repositories' | 'Folders' | 'Chat homes' | 'Host drones' | 'Container drones';
   path?: string;
   droneId?: string;
   status?: string;
@@ -77,11 +77,13 @@ export async function browsableWorkspaces(
     kind: 'folder',
     category: (option as { userWorkspace?: boolean }).userWorkspace
       ? 'Workspaces'
-      : option.repository
-        ? 'Repositories'
-        : option.runtime === 'host'
-          ? 'Host drones'
-          : 'Folders',
+      : option.chatHome
+        ? 'Chat homes'
+        : option.repository
+          ? 'Repositories'
+          : option.runtime === 'host'
+            ? 'Host drones'
+            : 'Folders',
     ...(option.path ? { path: option.path } : {}),
     ...(option.status ? { status: option.status } : {}),
   }));

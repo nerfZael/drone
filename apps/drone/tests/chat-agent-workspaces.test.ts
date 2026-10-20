@@ -1,10 +1,33 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { ChatWorkspaceAccess } from '@drone/assistant-chat';
 import { AgentChatWorkspaces, type AgentChat } from '../src/hub/assistant/chat-agent-workspaces';
 import { buildHostWorkspaces, hostWorkspaceId } from '../src/hub/assistant/host-workspaces';
+import { ChatHomes, chatHomeTargetId } from '../src/hub/chat-homes';
 import { parseCompanionWorkspaceAccess } from '../src/hub/companion/companion-workspaces';
 
-function fixture() {
+const temporary: string[] = [];
+afterEach(() => {
+  for (const directory of temporary.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+});
+
+/** Chats with ids get homes in a temporary folder: `box/default` is chat `c-box`, and so on. */
+function fixture(options: { homes?: boolean } = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-homes-'));
+  temporary.push(directory);
+  const ids: Record<string, string> = { 'box/default': 'c-box', 'other/default': 'c-other', 'local/default': 'c-local' };
+  const homes = new ChatHomes(
+    () => directory,
+    () => ({
+      available: true,
+      chats: Object.entries(ids).map(([key, chatId]) => {
+        const [droneId, chatName] = key.split('/');
+        return { chatId, droneId: droneId!, chatName: chatName!, archived: false };
+      }),
+    }),
+  );
   const drones: any[] = [
     { id: 'box', name: 'box', runtime: 'container', repoPath: '/repo', status: 'running', group: null, chats: ['default'] },
     { id: 'other', name: 'other', runtime: 'container', repoPath: '/repo', status: 'running', group: null, chats: ['default'] },
@@ -15,7 +38,7 @@ function fixture() {
   const calls: Array<{ id: string; tool: string; args: Record<string, unknown> }> = [];
   const workspaces = new AgentChatWorkspaces(
     {
-      workspaceInventory: async () => ({ drones, hostWorkspaces: buildHostWorkspaces(drones, []) }),
+      workspaceInventory: async () => ({ drones, hostWorkspaces: buildHostWorkspaces(drones, [], [], await homes.list()) }),
       executeAuthorizedWorkspaceTool: async (id, call, authorize) => {
         await authorize();
         calls.push({ id, tool: call.tool, args: call.args });
@@ -33,9 +56,11 @@ function fixture() {
       write: async (chat, access) => {
         stored.set(key(chat), structuredClone(access));
       },
+      id: async (chat) => (options.homes ? ids[key(chat)] : undefined),
     },
+    homes,
   );
-  return { workspaces, stored, calls };
+  return { workspaces, stored, calls, directory };
 }
 
 describe('agent chat workspaces', () => {
@@ -164,5 +189,176 @@ describe('agent chat workspaces', () => {
         destinationPath: 'y',
       }),
     ).rejects.toThrow('at least two workspaces');
+  });
+});
+
+describe('chat homes', () => {
+  test('a chat starts with its own workspace and a home of its own, which is not the default', async () => {
+    const { workspaces, stored, directory } = fixture({ homes: true });
+    const chat = { droneId: 'box', chatName: 'default' };
+    const catalog = await workspaces.catalog(chat);
+    expect(fs.statSync(path.join(directory, 'c-box')).isDirectory()).toBe(true);
+    expect(catalog.access.defaultTargetId).toBe('drone:box');
+    // A container drone's agent does not run commands on this device, so its home on this device does not either.
+    expect(catalog.access.targets).toEqual([
+      expect.objectContaining({ id: 'drone:box', read: true, write: true, execute: true }),
+      expect.objectContaining({ id: chatHomeTargetId('c-box'), kind: 'host', name: 'default home (box)', read: true, write: true, execute: false }),
+    ]);
+    expect(stored.get('box/default')).toEqual(catalog.access);
+    expect((catalog.access.targets[1] as any).path).toBeUndefined();
+    // The first catalog already offers the home it selected.
+    expect(catalog.workspaces.find((option) => option.id === chatHomeTargetId('c-box'))).toEqual(
+      expect.objectContaining({ path: path.join(directory, 'c-box'), chatHome: expect.objectContaining({ chatId: 'c-box', droneName: 'box' }) }),
+    );
+    const listed = await workspaces.list(chat);
+    expect(listed.workspaces.map(({ id, home, ownWorkspace, path: root }) => ({ id, home, ownWorkspace, root }))).toEqual([
+      { id: 'drone:box', home: undefined, ownWorkspace: true, root: '/repo' },
+      { id: chatHomeTargetId('c-box'), home: true, ownWorkspace: undefined, root: path.join(directory, 'c-box') },
+    ]);
+  });
+
+  test('a host drone chat may run commands in its home', async () => {
+    const { workspaces } = fixture({ homes: true });
+    const catalog = await workspaces.catalog({ droneId: 'local', chatName: 'default' });
+    expect(catalog.access.targets.find((target) => target.id === chatHomeTargetId('c-local'))).toEqual(
+      expect.objectContaining({ read: true, write: true, execute: true }),
+    );
+  });
+
+  test('a chat that already chose its workspaces gets its home once; removed, it stays removed', async () => {
+    const { workspaces, stored, directory } = fixture({ homes: true });
+    const chat = { droneId: 'box', chatName: 'default' };
+    const before = await fixture().workspaces.catalog(chat);
+    stored.set('box/default', before.access);
+    const catalog = await workspaces.catalog(chat);
+    expect(catalog.access.targets.map((target) => target.id)).toEqual(['drone:box', chatHomeTargetId('c-box')]);
+    await workspaces.save(chat, { targets: [catalog.access.targets[0]], defaultTargetId: 'drone:box' }, catalog.revision);
+    expect((await workspaces.catalog(chat)).access.targets.map((target) => target.id)).toEqual(['drone:box']);
+    // The folder is still the chat's; the user can add it back from the picker.
+    expect(fs.existsSync(path.join(directory, 'c-box'))).toBe(true);
+    expect((await workspaces.catalog(chat)).workspaces.some((option) => option.id === chatHomeTargetId('c-box'))).toBe(true);
+  });
+
+  test("home() makes the home and says what the chat may do there, null once removed", async () => {
+    const { workspaces, directory } = fixture({ homes: true });
+    const chat = { droneId: 'box', chatName: 'default' };
+    expect(await workspaces.home(chat)).toEqual({
+      id: chatHomeTargetId('c-box'),
+      path: path.join(directory, 'c-box'),
+      access: { read: true, write: true, execute: false },
+    });
+    const catalog = await workspaces.catalog(chat);
+    await workspaces.save(chat, { targets: [catalog.access.targets[0]], defaultTargetId: 'drone:box' }, catalog.revision);
+    expect((await workspaces.home(chat))?.access).toBeNull();
+    expect(await fixture().workspaces.home(chat)).toBeNull();
+  });
+
+  test('tools reach the home folder by its workspace id', async () => {
+    const { workspaces, calls } = fixture({ homes: true });
+    const chat = { droneId: 'box', chatName: 'default' };
+    await workspaces.run(chat, 'write_file', { path: 'notes.md', content: 'hi', target: chatHomeTargetId('c-box') });
+    expect(calls.map(({ id, tool }) => [id, tool])).toEqual([[chatHomeTargetId('c-box'), 'write_file']]);
+  });
+});
+
+describe('granting workspace access', () => {
+  const one = { droneId: 'box', chatName: 'default' };
+  const two = { droneId: 'other', chatName: 'default' };
+
+  test('a chat gives another chat access it holds, added to what that chat has', async () => {
+    const { workspaces } = fixture({ homes: true });
+    const home = chatHomeTargetId('c-box');
+    expect(await workspaces.grant(one, two, { workspace: home, read: true })).toEqual({
+      workspace: home,
+      name: 'default home (box)',
+      changed: true,
+      access: { read: true, write: false, execute: false },
+    });
+    expect((await workspaces.grant(one, two, { workspace: home, write: true })).access).toEqual({ read: true, write: true, execute: false });
+    const access = (await workspaces.catalog(two)).access;
+    // The other chat keeps its own default.
+    expect(access.defaultTargetId).toBe('drone:other');
+    expect(access.targets.find((target) => target.id === home)).toEqual(
+      expect.objectContaining({ kind: 'host', read: true, write: true, execute: false }),
+    );
+    // Granting what it already has changes nothing, and never takes anything away.
+    expect(await workspaces.grant(one, two, { workspace: home, read: true })).toEqual(
+      expect.objectContaining({ changed: false, access: { read: true, write: true, execute: false } }),
+    );
+    await workspaces.run(two, 'write_file', { path: 'from-two.md', content: 'x', target: home });
+  });
+
+  test('a chat cannot grant what it does not hold', async () => {
+    const { workspaces } = fixture({ homes: true });
+    // Its home is not executable for a container drone's chat.
+    await expect(workspaces.grant(one, two, { workspace: chatHomeTargetId('c-box'), execute: true })).rejects.toThrow(
+      'it has no execute access to default home (box)',
+    );
+    // Chat two's home is not chat one's.
+    await workspaces.catalog(two);
+    await expect(workspaces.grant(one, two, { workspace: chatHomeTargetId('c-other'), read: true })).rejects.toThrow(
+      'This chat has no workspace',
+    );
+    const catalog = await workspaces.catalog(one);
+    const local = catalog.workspaces.find((option) => option.id === hostWorkspaceId('/tmp/local-repo'))!;
+    await workspaces.save(
+      one,
+      { targets: [...catalog.access.targets, { ...local, read: true, write: false, execute: false }], defaultTargetId: 'drone:box' },
+      catalog.revision,
+    );
+    await expect(workspaces.grant(one, two, { workspace: local.id, write: true })).rejects.toThrow('no write access');
+    await expect(workspaces.grant(one, two, { workspace: local.id })).rejects.toThrow('Choose at least one permission');
+    await expect(workspaces.grant(one, one, { workspace: local.id, read: true })).rejects.toThrow('to itself');
+  });
+
+  test('access granted stays when the granting chat loses it', async () => {
+    const { workspaces } = fixture({ homes: true });
+    const home = chatHomeTargetId('c-box');
+    await workspaces.grant(one, two, { workspace: 'default home (box)', write: true });
+    const catalog = await workspaces.catalog(one);
+    await workspaces.save(one, { targets: [catalog.access.targets[0]], defaultTargetId: 'drone:box' }, catalog.revision);
+    expect((await workspaces.catalog(two)).access.targets.find((target) => target.id === home)?.write).toBe(true);
+    await expect(workspaces.grant(one, two, { workspace: home, read: true })).rejects.toThrow('This chat has no workspace');
+  });
+});
+
+describe('chat home sweeps', () => {
+  function homes(chats: string[] | null) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-homes-'));
+    temporary.push(directory);
+    const sweeper = new ChatHomes(
+      () => directory,
+      () => ({
+        available: chats !== null,
+        chats: (chats ?? []).map((chatId, index) => ({ chatId, droneId: 'd', chatName: `c${index}`, archived: index > 0 })),
+      }),
+    );
+    return { sweeper, directory };
+  }
+
+  test('deletes the homes of chats that are gone, files and all, and keeps archived chats', async () => {
+    const { sweeper, directory } = homes(['live', 'archived']);
+    for (const id of ['live', 'archived', 'gone']) await sweeper.ensure(id);
+    fs.writeFileSync(path.join(directory, 'gone', 'work.md'), 'x');
+    fs.mkdirSync(path.join(directory, 'not a chat id'));
+    expect(await sweeper.sweep()).toEqual(['gone']);
+    expect(fs.readdirSync(directory).sort()).toEqual(['archived', 'live', 'not a chat id']);
+    expect((await sweeper.list()).map((home) => home.chatId).sort()).toEqual(['archived', 'live']);
+  });
+
+  test('deletes nothing without the chat list, or when it is empty', async () => {
+    for (const chats of [null, []]) {
+      const { sweeper, directory } = homes(chats);
+      await sweeper.ensure('kept');
+      expect(await sweeper.sweep()).toEqual([]);
+      expect(fs.existsSync(path.join(directory, 'kept'))).toBe(true);
+    }
+  });
+
+  test('ensure says whether it made the home', async () => {
+    const { sweeper } = homes(['a']);
+    expect((await sweeper.ensure('a')).created).toBe(true);
+    expect((await sweeper.ensure('a')).created).toBe(false);
+    await expect(sweeper.ensure('../escape')).rejects.toThrow('Invalid chat id');
   });
 });

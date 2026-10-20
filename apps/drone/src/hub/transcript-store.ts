@@ -218,6 +218,10 @@ export type TranscriptRollbackResult = {
   removedTurns: StoredTranscriptTurn[];
   turn: StoredTranscriptTurn | null;
 };
+/** A chat that exists, active or archived, by its stable id. */
+export type ChatIdentity = { chatId: string; droneId: string; chatName: string; archived: boolean };
+export type ChatIdentityStoreListResult = { available: boolean; chats: ChatIdentity[] };
+
 export type PermanentDroneChatCleanupResult = {
   available: boolean;
   removedLifecycle: boolean;
@@ -1759,6 +1763,28 @@ export class ChatTranscriptRepository {
     });
   }
 
+  listChatIdentities(): ChatIdentityStoreListResult {
+    return this.database.read((connection) => {
+      const rows = connection.prepare(`SELECT drone_id, chat_name, json_extract(metadata_json, '$.id') AS chat_id, 0 AS archived
+        FROM canonical_chats
+        UNION ALL
+        SELECT drone_id, chat_name, json_extract(chat_json, '$.id') AS chat_id, 1 AS archived
+        FROM canonical_archived_chats`).all() as Array<{
+        drone_id: string;
+        chat_name: string;
+        chat_id: string | null;
+        archived: number;
+      }>;
+      return {
+        available: true,
+        chats: rows.flatMap((row) => {
+          const chatId = String(row.chat_id ?? '').trim();
+          return chatId ? [{ chatId, droneId: row.drone_id, chatName: row.chat_name, archived: row.archived === 1 }] : [];
+        }),
+      };
+    });
+  }
+
   listExpiredArchivedChats(deleteAtOrBefore: string): ExpiredArchivedChatStoreListResult {
     return this.database.read((connection) => {
       const rows = connection.prepare(`SELECT drone_id, chat_name
@@ -3054,6 +3080,7 @@ export async function deleteActiveChatFromStore(opts: {
     await cancelResourceSubscriptionsForChat(current);
   }
   await getPromptQueueRepository()?.deleteChat({ droneId: opts.droneId, chatName: opts.chatName });
+  notifyChatRemovals();
   return result;
 }
 
@@ -3175,6 +3202,7 @@ export async function deleteArchivedChatFromStore(opts: {
     result = { available: true, deleted: true, archivedChat };
     await cancelResourceSubscriptionsForChat(result.archivedChat?.chat);
   }
+  if (result.deleted) notifyChatRemovals();
   return result;
 }
 
@@ -3204,6 +3232,44 @@ export function listArchivedChatMetadataFromStore(
           right.archivedAt.localeCompare(left.archivedAt) || left.chatName.localeCompare(right.chatName),
       ),
   };
+}
+
+/** Every chat that still exists, active or archived, across all drones. */
+export function listChatIdentitiesFromStore(): ChatIdentityStoreListResult {
+  const store = repository();
+  if (store) return store.listChatIdentities();
+  const identity = (droneId: string, chatName: string, chat: any, archived: boolean): ChatIdentity[] => {
+    const chatId = String(chat?.id ?? '').trim();
+    return chatId ? [{ chatId, droneId, chatName, archived }] : [];
+  };
+  return {
+    available: true,
+    chats: [
+      ...[...memoryChats.entries()].flatMap(([k, row]) => {
+        const [droneId, chatName] = k.split('\u0000');
+        return identity(droneId!, chatName!, row.metadata, false);
+      }),
+      ...[...memoryArchivedChats.values()].flatMap((record) => identity(record.droneId, record.chatName, record.chat, true)),
+    ],
+  };
+}
+
+const chatRemovalListeners = new Set<() => void>();
+
+/** Called after chats may have stopped existing (deleted, purged from the archive, or deleted with their drone). */
+export function subscribeChatRemovals(listener: () => void): () => void {
+  chatRemovalListeners.add(listener);
+  return () => chatRemovalListeners.delete(listener);
+}
+
+function notifyChatRemovals(): void {
+  for (const listener of chatRemovalListeners) {
+    try {
+      listener();
+    } catch {
+      // A listener's failure never fails the deletion that already happened.
+    }
+  }
 }
 
 export function listExpiredArchivedChatsFromStore(opts: {
@@ -3334,12 +3400,17 @@ async function renameChatInStoreUnlocked(opts: { droneId: string; chatName: stri
 
 export async function deleteChatFromStore(opts: { droneId: string; chatName: string }): Promise<boolean> {
   const store = repository();
-  if (store) return await store.deleteChat(opts);
+  if (store) {
+    const deleted = await store.deleteChat(opts);
+    if (deleted) notifyChatRemovals();
+    return deleted;
+  }
   memoryTurns.delete(key(opts.droneId, opts.chatName));
   memoryPrompts.delete(key(opts.droneId, opts.chatName));
   memoryReadStates.delete(key(opts.droneId, opts.chatName));
   const deleted = memoryChats.delete(key(opts.droneId, opts.chatName));
   memoryChatTombstones.add(key(opts.droneId, opts.chatName));
+  if (deleted) notifyChatRemovals();
   return deleted;
 }
 
@@ -3348,7 +3419,11 @@ export async function deleteChatAndSubscriptionsFromStore(opts: {
   chatName: string;
 }): Promise<boolean> {
   const store = repository();
-  if (store) return await store.deleteChatAndSubscriptions(opts);
+  if (store) {
+    const deleted = await store.deleteChatAndSubscriptions(opts);
+    if (deleted) notifyChatRemovals();
+    return deleted;
+  }
   const chat = readChatFromStore(opts).chat;
   const deleted = await deleteChatFromStore(opts);
   if (deleted) await cancelResourceSubscriptionsForChat(chat);
@@ -3360,7 +3435,11 @@ export async function commitPermanentDroneDeletionInStore(opts: {
   lifecycleState: 'real' | 'archived';
 }): Promise<PermanentDroneChatCleanupResult> {
   const store = repository();
-  if (store) return await store.commitPermanentDroneDeletion(opts);
+  if (store) {
+    const result = await store.commitPermanentDroneDeletion(opts);
+    notifyChatRemovals();
+    return result;
+  }
   const prefix = `${opts.droneId}\u0000`;
   const activeChatKeys = [...memoryChats.keys()].filter((item) => item.startsWith(prefix));
   const archivedChatKeys = [...memoryArchivedChats.keys()].filter((item) => item.startsWith(prefix));
@@ -3389,6 +3468,7 @@ export async function commitPermanentDroneDeletionInStore(opts: {
   for (const item of archivedTombstoneKeys) memoryArchivedChatTombstones.delete(item);
   for (const item of [...memoryCancelledPrompts].filter((keyValue) => keyValue.startsWith(prefix))) memoryCancelledPrompts.delete(item);
   memoryDroneChatTombstones.add(opts.droneId);
+  notifyChatRemovals();
   return {
     available: true,
     removedLifecycle: false,

@@ -12,8 +12,8 @@ import {
   type BrowsableWorkspace,
 } from './workspaces-client';
 
-const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Host drones', 'Container drones'];
-const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Host drones', 'Container drones']);
+const CATEGORIES: BrowsableWorkspace['category'][] = ['Home', 'Workspaces', 'Repositories', 'Folders', 'Chat homes', 'Host drones', 'Container drones'];
+const DRONE_CATEGORIES = new Set<BrowsableWorkspace['category']>(['Chat homes', 'Host drones', 'Container drones']);
 /** Drones shown per group before "more", as in the workspace picker; a search looks through all of them. */
 const DRONE_CAP = 5;
 

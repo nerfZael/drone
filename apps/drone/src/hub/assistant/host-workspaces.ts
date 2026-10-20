@@ -6,6 +6,7 @@ import { hostDroneWorkspacePath } from '../../host/runtime';
 import { listCanonicalRepositories } from '../groups-repositories';
 import { loadDroneSummaryRegistry } from '../drone-summary-registry';
 import { userWorkspaces, userWorkspaceTargetId } from '../user-workspaces';
+import { chatHomes, chatHomeTargetId, type ChatHome } from '../chat-homes';
 
 export type HostWorkspace = {
   id: string;
@@ -17,6 +18,8 @@ export type HostWorkspace = {
   droneName?: string;
   /** Set when the user added this workspace (Settings → Workspaces). */
   userWorkspace?: true;
+  /** Set when the folder is an agent chat's home, deleted with the chat. */
+  chatHome?: { chatId: string; droneId: string; chatName: string; droneName: string };
 };
 
 export function hostWorkspaceFilesystemEntry(workspace: HostWorkspace) {
@@ -69,6 +72,7 @@ export function buildHostWorkspaces(
   drones: Array<{ id?: string; name?: string; runtime?: string; cwd?: string; repoPath?: string }>,
   repositories: string[],
   added: Array<{ id: string; name: string; root: string }> = [],
+  homes: ChatHome[] = [],
 ): HostWorkspace[] {
   const repoPaths = new Set(
     [...repositories, ...drones.map((drone) => drone.repoPath ?? '')]
@@ -105,19 +109,35 @@ export function buildHostWorkspaces(
         ...(droneName ? { droneName } : {}),
       };
     });
-  return [...discovered, ...user].sort((a, b) => a.path.localeCompare(b.path));
+  const droneNames = new Map(drones.flatMap((drone) => (drone.id ? [[drone.id, String(drone.name || drone.id)]] : [])));
+  const home: HostWorkspace[] = homes.map((item) => {
+    const id = chatHomeTargetId(item.chatId);
+    const droneName = droneNames.get(item.droneId) ?? item.droneId;
+    return {
+      id,
+      workspaceId: id.slice('host:'.length),
+      // Chat names repeat across drones (every drone has a "default"), so the drone tells them apart.
+      name: `${item.chatName} home (${droneName})`,
+      path: path.resolve(item.root),
+      repository: false,
+      chatHome: { chatId: item.chatId, droneId: item.droneId, chatName: item.chatName, droneName },
+    };
+  });
+  return [...discovered, ...user, ...home].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /** Resolve from the device's catalog, never from a client-supplied filesystem path. */
 export async function listHostWorkspaces(): Promise<HostWorkspace[]> {
-  const [registry, repositories, added] = await Promise.all([
+  const [registry, repositories, added, homes] = await Promise.all([
     loadDroneSummaryRegistry(),
     listCanonicalRepositories(),
     userWorkspaces().available(),
+    chatHomes().list(),
   ]);
   return buildHostWorkspaces(
     [...Object.values(registry.drones ?? {}), ...Object.values(registry.pending ?? {})] as any[],
     repositories.map((repo) => repo.path),
     added,
+    homes,
   );
 }

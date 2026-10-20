@@ -177,6 +177,7 @@ import {
   resetTranscriptStoreForTests,
   restoreArchivedChatInStore,
   rollbackTranscriptToTurnInStore,
+  subscribeChatRemovals,
   transcriptTurnsSourceHash,
   type ChatReadState,
   upsertChatInStore,
@@ -333,6 +334,7 @@ import { registerRepoWorktreeRoutes } from './routes/repo-worktree-routes';
 import { RepoWorktrees, type DroneRepoGit } from './repo-worktrees';
 import { registerUserWorkspaceRoutes } from './routes/user-workspace-routes';
 import { userWorkspaces } from './user-workspaces';
+import { chatHomes } from './chat-homes';
 import { registerFolderWorkspace, resolveFolderWorkspace } from './folder-workspaces';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { createFileRevisionWatcher } from './file-revision-watch';
@@ -5753,8 +5755,19 @@ async function startDroneHubApiServerWithLifecycle(
         await updateChatInStore({ ...chat, update: (current: any) => ({ ...current, workspaceAccess: access }) });
         await projectCanonicalChatToRegistry(chat.droneId, chat.chatName);
       },
+      id: async (chat) => {
+        const id = readChatMetadataFromStore(chat).chat?.id;
+        return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+      },
     }),
   );
+  // A chat's home goes with the chat: swept after chats are removed, and every few minutes for removals made elsewhere.
+  const stopChatHomeRemovals = subscribeChatRemovals(() => chatHomes().scheduleSweep());
+  const stopChatHomeSweeps = chatHomes().startSweeping();
+  registerBackgroundResource('chat home sweeps', async () => {
+    stopChatHomeRemovals();
+    stopChatHomeSweeps();
+  });
   // Worktrees of a drone's repository: the Changes explorer can show one, and agent chats report the one they work in.
   registerRepoWorktreeRoutes(apiRouter, {
     worktrees: repoWorktrees,

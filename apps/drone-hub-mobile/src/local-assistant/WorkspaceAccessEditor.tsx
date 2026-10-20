@@ -53,7 +53,7 @@ const PERMISSIONS = [
 
 // Folders and repositories come first: a hub can run dozens of container drones
 // and the shared folders must not end up below all of them.
-const CATEGORIES = ['Repositories', 'Folders', 'Host drones', 'Container drones'] as const;
+const CATEGORIES = ['Repositories', 'Folders', 'Chat homes', 'Host drones', 'Container drones'] as const;
 const AUTO_COLLAPSE_CATEGORY_SIZE = 6;
 
 function optionMeta(option: ChatWorkspaceOption): string {
@@ -426,9 +426,9 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                     const selectedInCategory = entries.filter((entry) =>
                       selected.some((target) => target.id === entry.id),
                     ).length;
-                    // Long drone lists start collapsed unless something in them is selected.
+                    // Long drone and chat home lists start collapsed unless something in them is selected.
                     const collapsedByDefault =
-                      (category === 'Container drones' || category === 'Host drones') &&
+                      (category === 'Container drones' || category === 'Host drones' || category === 'Chat homes') &&
                       entries.length > AUTO_COLLAPSE_CATEGORY_SIZE &&
                       selectedInCategory === 0;
                     const categoryOpen =

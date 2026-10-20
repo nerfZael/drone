@@ -6,7 +6,7 @@ import { IconSpinner } from '../icons';
 import { AddWorkspaceControls } from '../workspaces/AddWorkspaceControls';
 import { notifyChatWorkspacesChanged, subscribeWorkspacesChanged, userWorkspaceTargetId, type UserWorkspace } from '../workspaces/workspaces-client';
 import {
-  WORKSPACE_CATEGORIES,
+  CAPPED_WORKSPACE_CATEGORIES, WORKSPACE_CATEGORIES,
   addWorkspace,
   removeWorkspace,
   setPermission,
@@ -464,7 +464,7 @@ export function WorkspaceAccessPicker({
                 {WORKSPACE_CATEGORIES.map((category) => {
                   let rows = options.filter((option) => workspaceCategory(option) === category);
                   if (!rows.length) return null;
-                  const drones = category === 'Container drones' || category === 'Host drones';
+                  const drones = CAPPED_WORKSPACE_CATEGORIES.has(category);
                   const total = rows.length;
                   if (drones && !allDrones && !term) rows = rows.filter((option, index) => index < DRONE_CAP || draft?.targets.some((target) => target.id === option.id));
                   return (
