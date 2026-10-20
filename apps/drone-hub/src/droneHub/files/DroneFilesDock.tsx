@@ -1477,6 +1477,7 @@ export function DroneFilesDock({
                 title="Directory is empty"
                 description={readOnly ? undefined : 'Right-click to create a file or folder.'}
                 compact
+                className="absolute inset-0"
                 role="treeitem"
               />
             ) : (

@@ -199,6 +199,53 @@ describe('reordering roots', () => {
   });
 });
 
+describe('closing roots', () => {
+  test("a middle click on an added root's header removes it; other buttons and the drone's own files stay", async () => {
+    const dom = new Window({ url: 'http://localhost' });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: dom, document: dom.document, localStorage: dom.localStorage, Node: dom.Node, IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+    const droneId = 'mech-middle-click';
+    addExplorerRoot(droneId, pin('host:guides'));
+    addExplorerRoot(droneId, pin('host:graphics'));
+    const roots = explorerRootsFor({
+      drone: mech, workspaces, droneById,
+      state: { ...explorerRootsState(droneId), open: { 'host:guides': false, 'host:graphics': false } },
+    });
+    const editor = {
+      activeFile: null, onOpenFile() {}, onConfirmCloseOpenedFilesForPaths: () => true, onCloseOpenedFilesForPaths() {},
+      onRemapOpenedFilesForPathChange() {},
+    };
+    const element = dom.document.createElement('div');
+    dom.document.body.appendChild(element);
+    const root = createRoot(element as unknown as HTMLElement);
+    const header = (title: string) =>
+      element.querySelector(`[data-explorer-root="${title}"] [draggable="true"]`) as unknown as Element;
+    const pinned = () => explorerRootsState(droneId).pinned.map((item) => item.id);
+    try {
+      await act(async () => {
+        root.render(<ExplorerRootsColumn droneId={droneId} ownName="Mech" ownOpen={false} roots={roots} editor={editor} own={null} zoom={1} />);
+      });
+      await act(async () => { Simulate.auxClick(header('Guides'), { button: 2 }); });
+      await act(async () => { Simulate.auxClick(header('Mech'), { button: 1 }); });
+      expect(pinned()).toEqual(['host:guides', 'host:graphics']);
+      await act(async () => { Simulate.auxClick(header('Guides'), { button: 1 }); });
+      expect(pinned()).toEqual(['host:graphics']);
+      await act(async () => root.unmount());
+    } finally {
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+      dom.happyDOM.abort();
+    }
+  });
+});
+
 describe('tabs of several workspaces in one editor', () => {
   const tab = (state: OpenedFileTabsState, droneId: string, path: string) =>
     openFileTab(state, { droneId, path, name: path.split('/').pop()!, targetLine: null, targetColumn: null, navigationSeq: 1 });

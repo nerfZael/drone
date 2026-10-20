@@ -81,11 +81,13 @@ type RootDrag = {
   onMove(step: -1 | 1): void;
 };
 
-function RootSection({ title, detail, open, onToggle, actions, drag, children }: {
+function RootSection({ title, detail, open, onToggle, onClose, actions, drag, children }: {
   title: string;
   detail?: string;
   open: boolean;
   onToggle(): void;
+  /** A middle click on the header; the drone's own root has none. */
+  onClose?(): void;
   actions?: React.ReactNode;
   drag: RootDrag;
   children: React.ReactNode;
@@ -104,6 +106,15 @@ function RootSection({ title, detail, open, onToggle, actions, drag, children }:
         draggable
         onDragStart={drag.onDragStart}
         onDragEnd={drag.onDragEnd}
+        // Middle-click closes, as on a tab; the press must not start autoscroll first.
+        onMouseDown={(event) => {
+          if (event.button === 1 && onClose) event.preventDefault();
+        }}
+        onAuxClick={(event) => {
+          if (event.button !== 1 || !onClose) return;
+          event.preventDefault();
+          onClose();
+        }}
       >
         <button
           type="button"
@@ -114,7 +125,7 @@ function RootSection({ title, detail, open, onToggle, actions, drag, children }:
             drag.onMove(event.key === 'ArrowUp' ? -1 : 1);
           }}
           aria-expanded={open}
-          title={`${detail ? `${title} · ${detail}` : title}\nDrag to move, or Alt+Up / Alt+Down`}
+          title={`${detail ? `${title} · ${detail}` : title}\nDrag to move, or Alt+Up / Alt+Down${onClose ? '\nMiddle-click to remove' : ''}`}
           className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1 text-left text-[11px] font-[var(--weight-semibold)] uppercase tracking-[0.04em] text-[var(--fg-secondary)] hover:text-[var(--fg)]"
         >
           <IconChevron down={open} size={12} />
@@ -266,6 +277,7 @@ export function ExplorerRootsColumn({ droneId, ownName, ownOpen, roots, editor, 
             open={root.open}
             drag={dragFor(id)}
             onToggle={() => setExplorerRootOpen(droneId, workspace.id, !root.open)}
+            onClose={() => removeExplorerRoot(droneId, workspace.id)}
             actions={
               <>
                 {workspace.kind === 'folder' ? (
