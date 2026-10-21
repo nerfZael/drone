@@ -6,6 +6,7 @@ import type { ITheme } from '@xterm/xterm';
 import { TerminalConnection } from './terminal-connection';
 import { terminalOpenRequests, type ShellTerminalTarget } from './terminal-open-request';
 import { setTerminalProcess, setTerminalProgramTitle } from './terminal-titles';
+import { leaveQueryRepliesToTmux } from './terminal-query-replies';
 
 type View = {
   element: HTMLDivElement;
@@ -45,6 +46,7 @@ export function acquireTerminalView(
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.loadAddon(new WebLinksAddon());
+    leaveQueryRepliesToTmux(terminal);
     terminal.open(element);
     const connection = new TerminalConnection(
       target,
