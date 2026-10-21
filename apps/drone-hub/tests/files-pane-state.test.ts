@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sameDroneFsListPayload } from '../src/droneHub/app/use-files-and-ports-pane-state';
+import { rewrittenPreviewOverride, sameDroneFsListPayload } from '../src/droneHub/app/use-files-and-ports-pane-state';
 import { sameDroneFsEntries } from '../src/droneHub/files/same-drone-fs-entries';
 import type { DroneFsEntry, DroneFsListPayload } from '../src/droneHub/types';
 
@@ -46,5 +46,18 @@ describe('desktop files pane state', () => {
     expect(sameDroneFsListPayload(current, payload([entry()]))).toBe(true);
     expect(sameDroneFsListPayload(current, payload([entry({ mtimeMs: 101 })]))).toBe(false);
     expect(sameDroneFsListPayload(current, { ...payload([entry()]), path: '/work/other' })).toBe(false);
+  });
+
+  test('leaves a saved preview URL alone once it points at the host port', () => {
+    const ports = [{ containerPort: 3000, hostPort: 45123 }];
+    // Already at its host address: no update, so the effect that stores it does not run again forever.
+    expect(rewrittenPreviewOverride('http://localhost:45123/app', ports, null)).toBeUndefined();
+    expect(rewrittenPreviewOverride('http://localhost:45999/', ports, null)).toBeUndefined();
+    // Container ports and Hub preview routes move to the host port once.
+    expect(rewrittenPreviewOverride('http://localhost:3000/app', ports, null)).toBe('http://localhost:45123/app');
+    expect(rewrittenPreviewOverride('/api/drones/d1/preview/3000/app', ports, null)).toBe('http://localhost:45123/app');
+    // The port's own default URL needs no override.
+    expect(rewrittenPreviewOverride('http://localhost:3000/', ports, 'http://localhost:45123/')).toBeNull();
+    expect(rewrittenPreviewOverride('https://example.com/', ports, null)).toBeUndefined();
   });
 });

@@ -78,6 +78,25 @@ function writeFsListCache(cacheKey: string, payload: Extract<DroneFsListPayload,
   fsListCache.set(cacheKey, { atMs: Date.now(), payload });
 }
 
+/**
+ * A drone's saved preview URL moved to its host address: null to fall back to the port's default URL, or
+ * undefined when it is already there. Storing an unchanged URL as a new map re-runs the effect that stores it.
+ */
+export function rewrittenPreviewOverride(
+  currentOverride: string,
+  portRows: DronePortMapping[],
+  defaultUrlRaw: string | null,
+): string | null | undefined {
+  const rewrittenValue =
+    rewriteLoopbackUrlToHostLoopback(currentOverride, portRows) ||
+    rewriteContainerPreviewUrlToHostLoopback(currentOverride, portRows);
+  if (!rewrittenValue) return undefined;
+  const rewrittenNormalized = normalizePreviewUrl(rewrittenValue) ?? rewrittenValue;
+  const defaultUrl = defaultUrlRaw ? normalizePreviewUrl(defaultUrlRaw) ?? defaultUrlRaw : null;
+  const nextValue = defaultUrl && rewrittenNormalized === defaultUrl ? null : rewrittenNormalized;
+  return nextValue === currentOverride ? undefined : nextValue;
+}
+
 export function invalidateFsListCacheForPath(droneIdRaw: string, pathRaw: string): void {
   const droneId = String(droneIdRaw ?? '').trim();
   const filePath = String(pathRaw ?? '').trim();
@@ -536,23 +555,8 @@ export function useFilesAndPortsPaneState({
     if (!droneId) return;
     const currentOverride = previewUrlByDrone[droneId];
     if (!currentOverride) return;
-    const rewritten = rewriteLoopbackUrlToHostLoopback(
-      currentOverride,
-      portRows,
-    );
-    const rewrittenLegacyPreview = rewriteContainerPreviewUrlToHostLoopback(
-      currentOverride,
-      portRows,
-    );
-    if (!rewritten && !rewrittenLegacyPreview) return;
-    const rewrittenValue = rewritten || rewrittenLegacyPreview;
-    if (!rewrittenValue) return;
-    const rewrittenNormalized = normalizePreviewUrl(rewrittenValue) ?? rewrittenValue;
-    const defaultUrl = selectedPreviewDefaultUrl
-      ? normalizePreviewUrl(selectedPreviewDefaultUrl) ?? selectedPreviewDefaultUrl
-      : null;
-    const nextValue =
-      defaultUrl && rewrittenNormalized === defaultUrl ? null : rewrittenNormalized;
+    const nextValue = rewrittenPreviewOverride(currentOverride, portRows, selectedPreviewDefaultUrl);
+    if (nextValue === undefined) return;
     setPreviewUrlByDrone((prev) => {
       if (prev[droneId] !== currentOverride) return prev;
       const next = { ...prev };
