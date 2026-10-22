@@ -120,3 +120,51 @@ describe('folded chats', () => {
     expect(names(squaresByHost.plan)).toEqual(['chip', 'aside', 'nested']);
   });
 });
+
+describe('chats created by another chat', () => {
+  const chats = ['orchestrator', 'worker-a', 'worker-b', 'sub', 'notes'];
+  const creators = { 'worker-a': 'orchestrator', 'worker-b': 'orchestrator', sub: 'worker-a' };
+  const created = (name: string) => name in creators;
+  const resolveCreated = (folds?: DroneChatFolds) => resolveFolds({ chatNames: chats, sideChats: [], folds, creators });
+
+  test('are squares on their creator, and a chat they created goes on the same card', () => {
+    const { cards, squaresByHost } = resolveCreated();
+    expect([...cards]).toEqual(['orchestrator', 'notes']);
+    expect(names(squaresByHost.orchestrator)).toEqual(['worker-a', 'worker-b', 'sub']);
+  });
+
+  test('dragged out, one is a card and stays one, with the chats it created on it', () => {
+    const folds = unfoldChat(undefined, 'worker-a', created);
+    expect(folds).toEqual({ 'worker-a': { card: true } });
+    const { cards, squaresByHost } = resolveCreated(folds);
+    expect([...cards]).toEqual(['orchestrator', 'worker-a', 'notes']);
+    expect(names(squaresByHost.orchestrator)).toEqual(['worker-b']);
+    expect(names(squaresByHost['worker-a'])).toEqual(['sub']);
+  });
+
+  test('go with their creator when it is folded into another card, and stay when it comes out', () => {
+    const folds = foldChats(undefined, ['orchestrator'], () => [], 'notes');
+    expect(names(resolveCreated(folds).squaresByHost.notes)).toEqual(['orchestrator', 'worker-a', 'worker-b', 'sub']);
+    expect(names(resolveCreated(unfoldChat(folds, 'orchestrator', created)).squaresByHost.orchestrator)).toEqual(['worker-a', 'worker-b', 'sub']);
+  });
+
+  test('one dragged out and folded in with its creator comes back out as a card', () => {
+    const asCard = unfoldChat(undefined, 'worker-a', created);
+    const folded = foldChats(asCard, ['orchestrator'], () => ['worker-a'], 'notes');
+    expect(resolveCreated(folded).cards.has('worker-a')).toBe(false);
+    expect(resolveCreated(unfoldChat(folded, 'orchestrator', created)).cards.has('worker-a')).toBe(true);
+  });
+
+  test('dragged together with their creator, they go with it', () => {
+    const folds = foldChats(undefined, ['orchestrator'], () => [], 'notes');
+    const all = names(resolveCreated(folds).squaresByHost.notes);
+    const leading = squaresLeading(folds, all, (name) => creators[name as keyof typeof creators] ?? null);
+    expect(leading).toEqual(['orchestrator']);
+  });
+
+  test('folded into a chat that is gone, or created by one that is gone, a chat goes back on its creator or is a card', () => {
+    expect(names(resolveCreated({ 'worker-b': { host: 'deleted' } }).squaresByHost.orchestrator)).toEqual(['worker-a', 'worker-b', 'sub']);
+    const orphan = resolveFolds({ chatNames: ['worker-a'], sideChats: [], folds: undefined, creators });
+    expect([...orphan.cards]).toEqual(['worker-a']);
+  });
+});

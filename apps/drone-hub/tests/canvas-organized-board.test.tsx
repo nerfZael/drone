@@ -109,10 +109,21 @@ test('the organized board lays chats out in trees, with side chats as squares, a
   const moves: SidebarMoveIntent[] = [];
   try {
     await act(async () => { root.render(<Dock onActivateChat={(_droneId, chatName) => activated.push(chatName)} onMoveSidebar={async (intent) => { moves.push(intent); }} />); await settle(); });
-    // Side chats of both kinds are squares on their source, not cards.
-    expect(cards().sort()).toEqual([alpha('default'), alpha('plan'), alpha('plan-copy'), alpha('worker')].sort());
-    const squares = Array.from(card('plan').querySelectorAll('[data-canvas-side-chat-square]')).map((el) => el.getAttribute('data-canvas-side-chat-square'));
-    expect(squares).toEqual(['side-1', 'chip']);
+    // Side chats of both kinds are squares on their source, and the chat plan created a square on plan, not cards.
+    expect(cards().sort()).toEqual([alpha('default'), alpha('plan'), alpha('plan-copy')].sort());
+    const planSquares = () => Array.from(card('plan').querySelectorAll('[data-canvas-side-chat-square]')).map((el) => el.getAttribute('data-canvas-side-chat-square'));
+    expect(planSquares()).toEqual(['worker', 'side-1', 'chip']);
+    // Dragged off, the created chat is a card under plan, and stays one.
+    const viewportEl = container.querySelector('[data-drone-canvas-viewport="1"]')!;
+    Object.assign(viewportEl, { getBoundingClientRect: () => ({ left: 0, right: 1200, width: 1200, top: 0, bottom: 800, height: 800, x: 0, y: 0 }) });
+    await act(async () => Simulate.mouseDown(card('plan').querySelector('[data-canvas-side-chat-square="worker"]')!, { button: 0, clientX: 300, clientY: 300 }));
+    for (const type of ['mousemove', 'mouseup']) {
+      await act(async () => { dom.dispatchEvent(new dom.MouseEvent(type, { clientX: 2, clientY: 2, buttons: type === 'mouseup' ? 0 : 1, bubbles: true })); await settle(); });
+    }
+    Reflect.deleteProperty(viewportEl, 'getBoundingClientRect');
+    expect(cards()).toContain(alpha('worker'));
+    expect(planSquares()).toEqual(['side-1', 'chip']);
+    expect(useDroneCanvasStore.getState().chatFoldsByDrone.alpha).toEqual({ worker: { card: true } });
 
     // The sidebar's order: plan's tree first, its copy and worker to its right, the worker below the copy.
     const at = (chatName: string) => organizedBoard().nodesByDroneId[alpha(chatName)]!;
@@ -209,7 +220,7 @@ test('the organized board lays chats out in trees, with side chats as squares, a
     expect(await dragCard('default', screen('worker', 10, 15))).toEqual([alpha('worker')]);
     expect(cards()).not.toContain(alpha('default'));
     expect(squaresOn('worker')).toEqual(['default:chat']);
-    expect(useDroneCanvasStore.getState().chatFoldsByDrone.alpha).toEqual({ default: { host: 'worker' } });
+    expect(useDroneCanvasStore.getState().chatFoldsByDrone.alpha).toEqual({ worker: { card: true }, default: { host: 'worker' } });
     // Dragged off its card, the square is a card again.
     const dragSquare = async (host: string, chatName: string, to: { x: number; y: number }, shiftKey = false) => {
       const square = card(host).querySelector(`[data-canvas-side-chat-square="${chatName}"]`)!;
@@ -236,7 +247,7 @@ test('the organized board lays chats out in trees, with side chats as squares, a
     expect(await dragSquare('plan', 'chip', screen('worker', 10, 15), true)).toBe('2');
     expect(squaresOn('worker')).toEqual(['side-1:side-chat', 'chip:side-chat']);
     expect(squaresOn('plan')).toEqual([]);
-    useDroneCanvasStore.getState().setChatFolds('alpha', {});
+    useDroneCanvasStore.getState().setChatFolds('alpha', { worker: { card: true } });
     await act(async () => { await settle(); });
 
     // Turned off, the drone's own board takes the chats and shows side chats as cards again; on again, the layout is back.

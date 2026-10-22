@@ -1,10 +1,11 @@
 /**
  * Chats folded into other cards on the organized board, where they show as squares instead of cards of their own.
- * A chat is a card until it is folded; a side chat is a square on the chat it started from until it is dragged out.
+ * A chat is a card until it is folded; a side chat is a square on the chat it started from, and a chat another chat
+ * created a square on its creator, until it is dragged out.
  * Folded with a card, the chats that came from it fold "via" it, so they come back out with it.
  */
 
-/** A chat folded into `host`, or a side chat shown as a card. */
+/** A chat folded into `host`, or a side chat or created chat shown as a card. */
 export type ChatFold = { host: string; via?: string } | { card: true };
 export type DroneChatFolds = Record<string, ChatFold>;
 
@@ -19,7 +20,7 @@ export type FoldSideChat = {
 export type FoldSquare = { chatName: string; kind: 'chat' | 'side-chat'; composer: boolean };
 
 export type ResolvedFolds = {
-  /** Chats shown as cards: every chat that is not folded, and side chats dragged out. */
+  /** Chats shown as cards: every chat that is not folded, and side chats and created chats dragged out. */
   cards: Set<string>;
   /** The squares on each card, folded chats first in the sidebar's order, then side chats oldest first. */
   squaresByHost: Record<string, FoldSquare[]>;
@@ -30,14 +31,17 @@ export type ResolvedFolds = {
 const hostOf = (fold: ChatFold | undefined): string | null => (fold && 'host' in fold ? fold.host : null);
 
 /**
- * Where every chat shows. A square whose card is itself folded goes on to that card's card; a fold that leads to a
- * chat that is gone, or round in a loop, leaves a chat a card (and a side chat on the chat it started from).
+ * Where every chat shows. A square whose card is itself folded goes on to that card's card. A fold into a chat that
+ * is gone puts a side chat back on the chat it started from and a created chat on its creator, and leaves any other
+ * chat a card; a fold round in a loop leaves a chat a card (a side chat on the chat it started from).
  */
-export function resolveFolds({ chatNames, sideChats, folds }: {
+export function resolveFolds({ chatNames, sideChats, folds, creators }: {
   /** The drone's chats in the sidebar's order, side chats left out. */
   chatNames: readonly string[];
   sideChats: readonly FoldSideChat[];
   folds: DroneChatFolds | undefined;
+  /** Chat name -> the chat of this drone that created it. */
+  creators?: Readonly<Record<string, string>>;
 }): ResolvedFolds {
   const chats = new Set(chatNames);
   const sides = [...sideChats].sort((a, b) => (Date.parse(a.createdAt ?? '') || 0) - (Date.parse(b.createdAt ?? '') || 0));
@@ -46,8 +50,11 @@ export function resolveFolds({ chatNames, sideChats, folds }: {
   // Each chat's own host: null for a card.
   const direct = new Map<string, string | null>();
   for (const name of chatNames) {
-    const host = hostOf(folds?.[name]);
-    direct.set(name, host && host !== name && known(host) ? host : null);
+    const fold = folds?.[name];
+    const host = hostOf(fold);
+    const creator = String(creators?.[name] ?? '').trim();
+    if (host && host !== name && known(host)) direct.set(name, host);
+    else direct.set(name, fold && 'card' in fold ? null : creator && creator !== name && known(creator) ? creator : null);
   }
   for (const chat of sides) {
     const fold = folds?.[chat.name];
@@ -129,19 +136,19 @@ export function foldChats(folds: DroneChatFolds | undefined, leads: readonly str
 }
 
 /**
- * A square dragged out: it is a card again, with the chats folded with it. A side chat among them stays a card,
- * rather than going back on the chat it started from.
+ * A square dragged out: it is a card again, with the chats folded with it. A side chat or created chat among them
+ * stays a card, rather than going back on the chat it started from or its creator.
  */
-export function unfoldChat(folds: DroneChatFolds | undefined, chatName: string, isSideChat: (name: string) => boolean): DroneChatFolds {
+export function unfoldChat(folds: DroneChatFolds | undefined, chatName: string, foldsByDefault: (name: string) => boolean): DroneChatFolds {
   const next: DroneChatFolds = {};
   for (const [name, fold] of Object.entries(folds ?? {})) {
     if (name === chatName || ('via' in fold && fold.via === chatName)) {
-      if (isSideChat(name)) next[name] = { card: true };
+      if (foldsByDefault(name)) next[name] = { card: true };
       continue;
     }
     next[name] = fold;
   }
-  if (isSideChat(chatName)) next[chatName] = { card: true };
+  if (foldsByDefault(chatName)) next[chatName] = { card: true };
   return next;
 }
 
@@ -174,13 +181,13 @@ export function moveFoldedChat(folds: DroneChatFolds | undefined, chatName: stri
 
 /**
  * Of squares dragged together, the ones that move themselves: a square folded with another of them, folded into it,
- * or a side chat started from it, goes with that one, as it would dragged alone.
+ * or a side chat started from it or chat created by it, goes with that one, as it would dragged alone.
  */
-export function squaresLeading(folds: DroneChatFolds | undefined, names: readonly string[], sideChatSourceOf: (name: string) => string | null): string[] {
+export function squaresLeading(folds: DroneChatFolds | undefined, names: readonly string[], defaultHostOf: (name: string) => string | null): string[] {
   const moving = new Set(names);
   return names.filter((name) => {
     const fold = folds?.[name];
-    const above = fold && 'host' in fold ? [fold.host, fold.via] : [sideChatSourceOf(name)];
+    const above = fold && 'host' in fold ? [fold.host, fold.via] : [defaultHostOf(name)];
     return !above.some((other) => other && other !== name && moving.has(other));
   });
 }

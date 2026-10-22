@@ -560,8 +560,13 @@ export function DroneCanvasDock({
       return node?.kind === 'chat' ? [node.chatName] : [];
     });
   }, [boardChats, boardDroneId, organized, sidebarChatOrder]);
-  // On the organized board side chats are squares on the card they came from, and chats folded into another card are
-  // squares on it, until they are dragged out.
+  // On the organized board side chats are squares on the card they came from, chats another chat created squares on
+  // their creator's card, and chats folded into another card squares on it, until they are dragged out.
+  const boardChatCreators = boardDrone?.chatCreators;
+  const boardChatCreatorsKey = JSON.stringify(boardChatCreators ?? {});
+  /** Each created chat's creator, read when a square drag ends. */
+  const boardChatCreatorsRef = React.useRef<Record<string, string>>({});
+  boardChatCreatorsRef.current = boardChatCreators ?? {};
   const chatFolds = useDroneCanvasStore((s) => (boardDroneId ? s.chatFoldsByDrone[boardDroneId] : undefined));
   const setChatFolds = useDroneCanvasStore((s) => s.setChatFolds);
   const boardSideChatKey = JSON.stringify((boardSideChats ?? []).map((chat) => [chat.name, chat.sourceChatName, chat.createdAt, chat.presentation]));
@@ -573,9 +578,10 @@ export function DroneCanvasDock({
         name: chat.name, sourceChatName: chat.sourceChatName, createdAt: chat.createdAt, composer: chat.presentation === 'composer',
       })),
       folds: chatFolds,
+      creators: JSON.parse(boardChatCreatorsKey) as Record<string, string>,
     });
     // The summary is rebuilt on every refresh; its side chats are in the key.
-  }, [boardDroneId, boardSideChatKey, chatFolds, organized, sidebarChatNames]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [boardChatCreatorsKey, boardDroneId, boardSideChatKey, chatFolds, organized, sidebarChatNames]); // eslint-disable-line react-hooks/exhaustive-deps
   const boardSideChatNameKey = (boardSideChats ?? []).map((chat) => chat.name).join('\u0000');
   const cardMembers = React.useMemo(() => {
     if (!organized || !resolvedFolds) return boardMembers;
@@ -1164,8 +1170,6 @@ export function DroneCanvasDock({
     observer?.observe(viewport);
     return () => observer?.disconnect();
   }, [organized]);
-  const boardChatCreators = boardDrone?.chatCreators;
-  const boardChatCreatorsKey = JSON.stringify(boardChatCreators ?? {});
   // Canvas node id of a chat -> the chat that created it, when it was not cloned from one: its line on the board.
   const createdSourceNodeIdByNodeId = React.useMemo(() => {
     const out: Record<string, string> = {};
@@ -1350,13 +1354,15 @@ export function DroneCanvasDock({
       if (target === hostId || target === undefined) return;
       const host = target ? parseCanvasChatNodeId(target)?.chatName ?? null : null;
       const sources = boardSideChatSourcesRef.current;
-      const isSideChat = (name: string) => sources.has(name);
+      const creators = boardChatCreatorsRef.current;
+      // Side chats and created chats are squares until dragged out, so out they stay cards.
+      const foldsByDefault = (name: string) => sources.has(name) || Boolean(creators[name]);
       let folds = useDroneCanvasStore.getState().chatFoldsByDrone[boardDroneId];
       const composer = new Set(moving.filter((item) => item.composer).map((item) => item.chatName));
-      const leading = squaresLeading(folds, moving.map((item) => item.chatName), (name) => sources.get(name) || null);
+      const leading = squaresLeading(folds, moving.map((item) => item.chatName), (name) => sources.get(name) || creators[name] || null);
       for (const chatName of leading) {
         if (host) folds = moveFoldedChat(folds, chatName, host);
-        else if (!composer.has(chatName)) folds = unfoldChat(folds, chatName, isSideChat);
+        else if (!composer.has(chatName)) folds = unfoldChat(folds, chatName, foldsByDefault);
       }
       setChatFolds(boardDroneId, folds ?? {});
     };
