@@ -255,6 +255,7 @@ type RightPanelTabContentProps = {
     name: string;
   }) => void;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
+  onCloseOpenedEditorFiles: (tabIds: string[], keepActiveTabId: string) => void;
   onConfirmCloseOpenedEditorFilesForPaths: (paths: string[], actionLabel?: string) => boolean | Promise<boolean>;
   onCloseOpenedEditorFilesForPaths: (paths: string[]) => void;
   onRemapOpenedEditorFilesForPathChange: (sourcePath: string, targetPath: string) => void;
@@ -629,7 +630,7 @@ export type EditorWorkspacePaneProps = Pick<RightPanelTabContentProps,
   | 'onOverwriteOpenedEditorFile' | 'onOpenFileInEditor' | 'onOpenFileInPanel' | 'onOpenFileTargetInEditor'
   | 'pendingFileOpenPath' | 'openedFile' | 'quickOpen' | 'openedFileTabs' | 'activeOpenedFileTabId'
   | 'onOpenedEditorFileContentChange' | 'onSaveOpenedEditorFile' | 'onAppendFileDictationLine'
-  | 'onOpenFileDictationTarget' | 'onCloseOpenedEditorFile' | 'onConfirmCloseOpenedEditorFilesForPaths'
+  | 'onOpenFileDictationTarget' | 'onCloseOpenedEditorFile' | 'onCloseOpenedEditorFiles' | 'onConfirmCloseOpenedEditorFilesForPaths'
   | 'onCloseOpenedEditorFilesForPaths' | 'onRemapOpenedEditorFilesForPathChange'
   | 'onActivateOpenedEditorFileTab' | 'onReorderOpenedEditorFileTabs' | 'explorerSwitcher' | 'explorerRoots'
   | 'editorWorkspaceOf'>;
@@ -666,6 +667,7 @@ export function EditorWorkspacePane({
   onAppendFileDictationLine,
   onOpenFileDictationTarget,
   onCloseOpenedEditorFile,
+  onCloseOpenedEditorFiles,
   onConfirmCloseOpenedEditorFilesForPaths,
   onCloseOpenedEditorFilesForPaths,
   onRemapOpenedEditorFilesForPathChange,
@@ -739,6 +741,7 @@ export function EditorWorkspacePane({
           onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
           onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
           onCloseOpenedEditorFile={onCloseOpenedEditorFile}
+          onCloseOpenedEditorFiles={onCloseOpenedEditorFiles}
           onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
           onOpenFileTargetInEditor={onOpenFileTargetInEditor}

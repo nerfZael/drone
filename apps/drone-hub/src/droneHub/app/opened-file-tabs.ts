@@ -166,6 +166,34 @@ export function closeFileTab(state: OpenedFileTabsState, tabIdRaw: string | null
   return { tabs, activeTabId: nextActive?.tabId ?? null };
 }
 
+/**
+ * Closes several tabs at once. When the active tab goes, `preferredTabId` takes
+ * over if it stays open (the tab "Close Others" was asked from), else the
+ * nearest open tab after the old active one, else the nearest before it. Tabs
+ * in `skipped` (shown in their own windows) never take over: activating one
+ * would pull focus to its window, so with only those left none is active.
+ */
+export function closeFileTabs(
+  state: OpenedFileTabsState,
+  tabIdsRaw: readonly string[],
+  preferredTabIdRaw?: string | null,
+  skipped?: ReadonlySet<string>,
+): OpenedFileTabsState {
+  const closing = new Set(tabIdsRaw.map((id) => String(id ?? '').trim()).filter(Boolean));
+  const tabs = state.tabs.filter((tab) => !closing.has(tab.tabId));
+  if (tabs.length === state.tabs.length) return state;
+  if (state.activeTabId && !closing.has(state.activeTabId)) return { tabs, activeTabId: state.activeTabId };
+  const candidate = (tab: OpenedFileTab) => !closing.has(tab.tabId) && !skipped?.has(tab.tabId);
+  const preferredTabId = String(preferredTabIdRaw ?? '').trim();
+  if (preferredTabId && tabs.some((tab) => tab.tabId === preferredTabId && candidate(tab))) return { tabs, activeTabId: preferredTabId };
+  const activeIndex = state.tabs.findIndex((tab) => tab.tabId === state.activeTabId);
+  const nextActive =
+    state.tabs.slice(activeIndex + 1).find(candidate) ??
+    state.tabs.slice(0, Math.max(0, activeIndex)).reverse().find(candidate) ??
+    null;
+  return { tabs, activeTabId: nextActive?.tabId ?? null };
+}
+
 export function activateFileTab(state: OpenedFileTabsState, tabIdRaw: string | null | undefined): OpenedFileTabsState {
   const tabId = String(tabIdRaw ?? '').trim();
   if (!tabId) return state;

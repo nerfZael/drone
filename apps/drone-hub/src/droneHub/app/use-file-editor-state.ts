@@ -6,6 +6,7 @@ import type { requestJson as requestJsonFn } from '../http';
 import {
   activateFileTab,
   closeFileTab,
+  closeFileTabs,
   closeFileTabsForPaths,
   closeFileTabsOfWorkspaces,
   createUntitledFileTab,
@@ -380,6 +381,22 @@ export function useFileEditorState({
       setTabState((prev) => closeFileTab(prev, requestedTabId));
     });
   }, [activeTabId, setTabState, tabs]);
+
+  /** Closes several tabs behind one prompt naming all their unsaved files; `keepActiveTabId` takes over when the active tab closes. */
+  const closeEditorFiles = React.useCallback((tabIds: readonly string[], keepActiveTabId?: string | null) => {
+    const requested = new Set(tabIds);
+    const targets = tabs.filter((tab) => requested.has(tab.tabId));
+    if (targets.length === 0) return;
+    const actionLabel = targets.length === 1
+      ? `Closing ${targets[0]?.name || 'this file'}`
+      : `Closing ${targets.length} files`;
+    void confirmDiscardDirtyTabs(targets, actionLabel).then((confirmed) => {
+      if (!confirmed) return;
+      setOpenFailure(null);
+      const hosted = new Set(hostedTabIdsKey.split('\u0000').filter(Boolean));
+      setTabState((prev) => closeFileTabs(prev, targets.map((tab) => tab.tabId), keepActiveTabId, hosted));
+    });
+  }, [hostedTabIdsKey, setTabState, tabs]);
 
   const normalizePositiveInt = React.useCallback((raw: unknown): number | null => {
     const n = Number(raw);
@@ -1564,6 +1581,7 @@ export function useFileEditorState({
     openEditorLocation,
     createUntitledFile,
     closeEditorFile,
+    closeEditorFiles,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,
     remapOpenedFileTabsForPathChange,

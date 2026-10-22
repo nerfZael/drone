@@ -53,6 +53,7 @@ type DroneEditorDockProps = {
   onReloadOpenedEditorFileFromDisk: () => void;
   onOverwriteOpenedEditorFile: () => Promise<boolean>;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
+  onCloseOpenedEditorFiles: (tabIds: string[], keepActiveTabId: string) => void;
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (activeId: string, overId: string) => void;
   onOpenFileTargetInEditor: (target: OpenFileTarget) => void;
@@ -75,6 +76,7 @@ export function DroneEditorDock({
   onReloadOpenedEditorFileFromDisk,
   onOverwriteOpenedEditorFile,
   onCloseOpenedEditorFile,
+  onCloseOpenedEditorFiles,
   onActivateOpenedEditorFileTab,
   onReorderOpenedEditorFileTabs,
   onOpenFileTargetInEditor,
@@ -117,6 +119,7 @@ export function DroneEditorDock({
           onReloadFromDisk={onReloadOpenedEditorFileFromDisk}
           onOverwriteFile={onOverwriteOpenedEditorFile}
           onCloseFile={onCloseOpenedEditorFile}
+          onCloseFiles={onCloseOpenedEditorFiles}
           onActivateFileTab={onActivateOpenedEditorFileTab}
           onReorderFileTabs={onReorderOpenedEditorFileTabs}
           onOpenResolvedFile={openResolvedFile}

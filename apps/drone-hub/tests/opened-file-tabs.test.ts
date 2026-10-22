@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   activateFileTab,
   closeFileTab,
+  closeFileTabs,
   closeFileTabsForPaths,
   dirtyFileTabsForPaths,
   openedFileTabDirty,
@@ -162,5 +163,50 @@ describe('opened file tabs', () => {
 
     expect(state.tabs.map((tab) => tab.path)).toEqual(['/work/repo/README.md']);
     expect(state.activeTabId).toBe(openedFileTabId('drone-1', '/work/repo/README.md'));
+  });
+
+  describe('closeFileTabs', () => {
+    const id = (name: string) => openedFileTabId('drone-1', `/work/repo/${name}`);
+    function fourTabs(active: string): OpenedFileTabsState {
+      let state: OpenedFileTabsState = { tabs: [], activeTabId: null };
+      ['a.ts', 'b.ts', 'c.ts', 'd.ts'].forEach((name, index) => { state = openTab(state, `/work/repo/${name}`, index + 1); });
+      return activateFileTab(state, id(active));
+    }
+    const names = (state: OpenedFileTabsState) => state.tabs.map((tab) => tab.name);
+
+    test('keeps the active tab when it stays open', () => {
+      const state = closeFileTabs(fourTabs('b.ts'), [id('c.ts'), id('d.ts')], id('a.ts'));
+      expect(names(state)).toEqual(['a.ts', 'b.ts']);
+      expect(state.activeTabId).toBe(id('b.ts'));
+    });
+
+    test('hands the active role to the tab the menu was opened on', () => {
+      const state = closeFileTabs(fourTabs('d.ts'), [id('a.ts'), id('c.ts'), id('d.ts')], id('b.ts'));
+      expect(names(state)).toEqual(['b.ts']);
+      expect(state.activeTabId).toBe(id('b.ts'));
+    });
+
+    test('falls back to the nearest open tab after, then before, the closed active one', () => {
+      const after = closeFileTabs(fourTabs('b.ts'), [id('b.ts'), id('c.ts')], id('c.ts'));
+      expect(after.activeTabId).toBe(id('d.ts'));
+      const before = closeFileTabs(fourTabs('c.ts'), [id('c.ts'), id('d.ts')], id('d.ts'));
+      expect(before.activeTabId).toBe(id('b.ts'));
+    });
+
+    test('never hands the active role to a tab shown in its own window', () => {
+      const hosted = new Set([id('d.ts')]);
+      const state = closeFileTabs(fourTabs('b.ts'), [id('a.ts'), id('b.ts'), id('c.ts')], id('b.ts'), hosted);
+      expect(names(state)).toEqual(['d.ts']);
+      expect(state.activeTabId).toBeNull();
+      const skipPreferred = closeFileTabs(fourTabs('b.ts'), [id('b.ts')], id('d.ts'), hosted);
+      expect(skipPreferred.activeTabId).toBe(id('c.ts'));
+    });
+
+    test('closing every tab leaves none active, and unknown ids change nothing', () => {
+      const start = fourTabs('a.ts');
+      const empty = closeFileTabs(start, start.tabs.map((tab) => tab.tabId), id('a.ts'));
+      expect(empty).toEqual({ tabs: [], activeTabId: null });
+      expect(closeFileTabs(start, ['file:nope'], null)).toBe(start);
+    });
   });
 });

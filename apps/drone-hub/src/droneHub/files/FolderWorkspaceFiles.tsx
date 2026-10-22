@@ -103,7 +103,8 @@ export function FolderWorkspaceFiles({ workspaceId, name, target, className, onN
           onOpenedEditorFileContentChange={editor.setOpenedFileContent} onSaveOpenedEditorFile={editor.saveOpenedFile}
           onAppendFileDictationLine={editor.appendAndSaveFileDictationLine} onOpenFileDictationTarget={open}
           onReloadOpenedEditorFileFromDisk={editor.reloadOpenedFileFromDisk} onOverwriteOpenedEditorFile={editor.overwriteOpenedFile}
-          onCloseOpenedEditorFile={editor.closeEditorFile} onActivateOpenedEditorFileTab={editor.setActiveOpenedFileTab}
+          onCloseOpenedEditorFile={editor.closeEditorFile} onCloseOpenedEditorFiles={editor.closeEditorFiles}
+          onActivateOpenedEditorFileTab={editor.setActiveOpenedFileTab}
           onReorderOpenedEditorFileTabs={editor.reorderOpenedFileTabs} onOpenFileTargetInEditor={open}
         />
       </div>

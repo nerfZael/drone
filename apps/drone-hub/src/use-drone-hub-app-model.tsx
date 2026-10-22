@@ -3029,6 +3029,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openEditorLocation,
     createUntitledFile,
     closeEditorFile,
+    closeEditorFiles,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,
     remapOpenedFileTabsForPathChange,
@@ -6200,6 +6201,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onAppendFileDictationLine={appendAndSaveFileDictationLine}
           onOpenFileDictationTarget={openFileDictationTarget}
           onCloseOpenedEditorFile={closeEditorFile}
+          onCloseOpenedEditorFiles={closeEditorFiles}
           onConfirmCloseOpenedEditorFilesForPaths={confirmCloseOpenedFileTabsForPaths}
           onCloseOpenedEditorFilesForPaths={closeOpenedFileTabsForPaths}
           onRemapOpenedEditorFilesForPathChange={remapOpenedFileTabsForPathChange}
@@ -6368,6 +6370,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       saveOpenedFile,
       appendAndSaveFileDictationLine,
       closeEditorFile,
+      closeEditorFiles,
       confirmCloseOpenedFileTabsForPaths,
       closeOpenedFileTabsForPaths,
       remapOpenedFileTabsForPathChange,

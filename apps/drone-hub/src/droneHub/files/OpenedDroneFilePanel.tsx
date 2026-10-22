@@ -288,6 +288,7 @@ type OpenedDroneFilePanelProps = {
   onReloadFromDisk?: () => void;
   onOverwriteFile?: () => Promise<boolean>;
   onCloseFile?: (tabId?: string | null) => void;
+  onCloseFiles?: (tabIds: string[], keepActiveTabId: string) => void;
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
   /** Labels tabs whose file is in another workspace than the drone's own. */
@@ -318,6 +319,7 @@ export function OpenedDroneFilePanel({
   onReloadFromDisk,
   onOverwriteFile,
   onCloseFile,
+  onCloseFiles,
   onActivateFileTab,
   onReorderFileTabs,
   workspaceLabelForTab,
@@ -1021,6 +1023,7 @@ export function OpenedDroneFilePanel({
           activeTabId={activeTabId}
           onActivateTab={(tabId) => onActivateFileTab?.(tabId)}
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
+          onCloseTabs={onCloseFiles}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
           workspaceLabel={workspaceLabelForTab}
           trailingActions={

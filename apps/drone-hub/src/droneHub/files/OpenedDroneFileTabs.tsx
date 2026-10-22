@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileTypeIcon } from './FileTypeIcon';
 import { setFileTabDragPayload } from '../app/file-tab-drag';
+import { SidebarContextMenu, type SidebarContextMenuItem } from '../app/SidebarContextMenu';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 
 type OpenedDroneFileTabsProps = {
@@ -8,6 +9,8 @@ type OpenedDroneFileTabsProps = {
   activeTabId: string | null;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  /** Closes several tabs at once (the tab menu's Close Others, Close Saved…); `keepActiveTabId` is the tab the menu was opened on. */
+  onCloseTabs?: (tabIds: string[], keepActiveTabId: string) => void;
   onReorderTabs: (fromTabId: string, toTabId: string) => void;
   /** The workspace a tab's file is in, when the strip holds tabs from more than the drone's own; null for its own. */
   workspaceLabel?: (tab: DroneOpenedFileTabState) => string | null;
@@ -25,6 +28,32 @@ function IconClose({ className }: { className?: string }) {
       <path d="M12 4l-8 8" />
     </svg>
   );
+}
+
+type TabMenuState = { tabId: string; x: number; y: number; view: Window };
+
+/** VS Code's tab menu, plus Close to the Left. */
+export function fileTabMenuItems(
+  tabs: DroneOpenedFileTabState[],
+  tabId: string,
+  onCloseTab: (tabId: string) => void,
+  onCloseTabs: (tabIds: string[], keepActiveTabId: string) => void,
+): SidebarContextMenuItem[] {
+  const index = tabs.findIndex((tab) => tab.tabId === tabId);
+  const ids = (list: DroneOpenedFileTabState[]) => list.map((tab) => tab.tabId);
+  const others = ids(tabs.filter((tab) => tab.tabId !== tabId));
+  const left = ids(tabs.slice(0, Math.max(0, index)));
+  const right = ids(tabs.slice(index + 1));
+  const saved = ids(tabs.filter((tab) => !tab.dirty));
+  const all = ids(tabs);
+  return [
+    { id: 'close', label: 'Close', onSelect: () => onCloseTab(tabId) },
+    { id: 'close-others', label: 'Close Others', disabled: others.length === 0, onSelect: () => onCloseTabs(others, tabId) },
+    { id: 'close-left', label: 'Close to the Left', disabled: left.length === 0, onSelect: () => onCloseTabs(left, tabId) },
+    { id: 'close-right', label: 'Close to the Right', disabled: right.length === 0, onSelect: () => onCloseTabs(right, tabId) },
+    { id: 'close-saved', label: 'Close Saved', disabled: saved.length === 0, onSelect: () => onCloseTabs(saved, tabId) },
+    { id: 'close-all', label: 'Close All', onSelect: () => onCloseTabs(all, tabId) },
+  ];
 }
 
 function FullScreenIcon({ active }: { active: boolean }) {
@@ -64,13 +93,21 @@ export function OpenedDroneFileTabs({
   activeTabId,
   onActivateTab,
   onCloseTab,
+  onCloseTabs,
   onReorderTabs,
   workspaceLabel,
   trailingActions,
   fullScreenAction,
 }: OpenedDroneFileTabsProps) {
   const [draggingTabId, setDraggingTabId] = React.useState<string | null>(null);
+  const [menu, setMenu] = React.useState<TabMenuState | null>(null);
+  const closeMenu = React.useCallback(() => setMenu(null), []);
   const normalizedTabs = tabs.filter((tab) => String(tab.tabId ?? '').trim());
+  const menuTabOpen = Boolean(menu && normalizedTabs.some((tab) => tab.tabId === menu.tabId));
+  // A tab closed while its menu is open drops the menu, so reopening the file does not bring it back.
+  React.useEffect(() => {
+    if (menu && !menuTabOpen) setMenu(null);
+  }, [menu, menuTabOpen]);
   if (normalizedTabs.length === 0 && !trailingActions && !fullScreenAction) return null;
 
   return (
@@ -115,6 +152,13 @@ export function OpenedDroneFileTabs({
                 event.stopPropagation();
                 onCloseTab(tab.tabId);
               }}
+              onContextMenu={onCloseTabs ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                // A file tab strip in a desktop tool window opens the menu in that window.
+                const view = event.currentTarget.ownerDocument.defaultView;
+                if (view) setMenu({ tabId: tab.tabId, x: event.clientX, y: event.clientY, view });
+              } : undefined}
               onDragOver={(event) => {
                 if (!draggingTabId || draggingTabId === tab.tabId) return;
                 event.preventDefault();
@@ -172,6 +216,16 @@ export function OpenedDroneFileTabs({
           );
         })}
       </div>
+      {menu && menuTabOpen && onCloseTabs ? (
+        <SidebarContextMenu
+          x={menu.x}
+          y={menu.y}
+          view={menu.view}
+          label="File tab actions"
+          items={fileTabMenuItems(normalizedTabs, menu.tabId, onCloseTab, onCloseTabs)}
+          onClose={closeMenu}
+        />
+      ) : null}
       {trailingActions ? (
         <div className="flex h-9 shrink-0 items-center gap-1 px-2">
           {trailingActions}

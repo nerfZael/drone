@@ -204,6 +204,7 @@ export function useStandaloneEditorPaneProps(
       if (drone && target.droneId === drone.id) openEditorLocation(target);
     },
     onCloseOpenedEditorFile: editor.closeEditorFile,
+    onCloseOpenedEditorFiles: editor.closeEditorFiles,
     onConfirmCloseOpenedEditorFilesForPaths: editor.confirmCloseOpenedFileTabsForPaths,
     onCloseOpenedEditorFilesForPaths: editor.closeOpenedFileTabsForPaths,
     onRemapOpenedEditorFilesForPathChange: editor.remapOpenedFileTabsForPathChange,
