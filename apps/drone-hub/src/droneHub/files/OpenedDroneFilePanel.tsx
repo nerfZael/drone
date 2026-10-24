@@ -60,7 +60,6 @@ import { droneHubEditorTextStyle, droneHubMonacoEditorOptions } from './editor-m
 import { targetCodeColumns, usePanelExpansionMeasure, visualLineLength } from '../app/workspace-panel-expansion';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { takeSourceModeHint, textViewModeKey } from './text-view-mode-hints';
-import { isUntitledEditorPath } from '../app/untitled-editor-files';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 import {
   MonacoEditorValueSynchronizer,
@@ -350,7 +349,6 @@ export function OpenedDroneFilePanel({
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
   const activeFileViewModeKey = textViewModeKey(droneId, activeFilePath);
-  const activeFileIsUntitled = isUntitledEditorPath(activeFilePath);
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
   const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
@@ -1037,7 +1035,7 @@ export function OpenedDroneFilePanel({
                     droneName={droneName}
                     path={activeFilePath}
                     name={fileName || activeFilePath}
-                    editable={!readOnly && openedEditorIsText && !activeFileIsUntitled}
+                    editable={!readOnly && openedEditorIsText}
                     loading={Boolean(fileLoading)}
                     saving={Boolean(fileSaving)}
                     externallyChanged={Boolean(file.externallyChanged)}

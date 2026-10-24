@@ -53,11 +53,13 @@ export function FileDictationEditorAction({
           return;
         }
         if (disabled) return;
-        const target = { droneId, droneName, path, name: name || path };
         void dictation.start({
-          ...target,
-          appendLine: (line) => onAppendLine({ droneId, path, line }),
-          open: () => onOpenTarget(target),
+          droneId,
+          droneName,
+          path,
+          name: name || path,
+          appendLine: onAppendLine,
+          open: onOpenTarget,
         });
       }}
       disabled={disabled && !targetMatches}

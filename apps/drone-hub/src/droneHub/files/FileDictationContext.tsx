@@ -17,8 +17,9 @@ export type FileDictationTarget = {
   droneName: string;
   path: string;
   name: string;
-  appendLine(line: string): Promise<boolean>;
-  open(): void;
+  /** Gets the target's file as it is now; an untitled file's target moves to where it is saved. */
+  appendLine(input: { droneId: string; path: string; line: string }): Promise<boolean>;
+  open(target: { droneId: string; path: string; name: string }): void;
 };
 
 type FileDictationContextValue = {
@@ -37,6 +38,8 @@ type FileDictationContextValue = {
   togglePause(): Promise<void>;
   toggleTimestamps(): void;
   openTarget(): void;
+  /** Points dictation into `from` at the file it was saved as, keeping the recording going. */
+  retarget(from: Pick<FileDictationTarget, 'droneId' | 'path'>, to: { path: string; name: string }): void;
 };
 
 const FileDictationContext = React.createContext<FileDictationContextValue | null>(null);
@@ -58,6 +61,8 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
   const [timestampsEnabled, setTimestampsEnabled] = React.useState(storedTimestampsEnabled);
   const targetRef = React.useRef<FileDictationTarget | null>(null);
   const lastTargetRef = React.useRef<FileDictationTarget | null>(null);
+  // Thoughts heard before a retarget carry the old route; they still belong to this target.
+  const previousRoutesRef = React.useRef(new Set<string>());
   const timestampsEnabledRef = React.useRef(timestampsEnabled);
   timestampsEnabledRef.current = timestampsEnabled;
   const microphoneOwner = React.useSyncExternalStore(
@@ -69,7 +74,13 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
   const onTranscript = React.useCallback(
     async (text: string, _deliveryId: string, route: string | null): Promise<boolean> => {
       const currentTarget = targetRef.current;
-      if (!currentTarget || route !== fileDictationTargetKey(currentTarget)) return false;
+      if (
+        !currentTarget ||
+        route === null ||
+        (route !== fileDictationTargetKey(currentTarget) && !previousRoutesRef.current.has(route))
+      ) {
+        return false;
+      }
       const line = formatFileDictationLine(
         text,
         timestampsEnabledRef.current ? new Date() : null,
@@ -77,9 +88,14 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       if (!line) return true;
       setSaving(true);
       try {
-        const saved = await currentTarget.appendLine(line);
+        const latestTarget = targetRef.current ?? currentTarget;
+        const saved = await latestTarget.appendLine({
+          droneId: latestTarget.droneId,
+          path: latestTarget.path,
+          line,
+        });
         if (!saved) {
-          throw new Error(`The dictated thought could not be saved to ${currentTarget.name}.`);
+          throw new Error(`The dictated thought could not be saved to ${latestTarget.name}.`);
         }
         setSaved(true);
         return true;
@@ -115,6 +131,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       if (getStatus() !== 'idle') return false;
       setError('');
       setSaved(false);
+      previousRoutesRef.current.clear();
       targetRef.current = nextTarget;
       setTarget(nextTarget);
       const started = await startVoice();
@@ -128,6 +145,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
     await stopVoice();
     if (getStatus() !== 'idle') return;
     targetRef.current = null;
+    previousRoutesRef.current.clear();
     setTarget(null);
     setSaving(false);
   }, [getStatus, stopVoice]);
@@ -153,8 +171,27 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
   }, [finish, getStatus, start]);
 
   const openTarget = React.useCallback(() => {
-    targetRef.current?.open();
+    const currentTarget = targetRef.current;
+    currentTarget?.open(currentTarget);
   }, []);
+
+  const retarget = React.useCallback(
+    (from: Pick<FileDictationTarget, 'droneId' | 'path'>, to: { path: string; name: string }) => {
+      const fromKey = fileDictationTargetKey(from);
+      const currentTarget = targetRef.current;
+      if (currentTarget && fileDictationTargetKey(currentTarget) === fromKey) {
+        const nextTarget = { ...currentTarget, path: to.path, name: to.name };
+        previousRoutesRef.current.add(fromKey);
+        targetRef.current = nextTarget;
+        setTarget(nextTarget);
+      }
+      const lastTarget = lastTargetRef.current;
+      if (lastTarget && fileDictationTargetKey(lastTarget) === fromKey) {
+        lastTargetRef.current = { ...lastTarget, path: to.path, name: to.name };
+      }
+    },
+    [],
+  );
 
   const value = React.useMemo<FileDictationContextValue>(
     () => ({
@@ -173,12 +210,14 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       togglePause,
       toggleTimestamps,
       openTarget,
+      retarget,
     }),
     [
       error,
       finish,
       microphoneOwner,
       openTarget,
+      retarget,
       saved,
       saving,
       start,

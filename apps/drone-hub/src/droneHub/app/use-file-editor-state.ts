@@ -52,6 +52,7 @@ import {
   type RememberedEditorFile,
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
+import { useFileDictation } from '../files/FileDictationContext';
 import type { InitialFileRead } from '../files/prepare-workspace-file-open';
 import { readDesktopFile } from '../files/read-desktop-file';
 import { subscribeFileEvents, type WorkspaceFileEvent } from '../files/workspace-events';
@@ -60,7 +61,12 @@ import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-ki
 import { runDroneFsAction } from '../files/file-actions-api';
 import { requestSaveAs, type SaveAsOutcome } from '../files/SaveAsDialog';
 import { openNextInSourceMode } from '../files/text-view-mode-hints';
-import { nextUntitledFileName, untitledFilesFromTabState, writeStoredUntitledFiles } from './untitled-editor-files';
+import {
+  isUntitledEditorPath,
+  nextUntitledFileName,
+  untitledFilesFromTabState,
+  writeStoredUntitledFiles,
+} from './untitled-editor-files';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -226,6 +232,9 @@ export function useFileEditorState({
   const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>(
     () => restoredOpenedFileTabsStateByDrone({ includeUntitled: rememberOpenedFiles }),
   );
+  const fileDictation = useFileDictation();
+  const retargetFileDictationRef = React.useRef(fileDictation?.retarget);
+  retargetFileDictationRef.current = fileDictation?.retarget;
   const saveAsDirectoryRef = React.useRef(saveAsDirectory);
   saveAsDirectoryRef.current = saveAsDirectory;
   const onUntitledFileSavedRef = React.useRef(onUntitledFileSaved);
@@ -1161,6 +1170,8 @@ export function useFileEditorState({
         const finalPath = typeof resp.path === 'string' && resp.path.trim() ? resp.path.trim() : targetPath;
         const finalName = finalPath.split('/').filter(Boolean).pop() || name;
         const savedTabId = openedFileTabId(droneId, finalPath);
+        // Dictation can add lines while the write is in flight; they stay in the tab as unsaved text.
+        const currentContent = tabStateByDroneIdRef.current[droneId]?.tabs.find((tab) => tab.tabId === tabId)?.content ?? content;
         // Keep the source view: a new notes.md should not flip to its preview mid-edit.
         openNextInSourceMode(droneId, finalPath);
         navigationSeqRef.current += 1;
@@ -1179,7 +1190,7 @@ export function useFileEditorState({
                   navigationSeq,
                   saving: false,
                   error: null,
-                  content,
+                  content: tab.content,
                   savedContent: content,
                   size: Number.isFinite(Number(resp.size)) ? Math.max(0, Math.floor(Number(resp.size))) : content.length,
                   mtimeMs: typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs) ? resp.mtimeMs : null,
@@ -1192,8 +1203,10 @@ export function useFileEditorState({
         });
         if (activeTabIdRef.current === tabId) {
           activeTabIdRef.current = savedTabId;
-          contentRef.current = content;
+          contentRef.current = currentContent;
         }
+        // Dictation into the new file carries on into the file it was saved as.
+        retargetFileDictationRef.current?.({ droneId, path: untitledTab.path }, { path: finalPath, name: finalName });
         savedPath = finalPath;
         return { ok: true };
       } catch (e: any) {
@@ -1317,10 +1330,21 @@ export function useFileEditorState({
       const openTab = (tabStateByDroneIdRef.current[stripDroneId]?.tabs ?? []).find(
         (tab) => tab.droneId === droneId && tab.path === filePath,
       );
+      if (openTab?.untitled) {
+        // A file that is not saved anywhere yet collects the thoughts in its editor until it is saved.
+        setTabStateForDrone(stripDroneId, (state) => ({
+          ...state,
+          tabs: state.tabs.map((tab) =>
+            tab.tabId === openTab.tabId ? { ...tab, content: appendFileDictationLine(tab.content, line) } : tab,
+          ),
+        }));
+        if (activeTabIdRef.current === openTab.tabId) contentRef.current = appendFileDictationLine(contentRef.current, line);
+        return true;
+      }
+      if (isUntitledEditorPath(filePath)) return false;
       if (
         openTab &&
-        (openTab.untitled ||
-          openTab.loading ||
+        (openTab.loading ||
           openTab.saving ||
           !openTab.loaded ||
           openTab.kind !== 'text' ||
