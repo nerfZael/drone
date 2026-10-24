@@ -21,6 +21,11 @@ import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
 import { FileTypeIcon } from './FileTypeIcon';
+import {
+  FileDictationExplorerMark,
+  useExplorerFileDictation,
+  type ExplorerFileDictationActions,
+} from './FileDictationExplorerMark';
 import { InlineExplorerNameInput } from './InlineExplorerNameInput';
 import {
   fileExtensionLower,
@@ -158,6 +163,7 @@ function InlineSpinner() {
 
 export function DroneFilesDock({
   droneId,
+  droneName,
   path,
   homePath,
   entries,
@@ -176,6 +182,7 @@ export function DroneFilesDock({
   openedFile,
   reveal,
   readOnly = false,
+  fileDictation,
   zoom = 1,
 }: {
   droneId: string;
@@ -199,6 +206,8 @@ export function DroneFilesDock({
   openedFile: DroneOpenedFileState;
   reveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
   readOnly?: boolean;
+  /** Lets the explorer start and stop dictation into its files; without it the explorer offers none. */
+  fileDictation?: ExplorerFileDictationActions;
   zoom?: number;
 }) {
   const explorerZoom = clampWorkspaceExplorerZoom(Number.isFinite(zoom) ? zoom : 1);
@@ -222,6 +231,7 @@ export function DroneFilesDock({
   const normalizedPath = normalizeContainerPathInput(path);
   const workspaceStateKey = filesWorkspaceStateKey(droneId, normalizedPath);
   const activeOpenedFilePath = String(openedFile.path ?? '').trim();
+  const dictation = useExplorerFileDictation({ droneId, droneName, actions: fileDictation, readOnly });
   const explorerRef = React.useRef<HTMLDivElement | null>(null);
   const selectionAnchorRef = React.useRef<string | null>(null);
   const [expandedDirs, setExpandedDirsState] = React.useState<Record<string, boolean>>(
@@ -1304,6 +1314,7 @@ export function DroneFilesDock({
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
       const renaming = inlineNameMode === 'rename' && selectedOne?.path === entry.path;
+      const dictationState = renaming ? null : dictation?.stateOf(entry.path) ?? null;
       return (
         <div key={`file:${entry.path}`} data-file-explorer-path={entry.path} role="none" className="relative w-full">
           {renaming ? (
@@ -1341,7 +1352,11 @@ export function DroneFilesDock({
                     ? 'dh-file-explorer-open bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                     : 'text-[var(--explorer-row-fg,var(--fg-secondary))] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
               }`}
-              style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
+              style={{
+                ...explorerRowGeometryStyle,
+                paddingLeft: `${indentPx}px`,
+                ...(dictationState ? { paddingRight: `${Math.round(22 * explorerZoom)}px` } : null),
+              }}
               title={`${entry.path} • ${modified}${ignored ? ' • Ignored by Git' : ''} • Right-click for actions`}
             >
               <span className={`inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`} style={explorerIconSlotStyle}>
@@ -1352,6 +1367,14 @@ export function DroneFilesDock({
               </span>
             </button>
           )}
+          {dictationState && dictation ? (
+            <FileDictationExplorerMark
+              state={dictationState}
+              name={node.name}
+              zoom={explorerZoom}
+              onToggle={() => dictation.toggle(entry)}
+            />
+          ) : null}
         </div>
       );
     });
@@ -1520,6 +1543,12 @@ export function DroneFilesDock({
           onPaste={() => {
             pasteClipboard();
             setContextMenu(null);
+          }}
+          dictation={contextMenu.entry ? dictation?.menuItem(contextMenu.entry) : null}
+          onToggleDictation={() => {
+            const entry = contextMenu.entry;
+            setContextMenu(null);
+            if (entry) dictation?.toggle(entry);
           }}
           onCopyLink={() => {
             const entry = contextMenu.entry;

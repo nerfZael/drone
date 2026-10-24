@@ -711,6 +711,7 @@ export function EditorWorkspacePane({
           onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
           onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
           openedFile={ownOpenedFile}
+          fileDictation={{ appendLine: onAppendFileDictationLine, open: onOpenFileDictationTarget }}
           zoom={explorerZoom}
         />
       )}

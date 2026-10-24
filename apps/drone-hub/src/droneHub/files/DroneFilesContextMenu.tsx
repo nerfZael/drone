@@ -26,6 +26,9 @@ type DroneFilesContextMenuProps = {
   onCopy: () => void;
   onPaste: () => void;
   onDownload: () => void;
+  /** Starts or stops file dictation into the entry; absent when the entry takes none. */
+  dictation?: { label: string; disabled: boolean; title?: string } | null;
+  onToggleDictation?: () => void;
   /** Copies a workspace link to the entry, for documents and chats. */
   onCopyLink?: () => void;
   onRefresh: () => void;
@@ -72,6 +75,8 @@ export function DroneFilesContextMenu({
   onCopy,
   onPaste,
   onDownload,
+  dictation,
+  onToggleDictation,
   onCopyLink,
   onRefresh,
   onGoToPath,
@@ -162,6 +167,11 @@ export function DroneFilesContextMenu({
               <button type="button" role="menuitem" disabled={busy} onClick={onOpen} className={itemClassName}>
                 {menu.entry.kind === 'directory' ? 'Expand / Collapse' : 'Open'}
               </button>
+              {dictation && onToggleDictation ? (
+                <button type="button" role="menuitem" disabled={dictation.disabled} onClick={onToggleDictation} title={dictation.title} className={itemClassName}>
+                  {dictation.label}
+                </button>
+              ) : null}
               <MenuDivider />
               {!readOnly ? (
                 <>

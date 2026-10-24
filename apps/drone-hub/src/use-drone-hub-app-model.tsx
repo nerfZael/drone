@@ -3948,8 +3948,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onConfirmCloseOpenedFilesForPaths: (droneId, paths, actionLabel) => confirmCloseOpenedFileTabsForPaths(paths, actionLabel, droneId),
     onCloseOpenedFilesForPaths: (droneId, paths) => closeOpenedFileTabsForPaths(paths, droneId),
     onRemapOpenedFilesForPathChange: (droneId, sourcePath, targetPath) => remapOpenedFileTabsForPathChange(sourcePath, targetPath, droneId),
+    fileDictation: { appendLine: appendAndSaveFileDictationLine, open: openRootFileInEditor },
   }), [
-    closeOpenedFileTabsForPaths, confirmCloseOpenedFileTabsForPaths, openRootFileInEditor, remapOpenedFileTabsForPathChange,
+    appendAndSaveFileDictationLine, closeOpenedFileTabsForPaths, confirmCloseOpenedFileTabsForPaths, openRootFileInEditor, remapOpenedFileTabsForPathChange,
     openedEditorFile?.droneId, openedEditorFile?.path, openedEditorFile?.untitled, // eslint-disable-line react-hooks/exhaustive-deps
   ]);
   React.useEffect(() => {

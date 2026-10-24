@@ -17,6 +17,7 @@ import {
 } from '../workspaces/explorer-roots';
 import { openWorkspaceFolder } from '../workspaces/workspaces-client';
 import { DroneFilesDock } from './DroneFilesDock';
+import type { ExplorerFileDictationActions } from './FileDictationExplorerMark';
 import type { DroneOpenedFileState } from './opened-file-types';
 import type { DroneFsEntry } from '../types';
 
@@ -28,6 +29,8 @@ export type ExplorerRootsEditor = {
   onConfirmCloseOpenedFilesForPaths(droneId: string, paths: string[], actionLabel?: string): boolean | Promise<boolean>;
   onCloseOpenedFilesForPaths(droneId: string, paths: string[]): void;
   onRemapOpenedFilesForPathChange(droneId: string, sourcePath: string, targetPath: string): void;
+  /** Dictation into a root's files from its explorer. */
+  fileDictation?: ExplorerFileDictationActions;
 };
 
 export type ExplorerRootsProps = {
@@ -176,6 +179,7 @@ function ExplorerRootFiles({ droneId, root, zoom, editor }: {
       onCloseOpenedFilesForPaths={(paths) => editor.onCloseOpenedFilesForPaths(rootId, paths)}
       onRemapOpenedFilesForPathChange={(source, target) => editor.onRemapOpenedFilesForPathChange(rootId, source, target)}
       openedFile={openedFile}
+      fileDictation={editor.fileDictation}
       zoom={zoom}
     />
   );

@@ -31,6 +31,8 @@ type FileDictationContextValue = {
   error: string;
   microphoneOwner: BrowserMicrophoneOwner | null;
   target: FileDictationTarget | null;
+  /** The file the toggle shortcut resumes into, once a dictation has started. */
+  lastTarget: Pick<FileDictationTarget, 'droneId' | 'path' | 'name'> | null;
   timestampsEnabled: boolean;
   start(target: FileDictationTarget): Promise<boolean>;
   toggle(): Promise<boolean>;
@@ -55,6 +57,7 @@ export function fileDictationTargetKey(target: Pick<FileDictationTarget, 'droneI
 
 export function FileDictationProvider({ children }: { children: React.ReactNode }) {
   const [target, setTarget] = React.useState<FileDictationTarget | null>(null);
+  const [lastTarget, setLastTarget] = React.useState<FileDictationTarget | null>(null);
   const [error, setError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
@@ -135,7 +138,10 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       targetRef.current = nextTarget;
       setTarget(nextTarget);
       const started = await startVoice();
-      if (started) lastTargetRef.current = nextTarget;
+      if (started) {
+        lastTargetRef.current = nextTarget;
+        setLastTarget(nextTarget);
+      }
       return started;
     },
     [getStatus, startVoice],
@@ -188,6 +194,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       const lastTarget = lastTargetRef.current;
       if (lastTarget && fileDictationTargetKey(lastTarget) === fromKey) {
         lastTargetRef.current = { ...lastTarget, path: to.path, name: to.name };
+        setLastTarget(lastTargetRef.current);
       }
     },
     [],
@@ -203,6 +210,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       error,
       microphoneOwner,
       target,
+      lastTarget,
       timestampsEnabled,
       start,
       toggle,
@@ -222,6 +230,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       saving,
       start,
       target,
+      lastTarget,
       timestampsEnabled,
       toggle,
       toggleTimestamps,

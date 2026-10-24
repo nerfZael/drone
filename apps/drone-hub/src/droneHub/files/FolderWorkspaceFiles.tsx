@@ -119,6 +119,7 @@ export function FolderWorkspaceFiles({ workspaceId, name, target, className, onN
           onCloseOpenedFilesForPaths={editor.closeOpenedFileTabsForPaths}
           onRemapOpenedFilesForPathChange={editor.remapOpenedFileTabsForPathChange}
           openedFile={openedFile} reveal={reveal}
+          fileDictation={{ appendLine: editor.appendAndSaveFileDictationLine, open }}
         /> : null}
       </div>
     </div>
